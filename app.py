@@ -177,9 +177,9 @@ def download_job(job_id: str):
     results = db.get_job_category_results(job_id)
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["Keyword", "Category", "Status", "Error", "Checked At"])
+    writer.writerow(["Keyword", "Category", "Cluster", "Status", "Error", "Checked At"])
     for r in results:
-        writer.writerow([r["keyword"], r["category"] or "", r["status"] or "", r["error"] or "", r["checked_at"]])
+        writer.writerow([r["keyword"], r["category"] or "", r["cluster"] or "", r["status"] or "", r["error"] or "", r["checked_at"]])
 
     buf.seek(0)
     return StreamingResponse(

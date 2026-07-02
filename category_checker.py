@@ -265,14 +265,82 @@ def find_matching_category(candidate_name, candidate_titles, existing_category_n
     return None
 
 
+# --- Clusters (broader grouping OVER categories) --------------------------
+# Unlike category naming, cluster naming is NOT word-constrained to the
+# source text. Categories are already short, synthesized phrases (e.g.
+# "PublicvsPrivate", "Benefits") -- capturing their broader shared topic
+# ("Private Schools") genuinely requires abstraction/rewording, not just
+# word extraction. This is deliberate: the goal here is topical grouping,
+# not literal-text-preservation like the category step above.
+
+def derive_cluster_name(category_name):
+    """Produce a short (1-3 word) cluster label capturing the broad topic
+    behind a specific category name. Free-form -- not constrained to the
+    category's literal wording, since abstraction is the whole point."""
+    client = get_openai_client()
+    prompt = (
+        "Below is a specific SEO category name.\n\n"
+        f'Category: "{category_name}"\n\n'
+        "Create a short, broad cluster label (1-3 words) representing the general "
+        "subject/theme this category belongs to. Strip out qualifiers like 'best', "
+        "'top', comparisons, rankings, or specific programs/promotions -- capture just "
+        "the core topic (e.g. a category like \"Best/Top Private Schools\" or "
+        "\"PublicvsPrivate\" or \"Benefits\" [in a schools context] might all belong to "
+        "the broader cluster \"Private Schools\").\n\n"
+        "Respond with ONLY the cluster label, nothing else."
+    )
+    resp = client.chat.completions.create(
+        model=OPENAI_CHAT_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
+        max_tokens=12,
+    )
+    label = resp.choices[0].message.content.strip().strip('"')
+    return label.title() if label else category_name
+
+
+def find_matching_cluster(candidate_cluster_name, category_name, existing_cluster_names):
+    """Ask OpenAI whether this category belongs in an already-created
+    cluster. Returns the existing cluster name if matched, else None."""
+    if not existing_cluster_names:
+        return None
+
+    client = get_openai_client()
+    cluster_list = "\n".join(f"{i + 1}. {name}" for i, name in enumerate(existing_cluster_names))
+    prompt = (
+        "You are grouping SEO categories into broader topic clusters.\n\n"
+        f"Existing clusters:\n{cluster_list}\n\n"
+        f'Category to place: "{category_name}"\n'
+        f'Candidate new cluster name for it: "{candidate_cluster_name}"\n\n'
+        "Does this category clearly belong in one of the existing clusters above "
+        "(same broad subject)? If yes, respond with ONLY the exact existing cluster "
+        "name, copied exactly as written above. If none fit, respond with exactly: NONE"
+    )
+    resp = client.chat.completions.create(
+        model=OPENAI_CHAT_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+        max_tokens=12,
+    )
+    answer = resp.choices[0].message.content.strip().strip('"')
+    if answer.upper() == "NONE":
+        return None
+
+    for name in existing_cluster_names:
+        if name.strip().lower() == answer.strip().lower():
+            return name
+    return None
+
+
 def categorize_keyword(keyword):
     """
     Full pipeline for one keyword: fetch top-3 titles, derive a candidate
     category name, match against existing categories (from Postgres), and
-    persist a new category if none matched.
+    persist a new category if none matched. Then does the same one level
+    up: derive/match a broader CLUSTER for that category.
 
-    Returns the assigned category name, or None if there was no usable
-    page data to categorize from.
+    Returns (category, cluster) -- both None if there was no usable page
+    data to categorize from.
     """
     import db  # local import to avoid a hard dependency for callers that
                # only want the pure scraping/naming functions above
@@ -280,14 +348,26 @@ def categorize_keyword(keyword):
     top3 = get_top3_for_category(keyword)
     titles = build_majority_titles(top3)
     if not titles:
-        return None
+        return None, None
 
     candidate_name = derive_category_name(titles)
-    existing_names = db.list_category_names()
-    matched_name = find_matching_category(candidate_name, titles, existing_names)
+    existing_category_names = db.list_category_names()
+    matched_category = find_matching_category(candidate_name, titles, existing_category_names)
 
-    if matched_name:
-        return matched_name
+    if matched_category:
+        category = matched_category
+    else:
+        db.add_category(candidate_name)
+        category = candidate_name
 
-    db.add_category(candidate_name)
-    return candidate_name
+    cluster_candidate = derive_cluster_name(category)
+    existing_cluster_names = db.list_cluster_names()
+    matched_cluster = find_matching_cluster(cluster_candidate, category, existing_cluster_names)
+
+    if matched_cluster:
+        cluster = matched_cluster
+    else:
+        db.add_cluster(cluster_candidate)
+        cluster = cluster_candidate
+
+    return category, cluster

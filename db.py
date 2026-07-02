@@ -65,14 +65,31 @@ def init_db():
                 job_id UUID REFERENCES jobs(id),
                 keyword TEXT NOT NULL,
                 category TEXT,
+                cluster TEXT,
                 status TEXT,
                 error TEXT,
                 checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
+        # In case this table already existed from before `cluster` was added.
+        conn.execute(text("""
+            ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS cluster TEXT
+        """))
         conn.execute(text("""
             CREATE INDEX IF NOT EXISTS idx_keyword_categories_job
             ON keyword_categories (job_id)
+        """))
+
+        # --- Clusters ------------------------------------------------------
+        # Broader groupings OVER categories (e.g. "Best/Top Private Schools",
+        # "PublicvsPrivate", and "Benefits" might all cluster under "Private
+        # Schools"). Same matching pattern as categories, one level up.
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS clusters (
+                id BIGSERIAL PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
         """))
 
 
@@ -146,13 +163,13 @@ def add_category(name):
         """), {"name": name})
 
 
-def insert_category_result(job_id, keyword, category, status, error=None):
+def insert_category_result(job_id, keyword, category, cluster, status, error=None):
     with engine.begin() as conn:
         conn.execute(text("""
-            INSERT INTO keyword_categories (job_id, keyword, category, status, error)
-            VALUES (:job_id, :keyword, :category, :status, :error)
+            INSERT INTO keyword_categories (job_id, keyword, category, cluster, status, error)
+            VALUES (:job_id, :keyword, :category, :cluster, :status, :error)
         """), {
-            "job_id": job_id, "keyword": keyword, "category": category,
+            "job_id": job_id, "keyword": keyword, "category": category, "cluster": cluster,
             "status": status, "error": error,
         })
 
@@ -160,10 +177,29 @@ def insert_category_result(job_id, keyword, category, status, error=None):
 def get_job_category_results(job_id):
     with engine.begin() as conn:
         rows = conn.execute(text("""
-            SELECT keyword, category, status, error, checked_at
+            SELECT keyword, category, cluster, status, error, checked_at
             FROM keyword_categories WHERE job_id = :job_id ORDER BY id
         """), {"job_id": job_id}).mappings().fetchall()
         return [dict(r) for r in rows]
+
+
+# --- Clusters ----------------------------------------------------------
+# Same rule as categories: run only ONE category worker at a time --
+# cluster assignment depends on clusters already created by prior keywords.
+
+def list_cluster_names():
+    with engine.begin() as conn:
+        rows = conn.execute(text("SELECT name FROM clusters ORDER BY id")).fetchall()
+        return [r.name for r in rows]
+
+
+def add_cluster(name):
+    """Insert a new cluster name. No-op if it already exists (unique constraint)."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO clusters (name) VALUES (:name)
+            ON CONFLICT (name) DO NOTHING
+        """), {"name": name})
 
 
 if __name__ == "__main__":
