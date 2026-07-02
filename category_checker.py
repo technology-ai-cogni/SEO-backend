@@ -276,7 +276,7 @@ def _extract_word_set_single(text):
     return set(w.lower() for w in re.findall(r"[A-Za-z0-9]+", text))
 
 
-def _fallback_cluster_name(category_name, max_words=2):
+def _fallback_cluster_name(category_name, max_words=3):
     """Guaranteed-safe fallback: literal leading words of the category
     name, used only if the LLM invents vocabulary."""
     words = category_name.split()
@@ -285,22 +285,34 @@ def _fallback_cluster_name(category_name, max_words=2):
 
 
 def derive_cluster_name(category_name):
-    """Produce a short (1-2 word) cluster label for a category -- HARD
-    constrained to only use words that literally appear in the category
-    name. No new vocabulary allowed, same rule as derive_category_name."""
+    """Produce a short cluster label for a category -- HARD constrained to
+    only use words that literally appear in the category name. No new
+    vocabulary allowed, same rule as derive_category_name. Preserves
+    distinguishing compound phrases (e.g. "International Schools",
+    "Private Schools") rather than over-collapsing to a single generic
+    word -- different topics that happen to share one word (e.g. "Schools")
+    should stay as separate clusters, not merge into one."""
     client = get_openai_client()
     allowed_words = _extract_word_set_single(category_name)
 
     prompt = (
         "Below is a specific SEO category name.\n\n"
         f'Category: "{category_name}"\n\n'
-        "Create a short, broad cluster label (1-2 words) representing the general "
-        "subject/theme of this category.\n\n"
-        "STRICT RULE: You may ONLY use words that appear verbatim in the category "
-        "name above (case doesn't matter). Do not add, invent, or substitute any "
-        "word that isn't already present. Select existing words only -- you may drop "
-        "qualifiers like 'best', 'top', numbers, or location names to make the label "
-        "broader, but every word you keep must already be in the category name.\n\n"
+        "Create a cluster label (2-3 words when possible, 1 word only if the "
+        "category itself is a single-topic word) representing this category's "
+        "specific subject.\n\n"
+        "STRICT RULE 1: You may ONLY use words that appear verbatim in the "
+        "category name above (case doesn't matter). Never add, invent, or "
+        "substitute a word that isn't already present.\n\n"
+        "STRICT RULE 2: Preserve the most SPECIFIC distinguishing phrase, not "
+        "the most generic one. If the category is \"International Schools in "
+        "Singapore\", the label should be \"International Schools\" -- NOT just "
+        "\"Schools\". If it's \"Private Schools in Singapore List\", the label "
+        "should be \"Private Schools\" -- NOT just \"Schools\". Only drop pure "
+        "filler/qualifier words: rankings (best, top), meta-words (list of, "
+        "understanding, guide to), and specific city/country names. NEVER drop "
+        "a topic-defining adjective (international, private, secondary, high, "
+        "public) that distinguishes this category from other similar ones.\n\n"
         "Respond with ONLY the cluster label, nothing else."
     )
     resp = client.chat.completions.create(
@@ -323,20 +335,29 @@ def derive_cluster_name(category_name):
 
 def find_matching_cluster(candidate_cluster_name, category_name, existing_cluster_names):
     """Ask OpenAI whether this category belongs in an already-created
-    cluster. Returns the existing cluster name if matched, else None."""
+    cluster. Returns the existing cluster name if matched, else None.
+    Deliberately strict: sharing one generic word (e.g. both mentioning
+    "Schools") is NOT enough -- the specific topic must match (e.g.
+    "International Schools" and "Private Schools" stay separate clusters
+    even though both are about schools)."""
     if not existing_cluster_names:
         return None
 
     client = get_openai_client()
     cluster_list = "\n".join(f"{i + 1}. {name}" for i, name in enumerate(existing_cluster_names))
     prompt = (
-        "You are grouping SEO categories into broader topic clusters.\n\n"
+        "You are grouping SEO categories into topic clusters. Be STRICT: only "
+        "merge into an existing cluster if the SPECIFIC topic matches, not just "
+        "a shared generic word. For example, \"International Schools\" and "
+        "\"Private Schools\" are DIFFERENT clusters even though both mention "
+        "\"Schools\" -- do not merge them just because of the shared word.\n\n"
         f"Existing clusters:\n{cluster_list}\n\n"
         f'Category to place: "{category_name}"\n'
         f'Candidate new cluster name for it: "{candidate_cluster_name}"\n\n'
-        "Does this category clearly belong in one of the existing clusters above "
-        "(same broad subject)? If yes, respond with ONLY the exact existing cluster "
-        "name, copied exactly as written above. If none fit, respond with exactly: NONE"
+        "Does this category's SPECIFIC topic clearly match one of the existing "
+        "clusters above (not just a shared generic word)? If yes, respond with "
+        "ONLY the exact existing cluster name, copied exactly as written above. "
+        "If none are a specific match, respond with exactly: NONE"
     )
     resp = client.chat.completions.create(
         model=OPENAI_CHAT_MODEL,
