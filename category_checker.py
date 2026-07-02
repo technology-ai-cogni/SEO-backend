@@ -266,27 +266,41 @@ def find_matching_category(candidate_name, candidate_titles, existing_category_n
 
 
 # --- Clusters (broader grouping OVER categories) --------------------------
-# Unlike category naming, cluster naming is NOT word-constrained to the
-# source text. Categories are already short, synthesized phrases (e.g.
-# "PublicvsPrivate", "Benefits") -- capturing their broader shared topic
-# ("Private Schools") genuinely requires abstraction/rewording, not just
-# word extraction. This is deliberate: the goal here is topical grouping,
-# not literal-text-preservation like the category step above.
+# Cluster names are word-constrained to the category's OWN text -- same
+# hard rule as category naming: never invent vocabulary. Matching a
+# category into an ALREADY-EXISTING cluster (below) stays semantic, so
+# generalization across different wording still happens once a cluster
+# already exists from an earlier keyword -- just not at creation time.
+
+def _extract_word_set_single(text):
+    return set(w.lower() for w in re.findall(r"[A-Za-z0-9]+", text))
+
+
+def _fallback_cluster_name(category_name, max_words=2):
+    """Guaranteed-safe fallback: literal leading words of the category
+    name, used only if the LLM invents vocabulary."""
+    words = category_name.split()
+    candidate = " ".join(words[:max_words])
+    return candidate or category_name
+
 
 def derive_cluster_name(category_name):
-    """Produce a short (1-3 word) cluster label capturing the broad topic
-    behind a specific category name. Free-form -- not constrained to the
-    category's literal wording, since abstraction is the whole point."""
+    """Produce a short (1-2 word) cluster label for a category -- HARD
+    constrained to only use words that literally appear in the category
+    name. No new vocabulary allowed, same rule as derive_category_name."""
     client = get_openai_client()
+    allowed_words = _extract_word_set_single(category_name)
+
     prompt = (
         "Below is a specific SEO category name.\n\n"
         f'Category: "{category_name}"\n\n'
-        "Create a short, broad cluster label (1-3 words) representing the general "
-        "subject/theme this category belongs to. Strip out qualifiers like 'best', "
-        "'top', comparisons, rankings, or specific programs/promotions -- capture just "
-        "the core topic (e.g. a category like \"Best/Top Private Schools\" or "
-        "\"PublicvsPrivate\" or \"Benefits\" [in a schools context] might all belong to "
-        "the broader cluster \"Private Schools\").\n\n"
+        "Create a short, broad cluster label (1-2 words) representing the general "
+        "subject/theme of this category.\n\n"
+        "STRICT RULE: You may ONLY use words that appear verbatim in the category "
+        "name above (case doesn't matter). Do not add, invent, or substitute any "
+        "word that isn't already present. Select existing words only -- you may drop "
+        "qualifiers like 'best', 'top', numbers, or location names to make the label "
+        "broader, but every word you keep must already be in the category name.\n\n"
         "Respond with ONLY the cluster label, nothing else."
     )
     resp = client.chat.completions.create(
@@ -295,8 +309,16 @@ def derive_cluster_name(category_name):
         temperature=0.3,
         max_tokens=12,
     )
-    label = resp.choices[0].message.content.strip().strip('"')
-    return label.title() if label else category_name
+    candidate = resp.choices[0].message.content.strip().strip('"')
+    candidate_words = re.findall(r"[A-Za-z0-9]+", candidate)
+    invalid_words = [w for w in candidate_words if w.lower() not in allowed_words]
+
+    if invalid_words or not candidate_words:
+        fallback = _fallback_cluster_name(category_name)
+        print(f"  [WARNING] Cluster model used word(s) not in category: {invalid_words} "
+              f"-> using fallback \"{fallback}\"")
+        return fallback
+    return candidate
 
 
 def find_matching_cluster(candidate_cluster_name, category_name, existing_cluster_names):
