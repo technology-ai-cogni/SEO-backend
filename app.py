@@ -39,7 +39,7 @@ import io
 import csv
 
 import pandas as pd
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -49,6 +49,9 @@ from category_tasks import categorize_keyword_task
 
 MIN_SEARCH_VOLUME = 19
 NEAR_ME_PHRASE = "near me"
+DEFAULT_DOMAIN = "default"  # domain-scoping removed from the API surface --
+                             # everything shares one global category/cluster
+                             # space again, keyed internally to this constant
 
 app = FastAPI(title="Category API")
 
@@ -120,19 +123,10 @@ def health():
 
 
 @app.post("/jobs/category")
-async def create_category_job(
-    file: UploadFile = File(...),
-    domain: str = Form(...),
-):
+async def create_category_job(file: UploadFile = File(...)):
     """Upload a .csv/.xlsx with a 'Keywords' column (optionally 'Search
-    Volume'), tagged with `domain`. Creates a category job scoped to that
-    domain and enqueues one task per keyword that passes the SV/'near me'
-    filters. Categories/clusters are matched only against other entries
-    already in this same domain."""
-    domain = domain.strip()
-    if not domain:
-        raise HTTPException(400, "domain is required")
-
+    Volume'). Creates a category job and enqueues one task per keyword
+    that passes the SV/'near me' filters."""
     filename = file.filename or "upload.csv"
     ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
     if ext not in ("csv", "xlsx", "xls"):
@@ -149,46 +143,38 @@ async def create_category_job(
     if not to_process:
         raise HTTPException(400, "No usable keyword rows found after filtering")
 
-    job_id = db.create_job(filename, domain, total=len(to_process))
+    job_id = db.create_job(filename, DEFAULT_DOMAIN, total=len(to_process))
     db.set_job_status(job_id, "running")
 
     for r in to_process:
         category_queue.enqueue(
             categorize_keyword_task,
-            job_id, domain, r["keyword"],
+            job_id, DEFAULT_DOMAIN, r["keyword"],
             job_timeout=180,
         )
 
     return {
-        "job_id": job_id, "domain": domain, "status": "running",
+        "job_id": job_id, "status": "running",
         "total": len(to_process), "skipped": len(rows) - len(to_process),
     }
 
 
-@app.get("/domains")
-def list_domains():
-    """Every domain that has at least one job -- for a domain picker in your UI."""
-    return {"domains": db.list_domains()}
+@app.get("/results")
+def get_all_results():
+    """ALL keyword results ever processed, across every job. This is the
+    accumulated results view -- importing a new sheet just adds to it."""
+    return {"results": db.get_domain_results(DEFAULT_DOMAIN)}
 
 
-@app.get("/domains/{domain}/results")
-def get_domain_results(domain: str):
-    """ALL keyword results ever processed for this domain, across every
-    job. This is the accumulated 'project table' view -- importing a new
-    sheet for this domain adds to it; a different domain never appears here."""
-    return {"domain": domain, "results": db.get_domain_results(domain)}
-
-
-@app.post("/domains/{domain}/recluster")
-def recluster_domain(domain: str):
-    """Manually re-run the deterministic clustering pass for this domain's
-    entire category list. Normally this happens automatically once a
-    job's categorization finishes -- this endpoint is for re-running it
-    on demand (e.g. a 'Recluster' button in your UI)."""
+@app.post("/recluster")
+def recluster():
+    """Manually re-run the deterministic clustering pass over the entire
+    category list. Normally this happens automatically once a job's
+    categorization finishes -- this endpoint is for re-running it on demand."""
     import category_checker
-    assignment = category_checker.cluster_all_categories(domain)
-    db.replace_domain_clusters(domain, assignment)
-    return {"domain": domain, "categories_clustered": len(assignment)}
+    assignment = category_checker.cluster_all_categories(DEFAULT_DOMAIN)
+    db.replace_domain_clusters(DEFAULT_DOMAIN, assignment)
+    return {"categories_clustered": len(assignment)}
 
 
 @app.get("/jobs")
