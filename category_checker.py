@@ -468,6 +468,14 @@ _CLUSTER_STOPWORDS = {
 }
 
 
+def _clean_cluster_label(text):
+    """Strip a leading 'Best/Top' tag before a category name is used AS
+    its own cluster label (the singleton-fallback case below) -- clusters
+    should never contain 'best'/'top' even in this edge case."""
+    cleaned = re.sub(r"(?i)^best/top\s*", "", text).strip()
+    return cleaned if cleaned else text
+
+
 def _cluster_significant_words(category_name):
     words = re.findall(r"[A-Za-z0-9]+", category_name.lower())
     return {w for w in words if w not in _CLUSTER_STOPWORDS and len(w) > 2}
@@ -540,7 +548,7 @@ def cluster_all_categories(domain):
             # Nothing left shares a word with anything else -- each
             # remaining category becomes its own cluster.
             for cat in list(remaining.keys()):
-                assignment[cat] = cat
+                assignment[cat] = _clean_cluster_label(cat)
                 del remaining[cat]
             break
 
