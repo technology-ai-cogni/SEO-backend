@@ -309,15 +309,23 @@ def find_matching_category(candidate_name, candidate_titles, existing_category_n
     titles_block = "\n".join(f"- {t}" for t in candidate_titles)
     system_prompt = (
         "You are grouping webpage topics into categories for an SEO keyword "
-        "taxonomy. Judge by INTENT and underlying topic, not literal word "
-        "overlap -- for example, a topic about \"premium\" options and one "
-        "about \"luxury\" options are the SAME category if they both convey "
-        "high-end/upscale intent, even though the exact word differs. The "
-        "same applies to other synonym groups (e.g. affordable/cheap/budget "
-        "all convey low-cost intent). If a new topic clearly matches an "
-        "existing category's intent, respond with ONLY that exact existing "
-        "category name, copied exactly as written. If none match, respond "
-        "with exactly: NONE"
+        "taxonomy. Two topics being in the same BROAD subject area is NOT "
+        "enough to merge them -- they must be the SAME SPECIFIC topic. For "
+        "example, 'private schools' and 'international schools' are "
+        "different specific types within the same broad 'schools' theme -- "
+        "keep them as SEPARATE categories even though related, unless the "
+        "titles show they're really about the exact same specific topic.\n\n"
+        "The one exception: judge by INTENT for genuine SYNONYMS of the same "
+        "specific concept -- for example, a topic about \"premium\" options "
+        "and one about \"luxury\" options ARE the same category (both mean "
+        "high-end/upscale), and 'affordable'/'cheap'/'budget' are the same "
+        "low-cost concept. That is different from merging two distinct "
+        "topics just because they're thematically related.\n\n"
+        "If a new topic is genuinely the SAME specific topic (or a synonym "
+        "of it) as an existing category, respond with ONLY that exact "
+        "existing category name, copied exactly as written. If it's a "
+        "different specific topic -- even if related -- respond with "
+        "exactly: NONE"
     )
     user_prompt = (
         f"Existing categories:\n{category_list}\n\n"
@@ -369,7 +377,15 @@ def categorize_keyword(keyword, domain):
     candidate_name = derive_category_name(titles)
     candidate_name = _apply_best_top_rule(candidate_name, titles)
 
-    existing_category_names = db.list_category_names(domain)
+    # Only compare against existing categories that have the SAME Best/Top
+    # status -- otherwise a "Best/Top ..." candidate could get silently
+    # merged into a plain existing category (or vice versa), losing the
+    # Best/Top tag that this specific keyword's titles actually signaled.
+    has_best_top = candidate_name.lower().startswith("best/top")
+    existing_category_names = [
+        name for name in db.list_category_names(domain)
+        if name.lower().startswith("best/top") == has_best_top
+    ]
     matched_category = find_matching_category(candidate_name, titles, existing_category_names)
 
     if matched_category:
