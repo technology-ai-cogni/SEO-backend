@@ -19,6 +19,7 @@ import time
 from urllib.parse import quote, urlparse
 
 import requests
+import pycountry
 from bs4 import BeautifulSoup
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -46,6 +47,37 @@ BLOG_PATH_HINTS = [
 ]
 
 _client = None
+
+
+def resolve_country_code(country_input):
+    """
+    Resolve a user-typed country name (or an already-2-letter code) into
+    Google's region code (ISO 3166-1 alpha-2, lowercase) for the SERP
+    `gl` parameter. Returns None if it can't be resolved.
+    """
+    if not country_input:
+        return None
+    country_input = country_input.strip()
+    if not country_input:
+        return None
+
+    if len(country_input) == 2 and country_input.isalpha():
+        return country_input.lower()
+
+    try:
+        result = pycountry.countries.lookup(country_input)
+        return result.alpha_2.lower()
+    except LookupError:
+        pass
+
+    try:
+        results = pycountry.countries.search_fuzzy(country_input)
+        if results:
+            return results[0].alpha_2.lower()
+    except LookupError:
+        pass
+
+    return None
 
 
 def get_openai_client():
@@ -107,10 +139,14 @@ def _brightdata_fetch(target_url):
     return html or None
 
 
-def get_top3_for_category(keyword):
+def get_top3_for_category(keyword, country_code=None):
     """Dedicated search: fetch top 3 organic results (url + title, title
-    taken straight from the SERP's h3 text -- no per-page fetches needed)."""
-    search_url = f"https://{GOOGLE_DOMAIN}/search?q={quote(keyword)}&gl={COUNTRY_CODE}&hl={LANGUAGE_CODE}"
+    taken straight from the SERP's h3 text -- no per-page fetches needed).
+    `country_code` overrides the .env default SERP_COUNTRY for this search
+    (e.g. "in", "us", "sg") -- resolved from a user-typed country name via
+    resolve_country_code()."""
+    gl = country_code or COUNTRY_CODE
+    search_url = f"https://{GOOGLE_DOMAIN}/search?q={quote(keyword)}&gl={gl}&hl={LANGUAGE_CODE}"
     html = _brightdata_fetch(search_url)
     if not html:
         return []
@@ -351,12 +387,13 @@ def find_matching_category(candidate_name, candidate_titles, existing_category_n
     return None
 
 
-def categorize_keyword(keyword, domain):
+def categorize_keyword(keyword, domain, country_code=None):
     """
     Category-only pipeline for one keyword, scoped to `domain`: fetch
-    top-3 titles, derive a candidate category name, apply the hardcoded
-    Best/Top rule, match against existing categories in this domain
-    (intent-aware), and persist a new category if none matched.
+    top-3 titles (from the given `country_code`'s Google region, or the
+    .env default if not given), derive a candidate category name, apply
+    the hardcoded Best/Top rule, match against existing categories in
+    this domain (intent-aware), and persist a new category if none matched.
 
     NOTE: clustering does NOT happen here anymore -- it's a separate,
     deterministic batch step that runs once per job, after every keyword
@@ -365,18 +402,19 @@ def categorize_keyword(keyword, domain):
     Returns (category, meta) -- category is None if there was no usable
     page data to categorize from. `meta` is always populated (even on
     failure) with the full audit trail: the actual top-3 titles/urls
-    fetched, which type (blog/landing/mixed) won, the raw candidate name
-    before the Best/Top rule, whether Best/Top fired, and whether this
-    keyword matched an already-existing category or created a new one.
+    fetched, which region was searched, the raw candidate name before the
+    Best/Top rule, whether Best/Top fired, and whether this keyword
+    matched an already-existing category or created a new one.
     """
     import db  # local import to avoid a hard dependency for callers that
                # only want the pure scraping/naming functions above
 
-    top3 = get_top3_for_category(keyword)
+    top3 = get_top3_for_category(keyword, country_code)
     titles, majority_type = build_majority_titles(top3)
 
     meta = {
         "top3": [{"url": r["url"], "title": r["title"]} for r in top3],
+        "search_region": country_code or COUNTRY_CODE,
         "majority_type": majority_type,
         "majority_titles_used": titles,
     }

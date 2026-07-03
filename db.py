@@ -49,6 +49,8 @@ def init_db():
                 id UUID PRIMARY KEY,
                 filename TEXT,
                 domain TEXT NOT NULL DEFAULT '',
+                country_name TEXT,
+                country_code TEXT,
                 job_type TEXT NOT NULL DEFAULT 'category',
                 status TEXT NOT NULL DEFAULT 'pending',
                 total INTEGER NOT NULL DEFAULT 0,
@@ -62,6 +64,12 @@ def init_db():
         """))
         conn.execute(text("""
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS clustering_triggered_at TIMESTAMPTZ
+        """))
+        conn.execute(text("""
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS country_name TEXT
+        """))
+        conn.execute(text("""
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS country_code TEXT
         """))
         conn.execute(text("""
             CREATE INDEX IF NOT EXISTS idx_jobs_domain ON jobs (domain)
@@ -126,13 +134,16 @@ def init_db():
 
 # --- Jobs -------------------------------------------------------------
 
-def create_job(filename, domain, total):
+def create_job(filename, domain, country_name, country_code, total):
     job_id = str(uuid.uuid4())
     with engine.begin() as conn:
         conn.execute(text("""
-            INSERT INTO jobs (id, filename, domain, job_type, status, total, processed)
-            VALUES (:id, :filename, :domain, 'category', 'pending', :total, 0)
-        """), {"id": job_id, "filename": filename, "domain": domain, "total": total})
+            INSERT INTO jobs (id, filename, domain, country_name, country_code, job_type, status, total, processed)
+            VALUES (:id, :filename, :domain, :country_name, :country_code, 'category', 'pending', :total, 0)
+        """), {
+            "id": job_id, "filename": filename, "domain": domain,
+            "country_name": country_name, "country_code": country_code, "total": total,
+        })
     return job_id
 
 

@@ -39,11 +39,12 @@ import io
 import csv
 
 import pandas as pd
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 import db
+import category_checker
 from job_queue import category_queue
 from category_tasks import categorize_keyword_task
 
@@ -123,10 +124,23 @@ def health():
 
 
 @app.post("/jobs/category")
-async def create_category_job(file: UploadFile = File(...)):
+async def create_category_job(
+    file: UploadFile = File(...),
+    country: str = Form(...),
+):
     """Upload a .csv/.xlsx with a 'Keywords' column (optionally 'Search
-    Volume'). Creates a category job and enqueues one task per keyword
-    that passes the SV/'near me' filters."""
+    Volume'). `country` is a country name (e.g. "India", "United States")
+    or a 2-letter code (e.g. "in", "us") -- every SERP search in this job
+    runs against that country's Google region. Creates a category job and
+    enqueues one task per keyword that passes the SV/'near me' filters."""
+    country_code = category_checker.resolve_country_code(country)
+    if not country_code:
+        raise HTTPException(
+            400,
+            f"Unknown country: '{country}'. Try a full country name "
+            f"(e.g. 'India', 'United States') or its 2-letter code (e.g. 'in', 'us')."
+        )
+
     filename = file.filename or "upload.csv"
     ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
     if ext not in ("csv", "xlsx", "xls"):
@@ -143,18 +157,18 @@ async def create_category_job(file: UploadFile = File(...)):
     if not to_process:
         raise HTTPException(400, "No usable keyword rows found after filtering")
 
-    job_id = db.create_job(filename, DEFAULT_DOMAIN, total=len(to_process))
+    job_id = db.create_job(filename, DEFAULT_DOMAIN, country, country_code, total=len(to_process))
     db.set_job_status(job_id, "running")
 
     for r in to_process:
         category_queue.enqueue(
             categorize_keyword_task,
-            job_id, DEFAULT_DOMAIN, r["keyword"],
+            job_id, DEFAULT_DOMAIN, r["keyword"], country_code,
             job_timeout=180,
         )
 
     return {
-        "job_id": job_id, "status": "running",
+        "job_id": job_id, "status": "running", "country": country, "country_code": country_code,
         "total": len(to_process), "skipped": len(rows) - len(to_process),
     }
 
@@ -188,7 +202,6 @@ def recluster():
     """Manually re-run the deterministic clustering pass over the entire
     category list. Normally this happens automatically once a job's
     categorization finishes -- this endpoint is for re-running it on demand."""
-    import category_checker
     assignment = category_checker.cluster_all_categories(DEFAULT_DOMAIN)
     db.replace_domain_clusters(DEFAULT_DOMAIN, assignment)
     return {"categories_clustered": len(assignment)}

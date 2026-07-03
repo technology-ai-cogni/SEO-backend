@@ -19,9 +19,9 @@ import category_checker
 from job_queue import category_queue
 
 
-def categorize_keyword_task(job_id, domain, keyword):
+def categorize_keyword_task(job_id, domain, keyword, country_code=None):
     try:
-        category, meta = category_checker.categorize_keyword(keyword, domain)
+        category, meta = category_checker.categorize_keyword(keyword, domain, country_code)
         if category is None:
             db.insert_category_result(job_id, domain, keyword, None, None, "no_data", meta=meta)
         else:
