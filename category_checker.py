@@ -154,26 +154,17 @@ def classify_page_type(url):
 
 
 def build_majority_titles(top3):
-    """Given up to 3 {"url","title"} results, return (titles, majority_type)
-    -- the majority-type (blog vs landing) titles to use for category
-    derivation, plus which type won (for the audit trail)."""
-    pages = [
-        {"url": r["url"], "title": r["title"], "type": classify_page_type(r["url"])}
-        for r in top3
-    ]
-    if not pages:
-        return [], None
+    """
+    Return all titles from the top-3 results, unmodified.
 
-    blog_pages = [p for p in pages if p["type"] == "blog"]
-    landing_pages = [p for p in pages if p["type"] == "landing"]
-    if len(blog_pages) > len(landing_pages):
-        majority_pages, majority_type = blog_pages, "blog"
-    elif len(landing_pages) > len(blog_pages):
-        majority_pages, majority_type = landing_pages, "landing"
-    else:
-        majority_pages, majority_type = pages, "mixed"
-
-    return [p["title"] for p in majority_pages], majority_type
+    NOTE: this previously filtered down to whichever of "blog" vs
+    "landing" page type won a 2-of-3 majority vote by URL path -- that
+    filtering was discarding the single most on-topic result in real
+    cases (e.g. a highly relevant blog post losing 2-1 to two generic
+    landing pages just because of URL structure, not actual relevance).
+    Removed: all 3 titles are always used now.
+    """
+    return [r["title"] for r in top3], "all"
 
 
 def _extract_word_set(titles):
@@ -316,17 +307,24 @@ def find_matching_category(candidate_name, candidate_titles, existing_category_n
         "different specific types within the same broad 'schools' theme -- "
         "keep them as SEPARATE categories even though related, unless the "
         "titles show they're really about the exact same specific topic.\n\n"
+        "This also applies to CONTENT TYPE, not just subject: a general "
+        "listing/directory topic (e.g. \"international schools\") is "
+        "DIFFERENT from an informational content topic about the same "
+        "subject (e.g. \"benefits of international schools\", \"pros and "
+        "cons\", \"how to choose\") -- these serve a different search intent "
+        "and must stay separate categories even though the underlying "
+        "subject overlaps.\n\n"
         "The one exception: judge by INTENT for genuine SYNONYMS of the same "
         "specific concept -- for example, a topic about \"premium\" options "
         "and one about \"luxury\" options ARE the same category (both mean "
         "high-end/upscale), and 'affordable'/'cheap'/'budget' are the same "
         "low-cost concept. That is different from merging two distinct "
-        "topics just because they're thematically related.\n\n"
-        "If a new topic is genuinely the SAME specific topic (or a synonym "
-        "of it) as an existing category, respond with ONLY that exact "
-        "existing category name, copied exactly as written. If it's a "
-        "different specific topic -- even if related -- respond with "
-        "exactly: NONE"
+        "topics or content types just because they're thematically related.\n\n"
+        "If a new topic is genuinely the SAME specific topic AND content "
+        "type (or a synonym of it) as an existing category, respond with "
+        "ONLY that exact existing category name, copied exactly as written. "
+        "If it's a different specific topic or content type -- even if "
+        "related -- respond with exactly: NONE"
     )
     user_prompt = (
         f"Existing categories:\n{category_list}\n\n"
