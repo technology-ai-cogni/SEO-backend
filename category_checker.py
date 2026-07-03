@@ -46,6 +46,13 @@ BLOG_PATH_HINTS = [
     "insights", "resources", "guide", "guides",
 ]
 
+# Shared generic English stopwords -- used both for highlighting
+# majority-shared words in category naming and for cluster word matching.
+_GENERIC_STOPWORDS = {
+    "a", "an", "the", "in", "of", "on", "at", "to", "for", "and", "or",
+    "with", "by", "is", "are", "vs", "your", "you", "best", "top",
+}
+
 _client = None
 
 
@@ -211,6 +218,30 @@ def _extract_word_set(titles):
     return allowed
 
 
+def _majority_shared_words(titles):
+    """
+    Which significant words appear in MULTIPLE of the titles (at least
+    half, rounded up) -- e.g. if 2 of 3 titles both mention "small
+    business", that's a majority-shared signal worth weighting heavily
+    in the category name, over a word that only appears in one title.
+    Computed fresh from the actual titles every time -- not tied to any
+    specific topic.
+    """
+    if len(titles) < 2:
+        return []
+
+    freq = {}
+    for t in titles:
+        words_in_title = {w.lower() for w in re.findall(r"[A-Za-z0-9]+", t)}
+        for w in words_in_title:
+            if w in _GENERIC_STOPWORDS or len(w) <= 2:
+                continue
+            freq[w] = freq.get(w, 0) + 1
+
+    threshold = (len(titles) // 2) + 1
+    return sorted(w for w, c in freq.items() if c >= threshold)
+
+
 def _fallback_extract_name(titles, max_words=6):
     source_title = titles[0].strip()
     delimiters = ["|", " - ", "–", "—", ":", "•"]
@@ -276,6 +307,7 @@ def derive_category_name(titles):
     client = get_openai_client()
     titles_block = "\n".join(f"- {t}" for t in titles)
     allowed_words = _extract_word_set(titles)
+    shared_words = _majority_shared_words(titles)
 
     system_prompt = (
         "You create short SEO category names from webpage titles. Follow these "
@@ -297,9 +329,16 @@ def derive_category_name(titles):
         "handled separately.\n\n"
         "5. Output ONLY plain words separated by single spaces -- no "
         "punctuation, no pipes, no colons, no quotation marks.\n\n"
+        "6. If a specific word or phrase appears in MULTIPLE of the titles "
+        "(you'll be told which ones below), that's a strong signal for what "
+        "this topic is actually about -- STRONGLY prefer including it over a "
+        "word that only appears in a single title, as long as it fits "
+        "naturally within the 2-3 word limit.\n\n"
         "Respond with ONLY the category name, nothing else."
     )
     user_prompt = f"Titles:\n{titles_block}"
+    if shared_words:
+        user_prompt += f"\n\nWords appearing in multiple titles: {', '.join(shared_words)}"
 
     resp = client.chat.completions.create(
         model=OPENAI_CHAT_MODEL,
@@ -428,6 +467,7 @@ def categorize_keyword(keyword, domain, country_code=None):
 
     raw_candidate = derive_category_name(titles)
     candidate_name = _apply_best_top_rule(raw_candidate, titles)
+    meta["majority_shared_words"] = _majority_shared_words(titles)
     meta["raw_candidate_before_best_top_rule"] = raw_candidate
     meta["best_top_applied"] = candidate_name != raw_candidate
 
@@ -466,10 +506,7 @@ def categorize_keyword(keyword, domain, country_code=None):
 # every cluster name is either a literal word pulled from the categories
 # it contains, or a category's own name.
 
-_CLUSTER_STOPWORDS = {
-    "a", "an", "the", "in", "of", "on", "at", "to", "for", "and", "or",
-    "with", "by", "is", "are", "vs", "your", "you", "best", "top",
-}
+_CLUSTER_STOPWORDS = _GENERIC_STOPWORDS
 
 
 def _clean_cluster_label(text):
