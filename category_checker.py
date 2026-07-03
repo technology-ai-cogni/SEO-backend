@@ -154,25 +154,26 @@ def classify_page_type(url):
 
 
 def build_majority_titles(top3):
-    """Given up to 3 {"url","title"} results, return the majority-type
-    (blog vs landing) titles to use for category derivation."""
+    """Given up to 3 {"url","title"} results, return (titles, majority_type)
+    -- the majority-type (blog vs landing) titles to use for category
+    derivation, plus which type won (for the audit trail)."""
     pages = [
         {"url": r["url"], "title": r["title"], "type": classify_page_type(r["url"])}
         for r in top3
     ]
     if not pages:
-        return []
+        return [], None
 
     blog_pages = [p for p in pages if p["type"] == "blog"]
     landing_pages = [p for p in pages if p["type"] == "landing"]
     if len(blog_pages) > len(landing_pages):
-        majority_pages = blog_pages
+        majority_pages, majority_type = blog_pages, "blog"
     elif len(landing_pages) > len(blog_pages):
-        majority_pages = landing_pages
+        majority_pages, majority_type = landing_pages, "landing"
     else:
-        majority_pages = pages
+        majority_pages, majority_type = pages, "mixed"
 
-    return [p["title"] for p in majority_pages]
+    return [p["title"] for p in majority_pages], majority_type
 
 
 def _extract_word_set(titles):
@@ -363,19 +364,32 @@ def categorize_keyword(keyword, domain):
     deterministic batch step that runs once per job, after every keyword
     in the job has been categorized. See cluster_all_categories().
 
-    Returns the assigned category name, or None if there was no usable
-    page data to categorize from.
+    Returns (category, meta) -- category is None if there was no usable
+    page data to categorize from. `meta` is always populated (even on
+    failure) with the full audit trail: the actual top-3 titles/urls
+    fetched, which type (blog/landing/mixed) won, the raw candidate name
+    before the Best/Top rule, whether Best/Top fired, and whether this
+    keyword matched an already-existing category or created a new one.
     """
     import db  # local import to avoid a hard dependency for callers that
                # only want the pure scraping/naming functions above
 
     top3 = get_top3_for_category(keyword)
-    titles = build_majority_titles(top3)
-    if not titles:
-        return None
+    titles, majority_type = build_majority_titles(top3)
 
-    candidate_name = derive_category_name(titles)
-    candidate_name = _apply_best_top_rule(candidate_name, titles)
+    meta = {
+        "top3": [{"url": r["url"], "title": r["title"]} for r in top3],
+        "majority_type": majority_type,
+        "majority_titles_used": titles,
+    }
+
+    if not titles:
+        return None, meta
+
+    raw_candidate = derive_category_name(titles)
+    candidate_name = _apply_best_top_rule(raw_candidate, titles)
+    meta["raw_candidate_before_best_top_rule"] = raw_candidate
+    meta["best_top_applied"] = candidate_name != raw_candidate
 
     # Only compare against existing categories that have the SAME Best/Top
     # status -- otherwise a "Best/Top ..." candidate could get silently
@@ -389,10 +403,13 @@ def categorize_keyword(keyword, domain):
     matched_category = find_matching_category(candidate_name, titles, existing_category_names)
 
     if matched_category:
-        return matched_category
+        meta["matched_existing_category"] = True
+        meta["candidate_before_match"] = candidate_name
+        return matched_category, meta
 
+    meta["matched_existing_category"] = False
     db.add_category(domain, candidate_name)
-    return candidate_name
+    return candidate_name, meta
 
 
 # --- Clustering (deterministic, batch, NO LLM) ---------------------------
