@@ -161,9 +161,26 @@ async def create_category_job(file: UploadFile = File(...)):
 
 @app.get("/results")
 def get_all_results():
-    """ALL keyword results ever processed, across every job. This is the
-    accumulated results view -- importing a new sheet just adds to it."""
+    """ALL keyword results ever processed, across every job -- includes
+    the full audit trail per keyword (top-3 titles/urls used, majority
+    type, whether Best/Top fired, whether it matched an existing category)."""
     return {"results": db.get_domain_results(DEFAULT_DOMAIN)}
+
+
+@app.get("/categories")
+def get_categories():
+    """Every distinct category, with keyword count and one example audit
+    trail -- shows WHY that category exists (the actual titles that
+    produced it) without opening every individual keyword."""
+    return {"categories": db.get_categories_overview(DEFAULT_DOMAIN)}
+
+
+@app.get("/clusters")
+def get_clusters():
+    """Every distinct cluster, with the categories grouped inside it --
+    the clustering criteria is directly visible: the shared word is
+    plainly readable in the category names listed."""
+    return {"clusters": db.get_clusters_overview(DEFAULT_DOMAIN)}
 
 
 @app.post("/recluster")

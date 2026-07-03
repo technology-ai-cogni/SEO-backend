@@ -21,11 +21,11 @@ from job_queue import category_queue
 
 def categorize_keyword_task(job_id, domain, keyword):
     try:
-        category = category_checker.categorize_keyword(keyword, domain)
+        category, meta = category_checker.categorize_keyword(keyword, domain)
         if category is None:
-            db.insert_category_result(job_id, domain, keyword, None, None, "no_data")
+            db.insert_category_result(job_id, domain, keyword, None, None, "no_data", meta=meta)
         else:
-            db.insert_category_result(job_id, domain, keyword, category, None, "processed")
+            db.insert_category_result(job_id, domain, keyword, category, None, "processed", meta=meta)
     except Exception as e:
         db.insert_category_result(job_id, domain, keyword, None, None, "error", error=str(e))
     finally:

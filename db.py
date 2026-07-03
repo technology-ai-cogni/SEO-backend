@@ -23,6 +23,7 @@ Setup:
 """
 
 import os
+import json
 import uuid
 
 from dotenv import load_dotenv
@@ -106,8 +107,12 @@ def init_db():
                 cluster TEXT,
                 status TEXT,
                 error TEXT,
+                meta JSONB,
                 checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
+        """))
+        conn.execute(text("""
+            ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS meta JSONB
         """))
         conn.execute(text("""
             CREATE INDEX IF NOT EXISTS idx_keyword_categories_job
@@ -279,21 +284,23 @@ def replace_domain_clusters(domain, category_to_cluster):
 
 # --- Keyword results ----------------------------------------------------
 
-def insert_category_result(job_id, domain, keyword, category, cluster, status, error=None):
+def insert_category_result(job_id, domain, keyword, category, cluster, status, meta=None, error=None):
     with engine.begin() as conn:
         conn.execute(text("""
-            INSERT INTO keyword_categories (job_id, domain, keyword, category, cluster, status, error)
-            VALUES (:job_id, :domain, :keyword, :category, :cluster, :status, :error)
+            INSERT INTO keyword_categories (job_id, domain, keyword, category, cluster, status, meta, error)
+            VALUES (:job_id, :domain, :keyword, :category, :cluster, :status, CAST(:meta AS JSONB), :error)
         """), {
             "job_id": job_id, "domain": domain, "keyword": keyword, "category": category,
-            "cluster": cluster, "status": status, "error": error,
+            "cluster": cluster, "status": status,
+            "meta": json.dumps(meta) if meta is not None else None,
+            "error": error,
         })
 
 
 def get_job_category_results(job_id):
     with engine.begin() as conn:
         rows = conn.execute(text("""
-            SELECT keyword, category, cluster, status, error, checked_at
+            SELECT keyword, category, cluster, status, error, meta, checked_at
             FROM keyword_categories WHERE job_id = :job_id ORDER BY id
         """), {"job_id": job_id}).mappings().fetchall()
         return [dict(r) for r in rows]
@@ -304,8 +311,43 @@ def get_domain_results(domain):
     -- this is what your UI's per-domain 'project table' view reads from."""
     with engine.begin() as conn:
         rows = conn.execute(text("""
-            SELECT keyword, category, cluster, status, error, checked_at, job_id
+            SELECT keyword, category, cluster, status, error, meta, checked_at, job_id
             FROM keyword_categories WHERE domain = :domain ORDER BY checked_at DESC
+        """), {"domain": domain}).mappings().fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_categories_overview(domain):
+    """Every distinct category in this domain, with keyword count and one
+    example audit trail (top-3 titles/urls that produced it) -- lets you
+    see WHY a category exists without opening every keyword individually."""
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT category, cluster, count(*) AS keyword_count,
+                   array_agg(keyword ORDER BY checked_at) AS keywords,
+                   (array_agg(meta ORDER BY checked_at))[1] AS example_meta
+            FROM keyword_categories
+            WHERE domain = :domain AND category IS NOT NULL
+            GROUP BY category, cluster
+            ORDER BY keyword_count DESC
+        """), {"domain": domain}).mappings().fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_clusters_overview(domain):
+    """Every distinct cluster in this domain, with the list of categories
+    inside it and total keyword count -- shows exactly which categories
+    got grouped together and why (the shared word is visible directly in
+    the category names)."""
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT cluster, count(DISTINCT category) AS category_count,
+                   count(*) AS keyword_count,
+                   array_agg(DISTINCT category) AS categories
+            FROM keyword_categories
+            WHERE domain = :domain AND cluster IS NOT NULL
+            GROUP BY cluster
+            ORDER BY keyword_count DESC
         """), {"domain": domain}).mappings().fetchall()
         return [dict(r) for r in rows]
 
