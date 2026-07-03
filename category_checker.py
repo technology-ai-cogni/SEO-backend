@@ -221,6 +221,16 @@ def _apply_best_top_rule(candidate_name, titles):
     return f"Best/Top {rest}".strip() if rest else "Best/Top"
 
 
+def _clean_category_text(text):
+    """Strip any leftover punctuation/delimiters (e.g. a stray '|' from a
+    title like 'Page Title | Site Name') and collapse whitespace. Applied
+    to every category string right before it's used, regardless of
+    whether it came from the model or the fallback extractor."""
+    text = re.sub(r"[^A-Za-z0-9 ]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 def derive_category_name(titles):
     """
     Build a short, meaningful category name -- HARD constrained to only
@@ -244,13 +254,17 @@ def derive_category_name(titles):
         "rules exactly:\n\n"
         "1. You may ONLY use words that appear verbatim in the titles given to "
         "you (case doesn't matter). Never add, invent, or substitute a word.\n\n"
-        "2. Select and reorder existing words to form a coherent, natural "
-        "2-5 word phrase -- do not just truncate one title mid-sentence.\n\n"
+        "2. Keep it MINIMAL: 2-3 words maximum, describing ONE clear concept. "
+        "Do not stack multiple words that mean the same thing (e.g. don't "
+        "combine both 'affordable' AND 'fees' -- pick the single clearest "
+        "word for that concept, not both).\n\n"
         "3. Do NOT include any city, state, country, or region name in the "
         "category, even if one appears in the titles -- the category should "
         "describe the TOPIC, not the location.\n\n"
         "4. Do NOT include ranking words like 'best' or 'top' -- that is "
         "handled separately.\n\n"
+        "5. Output ONLY plain words separated by single spaces -- no "
+        "punctuation, no pipes, no colons, no quotation marks.\n\n"
         "Respond with ONLY the category name, nothing else."
     )
     user_prompt = f"Titles:\n{titles_block}"
@@ -273,9 +287,9 @@ def derive_category_name(titles):
         fallback = _fallback_extract_name(titles)
         print(f"  [WARNING] Model used word(s) not in the titles: {invalid_words} "
               f"-- discarding \"{candidate}\", using safe fallback: \"{fallback}\"")
-        return fallback
+        return _clean_category_text(fallback)
 
-    return candidate
+    return _clean_category_text(candidate)
 
 
 def find_matching_category(candidate_name, candidate_titles, existing_category_names):
@@ -390,6 +404,50 @@ def _cluster_significant_words(category_name):
     return {w for w in words if w not in _CLUSTER_STOPWORDS and len(w) > 2}
 
 
+def _extend_cluster_phrase(word, matched_categories):
+    """
+    The chosen common word alone (e.g. "international") often reads
+    awkwardly as a cluster name on its own. Check whether a second word
+    commonly sits directly next to it (before or after) across the
+    categories being grouped -- e.g. if most of them contain "...
+    International Schools ..." or "... International School ...", extend
+    the cluster label to "International Schools" instead of just
+    "International". Purely positional/frequency-based -- never invents
+    a word that isn't already adjacent to it in the real category text.
+    """
+    after_counts, before_counts = {}, {}
+    for cat in matched_categories:
+        tokens = re.findall(r"[A-Za-z0-9]+", cat.lower())
+        for i, t in enumerate(tokens):
+            if t != word:
+                continue
+            if i + 1 < len(tokens) and tokens[i + 1] not in _CLUSTER_STOPWORDS:
+                after_counts[tokens[i + 1]] = after_counts.get(tokens[i + 1], 0) + 1
+            if i - 1 >= 0 and tokens[i - 1] not in _CLUSTER_STOPWORDS:
+                before_counts[tokens[i - 1]] = before_counts.get(tokens[i - 1], 0) + 1
+
+    total = len(matched_categories)
+    if total < 2:
+        return word.title()
+
+    threshold = (total + 1) // 2  # majority, rounded up
+
+    best_after = max(after_counts.items(), key=lambda kv: kv[1], default=None)
+    best_before = max(before_counts.items(), key=lambda kv: kv[1], default=None)
+
+    candidates = []
+    if best_after and best_after[1] >= max(threshold, 2):
+        candidates.append((best_after[1], f"{word} {best_after[0]}"))
+    if best_before and best_before[1] >= max(threshold, 2):
+        candidates.append((best_before[1], f"{best_before[0]} {word}"))
+
+    if candidates:
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        return candidates[0][1].title()
+
+    return word.title()
+
+
 def cluster_all_categories(domain):
     """
     Deterministic greedy clustering over every category currently in this
@@ -420,9 +478,9 @@ def cluster_all_categories(domain):
         # Tie-break deterministically: alphabetically first among the
         # most-common words.
         chosen_word = sorted(w for w, c in freq.items() if c == max_freq)[0]
-        cluster_label = chosen_word.title()
-
         matched = [cat for cat, words in remaining.items() if chosen_word in words]
+        cluster_label = _extend_cluster_phrase(chosen_word, matched)
+
         for cat in matched:
             assignment[cat] = cluster_label
             del remaining[cat]
