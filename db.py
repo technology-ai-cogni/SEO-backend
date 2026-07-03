@@ -1,12 +1,18 @@
 """
 Database layer, backed by Postgres (Supabase).
 
+Everything is scoped by DOMAIN -- each domain behaves like its own
+isolated project. Categories, clusters, and the category->cluster cache
+are matched only against other entries in the SAME domain, so importing a
+sheet for a different domain never mixes data with another domain's
+categories/clusters.
+
 Tables:
-    jobs                -- one row per category-check batch
-    categories          -- master list of distinct category names (matched
-                            against for every new keyword)
-    keyword_categories   -- one row per keyword categorized EVER (history
-                            kept, not overwritten)
+    jobs                  -- one row per import batch, tagged with domain
+    categories             -- distinct category names, scoped per domain
+    clusters                -- distinct cluster names, scoped per domain
+    category_cluster_map    -- deterministic category->cluster cache, per domain
+    keyword_categories      -- one row per keyword processed EVER (history kept)
 
 Setup:
     1. Create a free project at https://supabase.com
@@ -41,28 +47,60 @@ def init_db():
             CREATE TABLE IF NOT EXISTS jobs (
                 id UUID PRIMARY KEY,
                 filename TEXT,
+                domain TEXT NOT NULL DEFAULT '',
                 job_type TEXT NOT NULL DEFAULT 'category',
                 status TEXT NOT NULL DEFAULT 'pending',
                 total INTEGER NOT NULL DEFAULT 0,
                 processed INTEGER NOT NULL DEFAULT 0,
                 error TEXT,
+                clustering_triggered_at TIMESTAMPTZ,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 completed_at TIMESTAMPTZ
             )
         """))
+        conn.execute(text("""
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS clustering_triggered_at TIMESTAMPTZ
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_jobs_domain ON jobs (domain)
+        """))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS categories (
                 id BIGSERIAL PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                domain TEXT NOT NULL,
+                name TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                UNIQUE (domain, name)
             )
         """))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS clusters (
+                id BIGSERIAL PRIMARY KEY,
+                domain TEXT NOT NULL,
+                name TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                UNIQUE (domain, name)
+            )
+        """))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS category_cluster_map (
+                domain TEXT NOT NULL,
+                category TEXT NOT NULL,
+                cluster TEXT NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (domain, category)
+            )
+        """))
+
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS keyword_categories (
                 id BIGSERIAL PRIMARY KEY,
                 job_id UUID REFERENCES jobs(id),
+                domain TEXT NOT NULL DEFAULT '',
                 keyword TEXT NOT NULL,
                 category TEXT,
                 cluster TEXT,
@@ -71,37 +109,25 @@ def init_db():
                 checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
-        # In case this table already existed from before `cluster` was added.
-        conn.execute(text("""
-            ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS cluster TEXT
-        """))
         conn.execute(text("""
             CREATE INDEX IF NOT EXISTS idx_keyword_categories_job
             ON keyword_categories (job_id)
         """))
-
-        # --- Clusters ------------------------------------------------------
-        # Broader groupings OVER categories (e.g. "Best/Top Private Schools",
-        # "PublicvsPrivate", and "Benefits" might all cluster under "Private
-        # Schools"). Same matching pattern as categories, one level up.
         conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS clusters (
-                id BIGSERIAL PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            )
+            CREATE INDEX IF NOT EXISTS idx_keyword_categories_domain
+            ON keyword_categories (domain)
         """))
 
 
 # --- Jobs -------------------------------------------------------------
 
-def create_job(filename, total):
+def create_job(filename, domain, total):
     job_id = str(uuid.uuid4())
     with engine.begin() as conn:
         conn.execute(text("""
-            INSERT INTO jobs (id, filename, job_type, status, total, processed)
-            VALUES (:id, :filename, 'category', 'pending', :total, 0)
-        """), {"id": job_id, "filename": filename, "total": total})
+            INSERT INTO jobs (id, filename, domain, job_type, status, total, processed)
+            VALUES (:id, :filename, :domain, 'category', 'pending', :total, 0)
+        """), {"id": job_id, "filename": filename, "domain": domain, "total": total})
     return job_id
 
 
@@ -143,34 +169,124 @@ def list_jobs():
         return [dict(r) for r in rows]
 
 
-# --- Categories ------------------------------------------------------------
-# IMPORTANT: run only ONE category worker at a time -- category assignment
-# is inherently sequential (each decision depends on categories already
-# created by prior keywords in the run).
-
-def list_category_names():
+def list_domains():
+    """Distinct domains that have at least one job -- for populating a
+    domain picker in your UI."""
     with engine.begin() as conn:
-        rows = conn.execute(text("SELECT name FROM categories ORDER BY id")).fetchall()
+        rows = conn.execute(text("""
+            SELECT DISTINCT domain FROM jobs WHERE domain != '' ORDER BY domain
+        """)).fetchall()
+        return [r.domain for r in rows]
+
+
+def try_mark_clustering_triggered(job_id):
+    """Atomically claim the right to trigger clustering for this job.
+    Returns True only for the ONE caller that wins the race (guards
+    against double-triggering if progress updates ever overlap)."""
+    with engine.begin() as conn:
+        result = conn.execute(text("""
+            UPDATE jobs SET clustering_triggered_at = now()
+            WHERE id = :id AND clustering_triggered_at IS NULL
+        """), {"id": job_id})
+        return result.rowcount > 0
+
+
+# --- Categories (domain-scoped) --------------------------------------------
+
+def list_category_names(domain):
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT name FROM categories WHERE domain = :domain ORDER BY id
+        """), {"domain": domain}).fetchall()
         return [r.name for r in rows]
 
 
-def add_category(name):
-    """Insert a new category name. No-op if it already exists (unique constraint)."""
+def add_category(domain, name):
     with engine.begin() as conn:
         conn.execute(text("""
-            INSERT INTO categories (name) VALUES (:name)
-            ON CONFLICT (name) DO NOTHING
-        """), {"name": name})
+            INSERT INTO categories (domain, name) VALUES (:domain, :name)
+            ON CONFLICT (domain, name) DO NOTHING
+        """), {"domain": domain, "name": name})
 
 
-def insert_category_result(job_id, keyword, category, cluster, status, error=None):
+# --- Clusters (domain-scoped) -----------------------------------------
+# IMPORTANT: run only ONE category worker at a time -- category AND
+# cluster assignment are both inherently sequential within a domain.
+
+def list_cluster_names(domain):
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT name FROM clusters WHERE domain = :domain ORDER BY id
+        """), {"domain": domain}).fetchall()
+        return [r.name for r in rows]
+
+
+def add_cluster(domain, name):
     with engine.begin() as conn:
         conn.execute(text("""
-            INSERT INTO keyword_categories (job_id, keyword, category, cluster, status, error)
-            VALUES (:job_id, :keyword, :category, :cluster, :status, :error)
+            INSERT INTO clusters (domain, name) VALUES (:domain, :name)
+            ON CONFLICT (domain, name) DO NOTHING
+        """), {"domain": domain, "name": name})
+
+
+def get_cluster_for_category(domain, category_name):
+    """Deterministic cache lookup, scoped per domain: has this EXACT
+    category already been assigned a cluster in this domain before?"""
+    with engine.begin() as conn:
+        row = conn.execute(text("""
+            SELECT cluster FROM category_cluster_map
+            WHERE domain = :domain AND category = :category
+        """), {"domain": domain, "category": category_name}).fetchone()
+        return row.cluster if row else None
+
+
+def set_cluster_for_category(domain, category_name, cluster_name):
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO category_cluster_map (domain, category, cluster, updated_at)
+            VALUES (:domain, :category, :cluster, now())
+            ON CONFLICT (domain, category) DO UPDATE SET cluster = :cluster, updated_at = now()
+        """), {"domain": domain, "category": category_name, "cluster": cluster_name})
+
+
+def replace_domain_clusters(domain, category_to_cluster):
+    """Overwrite this domain's ENTIRE cluster assignment in one pass --
+    used by the post-categorization clustering step, which re-clusters
+    the whole domain's category list from scratch every time it runs
+    (new categories can shift which word is now the 'most common', so a
+    full recompute keeps clustering consistent rather than just patching
+    in new categories against stale groupings)."""
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM clusters WHERE domain = :domain"), {"domain": domain})
+        for cluster_name in sorted(set(category_to_cluster.values())):
+            conn.execute(text("""
+                INSERT INTO clusters (domain, name) VALUES (:domain, :name)
+                ON CONFLICT (domain, name) DO NOTHING
+            """), {"domain": domain, "name": cluster_name})
+
+        conn.execute(text("DELETE FROM category_cluster_map WHERE domain = :domain"), {"domain": domain})
+        for category_name, cluster_name in category_to_cluster.items():
+            conn.execute(text("""
+                INSERT INTO category_cluster_map (domain, category, cluster, updated_at)
+                VALUES (:domain, :category, :cluster, now())
+            """), {"domain": domain, "category": category_name, "cluster": cluster_name})
+
+            conn.execute(text("""
+                UPDATE keyword_categories SET cluster = :cluster
+                WHERE domain = :domain AND category = :category
+            """), {"domain": domain, "category": category_name, "cluster": cluster_name})
+
+
+# --- Keyword results ----------------------------------------------------
+
+def insert_category_result(job_id, domain, keyword, category, cluster, status, error=None):
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO keyword_categories (job_id, domain, keyword, category, cluster, status, error)
+            VALUES (:job_id, :domain, :keyword, :category, :cluster, :status, :error)
         """), {
-            "job_id": job_id, "keyword": keyword, "category": category, "cluster": cluster,
-            "status": status, "error": error,
+            "job_id": job_id, "domain": domain, "keyword": keyword, "category": category,
+            "cluster": cluster, "status": status, "error": error,
         })
 
 
@@ -183,23 +299,15 @@ def get_job_category_results(job_id):
         return [dict(r) for r in rows]
 
 
-# --- Clusters ----------------------------------------------------------
-# Same rule as categories: run only ONE category worker at a time --
-# cluster assignment depends on clusters already created by prior keywords.
-
-def list_cluster_names():
+def get_domain_results(domain):
+    """All keyword results ever processed for a domain, across every job
+    -- this is what your UI's per-domain 'project table' view reads from."""
     with engine.begin() as conn:
-        rows = conn.execute(text("SELECT name FROM clusters ORDER BY id")).fetchall()
-        return [r.name for r in rows]
-
-
-def add_cluster(name):
-    """Insert a new cluster name. No-op if it already exists (unique constraint)."""
-    with engine.begin() as conn:
-        conn.execute(text("""
-            INSERT INTO clusters (name) VALUES (:name)
-            ON CONFLICT (name) DO NOTHING
-        """), {"name": name})
+        rows = conn.execute(text("""
+            SELECT keyword, category, cluster, status, error, checked_at, job_id
+            FROM keyword_categories WHERE domain = :domain ORDER BY checked_at DESC
+        """), {"domain": domain}).mappings().fetchall()
+        return [dict(r) for r in rows]
 
 
 if __name__ == "__main__":

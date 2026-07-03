@@ -4,9 +4,13 @@ from Bright Data's SERP zone, then derive/match a category name via OpenAI.
 
 Categories are read from and written to Postgres (db.py) rather than a
 local JSON file, so they stay consistent when driven by an RQ worker.
-IMPORTANT: run only ONE category worker process at a time -- see README.
-Category assignment is inherently sequential (each decision depends on
-categories already created by prior keywords).
+IMPORTANT: run only ONE category worker process at a time. Category
+assignment is inherently sequential (each decision depends on categories
+already created by prior keywords in the same domain).
+
+Clustering is a SEPARATE, deterministic, non-LLM step that runs once per
+job -- AFTER every keyword in that job has been categorized -- over the
+domain's ENTIRE category list. See cluster_all_categories() at the bottom.
 """
 
 import os
@@ -194,68 +198,129 @@ def _fallback_extract_name(titles, max_words=6):
     return candidate
 
 
+# --- Hardcoded Best/Top rule ------------------------------------------
+# Deliberately deterministic, not LLM-judged: if ANY of the top-3 titles
+# contains the word "best" or "top", the category MUST carry the literal
+# "Best/Top" tag -- this is a fixed business rule, not a suggestion.
+
+def _titles_contain_best_or_top(titles):
+    for t in titles:
+        words = set(re.findall(r"[a-z]+", t.lower()))
+        if "best" in words or "top" in words:
+            return True
+    return False
+
+
+def _apply_best_top_rule(candidate_name, titles):
+    if not _titles_contain_best_or_top(titles):
+        return candidate_name
+    words = candidate_name.split()
+    if words and words[0].strip().lower() in ("best", "top", "best/top"):
+        words = words[1:]
+    rest = " ".join(words).strip()
+    return f"Best/Top {rest}".strip() if rest else "Best/Top"
+
+
 def derive_category_name(titles):
-    """Build a short category name -- HARD constrained to only use words
-    that literally appear in the titles. Validated word-by-word; falls
-    back to a guaranteed-safe extraction if the model breaks the rule."""
+    """
+    Build a short, meaningful category name -- HARD constrained to only
+    select/rearrange words that literally appear in the majority titles.
+    No new vocabulary allowed. Also instructed to exclude any city/state/
+    country/region name (categories should describe the TOPIC, not the
+    location) -- enforced via prompt instruction since a hardcoded
+    place-name list can't generalize to "any" location worldwide.
+
+    The result is validated word-by-word afterward; if the model breaks
+    the word-source rule, its answer is discarded and a guaranteed-safe
+    extraction is used instead. The Best/Top rule is applied separately,
+    deterministically, after this function returns.
+    """
     client = get_openai_client()
     titles_block = "\n".join(f"- {t}" for t in titles)
     allowed_words = _extract_word_set(titles)
 
-    prompt = (
-        "Below are webpage titles that share a common topic.\n\n"
-        "Create a short, meaningful category name (aim for 2-5 words) that "
-        "summarizes what they have in common.\n\n"
-        "STRICT RULE: You may ONLY use words that appear verbatim in the "
-        "titles below (case doesn't matter). Do not add, invent, substitute, "
-        "or pluralize/modify any word that isn't already present. Select and "
-        "reorder existing words from the titles to form a coherent, natural "
-        "phrase -- do not just truncate one title mid-sentence.\n\n"
-        f"Titles:\n{titles_block}\n\n"
+    system_prompt = (
+        "You create short SEO category names from webpage titles. Follow these "
+        "rules exactly:\n\n"
+        "1. You may ONLY use words that appear verbatim in the titles given to "
+        "you (case doesn't matter). Never add, invent, or substitute a word.\n\n"
+        "2. Select and reorder existing words to form a coherent, natural "
+        "2-5 word phrase -- do not just truncate one title mid-sentence.\n\n"
+        "3. Do NOT include any city, state, country, or region name in the "
+        "category, even if one appears in the titles -- the category should "
+        "describe the TOPIC, not the location.\n\n"
+        "4. Do NOT include ranking words like 'best' or 'top' -- that is "
+        "handled separately.\n\n"
         "Respond with ONLY the category name, nothing else."
     )
+    user_prompt = f"Titles:\n{titles_block}"
 
     resp = client.chat.completions.create(
         model=OPENAI_CHAT_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0,
         max_tokens=20,
     )
     candidate = resp.choices[0].message.content.strip().strip('"')
+
     candidate_words = re.findall(r"[A-Za-z0-9]+", candidate)
     invalid_words = [w for w in candidate_words if w.lower() not in allowed_words]
 
     if invalid_words or not candidate_words:
-        return _fallback_extract_name(titles)
+        fallback = _fallback_extract_name(titles)
+        print(f"  [WARNING] Model used word(s) not in the titles: {invalid_words} "
+              f"-- discarding \"{candidate}\", using safe fallback: \"{fallback}\"")
+        return fallback
+
     return candidate
 
 
 def find_matching_category(candidate_name, candidate_titles, existing_category_names):
-    """Ask OpenAI whether candidate_name fits an already-created category.
-    Returns the existing category name if matched, else None."""
+    """
+    Ask OpenAI whether candidate_name fits an already-created category.
+    Judged by INTENT/topic, not literal word overlap -- e.g. a category
+    built around "premium" and one built around "luxury" (or "affordable"
+    vs "cheap" vs "budget") should be recognized as the SAME category if
+    the titles convey the same underlying intent, even though the exact
+    wording differs. Returns the existing category name if matched, else None.
+    """
     if not existing_category_names:
         return None
 
     client = get_openai_client()
     category_list = "\n".join(f"{i + 1}. {name}" for i, name in enumerate(existing_category_names))
     titles_block = "\n".join(f"- {t}" for t in candidate_titles)
-    prompt = (
-        "You are grouping webpage topics into categories for an SEO keyword taxonomy.\n\n"
+    system_prompt = (
+        "You are grouping webpage topics into categories for an SEO keyword "
+        "taxonomy. Judge by INTENT and underlying topic, not literal word "
+        "overlap -- for example, a topic about \"premium\" options and one "
+        "about \"luxury\" options are the SAME category if they both convey "
+        "high-end/upscale intent, even though the exact word differs. The "
+        "same applies to other synonym groups (e.g. affordable/cheap/budget "
+        "all convey low-cost intent). If a new topic clearly matches an "
+        "existing category's intent, respond with ONLY that exact existing "
+        "category name, copied exactly as written. If none match, respond "
+        "with exactly: NONE"
+    )
+    user_prompt = (
         f"Existing categories:\n{category_list}\n\n"
         f'New topic candidate: "{candidate_name}"\n'
-        f"Based on these page titles:\n{titles_block}\n\n"
-        "Does this new topic clearly fit into one of the existing categories above "
-        "(same general subject)? If yes, respond with ONLY the exact existing category "
-        "name, copied exactly as written above. If none are a good fit, respond with "
-        "exactly: NONE"
+        f"Based on these page titles:\n{titles_block}"
     )
     resp = client.chat.completions.create(
         model=OPENAI_CHAT_MODEL,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
         temperature=0,
         max_tokens=20,
     )
     answer = resp.choices[0].message.content.strip().strip('"')
+
     if answer.upper() == "NONE":
         return None
 
@@ -265,125 +330,19 @@ def find_matching_category(candidate_name, candidate_titles, existing_category_n
     return None
 
 
-# --- Clusters (broader grouping OVER categories) --------------------------
-# Cluster names are word-constrained to the category's OWN text -- same
-# hard rule as category naming: never invent vocabulary. Matching a
-# category into an ALREADY-EXISTING cluster (below) stays semantic, so
-# generalization across different wording still happens once a cluster
-# already exists from an earlier keyword -- just not at creation time.
-
-def _extract_word_set_single(text):
-    return set(w.lower() for w in re.findall(r"[A-Za-z0-9]+", text))
-
-
-def _fallback_cluster_name(category_name, max_words=3):
-    """Guaranteed-safe fallback: literal leading words of the category
-    name, used only if the LLM invents vocabulary."""
-    words = category_name.split()
-    candidate = " ".join(words[:max_words])
-    return candidate or category_name
-
-
-def derive_cluster_name(category_name):
-    """Produce a short cluster label for a category -- HARD constrained to
-    only use words that literally appear in the category name. No new
-    vocabulary allowed, same rule as derive_category_name. Preserves
-    distinguishing compound phrases (e.g. "International Schools",
-    "Private Schools") rather than over-collapsing to a single generic
-    word -- different topics that happen to share one word (e.g. "Schools")
-    should stay as separate clusters, not merge into one."""
-    client = get_openai_client()
-    allowed_words = _extract_word_set_single(category_name)
-
-    prompt = (
-        "Below is a specific SEO category name.\n\n"
-        f'Category: "{category_name}"\n\n'
-        "Create a cluster label (2-3 words when possible, 1 word only if the "
-        "category itself is a single-topic word) representing this category's "
-        "specific subject.\n\n"
-        "STRICT RULE 1: You may ONLY use words that appear verbatim in the "
-        "category name above (case doesn't matter). Never add, invent, or "
-        "substitute a word that isn't already present.\n\n"
-        "STRICT RULE 2: Preserve the most SPECIFIC distinguishing phrase, not "
-        "the most generic one. If the category is \"International Schools in "
-        "Singapore\", the label should be \"International Schools\" -- NOT just "
-        "\"Schools\". If it's \"Private Schools in Singapore List\", the label "
-        "should be \"Private Schools\" -- NOT just \"Schools\". Only drop pure "
-        "filler/qualifier words: rankings (best, top), meta-words (list of, "
-        "understanding, guide to), and specific city/country names. NEVER drop "
-        "a topic-defining adjective (international, private, secondary, high, "
-        "public) that distinguishes this category from other similar ones.\n\n"
-        "Respond with ONLY the cluster label, nothing else."
-    )
-    resp = client.chat.completions.create(
-        model=OPENAI_CHAT_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=12,
-    )
-    candidate = resp.choices[0].message.content.strip().strip('"')
-    candidate_words = re.findall(r"[A-Za-z0-9]+", candidate)
-    invalid_words = [w for w in candidate_words if w.lower() not in allowed_words]
-
-    if invalid_words or not candidate_words:
-        fallback = _fallback_cluster_name(category_name)
-        print(f"  [WARNING] Cluster model used word(s) not in category: {invalid_words} "
-              f"-> using fallback \"{fallback}\"")
-        return fallback
-    return candidate
-
-
-def find_matching_cluster(candidate_cluster_name, category_name, existing_cluster_names):
-    """Ask OpenAI whether this category belongs in an already-created
-    cluster. Returns the existing cluster name if matched, else None.
-    Deliberately strict: sharing one generic word (e.g. both mentioning
-    "Schools") is NOT enough -- the specific topic must match (e.g.
-    "International Schools" and "Private Schools" stay separate clusters
-    even though both are about schools)."""
-    if not existing_cluster_names:
-        return None
-
-    client = get_openai_client()
-    cluster_list = "\n".join(f"{i + 1}. {name}" for i, name in enumerate(existing_cluster_names))
-    prompt = (
-        "You are grouping SEO categories into topic clusters. Be STRICT: only "
-        "merge into an existing cluster if the SPECIFIC topic matches, not just "
-        "a shared generic word. For example, \"International Schools\" and "
-        "\"Private Schools\" are DIFFERENT clusters even though both mention "
-        "\"Schools\" -- do not merge them just because of the shared word.\n\n"
-        f"Existing clusters:\n{cluster_list}\n\n"
-        f'Category to place: "{category_name}"\n'
-        f'Candidate new cluster name for it: "{candidate_cluster_name}"\n\n'
-        "Does this category's SPECIFIC topic clearly match one of the existing "
-        "clusters above (not just a shared generic word)? If yes, respond with "
-        "ONLY the exact existing cluster name, copied exactly as written above. "
-        "If none are a specific match, respond with exactly: NONE"
-    )
-    resp = client.chat.completions.create(
-        model=OPENAI_CHAT_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0,
-        max_tokens=12,
-    )
-    answer = resp.choices[0].message.content.strip().strip('"')
-    if answer.upper() == "NONE":
-        return None
-
-    for name in existing_cluster_names:
-        if name.strip().lower() == answer.strip().lower():
-            return name
-    return None
-
-
-def categorize_keyword(keyword):
+def categorize_keyword(keyword, domain):
     """
-    Full pipeline for one keyword: fetch top-3 titles, derive a candidate
-    category name, match against existing categories (from Postgres), and
-    persist a new category if none matched. Then does the same one level
-    up: derive/match a broader CLUSTER for that category.
+    Category-only pipeline for one keyword, scoped to `domain`: fetch
+    top-3 titles, derive a candidate category name, apply the hardcoded
+    Best/Top rule, match against existing categories in this domain
+    (intent-aware), and persist a new category if none matched.
 
-    Returns (category, cluster) -- both None if there was no usable page
-    data to categorize from.
+    NOTE: clustering does NOT happen here anymore -- it's a separate,
+    deterministic batch step that runs once per job, after every keyword
+    in the job has been categorized. See cluster_all_categories().
+
+    Returns the assigned category name, or None if there was no usable
+    page data to categorize from.
     """
     import db  # local import to avoid a hard dependency for callers that
                # only want the pure scraping/naming functions above
@@ -391,26 +350,81 @@ def categorize_keyword(keyword):
     top3 = get_top3_for_category(keyword)
     titles = build_majority_titles(top3)
     if not titles:
-        return None, None
+        return None
 
     candidate_name = derive_category_name(titles)
-    existing_category_names = db.list_category_names()
+    candidate_name = _apply_best_top_rule(candidate_name, titles)
+
+    existing_category_names = db.list_category_names(domain)
     matched_category = find_matching_category(candidate_name, titles, existing_category_names)
 
     if matched_category:
-        category = matched_category
-    else:
-        db.add_category(candidate_name)
-        category = candidate_name
+        return matched_category
 
-    cluster_candidate = derive_cluster_name(category)
-    existing_cluster_names = db.list_cluster_names()
-    matched_cluster = find_matching_cluster(cluster_candidate, category, existing_cluster_names)
+    db.add_category(domain, candidate_name)
+    return candidate_name
 
-    if matched_cluster:
-        cluster = matched_cluster
-    else:
-        db.add_cluster(cluster_candidate)
-        cluster = cluster_candidate
 
-    return category, cluster
+# --- Clustering (deterministic, batch, NO LLM) ---------------------------
+# Runs once per job, AFTER every keyword in that job has been categorized,
+# over the domain's ENTIRE category list (not just this job's categories --
+# a full recompute keeps clustering consistent as new categories arrive).
+#
+# Algorithm: repeatedly find the single word shared by the MOST remaining
+# (not-yet-clustered) categories, group every category containing that
+# word under a cluster literally named after that word, remove them from
+# the pool, and repeat with whatever's left. Categories that share no word
+# with any other remaining category become their own single-category
+# cluster (named after themselves). This never invents vocabulary --
+# every cluster name is either a literal word pulled from the categories
+# it contains, or a category's own name.
+
+_CLUSTER_STOPWORDS = {
+    "a", "an", "the", "in", "of", "on", "at", "to", "for", "and", "or",
+    "with", "by", "is", "are", "vs", "your", "you", "best", "top",
+}
+
+
+def _cluster_significant_words(category_name):
+    words = re.findall(r"[A-Za-z0-9]+", category_name.lower())
+    return {w for w in words if w not in _CLUSTER_STOPWORDS and len(w) > 2}
+
+
+def cluster_all_categories(domain):
+    """
+    Deterministic greedy clustering over every category currently in this
+    domain. Returns {category_name: cluster_name} covering ALL of them.
+    """
+    import db
+
+    categories = db.list_category_names(domain)
+    remaining = {cat: _cluster_significant_words(cat) for cat in categories}
+    assignment = {}
+
+    while remaining:
+        freq = {}
+        for words in remaining.values():
+            for w in words:
+                freq[w] = freq.get(w, 0) + 1
+
+        max_freq = max(freq.values()) if freq else 0
+
+        if max_freq <= 1:
+            # Nothing left shares a word with anything else -- each
+            # remaining category becomes its own cluster.
+            for cat in list(remaining.keys()):
+                assignment[cat] = cat
+                del remaining[cat]
+            break
+
+        # Tie-break deterministically: alphabetically first among the
+        # most-common words.
+        chosen_word = sorted(w for w, c in freq.items() if c == max_freq)[0]
+        cluster_label = chosen_word.title()
+
+        matched = [cat for cat, words in remaining.items() if chosen_word in words]
+        for cat in matched:
+            assignment[cat] = cluster_label
+            del remaining[cat]
+
+    return assignment
