@@ -48,7 +48,7 @@ import category_checker
 from job_queue import category_queue
 from category_tasks import categorize_keyword_task
 
-MIN_SEARCH_VOLUME = 19
+MIN_SEARCH_VOLUME = 5
 NEAR_ME_PHRASE = "near me"
 DEFAULT_DOMAIN = "default"  # domain-scoping removed from the API surface --
                              # everything shares one global category/cluster
