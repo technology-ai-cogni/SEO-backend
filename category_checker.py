@@ -465,11 +465,29 @@ def categorize_keyword(keyword, domain, country_code=None):
 # cluster (named after themselves). This never invents vocabulary --
 # every cluster name is either a literal word pulled from the categories
 # it contains, or a category's own name.
+#
+# IMPORTANT FIX: when almost every category in the domain shares the same
+# "umbrella" word (e.g. every keyword set here is about "digital
+# marketing", so the words "marketing"/"digital" show up in nearly all
+# categories), that word is USELESS for discriminating between topics --
+# picking it first just dumps everything (real estate, healthcare,
+# hospitals, schools, hospitality, ...) into one giant cluster. To avoid
+# this, words that appear in more than GENERIC_RATIO_THRESHOLD of ALL
+# categories in the domain are treated as "generic" and are excluded from
+# being the cluster-DEFINING word (they can still show up in a cluster's
+# label via _extend_cluster_phrase, as a suffix/prefix on a more specific
+# word). This is computed dynamically from the actual data -- nothing is
+# hardcoded -- so a domain that genuinely is single-topic still clusters
+# correctly (generic-word fallback kicks in once no specific words remain).
 
 _CLUSTER_STOPWORDS = {
     "a", "an", "the", "in", "of", "on", "at", "to", "for", "and", "or",
     "with", "by", "is", "are", "vs", "your", "you", "best", "top",
 }
+
+# A word shared by more than this fraction of ALL categories in the domain
+# is considered too generic/ubiquitous to define a cluster on its own.
+GENERIC_WORD_RATIO_THRESHOLD = 0.5
 
 
 def _clean_cluster_label(text):
@@ -578,6 +596,15 @@ def cluster_all_categories(domain):
     """
     Deterministic greedy clustering over every category currently in this
     domain. Returns {category_name: cluster_name} covering ALL of them.
+
+    Words that are near-ubiquitous across the WHOLE domain (present in
+    more than GENERIC_WORD_RATIO_THRESHOLD of all categories) are excluded
+    from being the cluster-defining word at every iteration -- they don't
+    discriminate between topics, so letting them win the frequency vote
+    would just merge every topic into one cluster. They remain eligible as
+    a secondary word in _extend_cluster_phrase, and remain available as a
+    last-resort splitting word if a remaining group has no specific words
+    left at all.
     """
     import db
 
@@ -585,17 +612,48 @@ def cluster_all_categories(domain):
     remaining = {cat: _cluster_words_with_originals(cat) for cat in categories}
     assignment = {}
 
+    total_categories = len(categories)
+
+    # Determine which words are "generic" (near-ubiquitous) across the
+    # WHOLE domain, computed once up front from the full category list --
+    # not recomputed as the pool shrinks, since the point is to identify
+    # words that fail to discriminate across the domain as a whole.
+    generic_words = set()
+    if total_categories:
+        domain_word_doc_count = {}
+        for words in remaining.values():
+            for norm_word in words:
+                domain_word_doc_count[norm_word] = domain_word_doc_count.get(norm_word, 0) + 1
+        generic_words = {
+            w for w, c in domain_word_doc_count.items()
+            if c / total_categories > GENERIC_WORD_RATIO_THRESHOLD
+        }
+
     while remaining:
         freq = {}
         for words in remaining.values():
             for norm_word in words:
                 freq[norm_word] = freq.get(norm_word, 0) + 1
 
-        max_freq = max(freq.values()) if freq else 0
+        if not freq:
+            for cat in list(remaining.keys()):
+                assignment[cat] = _clean_cluster_label(cat)
+                del remaining[cat]
+            break
+
+        # Prefer a specific (non-generic) word to define the next cluster.
+        # Only fall back to a generic word if nothing specific is left in
+        # the remaining pool -- otherwise a domain-wide umbrella term like
+        # "marketing" would dominate every single iteration and merge
+        # unrelated topics together.
+        specific_freq = {w: c for w, c in freq.items() if w not in generic_words}
+        pool = specific_freq if specific_freq else freq
+
+        max_freq = max(pool.values())
 
         if max_freq <= 1:
-            # Nothing left shares a word with anything else -- each
-            # remaining category becomes its own cluster.
+            # Nothing left shares a (specific) word with anything else --
+            # each remaining category becomes its own cluster.
             for cat in list(remaining.keys()):
                 assignment[cat] = _clean_cluster_label(cat)
                 del remaining[cat]
@@ -603,7 +661,7 @@ def cluster_all_categories(domain):
 
         # Tie-break deterministically: alphabetically first among the
         # most-common normalized words.
-        chosen_word = sorted(w for w, c in freq.items() if c == max_freq)[0]
+        chosen_word = sorted(w for w, c in pool.items() if c == max_freq)[0]
         matched = [cat for cat, words in remaining.items() if chosen_word in words]
         cluster_label = _extend_cluster_phrase(chosen_word, matched)
 
