@@ -285,11 +285,7 @@ def derive_category_name(titles):
         "2. Keep it MINIMAL: 2-3 words maximum, describing ONE clear concept. "
         "Do not stack multiple words that mean the same thing (e.g. don't "
         "combine both 'affordable' AND 'fees' -- pick the single clearest "
-        "word for that concept, not both). Prefer the noun that names the "
-        "core concept (e.g. 'benefits', 'admission', 'fees') over an "
-        "incidental verb form describing the action around it (e.g. "
-        "'studying', 'attending', 'choosing') -- if both are available in "
-        "the titles, the concept noun is the stronger, more useful word.\n\n"
+        "word for that concept, not both).\n\n"
         "3. Do NOT include any city, state, country, or region name in the "
         "category, even if one appears in the titles -- the category should "
         "describe the TOPIC, not the location.\n\n"
@@ -465,203 +461,92 @@ def categorize_keyword(keyword, domain, country_code=None):
 # cluster (named after themselves). This never invents vocabulary --
 # every cluster name is either a literal word pulled from the categories
 # it contains, or a category's own name.
-#
-# IMPORTANT FIX: when almost every category in the domain shares the same
-# "umbrella" word (e.g. every keyword set here is about "digital
-# marketing", so the words "marketing"/"digital" show up in nearly all
-# categories), that word is USELESS for discriminating between topics --
-# picking it first just dumps everything (real estate, healthcare,
-# hospitals, schools, hospitality, ...) into one giant cluster. To avoid
-# this, words that appear in more than GENERIC_RATIO_THRESHOLD of ALL
-# categories in the domain are treated as "generic" and are excluded from
-# being the cluster-DEFINING word (they can still show up in a cluster's
-# label via _extend_cluster_phrase, as a suffix/prefix on a more specific
-# word). This is computed dynamically from the actual data -- nothing is
-# hardcoded -- so a domain that genuinely is single-topic still clusters
-# correctly (generic-word fallback kicks in once no specific words remain).
 
 _CLUSTER_STOPWORDS = {
     "a", "an", "the", "in", "of", "on", "at", "to", "for", "and", "or",
     "with", "by", "is", "are", "vs", "your", "you", "best", "top",
 }
 
-# A word shared by more than this fraction of ALL categories in the domain
-# is considered too generic/ubiquitous to define a cluster on its own.
-GENERIC_WORD_RATIO_THRESHOLD = 0.5
+
+def _cluster_significant_words(category_name):
+    words = re.findall(r"[A-Za-z0-9]+", category_name.lower())
+    return {w for w in words if w not in _CLUSTER_STOPWORDS and len(w) > 2}
 
 
-def _clean_cluster_label(text):
-    """Strip a leading 'Best/Top' tag before a category name is used AS
-    its own cluster label (the singleton-fallback case below) -- clusters
-    should never contain 'best'/'top' even in this edge case."""
-    cleaned = re.sub(r"(?i)^best/top\s*", "", text).strip()
-    return cleaned if cleaned else text
-
-
-def _normalize_word(word):
-    """Lightweight, generic singular/plural normalization (e.g. "school"
-    and "schools" -> the same key) so clustering treats them as the same
-    word instead of splitting frequency/adjacency votes between the two
-    forms. Not specific to any topic -- plain English suffix-stripping."""
-    if len(word) > 4 and word.endswith("ies"):
-        return word[:-3] + "y"
-    if len(word) > 4 and word.endswith("es") and word[-3] in "sxz":
-        return word[:-2]
-    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
-        return word[:-1]
-    return word
-
-
-def _cluster_words_with_originals(category_name):
-    """{normalized_word: original_word} for this category's significant
-    words (stopwords and very short words excluded). Plural/singular
-    forms collapse to the same normalized key."""
-    tokens = re.findall(r"[A-Za-z0-9]+", category_name.lower())
-    result = {}
-    for t in tokens:
-        if t in _CLUSTER_STOPWORDS or len(t) <= 2:
-            continue
-        result.setdefault(_normalize_word(t), t)
-    return result
-
-
-def _most_common_surface_form(norm_word, matched_categories):
-    """Which actual spelling (singular vs plural) shows up most often
-    among the matched categories, for display purposes."""
-    forms = {}
-    for cat in matched_categories:
-        words = _cluster_words_with_originals(cat)
-        if norm_word in words:
-            form = words[norm_word]
-            forms[form] = forms.get(form, 0) + 1
-    if not forms:
-        return norm_word
-    return max(forms.items(), key=lambda kv: kv[1])[0]
-
-
-def _extend_cluster_phrase(norm_word, matched_categories):
+def _extend_cluster_phrase(word, matched_categories):
     """
     The chosen common word alone (e.g. "international") often reads
     awkwardly as a cluster name on its own. Check whether a second word
     commonly sits directly next to it (before or after) across the
-    categories being grouped, using NORMALIZED forms so "school" and
-    "schools" count together instead of splitting the vote -- e.g. if
-    most of them contain "... International School(s) ...", extend the
-    cluster label to "International Schools" instead of just
+    categories being grouped -- e.g. if most of them contain "...
+    International Schools ..." or "... International School ...", extend
+    the cluster label to "International Schools" instead of just
     "International". Purely positional/frequency-based -- never invents
     a word that isn't already adjacent to it in the real category text.
     """
     after_counts, before_counts = {}, {}
-    after_originals, before_originals = {}, {}
-
     for cat in matched_categories:
         tokens = re.findall(r"[A-Za-z0-9]+", cat.lower())
-        norm_tokens = [_normalize_word(t) for t in tokens]
-        for i, nt in enumerate(norm_tokens):
-            if nt != norm_word:
+        for i, t in enumerate(tokens):
+            if t != word:
                 continue
-            if i + 1 < len(tokens) and norm_tokens[i + 1] not in _CLUSTER_STOPWORDS and len(norm_tokens[i + 1]) > 2:
-                after_counts[norm_tokens[i + 1]] = after_counts.get(norm_tokens[i + 1], 0) + 1
-                after_originals.setdefault(norm_tokens[i + 1], tokens[i + 1])
-            if i - 1 >= 0 and norm_tokens[i - 1] not in _CLUSTER_STOPWORDS and len(norm_tokens[i - 1]) > 2:
-                before_counts[norm_tokens[i - 1]] = before_counts.get(norm_tokens[i - 1], 0) + 1
-                before_originals.setdefault(norm_tokens[i - 1], tokens[i - 1])
+            if i + 1 < len(tokens) and tokens[i + 1] not in _CLUSTER_STOPWORDS:
+                after_counts[tokens[i + 1]] = after_counts.get(tokens[i + 1], 0) + 1
+            if i - 1 >= 0 and tokens[i - 1] not in _CLUSTER_STOPWORDS:
+                before_counts[tokens[i - 1]] = before_counts.get(tokens[i - 1], 0) + 1
 
     total = len(matched_categories)
-    base_display = _most_common_surface_form(norm_word, matched_categories)
-
     if total < 2:
-        return base_display.title()
+        return word.title()
 
-    threshold = max((total + 1) // 2, 2)  # majority, rounded up, minimum 2
+    threshold = (total + 1) // 2  # majority, rounded up
+
+    best_after = max(after_counts.items(), key=lambda kv: kv[1], default=None)
+    best_before = max(before_counts.items(), key=lambda kv: kv[1], default=None)
 
     candidates = []
-    if after_counts:
-        best_after_norm = max(after_counts.items(), key=lambda kv: kv[1])
-        if best_after_norm[1] >= threshold:
-            candidates.append((best_after_norm[1], f"{base_display} {after_originals[best_after_norm[0]]}"))
-    if before_counts:
-        best_before_norm = max(before_counts.items(), key=lambda kv: kv[1])
-        if best_before_norm[1] >= threshold:
-            candidates.append((best_before_norm[1], f"{before_originals[best_before_norm[0]]} {base_display}"))
+    if best_after and best_after[1] >= max(threshold, 2):
+        candidates.append((best_after[1], f"{word} {best_after[0]}"))
+    if best_before and best_before[1] >= max(threshold, 2):
+        candidates.append((best_before[1], f"{best_before[0]} {word}"))
 
     if candidates:
         candidates.sort(key=lambda c: c[0], reverse=True)
         return candidates[0][1].title()
 
-    return base_display.title()
+    return word.title()
 
 
 def cluster_all_categories(domain):
     """
     Deterministic greedy clustering over every category currently in this
     domain. Returns {category_name: cluster_name} covering ALL of them.
-
-    Words that are near-ubiquitous across the WHOLE domain (present in
-    more than GENERIC_WORD_RATIO_THRESHOLD of all categories) are excluded
-    from being the cluster-defining word at every iteration -- they don't
-    discriminate between topics, so letting them win the frequency vote
-    would just merge every topic into one cluster. They remain eligible as
-    a secondary word in _extend_cluster_phrase, and remain available as a
-    last-resort splitting word if a remaining group has no specific words
-    left at all.
     """
     import db
 
     categories = db.list_category_names(domain)
-    remaining = {cat: _cluster_words_with_originals(cat) for cat in categories}
+    remaining = {cat: _cluster_significant_words(cat) for cat in categories}
     assignment = {}
-
-    total_categories = len(categories)
-
-    # Determine which words are "generic" (near-ubiquitous) across the
-    # WHOLE domain, computed once up front from the full category list --
-    # not recomputed as the pool shrinks, since the point is to identify
-    # words that fail to discriminate across the domain as a whole.
-    generic_words = set()
-    if total_categories:
-        domain_word_doc_count = {}
-        for words in remaining.values():
-            for norm_word in words:
-                domain_word_doc_count[norm_word] = domain_word_doc_count.get(norm_word, 0) + 1
-        generic_words = {
-            w for w, c in domain_word_doc_count.items()
-            if c / total_categories > GENERIC_WORD_RATIO_THRESHOLD
-        }
 
     while remaining:
         freq = {}
         for words in remaining.values():
-            for norm_word in words:
-                freq[norm_word] = freq.get(norm_word, 0) + 1
+            for w in words:
+                freq[w] = freq.get(w, 0) + 1
 
-        if not freq:
-            for cat in list(remaining.keys()):
-                assignment[cat] = _clean_cluster_label(cat)
-                del remaining[cat]
-            break
-
-        # Prefer a specific (non-generic) word to define the next cluster.
-        # Only fall back to a generic word if nothing specific is left in
-        # the remaining pool -- otherwise a domain-wide umbrella term like
-        # "marketing" would dominate every single iteration and merge
-        # unrelated topics together.
-        specific_freq = {w: c for w, c in freq.items() if w not in generic_words}
-        pool = specific_freq if specific_freq else freq
-
-        max_freq = max(pool.values())
+        max_freq = max(freq.values()) if freq else 0
 
         if max_freq <= 1:
-            # Nothing left shares a (specific) word with anything else --
-            # each remaining category becomes its own cluster.
+            # Nothing left shares a word with anything else -- each
+            # remaining category becomes its own cluster.
             for cat in list(remaining.keys()):
-                assignment[cat] = _clean_cluster_label(cat)
+                assignment[cat] = cat
                 del remaining[cat]
             break
 
         # Tie-break deterministically: alphabetically first among the
-        # most-common normalized words.
-        chosen_word = sorted(w for w, c in pool.items() if c == max_freq)[0]
+        # most-common words.
+        chosen_word = sorted(w for w, c in freq.items() if c == max_freq)[0]
         matched = [cat for cat, words in remaining.items() if chosen_word in words]
         cluster_label = _extend_cluster_phrase(chosen_word, matched)
 
