@@ -1,10 +1,18 @@
 """
 Backend API -- category checking, scoped by PROJECT.
 
-Each project gets its own dedicated database tables (see db.py) -- real
-physical isolation, not just a filtered shared table. You give a project
-name on upload; if it doesn't exist yet, it's created automatically
-(tables and all) on the spot.
+Category/cluster/keyword data lives in SHARED tables (categories,
+clusters, category_cluster_map, keyword_categories -- see db.py), each
+scoped by a project_name column, rather than dedicated tables per
+project. `project` in most URLs below can be either the exact display
+name you typed when creating it (e.g. "Real Estate Clients") or its
+slug (e.g. "real_estate_clients") -- both resolve to the same project.
+
+DOMAINS: a separate registry capturing the "Create Project" form (domain,
+project name, target regions, platforms, domain authority, users).
+Creating a domain also registers (or reuses) the matching project, so
+you can immediately follow up with a /jobs/category upload against that
+same project name. One domain maps to exactly one project.
 
 Job/result state lives in Postgres (db.py). Actual categorization happens
 in a separate worker process via RQ (job_queue.py, category_tasks.py) --
@@ -14,6 +22,10 @@ Auth is intentionally NOT wired in here yet -- every endpoint is open.
 Lock this down before deploying publicly.
 
 Endpoints:
+    POST /domains                          register a domain <-> project
+                                           (the "Create Project" form)
+    GET  /domains                          list every domain that's been
+                                           registered
     POST /jobs/category                   upload -> category job for a
                                            project (creates the project on
                                            first use), one task per keyword
@@ -34,10 +46,6 @@ Endpoints:
     GET  /jobs/{job_id}/download              same results, as a CSV download
     GET  /health
 
-`project` in the URL can be either the exact display name you typed on
-upload (e.g. "Real Estate Clients") or its slug (e.g. "real_estate_clients")
--- both resolve to the same project.
-
 Run locally (needs a worker running separately too -- see README.md):
     python db.py              # one-time: creates/updates shared tables
     uvicorn app:app --reload --port 8000
@@ -49,11 +57,13 @@ load_dotenv()  # must happen before importing db / job_queue
 
 import io
 import csv
+from typing import List, Optional
 
 import pandas as pd
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 import db
 import category_checker
@@ -71,6 +81,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class DomainUser(BaseModel):
+    type: Optional[str] = None
+    email: str
+
+
+class CreateDomainRequest(BaseModel):
+    domain: str
+    project_name: Optional[str] = None  # auto-generated from `domain` if left blank
+    target_regions: Optional[List[str]] = None
+    platforms: Optional[List[str]] = None
+    domain_authority: Optional[str] = None
+    users: Optional[List[DomainUser]] = None
+
+
 
 
 def _find_column(columns, candidates):
@@ -186,6 +212,32 @@ def _resolve_project_or_404(project_param):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/domains")
+def create_domain(payload: CreateDomainRequest):
+    """Registers a domain <-> project pairing -- the "Create Project"
+    form. One domain maps to exactly one project; this also creates (or
+    reuses) that project in the `projects` registry, so a subsequent
+    /jobs/category upload with the same project name lands in the right
+    place. Fields not present in the creation form (traffic, keyword
+    count, target/blog page counts) stay NULL -- nothing computes them
+    here."""
+    users_payload = [u.dict() for u in payload.users] if payload.users else None
+    try:
+        project_slug = db.create_domain(
+            payload.domain, payload.project_name, payload.target_regions,
+            payload.platforms, payload.domain_authority, users_payload,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"domain": payload.domain, "project_slug": project_slug}
+
+
+@app.get("/domains")
+def list_domains_endpoint():
+    """Every domain that's been registered -- the project listing view."""
+    return {"domains": db.list_domain_records()}
 
 
 @app.post("/jobs/category")
