@@ -12,6 +12,20 @@ Two task types on the same queue:
 IMPORTANT: run only ONE category worker process at a time. Category
 assignment is inherently sequential within a domain, and clustering must
 run strictly after all of a job's categorization is complete.
+
+ROW LIFECYCLE: as of the pass-through-columns change, the row for each
+keyword is now PRE-INSERTED at upload time (see app.py / db.insert_
+keyword_rows), already containing whatever sheet data (SV, KW Diff, Type,
+Target Subtype, Target Geo, Priority, Landing Page URL) came with that
+keyword. categorize_keyword_task's job is ONLY to fill in that SAME row's
+category/cluster/status/meta/error via db.update_keyword_result() -- it
+never touches, generates, or overwrites the pass-through columns.
+
+`row_id` is passed in by the enqueueing code (app.py) so the task knows
+exactly which pre-inserted row to update. If a task somehow gets enqueued
+without a row_id (e.g. one already sitting in the queue from before this
+change, mid-deploy), it falls back to inserting a brand-new row via the
+legacy db.insert_category_result() path instead of crashing.
 """
 
 import db
@@ -19,15 +33,22 @@ import category_checker
 from job_queue import category_queue
 
 
-def categorize_keyword_task(job_id, domain, keyword, country_code=None):
+def categorize_keyword_task(job_id, domain, keyword, country_code=None, row_id=None):
     try:
         category, meta = category_checker.categorize_keyword(keyword, domain, country_code)
-        if category is None:
-            db.insert_category_result(job_id, domain, keyword, None, None, "no_data", meta=meta)
-        else:
-            db.insert_category_result(job_id, domain, keyword, category, None, "processed", meta=meta)
+        status = "no_data" if category is None else "processed"
     except Exception as e:
-        db.insert_category_result(job_id, domain, keyword, None, None, "error", error=str(e))
+        category, meta, status = None, None, "error"
+        error_message = str(e)
+    else:
+        error_message = None
+
+    try:
+        if row_id is not None:
+            db.update_keyword_result(domain, row_id, category, None, status, meta=meta, error=error_message)
+        else:
+            # Legacy fallback -- see module docstring.
+            db.insert_category_result(job_id, domain, keyword, category, None, status, meta=meta, error=error_message)
     finally:
         db.increment_job_progress(job_id)
 
@@ -42,7 +63,8 @@ def categorize_keyword_task(job_id, domain, keyword, country_code=None):
 def cluster_domain_task(job_id, domain):
     """Runs once, after a job's categorization fully completes. Re-clusters
     the WHOLE domain's category list (not just this job's) and writes the
-    result back into clusters / category_cluster_map / keyword_categories."""
+    result back into clusters / category_cluster_map / keyword_categories
+    (cluster column only -- never touches the pass-through columns)."""
     try:
         assignment = category_checker.cluster_all_categories(domain)
         db.replace_domain_clusters(domain, assignment)

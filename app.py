@@ -94,15 +94,51 @@ def _load_dataframe(file_bytes, filename):
 
 def _parse_upload(df):
     """Column resolution + SV/'near me' filtering. Returns a list of
-    {"keyword", "skip_reason"} dicts -- skip_reason is None for rows that
-    should actually be processed."""
+    dicts, one per keyword row, with keys:
+        keyword, skip_reason,
+        sv, kw_diff, type, target_type, target_subtype, target_geo, priority, landing_page_url
+    skip_reason is None for rows that should actually be processed.
+
+    Every pass-through field (everything except keyword/skip_reason) is
+    stored EXACTLY as it appears in the sheet -- None if that column
+    isn't present at all, or if this particular row's cell is blank.
+    Nothing here is inferred or generated -- that's the whole point."""
     df.columns = [str(c).strip() for c in df.columns]
 
-    keyword_col = _find_column(df.columns, ["keywords", "keyword"])
+    keyword_col = _find_column(df.columns, ["keywords", "keyword", "kw"])
     if keyword_col is None:
         raise HTTPException(400, f"No 'Keywords' column found. Columns present: {list(df.columns)}")
 
     sv_col = _find_column(df.columns, ["search volume", "sv", "volume", "search_volume"])
+    kw_diff_col = _find_column(df.columns, ["kw diff", "keyword difficulty", "kd", "difficulty", "kw_diff", "kw difficulty"])
+    type_col = _find_column(df.columns, ["type"])
+    target_type_col = _find_column(df.columns, ["target type", "target_type"])
+    target_subtype_col = _find_column(df.columns, ["target subtype", "subtype", "target_subtype"])
+    target_geo_col = _find_column(df.columns, ["target geo", "geo", "location", "target_geo"])
+    priority_col = _find_column(df.columns, ["priority"])
+    landing_page_col = _find_column(df.columns, ["landing page(url)", "landing page (url)", "landing page", "landing_page", "landing page url", "url"])
+
+    def _cell(row, col):
+        """Raw pass-through value for one cell -- None if the column
+        doesn't exist, or if this row's value is blank/NaN. Never
+        transformed, inferred, or defaulted to anything else -- EXCEPT
+        for undoing pandas' own float-coercion artifact: a numeric
+        column with any blank cell gets read as float64, so a whole
+        number like 500 comes back as 500.0. That's pandas' doing, not
+        the sheet's -- we strip a trailing ".0" so what's stored matches
+        what was actually typed in the sheet."""
+        if col is None:
+            return None
+        value = row.get(col)
+        if value is None:
+            return None
+        if isinstance(value, float) and value.is_integer():
+            text_value = str(int(value))
+        else:
+            text_value = str(value).strip()
+        if text_value == "" or text_value.lower() == "nan":
+            return None
+        return text_value
 
     rows = []
     for _, row in df.iterrows():
@@ -122,7 +158,18 @@ def _parse_upload(df):
             except (TypeError, ValueError):
                 pass  # SV missing/non-numeric -> don't filter on it
 
-        rows.append({"keyword": keyword, "skip_reason": skip_reason})
+        rows.append({
+            "keyword": keyword,
+            "skip_reason": skip_reason,
+            "sv": _cell(row, sv_col),
+            "kw_diff": _cell(row, kw_diff_col),
+            "type": _cell(row, type_col),
+            "target_type": _cell(row, target_type_col),
+            "target_subtype": _cell(row, target_subtype_col),
+            "target_geo": _cell(row, target_geo_col),
+            "priority": _cell(row, priority_col),
+            "landing_page_url": _cell(row, landing_page_col),
+        })
 
     return rows
 
@@ -190,10 +237,17 @@ async def create_category_job(
     job_id = db.create_job(filename, project_slug, project_name, country, country_code, total=len(to_process))
     db.set_job_status(job_id, "running")
 
-    for r in to_process:
+    # Pre-insert one row per keyword RIGHT NOW, with whatever pass-through
+    # sheet data (sv/kw_diff/type/target_subtype/target_geo/priority/
+    # landing_page_url) it had -- stored immediately, regardless of
+    # whether/when categorization succeeds. The worker task below only
+    # ever fills in category/cluster/status/meta on these SAME rows.
+    row_ids = db.insert_keyword_rows(job_id, project_slug, to_process)
+
+    for r, row_id in zip(to_process, row_ids):
         category_queue.enqueue(
             categorize_keyword_task,
-            job_id, project_slug, r["keyword"], country_code,
+            job_id, project_slug, r["keyword"], country_code, row_id,
             job_timeout=180,
         )
 
@@ -281,9 +335,17 @@ def download_job(job_id: str):
     results = db.get_job_category_results(job_id)
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["Keyword", "Category", "Cluster", "Status", "Error", "Checked At"])
+    writer.writerow([
+        "Keyword", "SV", "KW Diff", "Type", "Category", "Cluster", "Target Type", "Target Subtype",
+        "Target Geo", "Priority", "Landing Page (URL)", "Status", "Error", "Checked At",
+    ])
     for r in results:
-        writer.writerow([r["keyword"], r["category"] or "", r["cluster"] or "", r["status"] or "", r["error"] or "", r["checked_at"]])
+        writer.writerow([
+            r["keyword"], r.get("sv") or "", r.get("kw_diff") or "", r.get("type") or "",
+            r["category"] or "", r["cluster"] or "", r.get("target_type") or "", r.get("target_subtype") or "",
+            r.get("target_geo") or "", r.get("priority") or "", r.get("landing_page_url") or "",
+            r["status"] or "", r["error"] or "", r["checked_at"],
+        ])
 
     buf.seek(0)
     return StreamingResponse(

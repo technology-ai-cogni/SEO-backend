@@ -27,13 +27,11 @@ Two tables remain SHARED across all projects (not per-project):
                  history works with one query across every project.
     projects  -- the name -> slug registry itself.
 
-Legacy note: tables named exactly `categories`, `clusters`,
-`category_cluster_map`, `keyword_categories` (no suffix) are the OLD
-shared, domain-filtered tables from before per-project tables existed.
-They are left in place (nothing drops them) so no historical data is
-lost, but new code never reads/writes them directly -- see
-migrate_legacy_domain_to_project() below for a one-time copy into a
-project's new dedicated tables.
+Legacy note: this project used to keep one shared, domain-filtered set of
+tables (`categories`, `clusters`, `category_cluster_map`,
+`keyword_categories`, no suffix) before per-project tables existed. That
+data was migrated into a real project's dedicated tables and the legacy
+tables were then dropped -- there is nothing left to migrate from.
 
 Setup:
     1. Create a free project at https://supabase.com
@@ -41,16 +39,11 @@ Setup:
        "Transaction" pooler mode is fine for this use case)
     3. Put it in your .env as DATABASE_URL (see .env.example)
     4. Run `python db.py` once to create the shared tables
-    5. (one-time, only if you have pre-existing data under the old
-       shared tables) run:
-           python db.py migrate default "My Project Display Name"
-       to copy domain='default' rows into that project's own new tables.
 """
 
 import os
 import re
 import json
-import sys
 import uuid
 
 from dotenv import load_dotenv
@@ -66,6 +59,15 @@ if not DATABASE_URL:
     )
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+
+
+def _chunked(items, size=500):
+    """Generic chunking helper for bulk multi-row INSERTs -- splits a
+    list into pieces of at most `size` so a single upload doesn't try to
+    build one gigantic SQL statement (or issue one round-trip per row)."""
+    items = list(items)
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
 
 
 # --- Project name -> safe SQL identifier ---------------------------------
@@ -166,6 +168,7 @@ def _create_project_tables(conn, project_slug):
             checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
     """))
+    _ensure_keyword_categories_extra_columns(conn, t['keyword_categories'])
     # Short, fixed-prefix index name (NOT just "idx_" + full table name) --
     # keeps us safely under Postgres's 63-char identifier limit even at
     # MAX_SLUG_LENGTH, instead of relying on silent truncation.
@@ -175,11 +178,40 @@ def _create_project_tables(conn, project_slug):
     """))
 
 
+# Columns that hold RAW PASS-THROUGH data straight from the uploaded
+# sheet (KW/SV/KW Diff/Type/Target Type/Target Subtype/Target Geo/
+# Priority/Landing Page URL) -- stored exactly as given at upload time, in
+# insert_keyword_rows() below, and NEVER written/overwritten by the
+# categorize/cluster pipeline. `category` and `cluster` are deliberately
+# NOT in this list -- those remain the two fields the pipeline is allowed
+# to fill in (via update_keyword_result()).
+_PASS_THROUGH_COLUMNS = {
+    "sv": "TEXT",
+    "kw_diff": "TEXT",
+    "type": "TEXT",
+    "target_type": "TEXT",
+    "target_subtype": "TEXT",
+    "target_geo": "TEXT",
+    "priority": "TEXT",
+    "landing_page_url": "TEXT",
+}
+
+
+def _ensure_keyword_categories_extra_columns(conn, table_name):
+    """Idempotently add every pass-through column to an existing
+    project's keyword_categories table. Called both when a project's
+    tables are first created AND every time get_or_create_project() is
+    called for an ALREADY-existing project -- so projects created before
+    these columns existed get backfilled automatically, with no separate
+    manual migration step needed."""
+    for col_name, col_type in _PASS_THROUGH_COLUMNS.items():
+        conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+
+
 def init_db():
-    """Create the SHARED tables (jobs, projects) if they don't exist yet,
-    plus the LEGACY shared category/cluster tables (kept only so old data
-    isn't lost -- new code doesn't write to them). Safe to run repeatedly.
-    Per-project tables are created lazily by get_or_create_project()."""
+    """Create the SHARED tables (jobs, projects) if they don't exist yet.
+    Safe to run repeatedly. Per-project tables are created lazily by
+    get_or_create_project()."""
     with engine.begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS jobs (
@@ -217,54 +249,6 @@ def init_db():
             )
         """))
 
-        # --- LEGACY shared tables (pre-per-project). Left in place only
-        # so existing historical rows are never lost. New code does not
-        # read or write these -- see migrate_legacy_domain_to_project().
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS categories (
-                id BIGSERIAL PRIMARY KEY,
-                domain TEXT NOT NULL,
-                name TEXT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                UNIQUE (domain, name)
-            )
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS clusters (
-                id BIGSERIAL PRIMARY KEY,
-                domain TEXT NOT NULL,
-                name TEXT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                UNIQUE (domain, name)
-            )
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS category_cluster_map (
-                domain TEXT NOT NULL,
-                category TEXT NOT NULL,
-                cluster TEXT NOT NULL,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                PRIMARY KEY (domain, category)
-            )
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS keyword_categories (
-                id BIGSERIAL PRIMARY KEY,
-                job_id UUID REFERENCES jobs(id),
-                domain TEXT NOT NULL DEFAULT '',
-                keyword TEXT NOT NULL,
-                category TEXT,
-                cluster TEXT,
-                status TEXT,
-                error TEXT,
-                meta JSONB,
-                checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            )
-        """))
-        conn.execute(text("ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS meta JSONB"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_keyword_categories_job ON keyword_categories (job_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_keyword_categories_domain ON keyword_categories (domain)"))
-
 
 # --- Projects -------------------------------------------------------------
 
@@ -285,6 +269,11 @@ def get_or_create_project(name):
     with engine.begin() as conn:
         row = conn.execute(text("SELECT slug FROM projects WHERE name = :name"), {"name": name}).fetchone()
         if row:
+            # Existing project -- still make sure any newer pass-through
+            # columns exist on its table (covers projects created before
+            # those columns were introduced).
+            t = _project_table_names(row.slug)
+            _ensure_keyword_categories_extra_columns(conn, t['keyword_categories'])
             return row.slug
 
         base_slug = _slugify_project_name(name)
@@ -489,7 +478,86 @@ def replace_domain_clusters(domain, category_to_cluster):
 
 # --- Keyword results (per-project table) --------------------------------
 
+def insert_keyword_rows(job_id, domain, rows):
+    """Pre-insert ONE row per keyword at UPLOAD time (called from the
+    /jobs/category endpoint), storing ONLY whatever pass-through data
+    came from the sheet itself: sv, kw_diff, type, target_type,
+    target_subtype, target_geo, priority, landing_page_url. Nothing is
+    inferred or generated here -- a column that wasn't present in the
+    sheet (or was blank for that row) is stored as NULL, never guessed.
+
+    category/cluster start out NULL and status starts 'queued' -- the
+    background pipeline fills those in later via update_keyword_result(),
+    and never touches the pass-through columns above.
+
+    `rows` is a list of dicts with keys: keyword, sv, kw_diff, type,
+    target_type, target_subtype, target_geo, priority, landing_page_url
+    (any of the non-keyword keys may be missing/None).
+
+    Returns the list of inserted row ids, in the SAME ORDER as `rows` --
+    Postgres preserves VALUES-list order in a single INSERT's RETURNING
+    output, so callers can zip(rows, ids) directly to know which row id
+    corresponds to which keyword when enqueuing worker tasks."""
+    t = _project_table_names(domain)
+    ids = []
+    with engine.begin() as conn:
+        for chunk in _chunked(rows):
+            values_sql = ", ".join(
+                f"(:job_id{i}, :keyword{i}, 'queued', :sv{i}, :kw_diff{i}, :type{i}, "
+                f":target_type{i}, :target_subtype{i}, :target_geo{i}, :priority{i}, :landing_page_url{i})"
+                for i in range(len(chunk))
+            )
+            params = {}
+            for i, r in enumerate(chunk):
+                params[f"job_id{i}"] = job_id
+                params[f"keyword{i}"] = r.get("keyword")
+                params[f"sv{i}"] = r.get("sv")
+                params[f"kw_diff{i}"] = r.get("kw_diff")
+                params[f"type{i}"] = r.get("type")
+                params[f"target_type{i}"] = r.get("target_type")
+                params[f"target_subtype{i}"] = r.get("target_subtype")
+                params[f"target_geo{i}"] = r.get("target_geo")
+                params[f"priority{i}"] = r.get("priority")
+                params[f"landing_page_url{i}"] = r.get("landing_page_url")
+
+            result = conn.execute(text(f"""
+                INSERT INTO {t['keyword_categories']}
+                    (job_id, keyword, status, sv, kw_diff, type, target_type, target_subtype,
+                     target_geo, priority, landing_page_url)
+                VALUES {values_sql}
+                RETURNING id
+            """), params)
+            ids.extend(r.id for r in result.fetchall())
+    return ids
+
+
+def update_keyword_result(domain, row_id, category, cluster, status, meta=None, error=None):
+    """Called by the background worker after processing ONE keyword row
+    (identified by the id returned from insert_keyword_rows at upload
+    time). Updates ONLY category/cluster/status/meta/error -- never
+    touches sv/kw_diff/type/target_subtype/target_geo/priority/
+    landing_page_url, which are pure pass-through from the original
+    upload and are never generated or overwritten by this pipeline."""
+    t = _project_table_names(domain)
+    with engine.begin() as conn:
+        conn.execute(text(f"""
+            UPDATE {t['keyword_categories']}
+            SET category = :category, cluster = :cluster, status = :status,
+                meta = CAST(:meta AS JSONB), error = :error, checked_at = now()
+            WHERE id = :id
+        """), {
+            "id": row_id, "category": category, "cluster": cluster, "status": status,
+            "meta": json.dumps(meta) if meta is not None else None, "error": error,
+        })
+
+
 def insert_category_result(job_id, domain, keyword, category, cluster, status, meta=None, error=None):
+    """LEGACY fallback path -- inserts a brand-new row rather than
+    updating a pre-inserted one. Kept only so any task already sitting in
+    the RQ queue from before insert_keyword_rows()/update_keyword_result()
+    existed (i.e. enqueued without a row_id) still completes safely
+    during a deploy transition. New code should use insert_keyword_rows +
+    update_keyword_result instead."""
     t = _project_table_names(domain)
     with engine.begin() as conn:
         conn.execute(text(f"""
@@ -512,7 +580,8 @@ def get_job_category_results(job_id):
     t = _project_table_names(job["domain"])
     with engine.begin() as conn:
         rows = conn.execute(text(f"""
-            SELECT keyword, category, cluster, status, error, meta, checked_at
+            SELECT keyword, category, cluster, status, error, meta, checked_at,
+                   sv, kw_diff, type, target_type, target_subtype, target_geo, priority, landing_page_url
             FROM {t['keyword_categories']} WHERE job_id = :job_id ORDER BY id
         """), {"job_id": job_id}).mappings().fetchall()
         return [dict(r) for r in rows]
@@ -524,7 +593,8 @@ def get_domain_results(domain):
     t = _project_table_names(domain)
     with engine.begin() as conn:
         rows = conn.execute(text(f"""
-            SELECT keyword, category, cluster, status, error, meta, checked_at, job_id
+            SELECT keyword, category, cluster, status, error, meta, checked_at, job_id,
+                   sv, kw_diff, type, target_type, target_subtype, target_geo, priority, landing_page_url
             FROM {t['keyword_categories']} ORDER BY checked_at DESC
         """)).mappings().fetchall()
         return [dict(r) for r in rows]
@@ -565,124 +635,17 @@ def get_clusters_overview(domain):
 
 
 # --- One-time legacy migration ------------------------------------------
-
-def _chunked(items, size=500):
-    items = list(items)
-    for i in range(0, len(items), size):
-        yield items[i:i + size]
-
-
-def migrate_legacy_domain_to_project(legacy_domain, project_name):
-    """Copy rows from the OLD shared tables (categories/clusters/
-    category_cluster_map/keyword_categories, filtered by domain=
-    legacy_domain) into a brand-new project's own dedicated tables.
-    Creates the project if it doesn't exist yet. Safe to re-run for
-    categories/clusters/category_cluster_map (ON CONFLICT DO NOTHING) --
-    NOT safe to re-run after a fully successful commit for
-    keyword_categories, since those rows have no natural unique key and
-    would be duplicated; re-running after an INTERRUPTED attempt (nothing
-    committed) is fine.
-
-    Does NOT touch or delete the legacy rows -- purely additive.
-
-    Uses chunked multi-row INSERTs (500 rows per statement) rather than
-    one round-trip per row -- inserting hundreds/thousands of rows
-    one-at-a-time over a network connection to Supabase is what made the
-    previous version feel like it had hung."""
-    project_slug = get_or_create_project(project_name)
-    t = _project_table_names(project_slug)
-
-    with engine.begin() as conn:
-        cat_rows = conn.execute(text("""
-            SELECT name FROM categories WHERE domain = :domain
-        """), {"domain": legacy_domain}).fetchall()
-        for chunk in _chunked(cat_rows):
-            values_sql = ", ".join(f"(:name{i})" for i in range(len(chunk)))
-            params = {f"name{i}": r.name for i, r in enumerate(chunk)}
-            conn.execute(text(f"""
-                INSERT INTO {t['categories']} (name) VALUES {values_sql}
-                ON CONFLICT (name) DO NOTHING
-            """), params)
-        print(f"  categories: {len(cat_rows)} rows")
-
-        clus_rows = conn.execute(text("""
-            SELECT name FROM clusters WHERE domain = :domain
-        """), {"domain": legacy_domain}).fetchall()
-        for chunk in _chunked(clus_rows):
-            values_sql = ", ".join(f"(:name{i})" for i in range(len(chunk)))
-            params = {f"name{i}": r.name for i, r in enumerate(chunk)}
-            conn.execute(text(f"""
-                INSERT INTO {t['clusters']} (name) VALUES {values_sql}
-                ON CONFLICT (name) DO NOTHING
-            """), params)
-        print(f"  clusters: {len(clus_rows)} rows")
-
-        map_rows = conn.execute(text("""
-            SELECT category, cluster FROM category_cluster_map WHERE domain = :domain
-        """), {"domain": legacy_domain}).fetchall()
-        for chunk in _chunked(map_rows):
-            values_sql = ", ".join(f"(:category{i}, :cluster{i}, now())" for i in range(len(chunk)))
-            params = {}
-            for i, r in enumerate(chunk):
-                params[f"category{i}"] = r.category
-                params[f"cluster{i}"] = r.cluster
-            conn.execute(text(f"""
-                INSERT INTO {t['category_cluster_map']} (category, cluster, updated_at)
-                VALUES {values_sql}
-                ON CONFLICT (category) DO NOTHING
-            """), params)
-        print(f"  category->cluster mappings: {len(map_rows)} rows")
-
-        kw_rows = conn.execute(text("""
-            SELECT job_id, keyword, category, cluster, status, error, meta, checked_at
-            FROM keyword_categories WHERE domain = :domain
-        """), {"domain": legacy_domain}).mappings().fetchall()
-        for chunk_num, chunk in enumerate(_chunked(kw_rows), start=1):
-            values_sql = ", ".join(
-                f"(:job_id{i}, :keyword{i}, :category{i}, :cluster{i}, :status{i}, "
-                f":error{i}, CAST(:meta{i} AS JSONB), :checked_at{i})"
-                for i in range(len(chunk))
-            )
-            params = {}
-            for i, r in enumerate(chunk):
-                params[f"job_id{i}"] = r["job_id"]
-                params[f"keyword{i}"] = r["keyword"]
-                params[f"category{i}"] = r["category"]
-                params[f"cluster{i}"] = r["cluster"]
-                params[f"status{i}"] = r["status"]
-                params[f"error{i}"] = r["error"]
-                params[f"meta{i}"] = json.dumps(r["meta"]) if r["meta"] is not None else None
-                params[f"checked_at{i}"] = r["checked_at"]
-            conn.execute(text(f"""
-                INSERT INTO {t['keyword_categories']}
-                    (job_id, keyword, category, cluster, status, error, meta, checked_at)
-                VALUES {values_sql}
-            """), params)
-            print(f"  keyword_categories: chunk {chunk_num} ({len(chunk)} rows) done")
-        print(f"  keyword_categories: {len(kw_rows)} rows total")
-
-        # Re-point existing jobs' `domain`/`project_name` so their history
-        # shows up under the new project going forward.
-        conn.execute(text("""
-            UPDATE jobs SET domain = :new_slug, project_name = :project_name
-            WHERE domain = :legacy_domain
-        """), {"new_slug": project_slug, "project_name": project_name, "legacy_domain": legacy_domain})
-
-    print(f"Migrated {len(cat_rows)} categories, {len(clus_rows)} clusters, "
-          f"{len(map_rows)} category->cluster mappings, {len(kw_rows)} keyword rows "
-          f"from legacy domain '{legacy_domain}' into project '{project_name}' (slug: {project_slug}).")
-    return project_slug
+# NOTE: this section is now historical -- once the old shared tables
+# (categories/clusters/category_cluster_map/keyword_categories, no
+# suffix) have been dropped after a successful migration, there is
+# nothing left for this function to read from. Kept only as a reference
+# in case you ever need to reconstruct the pattern for a similar one-off
+# copy. Calling it after the legacy tables are dropped will simply error
+# with "relation does not exist".
 
 
 if __name__ == "__main__":
     # Create/update the shared tables:
     #   python db.py
-    #
-    # One-time migration of old shared-table data into a real project:
-    #   python db.py migrate <legacy_domain> "<Project Display Name>"
-    if len(sys.argv) >= 4 and sys.argv[1] == "migrate":
-        init_db()
-        migrate_legacy_domain_to_project(sys.argv[2], sys.argv[3])
-    else:
-        init_db()
-        print("Tables created (or already existed).")
+    init_db()
+    print("Tables created (or already existed).")
