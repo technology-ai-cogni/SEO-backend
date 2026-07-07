@@ -531,23 +531,40 @@ def insert_keyword_rows(job_id, domain, rows):
     return ids
 
 
-def update_keyword_result(domain, row_id, category, cluster, status, meta=None, error=None):
+def update_keyword_result(domain, row_id, category, cluster, status, meta=None, error=None,
+                           computed_target_type=None, computed_region_name=None):
     """Called by the background worker after processing ONE keyword row
     (identified by the id returned from insert_keyword_rows at upload
-    time). Updates ONLY category/cluster/status/meta/error -- never
-    touches sv/kw_diff/type/target_subtype/target_geo/priority/
-    landing_page_url, which are pure pass-through from the original
-    upload and are never generated or overwritten by this pipeline."""
+    time). Updates category/cluster/status/meta/error as before, PLUS:
+
+    - target_type: ALWAYS overwritten with computed_target_type (Blog
+      Page / Landing Page / Topical Blog Page, derived from the same
+      SERP top-3 results used for categorization) -- same as
+      category/cluster, this is a system-computed field regardless of
+      what the upload sheet had in it.
+    - target_geo: filled in with computed_region_name (e.g. "India")
+      ONLY IF the row's target_geo is currently NULL/blank -- i.e. this
+      never overwrites a target geo the user explicitly supplied in
+      their upload (which may legitimately differ from the region the
+      SERP search itself ran against); it only fills in the ones that
+      were left blank.
+
+    Never touches sv/kw_diff/type/target_subtype/priority/
+    landing_page_url, which remain pure pass-through from the original
+    upload."""
     t = _project_table_names(domain)
     with engine.begin() as conn:
         conn.execute(text(f"""
             UPDATE {t['keyword_categories']}
             SET category = :category, cluster = :cluster, status = :status,
-                meta = CAST(:meta AS JSONB), error = :error, checked_at = now()
+                meta = CAST(:meta AS JSONB), error = :error, checked_at = now(),
+                target_type = :computed_target_type,
+                target_geo = COALESCE(NULLIF(target_geo, ''), :computed_region_name)
             WHERE id = :id
         """), {
             "id": row_id, "category": category, "cluster": cluster, "status": status,
             "meta": json.dumps(meta) if meta is not None else None, "error": error,
+            "computed_target_type": computed_target_type, "computed_region_name": computed_region_name,
         })
 
 

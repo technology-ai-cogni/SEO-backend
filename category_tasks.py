@@ -17,9 +17,13 @@ ROW LIFECYCLE: as of the pass-through-columns change, the row for each
 keyword is now PRE-INSERTED at upload time (see app.py / db.insert_
 keyword_rows), already containing whatever sheet data (SV, KW Diff, Type,
 Target Subtype, Target Geo, Priority, Landing Page URL) came with that
-keyword. categorize_keyword_task's job is ONLY to fill in that SAME row's
-category/cluster/status/meta/error via db.update_keyword_result() -- it
-never touches, generates, or overwrites the pass-through columns.
+keyword. categorize_keyword_task fills in that SAME row's category,
+cluster, status, meta, error, AND target_type (always recomputed from the
+SERP results, same as category) via db.update_keyword_result() -- target_geo
+also gets filled in from the actual SERP-searched region, but ONLY when the
+upload left it blank; a target_geo the user explicitly supplied is never
+overwritten. sv/kw_diff/type/target_subtype/priority/landing_page_url stay
+pure pass-through and are never touched here.
 
 `row_id` is passed in by the enqueueing code (app.py) so the task knows
 exactly which pre-inserted row to update. If a task somehow gets enqueued
@@ -43,9 +47,15 @@ def categorize_keyword_task(job_id, domain, keyword, country_code=None, row_id=N
     else:
         error_message = None
 
+    computed_target_type = meta.get("computed_target_type") if meta else None
+    computed_region_name = meta.get("computed_region_name") if meta else None
+
     try:
         if row_id is not None:
-            db.update_keyword_result(domain, row_id, category, None, status, meta=meta, error=error_message)
+            db.update_keyword_result(
+                domain, row_id, category, None, status, meta=meta, error=error_message,
+                computed_target_type=computed_target_type, computed_region_name=computed_region_name,
+            )
         else:
             # Legacy fallback -- see module docstring.
             db.insert_category_result(job_id, domain, keyword, category, None, status, meta=meta, error=error_message)

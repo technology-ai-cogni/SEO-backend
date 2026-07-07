@@ -16,6 +16,7 @@ domain's ENTIRE category list. See cluster_all_categories() at the bottom.
 import os
 import re
 import time
+from collections import Counter
 from urllib.parse import quote, urlparse
 
 import requests
@@ -387,6 +388,105 @@ def find_matching_category(candidate_name, candidate_titles, existing_category_n
     return None
 
 
+# --- Target Type (deterministic, NO LLM) ---------------------------------
+# Classifies each of the top-3 SERP results as one of:
+#   "Landing Page"       -- no blog-ish path segment in the URL at all
+#   "Blog Page"           -- blog-ish path segment present, but reads like
+#                            a generic index/category page
+#   "Topical Blog Page"    -- blog-ish path segment present AND the slug is
+#                            long/specific, or the title reads like a
+#                            listicle/how-to (an actual article on a
+#                            specific topic, not just a blog index)
+# then takes a majority vote across the 3, with a deterministic tie-break
+# if it's a 1-1-1 split. A Best/Top query is ALWAYS "Blog Page" outright,
+# since "best X" / "top X" search intent is listicle-style by definition.
+
+_TARGET_TYPE_TOPICAL_TITLE_PATTERN = re.compile(
+    r"^\s*\d+\s+|\bhow to\b|\bguide to\b|\btips\b|\bvs\.?\b|\bwhy\b|\bwhat is\b|\bbenefits of\b|\bpros and cons\b",
+    re.IGNORECASE,
+)
+_TARGET_TYPE_SPECIFIC_SLUG_MIN_WORDS = 4
+
+TARGET_TYPE_LANDING = "Landing Page"
+TARGET_TYPE_BLOG = "Blog Page"
+TARGET_TYPE_TOPICAL = "Topical Blog Page"
+_TARGET_TYPE_TIE_BREAK_PRIORITY = [TARGET_TYPE_TOPICAL, TARGET_TYPE_BLOG, TARGET_TYPE_LANDING]
+
+
+def _classify_single_target_type(url, title):
+    if not url:
+        return None
+
+    path = urlparse(url).path.lower()
+    segments = [s for s in path.split("/") if s]
+
+    hint_index = None
+    for i, seg in enumerate(segments):
+        if any(hint in seg for hint in BLOG_PATH_HINTS):
+            hint_index = i
+            break
+
+    if hint_index is None:
+        return TARGET_TYPE_LANDING
+
+    slug_words = []
+    for seg in segments[hint_index:]:
+        slug_words.extend(w for w in re.split(r"[-_]+", seg) if w)
+
+    has_specific_slug = len(slug_words) >= _TARGET_TYPE_SPECIFIC_SLUG_MIN_WORDS
+    title_reads_topical = bool(_TARGET_TYPE_TOPICAL_TITLE_PATTERN.search(title or ""))
+
+    if has_specific_slug or title_reads_topical:
+        return TARGET_TYPE_TOPICAL
+    return TARGET_TYPE_BLOG
+
+
+def _majority_target_type(top3):
+    types = [_classify_single_target_type(r.get("url"), r.get("title")) for r in top3]
+    types = [t for t in types if t is not None]
+
+    if not types:
+        return None
+
+    counts = Counter(types)
+    max_count = max(counts.values())
+    winners = [t for t, c in counts.items() if c == max_count]
+
+    if len(winners) == 1:
+        return winners[0]
+
+    for candidate in _TARGET_TYPE_TIE_BREAK_PRIORITY:
+        if candidate in winners:
+            return candidate
+    return types[0]
+
+
+def compute_target_type(top3, has_best_top):
+    """has_best_top ALWAYS forces Blog Page, regardless of URL/title --
+    matches the same rule already used for the Best/Top category tag."""
+    if has_best_top:
+        return TARGET_TYPE_BLOG
+    return _majority_target_type(top3)
+
+
+def region_display_name(search_region_code):
+    """2-letter SERP region code (e.g. 'in') -> human-readable country
+    name (e.g. 'India'). Falls back to the raw uppercased code if
+    pycountry doesn't recognize it."""
+    if not search_region_code:
+        return None
+    code = search_region_code.strip()
+    if not code:
+        return None
+    try:
+        country = pycountry.countries.get(alpha_2=code.upper())
+        if country:
+            return country.name
+    except Exception:
+        pass
+    return code.upper()
+
+
 def categorize_keyword(keyword, domain, country_code=None):
     """
     Category-only pipeline for one keyword, scoped to `domain`: fetch
@@ -394,6 +494,11 @@ def categorize_keyword(keyword, domain, country_code=None):
     .env default if not given), derive a candidate category name, apply
     the hardcoded Best/Top rule, match against existing categories in
     this domain (intent-aware), and persist a new category if none matched.
+
+    Also computes target_type and region_name (both deterministic, no
+    LLM) from the SAME top-3 SERP results already fetched here, and
+    attaches them to `meta` as `computed_target_type` /
+    `computed_region_name` for the caller to read off and store.
 
     NOTE: clustering does NOT happen here anymore -- it's a separate,
     deterministic batch step that runs once per job, after every keyword
@@ -412,15 +517,24 @@ def categorize_keyword(keyword, domain, country_code=None):
     top3 = get_top3_for_category(keyword, country_code)
     titles, majority_type = build_majority_titles(top3)
 
+    search_region = country_code or COUNTRY_CODE
+
     meta = {
         "top3": [{"url": r["url"], "title": r["title"]} for r in top3],
-        "search_region": country_code or COUNTRY_CODE,
+        "search_region": search_region,
         "majority_type": majority_type,
         "majority_titles_used": titles,
     }
 
     if not titles:
+        meta["computed_target_type"] = None
+        meta["computed_region_name"] = region_display_name(search_region)
         return None, meta
+
+    has_best_top = _titles_contain_best_or_top(titles)
+
+    meta["computed_target_type"] = compute_target_type(top3, has_best_top)
+    meta["computed_region_name"] = region_display_name(search_region)
 
     raw_candidate = derive_category_name(titles)
     candidate_name = _apply_best_top_rule(raw_candidate, titles)
@@ -431,7 +545,6 @@ def categorize_keyword(keyword, domain, country_code=None):
     # status -- otherwise a "Best/Top ..." candidate could get silently
     # merged into a plain existing category (or vice versa), losing the
     # Best/Top tag that this specific keyword's titles actually signaled.
-    has_best_top = candidate_name.lower().startswith("best/top")
     existing_category_names = [
         name for name in db.list_category_names(domain)
         if name.lower().startswith("best/top") == has_best_top
