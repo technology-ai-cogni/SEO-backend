@@ -1,10 +1,10 @@
 """
-Backend API -- category checking, scoped by DOMAIN.
+Backend API -- category checking, scoped by PROJECT.
 
-Each domain behaves like its own isolated project: categories and clusters
-are only ever matched against other entries in the SAME domain, so
-importing a sheet for a different domain never mixes into another
-domain's categories/clusters.
+Each project gets its own dedicated database tables (see db.py) -- real
+physical isolation, not just a filtered shared table. You give a project
+name on upload; if it doesn't exist yet, it's created automatically
+(tables and all) on the spot.
 
 Job/result state lives in Postgres (db.py). Actual categorization happens
 in a separate worker process via RQ (job_queue.py, category_tasks.py) --
@@ -14,20 +14,32 @@ Auth is intentionally NOT wired in here yet -- every endpoint is open.
 Lock this down before deploying publicly.
 
 Endpoints:
-    POST /jobs/category         upload -> category job for a domain, one
-                                 task per keyword
-    GET  /domains                 list every domain that has data
-    GET  /domains/{domain}/results  ALL keyword results ever processed
-                                 for a domain, across every job -- this is
-                                 the "project table" view for your UI
-    GET  /jobs                     list all jobs (every domain)
-    GET  /jobs/{job_id}             poll job status/progress
-    GET  /jobs/{job_id}/results       per-keyword results for one job
-    GET  /jobs/{job_id}/download      same results, as a CSV download
+    POST /jobs/category                   upload -> category job for a
+                                           project (creates the project on
+                                           first use), one task per keyword
+    GET  /projects                         list every project that exists
+    GET  /projects/{project}/results        ALL keyword results ever
+                                           processed for a project, across
+                                           every job -- the "project table"
+                                           view for your UI
+    GET  /projects/{project}/categories      every distinct category in
+                                           this project + audit trail
+    GET  /projects/{project}/clusters        every distinct cluster in
+                                           this project + its categories
+    POST /projects/{project}/recluster       manually re-run clustering
+                                           for one project
+    GET  /jobs                             list all jobs (every project)
+    GET  /jobs/{job_id}                     poll job status/progress
+    GET  /jobs/{job_id}/results               per-keyword results for one job
+    GET  /jobs/{job_id}/download              same results, as a CSV download
     GET  /health
 
+`project` in the URL can be either the exact display name you typed on
+upload (e.g. "Real Estate Clients") or its slug (e.g. "real_estate_clients")
+-- both resolve to the same project.
+
 Run locally (needs a worker running separately too -- see README.md):
-    python db.py              # one-time: creates/updates tables
+    python db.py              # one-time: creates/updates shared tables
     uvicorn app:app --reload --port 8000
     rq worker category_checks     # in a separate terminal -- run ONLY ONE
 """
@@ -50,9 +62,6 @@ from category_tasks import categorize_keyword_task
 
 MIN_SEARCH_VOLUME = 5
 NEAR_ME_PHRASE = "near me"
-DEFAULT_DOMAIN = "default"  # domain-scoping removed from the API surface --
-                             # everything shares one global category/cluster
-                             # space again, keyed internally to this constant
 
 app = FastAPI(title="Category API")
 
@@ -118,6 +127,15 @@ def _parse_upload(df):
     return rows
 
 
+def _resolve_project_or_404(project_param):
+    """`project_param` can be either the exact display name or the slug --
+    try both. 404s if neither matches anything that's ever been created."""
+    proj = db.get_project_by_name(project_param) or db.get_project_by_slug(project_param)
+    if proj is None:
+        raise HTTPException(404, f"Project '{project_param}' not found.")
+    return proj
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -127,12 +145,16 @@ def health():
 async def create_category_job(
     file: UploadFile = File(...),
     country: str = Form(...),
+    project: str = Form(...),
 ):
     """Upload a .csv/.xlsx with a 'Keywords' column (optionally 'Search
     Volume'). `country` is a country name (e.g. "India", "United States")
     or a 2-letter code (e.g. "in", "us") -- every SERP search in this job
-    runs against that country's Google region. Creates a category job and
-    enqueues one task per keyword that passes the SV/'near me' filters."""
+    runs against that country's Google region. `project` is any name you
+    want -- if it's never been used before, it's created automatically
+    (along with its own dedicated tables) right here. Creates a category
+    job and enqueues one task per keyword that passes the SV/'near me'
+    filters."""
     country_code = category_checker.resolve_country_code(country)
     if not country_code:
         raise HTTPException(
@@ -140,6 +162,14 @@ async def create_category_job(
             f"Unknown country: '{country}'. Try a full country name "
             f"(e.g. 'India', 'United States') or its 2-letter code (e.g. 'in', 'us')."
         )
+
+    project_name = (project or "").strip()
+    if not project_name:
+        raise HTTPException(400, "Project name is required.")
+    try:
+        project_slug = db.get_or_create_project(project_name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
     filename = file.filename or "upload.csv"
     ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
@@ -157,58 +187,68 @@ async def create_category_job(
     if not to_process:
         raise HTTPException(400, "No usable keyword rows found after filtering")
 
-    job_id = db.create_job(filename, DEFAULT_DOMAIN, country, country_code, total=len(to_process))
+    job_id = db.create_job(filename, project_slug, project_name, country, country_code, total=len(to_process))
     db.set_job_status(job_id, "running")
 
     for r in to_process:
         category_queue.enqueue(
             categorize_keyword_task,
-            job_id, DEFAULT_DOMAIN, r["keyword"], country_code,
+            job_id, project_slug, r["keyword"], country_code,
             job_timeout=180,
         )
 
     return {
-        "job_id": job_id, "status": "running", "country": country, "country_code": country_code,
+        "job_id": job_id, "status": "running", "project": project_name, "project_slug": project_slug,
+        "country": country, "country_code": country_code,
         "total": len(to_process), "skipped": len(rows) - len(to_process),
     }
 
 
-@app.get("/results")
-def get_all_results():
-    """ALL keyword results ever processed, across every job -- includes
-    the full audit trail per keyword (top-3 titles/urls used, majority
-    type, whether Best/Top fired, whether it matched an existing category)."""
-    return {"results": db.get_domain_results(DEFAULT_DOMAIN)}
+@app.get("/projects")
+def get_projects():
+    """Every project that has ever been created."""
+    return {"projects": db.list_projects()}
 
 
-@app.get("/categories")
-def get_categories():
-    """Every distinct category, with keyword count and one example audit
-    trail -- shows WHY that category exists (the actual titles that
-    produced it) without opening every individual keyword."""
-    return {"categories": db.get_categories_overview(DEFAULT_DOMAIN)}
+@app.get("/projects/{project}/results")
+def get_project_results(project: str):
+    """ALL keyword results ever processed for this project, across every
+    job -- includes the full audit trail per keyword."""
+    proj = _resolve_project_or_404(project)
+    return {"project": proj["name"], "results": db.get_domain_results(proj["slug"])}
 
 
-@app.get("/clusters")
-def get_clusters():
-    """Every distinct cluster, with the categories grouped inside it --
-    the clustering criteria is directly visible: the shared word is
-    plainly readable in the category names listed."""
-    return {"clusters": db.get_clusters_overview(DEFAULT_DOMAIN)}
+@app.get("/projects/{project}/categories")
+def get_project_categories(project: str):
+    """Every distinct category in this project, with keyword count and one
+    example audit trail."""
+    proj = _resolve_project_or_404(project)
+    return {"project": proj["name"], "categories": db.get_categories_overview(proj["slug"])}
 
 
-@app.post("/recluster")
-def recluster():
-    """Manually re-run the deterministic clustering pass over the entire
-    category list. Normally this happens automatically once a job's
-    categorization finishes -- this endpoint is for re-running it on demand."""
-    assignment = category_checker.cluster_all_categories(DEFAULT_DOMAIN)
-    db.replace_domain_clusters(DEFAULT_DOMAIN, assignment)
-    return {"categories_clustered": len(assignment)}
+@app.get("/projects/{project}/clusters")
+def get_project_clusters(project: str):
+    """Every distinct cluster in this project, with the categories grouped
+    inside it."""
+    proj = _resolve_project_or_404(project)
+    return {"project": proj["name"], "clusters": db.get_clusters_overview(proj["slug"])}
+
+
+@app.post("/projects/{project}/recluster")
+def recluster_project(project: str):
+    """Manually re-run the deterministic clustering pass over this
+    project's entire category list. Normally this happens automatically
+    once a job's categorization finishes -- this endpoint is for
+    re-running it on demand."""
+    proj = _resolve_project_or_404(project)
+    assignment = category_checker.cluster_all_categories(proj["slug"])
+    db.replace_domain_clusters(proj["slug"], assignment)
+    return {"project": proj["name"], "categories_clustered": len(assignment)}
 
 
 @app.get("/jobs")
 def list_jobs():
+    """All jobs, across every project."""
     return {"jobs": db.list_jobs()}
 
 
@@ -226,7 +266,10 @@ def get_job_results(job_id: str):
     if job is None:
         raise HTTPException(404, "Job not found")
     results = db.get_job_category_results(job_id)
-    return {"job_id": job_id, "domain": job["domain"], "status": job["status"], "results": results}
+    return {
+        "job_id": job_id, "project": job.get("project_name"), "status": job["status"],
+        "results": results,
+    }
 
 
 @app.get("/jobs/{job_id}/download")
