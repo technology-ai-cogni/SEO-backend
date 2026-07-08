@@ -239,7 +239,10 @@ def build_majority_titles(top3):
 
 
 def _title_word_set(title):
-    return {w.lower() for w in re.findall(r"[A-Za-z0-9]+", title)}
+    """Lowercased word tokens from one title -- pure numbers (e.g. "10",
+    "100" from something like "Top 10 Agencies") are never included; a
+    category/cluster name should be made of real words, not digits."""
+    return {w.lower() for w in re.findall(r"[A-Za-z0-9]+", title) if not w.isdigit()}
 
 
 def _common_words_across_titles(titles, min_titles=2):
@@ -350,7 +353,8 @@ def derive_category_name(titles):
         # representative title's own words rather than refusing outright.
         qualifying_words = [
             w for w in dict.fromkeys(re.findall(r"[A-Za-z0-9]+", titles[0].lower()))
-            if w not in _LOCATION_WORDS
+            if w not in _LOCATION_WORDS and w not in _STOPWORDS
+            and w not in _RANKING_WORDS and not w.isdigit()
         ]
 
     titles_block = "\n".join(f"- {t}" for t in titles)
@@ -361,7 +365,9 @@ def derive_category_name(titles):
         "rules exactly:\n\n"
         f"1. You may ONLY use words from this allowed list (case doesn't "
         f"matter): {allowed_block}\n"
-        "Never add, invent, or substitute a word that isn't in that list.\n\n"
+        "Never add, invent, or substitute a word that isn't in that list -- "
+        "not even a small connector word like 'is', 'an', 'the', 'of', or "
+        "'and'. Only use real, meaningful topic words from the list.\n\n"
         "2. Use AS MANY of the allowed words as you sensibly can while "
         "still reading as one natural, coherent phrase describing the "
         "shared topic across the titles -- this should be the fullest "
@@ -371,9 +377,11 @@ def derive_category_name(titles):
         "3. Do NOT include any city, state, country, or region name, even "
         "if one is in the allowed list -- the category should describe "
         "the TOPIC, not the location.\n\n"
-        "4. Do NOT include ranking words like 'best' or 'top' -- that is "
+        "4. Do NOT include any number or digit (e.g. '10', '100'), even if "
+        "one is in the allowed list.\n\n"
+        "5. Do NOT include ranking words like 'best' or 'top' -- that is "
         "handled separately.\n\n"
-        "5. Output ONLY plain words separated by single spaces -- no "
+        "6. Output ONLY plain words separated by single spaces -- no "
         "punctuation, no pipes, no colons, no quotation marks.\n\n"
         "Respond with ONLY the category name, nothing else."
     )
@@ -692,7 +700,7 @@ def _cluster_significant_words(category_name):
     return {
         _singularize_word(w) for w in words
         if w not in _STOPWORDS and w not in _RANKING_WORDS
-        and w not in _LOCATION_WORDS and len(w) > 2
+        and w not in _LOCATION_WORDS and not w.isdigit() and len(w) > 2
     }
 
 
