@@ -10,14 +10,20 @@ worker because each decision depends on categories already created by
 prior keywords), rank-checking has NO ordering dependency between
 keywords -- checking keyword A's rank has zero effect on checking
 keyword B's rank. This module is safe to run under MULTIPLE concurrent
-RQ workers on the `rank_checks` queue (see job_queue.py / rank_tasks.py)
--- there is no shared mutable state here beyond a thread-local HTTP
-session used purely for connection-pool reuse.
+RQ workers on the `rank_checks` queue (see job_queue.py / rank_tasks.py).
+Each RQ job runs in its own forked work-horse PROCESS (not a thread), so
+there is no shared state between concurrent rank-checks to worry about --
+every call to fetch_serp_page makes its own plain, independent HTTP
+request (deliberately NOT reusing a shared requests.Session across calls:
+an earlier version of this file tried session reuse via
+threading.local(), but that provided no real benefit under this
+per-process concurrency model and is suspected of causing SIGSEGV crashes
+under macOS's fork() -- a Session's internal connection-pool locks/socket
+state surviving a fork() boundary is a classic native-crash source).
 """
 
 import os
 import time
-import threading
 from urllib.parse import quote, urlparse
 
 import requests
@@ -42,18 +48,6 @@ SLEEP_BETWEEN_REQUESTS = 0.5
 MAX_REQUEST_RETRIES = 3
 RETRY_BACKOFF_SECONDS = 5
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
-
-# One requests.Session PER THREAD -- reuses TCP/TLS connections within a
-# thread (real speedup under concurrent workers hammering the same Bright
-# Data endpoint) without sharing a Session object ACROSS threads, which
-# requests does not officially guarantee is safe.
-_thread_local = threading.local()
-
-
-def _get_session():
-    if not hasattr(_thread_local, "session"):
-        _thread_local.session = requests.Session()
-    return _thread_local.session
 
 
 def clean_url(url):
@@ -110,13 +104,12 @@ def fetch_serp_page(keyword, start=0, country_code=None):
         "Content-Type": "application/json",
     }
 
-    session = _get_session()
     resp = None
     last_error = None
 
     for attempt in range(1, MAX_REQUEST_RETRIES + 1):
         try:
-            resp = session.post(
+            resp = requests.post(
                 BRIGHTDATA_REQUEST_URL, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
             )
             resp.raise_for_status()
