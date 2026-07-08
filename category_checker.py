@@ -324,6 +324,74 @@ def _clean_category_text(text):
     return text
 
 
+# --- Single entity-type word rule -----------------------------------------
+# A business is only ONE kind of entity -- "agency", OR "company", OR
+# "service", OR "firm", OR "provider" -- never several at once, even if
+# more than one of those words is common across the source titles. If a
+# derived category ends up with more than one of these, keep only
+# whichever is most common across the titles/keyword and drop the rest.
+# "digital marketing" is a different case -- those are two genuinely
+# distinct topic words describing ONE combined subject, not interchangeable
+# entity-type labels, so they're never touched by this rule.
+_ENTITY_TYPE_WORDS = {"company", "agency", "service", "firm", "provider"}
+
+
+def _enforce_single_entity_type(category_name, count_documents):
+    words = category_name.split()
+    entity_positions = [
+        i for i, w in enumerate(words) if _singularize_word(w) in _ENTITY_TYPE_WORDS
+    ]
+    if len(entity_positions) <= 1:
+        return category_name
+
+    doc_word_sets = [
+        {_singularize_word(w) for w in re.findall(r"[A-Za-z0-9]+", doc.lower())}
+        for doc in count_documents
+    ]
+    counts = {}
+    for i in entity_positions:
+        stem = _singularize_word(words[i])
+        counts[i] = sum(1 for doc_words in doc_word_sets if stem in doc_words)
+
+    winner = max(entity_positions, key=lambda i: (counts[i], -i))
+    drop = set(entity_positions) - {winner}
+    return " ".join(w for i, w in enumerate(words) if i not in drop)
+
+
+# --- Singular/plural category dedup ----------------------------------------
+# A deterministic safety net alongside find_matching_category()'s
+# LLM-based intent matching below: if an existing category is IDENTICAL
+# to the new candidate except that some of its words differ only by
+# singular vs. plural form (e.g. "Company" vs "Companies"), treat them as
+# the SAME category rather than letting a near-duplicate get created --
+# and standardize on whichever of the two is plural.
+
+def _plural_normalized_signature(name):
+    return tuple(_singularize_word(w) for w in re.findall(r"[A-Za-z0-9]+", name.lower()))
+
+
+def _find_plural_variant(candidate_name, existing_category_names):
+    """Returns the category name to use (candidate_name or an existing
+    one) if `candidate_name` is a pure singular/plural variant of an
+    already-existing category, preferring whichever form is plural.
+    Returns None if no such variant exists (the normal LLM-based matching
+    in find_matching_category() should be tried instead)."""
+    candidate_sig = _plural_normalized_signature(candidate_name)
+
+    def _is_plural(name):
+        return any(_singularize_word(w) != w.lower() for w in name.split())
+
+    for existing in existing_category_names:
+        if existing.strip().lower() == candidate_name.strip().lower():
+            continue
+        if _plural_normalized_signature(existing) != candidate_sig:
+            continue
+        if _is_plural(existing) and not _is_plural(candidate_name):
+            return existing
+        return candidate_name
+    return None
+
+
 def derive_category_name(titles, keyword=None):
     """
     Build a category name from words COMMON to at least 2 of the 3
@@ -389,7 +457,17 @@ def derive_category_name(titles, keyword=None):
         "one is in the allowed list.\n\n"
         "5. Do NOT include ranking words like 'best' or 'top' -- that is "
         "handled separately.\n\n"
-        "6. Output ONLY plain words separated by single spaces -- no "
+        "6. Understand INTENT, not just word matching: words like "
+        "'company', 'agency', 'service', 'firm', and 'provider' (singular "
+        "or plural) all describe the SAME thing -- what TYPE of business "
+        "this is. A business is only one of those at a time, so even if "
+        "more than one is in the allowed list, use ONLY the single one "
+        "that best fits, never two or more together (e.g. never 'agency "
+        "company' or 'agencies companies'). This is different from words "
+        "like 'digital' and 'marketing', which are separate real topic "
+        "words that belong together, not interchangeable labels for the "
+        "same thing.\n\n"
+        "7. Output ONLY plain words separated by single spaces -- no "
         "punctuation, no pipes, no colons, no quotation marks.\n\n"
         "Respond with ONLY the category name, nothing else."
     )
@@ -414,9 +492,9 @@ def derive_category_name(titles, keyword=None):
         fallback = " ".join(w.capitalize() for w in qualifying_words)
         print(f"  [WARNING] Model used word(s) not in the allowed list: {invalid_words} "
               f"-- discarding \"{candidate}\", using safe fallback: \"{fallback}\"")
-        return _clean_category_text(fallback)
+        return _enforce_single_entity_type(_clean_category_text(fallback), count_documents)
 
-    return _clean_category_text(candidate)
+    return _enforce_single_entity_type(_clean_category_text(candidate), count_documents)
 
 
 def find_matching_category(candidate_name, candidate_titles, existing_category_names):
@@ -648,6 +726,19 @@ def categorize_keyword(keyword, domain, country_code=None):
         name for name in db.list_category_names(domain)
         if name.lower().startswith("best/top") == has_best_top
     ]
+
+    # Deterministic singular/plural dedup, tried BEFORE the LLM-based
+    # intent match below -- if this candidate is purely a singular/plural
+    # variant of an already-existing category, use that pairing directly
+    # (standardized on whichever form is plural) instead of letting a
+    # near-duplicate category get created.
+    plural_variant = _find_plural_variant(candidate_name, existing_category_names)
+    if plural_variant:
+        meta["matched_existing_category"] = True
+        meta["candidate_before_match"] = candidate_name
+        db.add_category(domain, plural_variant)
+        return plural_variant, meta
+
     matched_category = find_matching_category(candidate_name, titles, existing_category_names)
 
     if matched_category:
