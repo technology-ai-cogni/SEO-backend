@@ -324,7 +324,7 @@ def _clean_category_text(text):
     return text
 
 
-def derive_category_name(titles):
+def derive_category_name(titles, keyword=None):
     """
     Build a category name from words COMMON to at least 2 of the 3
     fetched titles (case-insensitive -- 'Companies' and 'companies' are
@@ -338,6 +338,13 @@ def derive_category_name(titles):
     instruction since a hardcoded place-name list can't generalize to
     "any" location worldwide.
 
+    `keyword`, if given, is folded in as a 4th "title" for this same
+    common-word count -- NOT a real 4th SERP fetch, just the original
+    search keyword text counted alongside the 3 real titles. So a word
+    that appears once in the keyword AND once in any single one of the 3
+    titles now qualifies (2 total occurrences across the 4), even though
+    it wouldn't have qualified from the 3 real titles alone.
+
     The result is validated word-by-word afterward against that same
     qualifying set; if the model breaks the word-source rule, its answer
     is discarded and a guaranteed-safe deterministic join (qualifying
@@ -347,7 +354,8 @@ def derive_category_name(titles):
     """
     client = get_openai_client()
 
-    qualifying_words = _common_words_across_titles(titles, min_titles=2)
+    count_documents = titles + [keyword] if keyword else titles
+    qualifying_words = _common_words_across_titles(count_documents, min_titles=2)
     if not qualifying_words:
         # Nothing is shared by 2+ titles -- fall back to the single most
         # representative title's own words rather than refusing outright.
@@ -627,7 +635,7 @@ def categorize_keyword(keyword, domain, country_code=None):
     meta["computed_target_type"] = compute_target_type(top3, has_best_top)
     meta["computed_region_name"] = region_display_name(search_region)
 
-    raw_candidate = derive_category_name(titles)
+    raw_candidate = derive_category_name(titles, keyword)
     candidate_name = _apply_best_top_rule(raw_candidate, titles)
     meta["raw_candidate_before_best_top_rule"] = raw_candidate
     meta["best_top_applied"] = candidate_name != raw_candidate
