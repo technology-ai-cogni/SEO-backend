@@ -47,6 +47,40 @@ BLOG_PATH_HINTS = [
     "insights", "resources", "guide", "guides",
 ]
 
+
+def _build_location_word_blocklist():
+    """Every word that's part of a real country or state/province/region
+    name (via pycountry's actual ISO databases, not a hardcoded list),
+    plus a generic demonym guess for each country (India -> Indian, Korea
+    -> Korean -- countries ending in a vowel commonly adjective-ize by
+    adding 'n'/'an'; irregular demonyms like France -> French aren't
+    covered, this is a best-effort suffix rule, not a lookup table).
+    Used to keep category/cluster names describing the TOPIC, not a
+    country/region/state -- deliberately does NOT include cities (no
+    reliable non-hardcoded source for those)."""
+    words = set()
+    for country in pycountry.countries:
+        for attr in ("name", "official_name", "common_name"):
+            name = getattr(country, attr, None)
+            if not name:
+                continue
+            for w in re.findall(r"[A-Za-z]+", name.lower()):
+                if len(w) <= 2:
+                    continue
+                words.add(w)
+                if w[-1] in "aeiou":
+                    words.add(w + "n")
+                words.add(w + "an")
+    for subdivision in pycountry.subdivisions:
+        for w in re.findall(r"[A-Za-z]+", subdivision.name.lower()):
+            if len(w) > 2:
+                words.add(w)
+    return words
+
+
+_LOCATION_WORDS = _build_location_word_blocklist()
+
+
 def resolve_country_code(country_input):
     """
     Resolve a user-typed country name (or an already-2-letter code) into
@@ -212,16 +246,23 @@ def _common_words_across_titles(titles, min_titles=2):
     """Words appearing in at least `min_titles` of the given titles
     (case-insensitive -- 'Companies' and 'companies' count as the same
     word). A word that only shows up in a single title never qualifies,
-    no matter how salient it looks in isolation. Returned in the order
-    each word first appears when reading through the titles in order, so
-    joining them reads naturally rather than as a random word list."""
+    no matter how salient it looks in isolation. Country/region/state
+    words are never eligible, even if common to every title -- a
+    category/cluster should describe the TOPIC, not a location. Returned
+    in the order each word first appears when reading through the titles
+    in order, so joining them reads naturally rather than as a random
+    word list."""
     required = min(min_titles, len(titles)) if titles else min_titles
     counts = Counter()
     for title in titles:
         for w in _title_word_set(title):
             counts[w] += 1
 
-    qualifying = {w for w, c in counts.items() if c >= required}
+    qualifying = {
+        w for w, c in counts.items()
+        if c >= required and w not in _LOCATION_WORDS
+        and w not in _STOPWORDS and w not in _RANKING_WORDS
+    }
 
     order, seen = [], set()
     for title in titles:
@@ -253,31 +294,19 @@ def _titles_contain_best_or_top(titles):
     return bool(rest) and all(_title_has_best_or_top(t) for t in rest)
 
 
-def _pluralize_word(word):
-    """Naive, generic English pluralization -- good enough for the short
-    head nouns (agency/company/service/provider/...) that typically end a
-    derived category name. Left alone if it already looks plural."""
-    lower = word.lower()
-    if lower.endswith("s"):
-        return word
-    if re.search(r"[^aeiou]y$", lower):
-        return word[:-1] + "ies"
-    if lower.endswith(("x", "z", "ch", "sh")):
-        return word + "es"
-    return word + "s"
-
-
 def _apply_best_top_rule(candidate_name, titles):
-    """When Best/Top applies, the category's head noun (its last word --
-    e.g. "Company", "Agency", "Service") is pluralized, since a Best/Top
-    listicle is inherently about MULTIPLE of that thing."""
+    """When Best/Top applies, just prefix the category with 'Best/Top ' --
+    singular vs. plural is NEVER forced here. Whatever plurality the
+    common words naturally had in the source titles (e.g. titles actually
+    saying "Companies" vs "Company") is what derive_category_name already
+    picked up, and that form is preserved exactly as found -- no blind
+    grammar-rule pluralization that could mangle a mass noun like
+    "marketing" into "marketings"."""
     if not _titles_contain_best_or_top(titles):
         return candidate_name
     words = candidate_name.split()
     if words and words[0].strip().lower() in ("best", "top", "best/top"):
         words = words[1:]
-    if words:
-        words[-1] = _pluralize_word(words[-1])
     rest = " ".join(words).strip()
     return f"Best/Top {rest}".strip() if rest else "Best/Top"
 
@@ -319,7 +348,10 @@ def derive_category_name(titles):
     if not qualifying_words:
         # Nothing is shared by 2+ titles -- fall back to the single most
         # representative title's own words rather than refusing outright.
-        qualifying_words = [w for w in dict.fromkeys(re.findall(r"[A-Za-z0-9]+", titles[0].lower()))]
+        qualifying_words = [
+            w for w in dict.fromkeys(re.findall(r"[A-Za-z0-9]+", titles[0].lower()))
+            if w not in _LOCATION_WORDS
+        ]
 
     titles_block = "\n".join(f"- {t}" for t in titles)
     allowed_block = ", ".join(qualifying_words)
@@ -630,10 +662,15 @@ def categorize_keyword(keyword, domain, country_code=None):
 # invents vocabulary -- every cluster name is built only from words that
 # literally appear in the categories it contains.
 
-_CLUSTER_STOPWORDS = {
+_STOPWORDS = {
     "a", "an", "the", "in", "of", "on", "at", "to", "for", "and", "or",
-    "with", "by", "is", "are", "vs", "your", "you", "best", "top",
+    "with", "by", "is", "are", "vs", "your", "you",
 }
+# "best"/"top" are excluded separately, only where the caller wants them
+# excluded (cluster words always; category qualifying-words too, since
+# the Best/Top tag is applied by its own deterministic rule, not as
+# regular category vocabulary).
+_RANKING_WORDS = {"best", "top"}
 
 
 def _singularize_word(word):
@@ -654,7 +691,8 @@ def _cluster_significant_words(category_name):
     words = re.findall(r"[A-Za-z0-9]+", category_name.lower())
     return {
         _singularize_word(w) for w in words
-        if w not in _CLUSTER_STOPWORDS and len(w) > 2
+        if w not in _STOPWORDS and w not in _RANKING_WORDS
+        and w not in _LOCATION_WORDS and len(w) > 2
     }
 
 
