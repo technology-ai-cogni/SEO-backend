@@ -47,9 +47,6 @@ BLOG_PATH_HINTS = [
     "insights", "resources", "guide", "guides",
 ]
 
-_client = None
-
-
 def resolve_country_code(country_input):
     """
     Resolve a user-typed country name (or an already-2-letter code) into
@@ -82,12 +79,15 @@ def resolve_country_code(country_input):
 
 
 def get_openai_client():
-    global _client
-    if _client is None:
-        if not OPENAI_API_KEY:
-            raise RuntimeError("OPENAI_API_KEY is not set. Fill it in in .env.")
-        _client = OpenAI(api_key=OPENAI_API_KEY)
-    return _client
+    """Deliberately NOT cached at module level -- a persistent OpenAI
+    client wraps an httpx connection pool, which is the same class of
+    object (open sockets, SSL state, pool locks) that turned out to be
+    unsafe to reuse across RQ's forked work-horse processes for
+    rank_checker.py's requests.Session (see that module's docstring).
+    Always build a fresh, short-lived client right where it's used."""
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY is not set. Fill it in in .env.")
+    return OpenAI(api_key=OPENAI_API_KEY)
 
 
 def _brightdata_fetch(target_url):
@@ -204,48 +204,80 @@ def build_majority_titles(top3):
     return [r["title"] for r in top3], "all"
 
 
-def _extract_word_set(titles):
-    allowed = set()
-    for t in titles:
-        for w in re.findall(r"[A-Za-z0-9]+", t):
-            allowed.add(w.lower())
-    return allowed
+def _title_word_set(title):
+    return {w.lower() for w in re.findall(r"[A-Za-z0-9]+", title)}
 
 
-def _fallback_extract_name(titles, max_words=6):
-    source_title = titles[0].strip()
-    delimiters = ["|", " - ", "–", "—", ":", "•"]
-    candidate = source_title
-    for delim in delimiters:
-        if delim in source_title:
-            candidate = source_title.split(delim)[0].strip()
-            break
-    words = candidate.split()
-    candidate = " ".join(words[:max_words])
-    if not candidate:
-        candidate = " ".join(source_title.split()[:max_words])
-    return candidate
+def _common_words_across_titles(titles, min_titles=2):
+    """Words appearing in at least `min_titles` of the given titles
+    (case-insensitive -- 'Companies' and 'companies' count as the same
+    word). A word that only shows up in a single title never qualifies,
+    no matter how salient it looks in isolation. Returned in the order
+    each word first appears when reading through the titles in order, so
+    joining them reads naturally rather than as a random word list."""
+    required = min(min_titles, len(titles)) if titles else min_titles
+    counts = Counter()
+    for title in titles:
+        for w in _title_word_set(title):
+            counts[w] += 1
+
+    qualifying = {w for w, c in counts.items() if c >= required}
+
+    order, seen = [], set()
+    for title in titles:
+        for w in re.findall(r"[A-Za-z0-9]+", title.lower()):
+            if w in qualifying and w not in seen:
+                seen.add(w)
+                order.append(w)
+    return order
 
 
 # --- Hardcoded Best/Top rule ------------------------------------------
-# Deliberately deterministic, not LLM-judged: if ANY of the top-3 titles
-# contains the word "best" or "top", the category MUST carry the literal
-# "Best/Top" tag -- this is a fixed business rule, not a suggestion.
+# Deliberately deterministic, not LLM-judged. Rule: the FIRST title
+# deciding it alone if it contains "best"/"top"; if the first title
+# doesn't, then EVERY one of the other titles must contain "best"/"top"
+# for the tag to apply (a single stray mention in one of the other two
+# isn't enough).
+
+def _title_has_best_or_top(title):
+    words = set(re.findall(r"[a-z]+", title.lower()))
+    return "best" in words or "top" in words
+
 
 def _titles_contain_best_or_top(titles):
-    for t in titles:
-        words = set(re.findall(r"[a-z]+", t.lower()))
-        if "best" in words or "top" in words:
-            return True
-    return False
+    if not titles:
+        return False
+    if _title_has_best_or_top(titles[0]):
+        return True
+    rest = titles[1:]
+    return bool(rest) and all(_title_has_best_or_top(t) for t in rest)
+
+
+def _pluralize_word(word):
+    """Naive, generic English pluralization -- good enough for the short
+    head nouns (agency/company/service/provider/...) that typically end a
+    derived category name. Left alone if it already looks plural."""
+    lower = word.lower()
+    if lower.endswith("s"):
+        return word
+    if re.search(r"[^aeiou]y$", lower):
+        return word[:-1] + "ies"
+    if lower.endswith(("x", "z", "ch", "sh")):
+        return word + "es"
+    return word + "s"
 
 
 def _apply_best_top_rule(candidate_name, titles):
+    """When Best/Top applies, the category's head noun (its last word --
+    e.g. "Company", "Agency", "Service") is pluralized, since a Best/Top
+    listicle is inherently about MULTIPLE of that thing."""
     if not _titles_contain_best_or_top(titles):
         return candidate_name
     words = candidate_name.split()
     if words and words[0].strip().lower() in ("best", "top", "best/top"):
         words = words[1:]
+    if words:
+        words[-1] = _pluralize_word(words[-1])
     rest = " ".join(words).strip()
     return f"Best/Top {rest}".strip() if rest else "Best/Top"
 
@@ -262,34 +294,51 @@ def _clean_category_text(text):
 
 def derive_category_name(titles):
     """
-    Build a short, meaningful category name -- HARD constrained to only
-    select/rearrange words that literally appear in the majority titles.
-    No new vocabulary allowed. Also instructed to exclude any city/state/
-    country/region name (categories should describe the TOPIC, not the
-    location) -- enforced via prompt instruction since a hardcoded
-    place-name list can't generalize to "any" location worldwide.
+    Build a category name from words COMMON to at least 2 of the 3
+    fetched titles (case-insensitive -- 'Companies' and 'companies' are
+    the same word for this purpose). Deliberately includes AS MANY of
+    those qualifying words as can still read as one coherent, natural
+    phrase -- this is not a minimal 2-3 word summary, it's the maximum
+    shared vocabulary. A word appearing in only one title never
+    qualifies, however salient it looks in isolation. Also instructed to
+    exclude any city/state/country/region name (categories should
+    describe the TOPIC, not the location) -- enforced via prompt
+    instruction since a hardcoded place-name list can't generalize to
+    "any" location worldwide.
 
-    The result is validated word-by-word afterward; if the model breaks
-    the word-source rule, its answer is discarded and a guaranteed-safe
-    extraction is used instead. The Best/Top rule is applied separately,
-    deterministically, after this function returns.
+    The result is validated word-by-word afterward against that same
+    qualifying set; if the model breaks the word-source rule, its answer
+    is discarded and a guaranteed-safe deterministic join (qualifying
+    words in first-appearance order) is used instead. The Best/Top rule
+    is applied separately, deterministically, after this function
+    returns.
     """
     client = get_openai_client()
+
+    qualifying_words = _common_words_across_titles(titles, min_titles=2)
+    if not qualifying_words:
+        # Nothing is shared by 2+ titles -- fall back to the single most
+        # representative title's own words rather than refusing outright.
+        qualifying_words = [w for w in dict.fromkeys(re.findall(r"[A-Za-z0-9]+", titles[0].lower()))]
+
     titles_block = "\n".join(f"- {t}" for t in titles)
-    allowed_words = _extract_word_set(titles)
+    allowed_block = ", ".join(qualifying_words)
 
     system_prompt = (
-        "You create short SEO category names from webpage titles. Follow these "
+        "You create SEO category names from webpage titles. Follow these "
         "rules exactly:\n\n"
-        "1. You may ONLY use words that appear verbatim in the titles given to "
-        "you (case doesn't matter). Never add, invent, or substitute a word.\n\n"
-        "2. Keep it MINIMAL: 2-3 words maximum, describing ONE clear concept. "
-        "Do not stack multiple words that mean the same thing (e.g. don't "
-        "combine both 'affordable' AND 'fees' -- pick the single clearest "
-        "word for that concept, not both).\n\n"
-        "3. Do NOT include any city, state, country, or region name in the "
-        "category, even if one appears in the titles -- the category should "
-        "describe the TOPIC, not the location.\n\n"
+        f"1. You may ONLY use words from this allowed list (case doesn't "
+        f"matter): {allowed_block}\n"
+        "Never add, invent, or substitute a word that isn't in that list.\n\n"
+        "2. Use AS MANY of the allowed words as you sensibly can while "
+        "still reading as one natural, coherent phrase describing the "
+        "shared topic across the titles -- this should be the fullest "
+        "phrase the allowed words support, not an artificially shortened "
+        "one. Only drop a word if including it would make the phrase read "
+        "like a random word list rather than a real category name.\n\n"
+        "3. Do NOT include any city, state, country, or region name, even "
+        "if one is in the allowed list -- the category should describe "
+        "the TOPIC, not the location.\n\n"
         "4. Do NOT include ranking words like 'best' or 'top' -- that is "
         "handled separately.\n\n"
         "5. Output ONLY plain words separated by single spaces -- no "
@@ -305,16 +354,17 @@ def derive_category_name(titles):
             {"role": "user", "content": user_prompt},
         ],
         temperature=0,
-        max_tokens=20,
+        max_tokens=40,
     )
     candidate = resp.choices[0].message.content.strip().strip('"')
 
     candidate_words = re.findall(r"[A-Za-z0-9]+", candidate)
-    invalid_words = [w for w in candidate_words if w.lower() not in allowed_words]
+    allowed_lower = {w.lower() for w in qualifying_words}
+    invalid_words = [w for w in candidate_words if w.lower() not in allowed_lower]
 
     if invalid_words or not candidate_words:
-        fallback = _fallback_extract_name(titles)
-        print(f"  [WARNING] Model used word(s) not in the titles: {invalid_words} "
+        fallback = " ".join(w.capitalize() for w in qualifying_words)
+        print(f"  [WARNING] Model used word(s) not in the allowed list: {invalid_words} "
               f"-- discarding \"{candidate}\", using safe fallback: \"{fallback}\"")
         return _clean_category_text(fallback)
 
@@ -461,11 +511,12 @@ def _majority_target_type(top3):
     return types[0]
 
 
-def compute_target_type(top3, has_best_top):
-    """has_best_top ALWAYS forces Blog Page, regardless of URL/title --
-    matches the same rule already used for the Best/Top category tag."""
-    if has_best_top:
-        return TARGET_TYPE_BLOG
+def compute_target_type(top3, has_best_top=None):
+    """Pure majority vote across the 3 fetched results' page types
+    (Landing/Blog/Topical) -- no special-casing for Best/Top; what type
+    of page actually ranks is independent of whether the SERP intent
+    happens to be a "best/top X" listicle. `has_best_top` is accepted
+    only for call-site backward compatibility and ignored."""
     return _majority_target_type(top3)
 
 
@@ -566,14 +617,18 @@ def categorize_keyword(keyword, domain, country_code=None):
 # over the domain's ENTIRE category list (not just this job's categories --
 # a full recompute keeps clustering consistent as new categories arrive).
 #
-# Algorithm: repeatedly find the single word shared by the MOST remaining
-# (not-yet-clustered) categories, group every category containing that
-# word under a cluster literally named after that word, remove them from
-# the pool, and repeat with whatever's left. Categories that share no word
-# with any other remaining category become their own single-category
-# cluster (named after themselves). This never invents vocabulary --
-# every cluster name is either a literal word pulled from the categories
-# it contains, or a category's own name.
+# Algorithm: repeatedly find the single (normalized) word shared by the
+# MOST remaining (not-yet-clustered) categories -- that anchor word's
+# whole group of categories is then labeled using EVERY word shared by at
+# least 2 of them (not just the one anchor word), so the cluster name
+# uses the maximum common vocabulary those categories actually have, not
+# a single-word stub. "Best"/"Top" are never eligible (already tagged at
+# the category level, not the cluster level), and singular/plural forms
+# of the same word (Agency/Agencies, Company/Companies, ...) are treated
+# as identical, case-insensitively. Categories that share no word with
+# anything else become their own single-category cluster. This never
+# invents vocabulary -- every cluster name is built only from words that
+# literally appear in the categories it contains.
 
 _CLUSTER_STOPWORDS = {
     "a", "an", "the", "in", "of", "on", "at", "to", "for", "and", "or",
@@ -581,53 +636,38 @@ _CLUSTER_STOPWORDS = {
 }
 
 
+def _singularize_word(word):
+    """Naive, generic plural -> singular normalization (suffix rules
+    only, no hardcoded word list) so 'Agency'/'Agencies' or
+    'Company'/'Companies' are treated as the SAME word when clustering."""
+    w = word.lower()
+    if len(w) > 4 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) > 4 and w.endswith(("ches", "shes", "xes", "ses", "zes")):
+        return w[:-2]
+    if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
 def _cluster_significant_words(category_name):
     words = re.findall(r"[A-Za-z0-9]+", category_name.lower())
-    return {w for w in words if w not in _CLUSTER_STOPWORDS and len(w) > 2}
+    return {
+        _singularize_word(w) for w in words
+        if w not in _CLUSTER_STOPWORDS and len(w) > 2
+    }
 
 
-def _extend_cluster_phrase(word, matched_categories):
-    """
-    The chosen common word alone (e.g. "international") often reads
-    awkwardly as a cluster name on its own. Check whether a second word
-    commonly sits directly next to it (before or after) across the
-    categories being grouped -- e.g. if most of them contain "...
-    International Schools ..." or "... International School ...", extend
-    the cluster label to "International Schools" instead of just
-    "International". Purely positional/frequency-based -- never invents
-    a word that isn't already adjacent to it in the real category text.
-    """
-    after_counts, before_counts = {}, {}
+def _display_form(norm_word, matched_categories):
+    """Pick the most common literal surface form (actual casing +
+    plurality) of `norm_word` as it appears across `matched_categories`,
+    so the label reads naturally instead of showing the normalized stem."""
+    forms = Counter()
     for cat in matched_categories:
-        tokens = re.findall(r"[A-Za-z0-9]+", cat.lower())
-        for i, t in enumerate(tokens):
-            if t != word:
-                continue
-            if i + 1 < len(tokens) and tokens[i + 1] not in _CLUSTER_STOPWORDS:
-                after_counts[tokens[i + 1]] = after_counts.get(tokens[i + 1], 0) + 1
-            if i - 1 >= 0 and tokens[i - 1] not in _CLUSTER_STOPWORDS:
-                before_counts[tokens[i - 1]] = before_counts.get(tokens[i - 1], 0) + 1
-
-    total = len(matched_categories)
-    if total < 2:
-        return word.title()
-
-    threshold = (total + 1) // 2  # majority, rounded up
-
-    best_after = max(after_counts.items(), key=lambda kv: kv[1], default=None)
-    best_before = max(before_counts.items(), key=lambda kv: kv[1], default=None)
-
-    candidates = []
-    if best_after and best_after[1] >= max(threshold, 2):
-        candidates.append((best_after[1], f"{word} {best_after[0]}"))
-    if best_before and best_before[1] >= max(threshold, 2):
-        candidates.append((best_before[1], f"{best_before[0]} {word}"))
-
-    if candidates:
-        candidates.sort(key=lambda c: c[0], reverse=True)
-        return candidates[0][1].title()
-
-    return word.title()
+        for raw in re.findall(r"[A-Za-z0-9]+", cat.lower()):
+            if _singularize_word(raw) == norm_word:
+                forms[raw] += 1
+    return forms.most_common(1)[0][0] if forms else norm_word
 
 
 def cluster_all_categories(domain):
@@ -661,7 +701,30 @@ def cluster_all_categories(domain):
         # most-common words.
         chosen_word = sorted(w for w, c in freq.items() if c == max_freq)[0]
         matched = [cat for cat, words in remaining.items() if chosen_word in words]
-        cluster_label = _extend_cluster_phrase(chosen_word, matched)
+
+        # Maximum common words label: every normalized word shared by AT
+        # LEAST 2 of the matched categories (chosen_word always qualifies
+        # by construction), ordered by where it typically sits in the
+        # original category text so the phrase reads naturally.
+        shared_counts = {}
+        for cat in matched:
+            for w in remaining[cat]:
+                shared_counts[w] = shared_counts.get(w, 0) + 1
+        shared_words = {w for w, c in shared_counts.items() if c >= 2} or {chosen_word}
+
+        position_totals, position_counts = {}, {}
+        for cat in matched:
+            tokens = [_singularize_word(t) for t in re.findall(r"[A-Za-z0-9]+", cat.lower())]
+            for idx, t in enumerate(tokens):
+                if t in shared_words:
+                    position_totals[t] = position_totals.get(t, 0) + idx
+                    position_counts[t] = position_counts.get(t, 0) + 1
+
+        ordered_words = sorted(
+            shared_words,
+            key=lambda w: position_totals.get(w, 0) / position_counts.get(w, 1),
+        )
+        cluster_label = " ".join(_display_form(w, matched).title() for w in ordered_words)
 
         for cat in matched:
             assignment[cat] = cluster_label
