@@ -756,15 +756,24 @@ def cluster_all_categories(domain):
         chosen_word = sorted(w for w, c in freq.items() if c == max_freq)[0]
         matched = [cat for cat, words in remaining.items() if chosen_word in words]
 
-        # Maximum common words label: every normalized word shared by AT
-        # LEAST 2 of the matched categories (chosen_word always qualifies
-        # by construction), ordered by where it typically sits in the
-        # original category text so the phrase reads naturally.
+        # Maximum common words label: every normalized word shared by a
+        # MAJORITY of the matched categories (chosen_word always qualifies
+        # by construction, since its count == len(matched)) -- a flat
+        # ">=2" bar was letting the label balloon into a union of many
+        # only-weakly-shared words on larger groups (e.g. one pair
+        # sharing "media", a different pair sharing "services", a
+        # different pair sharing "ncr" -- none of which is actually
+        # common across the group as a whole). Requiring majority keeps
+        # every word in the label genuinely representative of most (not
+        # just some) of the categories it's applied to. Ordered by where
+        # each word typically sits in the original category text so the
+        # phrase reads naturally.
+        threshold = (len(matched) + 1) // 2  # majority, rounded up
         shared_counts = {}
         for cat in matched:
             for w in remaining[cat]:
                 shared_counts[w] = shared_counts.get(w, 0) + 1
-        shared_words = {w for w, c in shared_counts.items() if c >= 2} or {chosen_word}
+        shared_words = {w for w, c in shared_counts.items() if c >= threshold} or {chosen_word}
 
         position_totals, position_counts = {}, {}
         for cat in matched:
