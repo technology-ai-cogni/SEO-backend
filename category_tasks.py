@@ -13,6 +13,13 @@ IMPORTANT: run only ONE category worker process at a time. Category
 assignment is inherently sequential within a domain, and clustering must
 run strictly after all of a job's categorization is complete.
 
+Rank-checking is a SEPARATE stage, on a SEPARATE queue ('rank_checks'),
+and is NOT auto-triggered from here -- it's kicked off manually via
+POST /jobs/{job_id}/check-rank in app.py (a "trigger" button on the
+frontend), once you've confirmed category and cluster look right for
+that job. See rank_tasks.py / rank_checker.py for the actual rank-check
+logic, and app.py for the trigger endpoint.
+
 ROW LIFECYCLE: as of the pass-through-columns change, the row for each
 keyword is now PRE-INSERTED at upload time (see app.py / db.insert_
 keyword_rows), already containing whatever sheet data (SV, KW Diff, Type,
@@ -74,7 +81,10 @@ def cluster_domain_task(job_id, domain):
     """Runs once, after a job's categorization fully completes. Re-clusters
     the WHOLE domain's category list (not just this job's) and writes the
     result back into clusters / category_cluster_map / keyword_categories
-    (cluster column only -- never touches the pass-through columns)."""
+    (cluster column only -- never touches the pass-through columns).
+
+    Rank-checking is NOT triggered from here -- it's a manually-triggered
+    separate stage. See POST /jobs/{job_id}/check-rank in app.py."""
     try:
         assignment = category_checker.cluster_all_categories(domain)
         db.replace_domain_clusters(domain, assignment)

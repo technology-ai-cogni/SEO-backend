@@ -1,5 +1,18 @@
 """
-Redis connection + RQ queue, backed by Upstash (or any Redis instance).
+Redis connection + RQ queues, backed by Upstash (or any Redis instance).
+
+Two queues:
+    category_checks  -- category assignment + clustering. Sequential --
+                         run only ONE worker on this queue at a time (see
+                         start_workers.sh / category_tasks.py for why).
+    rank_checks       -- rank checking against Bright Data's Web
+                         Unlocker zone, manually triggered per job via
+                         POST /jobs/{job_id}/check-rank (app.py). NOT
+                         sequential -- checking one keyword's rank has no
+                         bearing on any other keyword's rank, so this
+                         queue is safe to run with MULTIPLE concurrent
+                         workers (see rank_checker.py's module docstring
+                         for the full reasoning).
 
 Setup:
     1. Create a free Redis database at https://upstash.com
@@ -25,3 +38,4 @@ if not REDIS_URL:
 
 redis_conn = Redis.from_url(REDIS_URL)
 category_queue = Queue("category_checks", connection=redis_conn)
+rank_queue = Queue("rank_checks", connection=redis_conn)

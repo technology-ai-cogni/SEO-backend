@@ -251,9 +251,15 @@ def init_db():
                 target_geo TEXT,
                 priority TEXT,
                 landing_page_url TEXT,
+                rank INTEGER,
+                rank_checked_at TIMESTAMPTZ,
+                rank_meta JSONB,
                 checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
+        conn.execute(text("ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank INTEGER"))
+        conn.execute(text("ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank_checked_at TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank_meta JSONB"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_keyword_categories_job ON keyword_categories (job_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_keyword_categories_project ON keyword_categories (project_name)"))
 
@@ -359,6 +365,19 @@ def list_domain_records():
     with engine.begin() as conn:
         rows = conn.execute(text("SELECT * FROM domains ORDER BY created_at DESC")).mappings().fetchall()
         return [dict(r) for r in rows]
+
+
+def get_domain_by_project_slug(project_slug):
+    """Looks up the domain registered for a project -- used as the
+    rank-check fallback target when a keyword row has no explicit
+    landing_page_url. Returns None if this project has no domain
+    registered yet (e.g. a project created directly via /jobs/category
+    rather than through the /domains "Create Project" form)."""
+    with engine.begin() as conn:
+        row = conn.execute(text("""
+            SELECT * FROM domains WHERE project_slug = :project_slug LIMIT 1
+        """), {"project_slug": project_slug}).mappings().fetchone()
+        return dict(row) if row else None
 
 
 # --- Jobs (shared, untouched) --------------------------------------------
@@ -607,6 +626,34 @@ def update_keyword_result(domain, row_id, category, cluster, status, meta=None, 
         })
 
 
+def update_keyword_rank(row_id, rank, rank_meta=None):
+    """Called by the rank-checking worker after checking ONE keyword row.
+    Only ever touches rank/rank_checked_at/rank_meta -- never category,
+    cluster, or any of the pass-through upload columns."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE keyword_categories
+            SET rank = :rank, rank_checked_at = now(), rank_meta = CAST(:rank_meta AS JSONB)
+            WHERE id = :id
+        """), {
+            "id": row_id, "rank": rank,
+            "rank_meta": json.dumps(rank_meta) if rank_meta is not None else None,
+        })
+
+
+def get_job_keyword_rows_for_rank_check(job_id):
+    """Every keyword row for a job, with enough info to enqueue a
+    rank-check task per row: id (to write the result back to THIS exact
+    row later) and landing_page_url (the pass-through column rank
+    checking should match against, if present)."""
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT id, keyword, landing_page_url
+            FROM keyword_categories WHERE job_id = :job_id ORDER BY id
+        """), {"job_id": job_id}).mappings().fetchall()
+        return [dict(r) for r in rows]
+
+
 def insert_category_result(job_id, domain, keyword, category, cluster, status, meta=None, error=None):
     """LEGACY fallback path -- inserts a brand-new row rather than
     updating a pre-inserted one. Kept only so any task already sitting in
@@ -631,7 +678,8 @@ def get_job_category_results(job_id):
     with engine.begin() as conn:
         rows = conn.execute(text("""
             SELECT keyword, category, cluster, status, error, meta, checked_at,
-                   sv, kw_diff, type, target_type, target_subtype, target_geo, priority, landing_page_url
+                   sv, kw_diff, type, target_type, target_subtype, target_geo, priority, landing_page_url,
+                   rank, rank_checked_at, rank_meta
             FROM keyword_categories WHERE job_id = :job_id ORDER BY id
         """), {"job_id": job_id}).mappings().fetchall()
         return [dict(r) for r in rows]
@@ -643,7 +691,8 @@ def get_domain_results(domain):
     with engine.begin() as conn:
         rows = conn.execute(text("""
             SELECT keyword, category, cluster, status, error, meta, checked_at, job_id,
-                   sv, kw_diff, type, target_type, target_subtype, target_geo, priority, landing_page_url
+                   sv, kw_diff, type, target_type, target_subtype, target_geo, priority, landing_page_url,
+                   rank, rank_checked_at, rank_meta
             FROM keyword_categories WHERE project_name = :project_name ORDER BY checked_at DESC
         """), {"project_name": domain}).mappings().fetchall()
         return [dict(r) for r in rows]
@@ -745,7 +794,12 @@ def _migrate_one_project_to_shared(slug):
     one project (e.g. a schema mismatch on an older per-project table)
     can never roll back a different project's already-successful
     migration. Called by migrate_per_project_tables_to_shared() above,
-    once per project, each wrapped in its own try/except."""
+    once per project, each wrapped in its own try/except.
+
+    Also tolerates keyword rows whose job_id no longer exists in `jobs`
+    (an orphaned FK reference) -- those rows are still migrated, just
+    with job_id set to NULL, rather than aborting the whole project's
+    migration on a ForeignKeyViolation."""
     old_categories = f"categories_{slug}"
     old_clusters = f"clusters_{slug}"
     old_map = f"category_cluster_map_{slug}"
@@ -803,6 +857,26 @@ def _migrate_one_project_to_shared(slug):
             FROM {old_keywords}
         """)).mappings().fetchall()
 
+        # Some old keyword rows may reference a job_id that no longer
+        # exists in `jobs` (deleted/orphaned job) -- keyword_categories.
+        # job_id is a FK to jobs(id), so inserting those as-is would
+        # raise a ForeignKeyViolation and abort this project's entire
+        # migration. Instead, null out just the orphaned references --
+        # the keyword data itself is still migrated, it just loses its
+        # link back to a job that doesn't exist anymore anyway.
+        distinct_job_ids = {r["job_id"] for r in kw_rows if r["job_id"] is not None}
+        valid_job_ids = set()
+        if distinct_job_ids:
+            id_list = list(distinct_job_ids)
+            found = conn.execute(text("""
+                SELECT id FROM jobs WHERE id = ANY(:ids)
+            """), {"ids": id_list}).fetchall()
+            valid_job_ids = {f.id for f in found}
+        orphaned_count = len(distinct_job_ids - valid_job_ids)
+        if orphaned_count:
+            print(f"[{slug}] {orphaned_count} distinct job_id(s) no longer exist in `jobs` -- "
+                  f"nulling those references on migrated rows (keyword data itself is kept).")
+
         for chunk in _chunked(kw_rows):
             values_sql = ", ".join(
                 f"(:job_id{i}, :project_name{i}, :keyword{i}, :category{i}, :cluster{i}, :status{i}, "
@@ -812,7 +886,8 @@ def _migrate_one_project_to_shared(slug):
             )
             params = {}
             for i, r in enumerate(chunk):
-                params[f"job_id{i}"] = r["job_id"]
+                row_job_id = r["job_id"]
+                params[f"job_id{i}"] = row_job_id if row_job_id in valid_job_ids else None
                 params[f"project_name{i}"] = slug
                 params[f"keyword{i}"] = r["keyword"]
                 params[f"category{i}"] = r["category"]

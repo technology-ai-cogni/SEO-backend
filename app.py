@@ -67,8 +67,9 @@ from pydantic import BaseModel
 
 import db
 import category_checker
-from job_queue import category_queue
+from job_queue import category_queue, rank_queue
 from category_tasks import categorize_keyword_task
+from rank_tasks import check_rank_task
 
 MIN_SEARCH_VOLUME = 5
 NEAR_ME_PHRASE = "near me"
@@ -364,6 +365,48 @@ def get_job(job_id: str):
     if job is None:
         raise HTTPException(404, "Job not found")
     return job
+
+
+@app.post("/jobs/{job_id}/check-rank")
+def check_rank_for_job(job_id: str):
+    """Manual trigger (the "check rank" button) -- enqueues one rank-check
+    task per keyword in this job onto the SEPARATE 'rank_checks' queue.
+    Not auto-triggered by categorization/clustering; call this once
+    you're happy with how a job's category/cluster results look.
+
+    Requires the job to have finished categorization (status
+    'completed') -- rank-checking a still-running job would race against
+    rows that haven't been categorized yet, and re-running this on the
+    same job re-checks every keyword's rank again (safe to do, e.g. to
+    refresh stale rankings, but each call re-enqueues ALL of the job's
+    keywords, not just ones missing a rank)."""
+    job = db.get_job(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found")
+    if job["status"] != "completed":
+        raise HTTPException(
+            400,
+            f"Job status is '{job['status']}', not 'completed' -- wait for "
+            f"categorization to finish before checking rank."
+        )
+    if not job.get("clustering_triggered_at"):
+        raise HTTPException(
+            400,
+            "Clustering hasn't been triggered for this job yet -- it usually "
+            "fires within moments of the job completing; try again shortly."
+        )
+
+    country_code = job.get("country_code")
+    project_slug = job["domain"]
+
+    rows = db.get_job_keyword_rows_for_rank_check(job_id)
+    for row in rows:
+        rank_queue.enqueue(
+            check_rank_task, job_id, project_slug, row["id"], row["keyword"], row["landing_page_url"],
+            country_code, job_timeout=300,
+        )
+
+    return {"job_id": job_id, "rank_checks_enqueued": len(rows)}
 
 
 @app.get("/jobs/{job_id}/results")
