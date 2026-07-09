@@ -78,7 +78,23 @@ def _build_location_word_blocklist():
     return words
 
 
-_LOCATION_WORDS = _build_location_word_blocklist()
+# pycountry has no city-level data at all, so real cities (Hyderabad,
+# Mumbai, Pune, ...) were still leaking into category/cluster names
+# despite the country/state filtering above. There's no dependency-free
+# source for a full global city list, so this is a manually curated
+# supplement covering the cities that have actually shown up leaking
+# during testing, plus a handful of other major single-word city names --
+# not exhaustive.
+_MAJOR_CITY_WORDS = {
+    "delhi", "mumbai", "bangalore", "bengaluru", "hyderabad", "chennai",
+    "kolkata", "pune", "ahmedabad", "jaipur", "lucknow", "surat", "noida",
+    "gurgaon", "gurugram", "chandigarh", "kochi", "coimbatore", "indore",
+    "bhopal", "nagpur", "patna", "ncr",
+    "london", "dubai", "singapore", "toronto", "sydney", "chicago",
+    "boston", "seattle",
+}
+
+_LOCATION_WORDS = _build_location_word_blocklist() | _MAJOR_CITY_WORDS
 
 
 def resolve_country_code(country_input):
@@ -248,31 +264,45 @@ def _title_word_set(title):
 def _common_words_across_titles(titles, min_titles=2):
     """Words appearing in at least `min_titles` of the given titles
     (case-insensitive -- 'Companies' and 'companies' count as the same
-    word). A word that only shows up in a single title never qualifies,
-    no matter how salient it looks in isolation. Country/region/state
-    words are never eligible, even if common to every title -- a
-    category/cluster should describe the TOPIC, not a location. Returned
-    in the order each word first appears when reading through the titles
-    in order, so joining them reads naturally rather than as a random
-    word list."""
+    word). Singular and plural forms of the same word (school/schools,
+    company/companies) are also merged into ONE word for this purpose --
+    counted together when deciding if it's common enough, and represented
+    by only ONE surface form in the result (whichever form actually
+    occurred more often), so a derived category can never end up using
+    both "school" and "schools" side by side. A word that only shows up
+    in a single title never qualifies, no matter how salient it looks in
+    isolation. Country/region/state/city words are never eligible, even
+    if common to every title -- a category/cluster should describe the
+    TOPIC, not a location. Returned in the order each word first appears
+    when reading through the titles in order, so joining them reads
+    naturally rather than as a random word list."""
     required = min(min_titles, len(titles)) if titles else min_titles
-    counts = Counter()
-    for title in titles:
-        for w in _title_word_set(title):
-            counts[w] += 1
 
-    qualifying = {
-        w for w, c in counts.items()
-        if c >= required and w not in _LOCATION_WORDS
-        and w not in _STOPWORDS and w not in _RANKING_WORDS
+    doc_presence = Counter()
+    surface_counts = {}
+    for title in titles:
+        normalized_in_title = set()
+        for w in _title_word_set(title):
+            norm = _singularize_word(w)
+            normalized_in_title.add(norm)
+            surface_counts.setdefault(norm, Counter())[w] += 1
+        for norm in normalized_in_title:
+            doc_presence[norm] += 1
+
+    qualifying_norms = {
+        norm for norm, c in doc_presence.items()
+        if c >= required and norm not in _LOCATION_WORDS
+        and norm not in _STOPWORDS and norm not in _RANKING_WORDS
     }
+    canonical_form = {norm: surface_counts[norm].most_common(1)[0][0] for norm in qualifying_norms}
 
     order, seen = [], set()
     for title in titles:
         for w in re.findall(r"[A-Za-z0-9]+", title.lower()):
-            if w in qualifying and w not in seen:
-                seen.add(w)
-                order.append(w)
+            norm = _singularize_word(w)
+            if norm in qualifying_norms and norm not in seen:
+                seen.add(norm)
+                order.append(canonical_form[norm])
     return order
 
 
@@ -427,11 +457,17 @@ def derive_category_name(titles, keyword=None):
     if not qualifying_words:
         # Nothing is shared by 2+ titles -- fall back to the single most
         # representative title's own words rather than refusing outright.
-        qualifying_words = [
-            w for w in dict.fromkeys(re.findall(r"[A-Za-z0-9]+", titles[0].lower()))
-            if w not in _LOCATION_WORDS and w not in _STOPWORDS
-            and w not in _RANKING_WORDS and not w.isdigit()
-        ]
+        # Still deduped by singular/plural (normalized) form, same as above.
+        seen_norms = set()
+        qualifying_words = []
+        for w in re.findall(r"[A-Za-z0-9]+", titles[0].lower()):
+            if w in _LOCATION_WORDS or w in _STOPWORDS or w in _RANKING_WORDS or w.isdigit():
+                continue
+            norm = _singularize_word(w)
+            if norm in seen_norms:
+                continue
+            seen_norms.add(norm)
+            qualifying_words.append(w)
 
     titles_block = "\n".join(f"- {t}" for t in titles)
     allowed_block = ", ".join(qualifying_words)
