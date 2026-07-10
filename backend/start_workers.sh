@@ -43,13 +43,17 @@ cleanup() {
 }
 trap cleanup INT TERM
 
+# --worker-class rq.SimpleWorker: the default Worker forks a new process
+# per job, which segfaults on macOS when the forked child makes an HTTPS
+# call (Bright Data / OpenAI) -- see worker.py's module docstring for the
+# full explanation. SimpleWorker runs jobs in-process, no fork, no crash.
 echo "Starting category worker on queue 'category_checks' (single worker only)..."
-rq worker category_checks --url "$REDIS_URL" &
+rq worker category_checks --worker-class rq.SimpleWorker --url "$REDIS_URL" &
 pids+=("$!")
 
 echo "Starting $RANK_WORKER_COUNT rank worker(s) on queue 'rank_checks'..."
 for i in $(seq 1 "$RANK_WORKER_COUNT"); do
-    rq worker rank_checks --url "$REDIS_URL" &
+    rq worker rank_checks --worker-class rq.SimpleWorker --url "$REDIS_URL" &
     pids+=("$!")
 done
 
