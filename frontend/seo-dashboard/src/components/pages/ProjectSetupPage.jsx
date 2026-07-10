@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, Plus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
@@ -21,7 +22,7 @@ function Input({ label, hint, placeholder, required, value, onChange, type = 'te
         </div>
       )}
       {hint === 'domain' && (
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -2 }}>Enter a domain or subdomain. Subfolders not supported.</span>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -2 }}>Enter a domain or subdomain. </span>
       )}
       <input
         type={type}
@@ -92,7 +93,6 @@ function CountryTagInput({ label, tags, onAdd, onRemove, placeholder }) {
   const [input, setInput] = useState('');
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
-  const wrapperRef = useState(null);
 
   const filtered = input.trim()
     ? COUNTRIES.filter(c => c.toLowerCase().includes(input.toLowerCase()) && !tags.includes(c))
@@ -102,6 +102,7 @@ function CountryTagInput({ label, tags, onAdd, onRemove, placeholder }) {
     onAdd(country);
     setInput('');
     setHighlightIdx(0);
+    setOpen(false);
   };
 
   const handleKeyDown = (e) => {
@@ -142,7 +143,12 @@ function CountryTagInput({ label, tags, onAdd, onRemove, placeholder }) {
           placeholder={tags.length === 0 ? placeholder : 'Type to search...'}
           style={{ border: 'none', outline: 'none', fontSize: 13, fontFamily: 'var(--font-body)', minWidth: 100, flex: 1, background: 'transparent' }}
         />
-        <ChevronDown size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+        <ChevronDown
+          size={14}
+          color="var(--text-muted)"
+          style={{ flexShrink: 0, cursor: 'pointer' }}
+          onMouseDown={e => { e.preventDefault(); e.stopPropagation(); setOpen(o => !o); }}
+        />
       </div>
       {open && filtered.length > 0 && (
         <div style={{
@@ -1605,6 +1611,25 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
   const hasPendingChanges = pendingUpdates.size > 0 || pendingDeleteIds.size > 0;
 
   const [showExcludeDropdown, setShowExcludeDropdown] = useState(false);
+  const [excludePos, setExcludePos] = useState({ top: 0, right: 0 });
+  const excludeBtnRef = useRef(null);
+
+  useEffect(() => {
+    if (!showExcludeDropdown) return;
+    const updatePos = () => {
+      if (!excludeBtnRef.current) return;
+      const rect = excludeBtnRef.current.getBoundingClientRect();
+      setExcludePos({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+    };
+    updatePos();
+    window.addEventListener('resize', updatePos);
+    window.addEventListener('scroll', updatePos, true);
+    return () => {
+      window.removeEventListener('resize', updatePos);
+      window.removeEventListener('scroll', updatePos, true);
+    };
+  }, [showExcludeDropdown]);
+
   const [excludeConfig, setExcludeConfig] = useState({
     kwChecked: false, kwVals: [],
     svChecked: false, svMin: '', svMax: '',
@@ -2037,6 +2062,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
         {/* Exclude Dropdown */}
         <div style={{ position: 'relative' }}>
           <button
+            ref={excludeBtnRef}
             onClick={() => setShowExcludeDropdown(!showExcludeDropdown)}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
@@ -2047,17 +2073,17 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
           >
             Exclude ▾
           </button>
-          
-          {showExcludeDropdown && (
+
+          {showExcludeDropdown && createPortal(
             <div style={{
-              position: 'absolute', top: 'calc(100% + 8px)', right: 0, width: 320,
+              position: 'fixed', top: excludePos.top, right: excludePos.right, width: 320,
               background: '#fff', border: '1px solid var(--border)', borderRadius: 8,
               boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-              zIndex: 50, padding: 16, display: 'flex', flexDirection: 'column', gap: 12,
+              zIndex: 1000, padding: 16, display: 'flex', flexDirection: 'column', gap: 12,
               maxHeight: 480, overflowY: 'auto',
             }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
-                Exclude Keywords
+                Exclude
               </div>
               
               {/* KW Exclude */}
@@ -2179,115 +2205,6 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
                 )}
               </div>
 
-              {/* Type Exclude */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  <input type="checkbox" checked={excludeConfig.typeChecked} onChange={e => setExcludeConfig({...excludeConfig, typeChecked: e.target.checked})} />
-                  Type
-                </label>
-                {excludeConfig.typeChecked && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 20 }}>
-                    {['AI Mode', 'AI Overview', 'Google', 'ChatGPT', 'Gemini'].map(t => (
-                      <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={excludeConfig.typeVals.includes(t)} onChange={() => toggleCheckboxVal('typeVals', t)} />
-                        {t}
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Target Type Exclude */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  <input type="checkbox" checked={excludeConfig.targetTypeChecked} onChange={e => setExcludeConfig({...excludeConfig, targetTypeChecked: e.target.checked})} />
-                  Target Type
-                </label>
-                {excludeConfig.targetTypeChecked && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 20 }}>
-                    {['Blogs', 'Landing Page', 'Topical Blogs'].map(t => (
-                      <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={excludeConfig.targetTypeVals.includes(t)} onChange={() => toggleCheckboxVal('targetTypeVals', t)} />
-                        {t}
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Target Subtype Exclude */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  <input type="checkbox" checked={excludeConfig.targetSubtypeChecked} onChange={e => setExcludeConfig({...excludeConfig, targetSubtypeChecked: e.target.checked})} />
-                  Target Subtype
-                </label>
-                {excludeConfig.targetSubtypeChecked && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 20 }}>
-                    {['Informational', 'Commercial'].map(t => (
-                      <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={excludeConfig.targetSubtypeVals.includes(t)} onChange={() => toggleCheckboxVal('targetSubtypeVals', t)} />
-                        {t}
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Target Geo Exclude */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  <input type="checkbox" checked={excludeConfig.targetGeoChecked} onChange={e => setExcludeConfig({...excludeConfig, targetGeoChecked: e.target.checked})} />
-                  Target Geo
-                </label>
-                {excludeConfig.targetGeoChecked && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <input
-                        type="text"
-                        placeholder="Type geo & click Add..."
-                        value={tempGeoInput}
-                        onChange={e => setTempGeoInput(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addGeoTag(); } }}
-                        style={{ border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12, flex: 1 }}
-                      />
-                      <button
-                        onClick={addGeoTag}
-                        style={{ padding: '4px 10px', fontSize: 12, background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}
-                      >
-                        Add
-                      </button>
-                    </div>
-                    {excludeConfig.targetGeoVals.length > 0 && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                        {excludeConfig.targetGeoVals.map(val => (
-                          <span key={val} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--accent-light)', color: 'var(--accent)', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 500 }}>
-                            {val}
-                            <span onClick={() => removeGeoTag(val)} style={{ cursor: 'pointer', fontWeight: 'bold', marginLeft: 2 }}>×</span>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Priority Exclude */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  <input type="checkbox" checked={excludeConfig.priorityChecked} onChange={e => setExcludeConfig({...excludeConfig, priorityChecked: e.target.checked})} />
-                  Priority
-                </label>
-                {excludeConfig.priorityChecked && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 20 }}>
-                    {['P1', 'P2', 'P3', 'P4', 'P5'].map(p => (
-                      <label key={p} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={excludeConfig.priorityVals.includes(p)} onChange={() => toggleCheckboxVal('priorityVals', p)} />
-                        {p}
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
 
               <button
                 onClick={handleExcludeAction}
@@ -2299,7 +2216,8 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
               >
                 Exclude Match
               </button>
-            </div>
+            </div>,
+            document.body
           )}
         </div>
         </>
@@ -3086,35 +3004,37 @@ export default function ProjectSetupPage({ tab }) {
         </div>
 
         {/* Table */}
-        <div style={{ overflowX: 'auto' }}>
-          {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} />}
-          {activeTab === 'KW Cluster' && selectedKwProject !== null ? (
-            <KwClusterDetailView
-              project={kwClusters[selectedKwProject]}
-              search={search}
-              onBack={() => { setSelectedKwProject(null); setSearch(''); }}
-              onUpdateKeywords={(updated) => setKwClusters(prev => prev.map((p, i) => i === selectedKwProject ? { ...p, detailKeywords: updated } : p))}
-            />
-          ) : activeTab === 'KW Cluster' && <PagesTab pages={kwClusters} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} loading={kwClustersLoading} error={kwClustersError} />}
-          {activeTab === 'Pages' && selectedPageProject !== null ? (
-            <PageDetailView
-              project={pages[selectedPageProject]}
-              onBack={() => setSelectedPageProject(null)}
-              onUpdatePages={(updated) => setPages(prev => prev.map((p, i) => i === selectedPageProject ? { ...p, detailPages: updated } : p))}
-            />
-          ) : activeTab === 'Pages' && <PagesTab pages={pages} onSelectProject={setSelectedPageProject} />}
-          {activeTab === 'Competitors' && selectedCompetitor !== null ? (
-            <CompetitorDetailView
-              competitor={COMPETITOR_ROWS[selectedCompetitor]}
-              onBack={() => setSelectedCompetitor(null)}
-            />
-          ) : activeTab === 'Competitors' && <CompetitorsTab onSelectCompetitor={setSelectedCompetitor} />}
-          {(activeTab === 'Outreach' || activeTab === 'Connectors') && (
-            <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-              No {activeTab.toLowerCase()} configured yet. Click <strong>+ {cta.label}</strong> to get started.
-            </div>
-          )}
-        </div>
+        {activeTab === 'KW Cluster' && selectedKwProject !== null ? (
+          <KwClusterDetailView
+            project={kwClusters[selectedKwProject]}
+            search={search}
+            onBack={() => { setSelectedKwProject(null); setSearch(''); }}
+            onUpdateKeywords={(updated) => setKwClusters(prev => prev.map((p, i) => i === selectedKwProject ? { ...p, detailKeywords: updated } : p))}
+          />
+        ) : activeTab === 'Pages' && selectedPageProject !== null ? (
+          <PageDetailView
+            project={pages[selectedPageProject]}
+            onBack={() => setSelectedPageProject(null)}
+            onUpdatePages={(updated) => setPages(prev => prev.map((p, i) => i === selectedPageProject ? { ...p, detailPages: updated } : p))}
+          />
+        ) : activeTab === 'Competitors' && selectedCompetitor !== null ? (
+          <CompetitorDetailView
+            competitor={COMPETITOR_ROWS[selectedCompetitor]}
+            onBack={() => setSelectedCompetitor(null)}
+          />
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} />}
+            {activeTab === 'KW Cluster' && <PagesTab pages={kwClusters} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} loading={kwClustersLoading} error={kwClustersError} />}
+            {activeTab === 'Pages' && <PagesTab pages={pages} onSelectProject={setSelectedPageProject} />}
+            {activeTab === 'Competitors' && <CompetitorsTab onSelectCompetitor={setSelectedCompetitor} />}
+            {(activeTab === 'Outreach' || activeTab === 'Connectors') && (
+              <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+                No {activeTab.toLowerCase()} configured yet. Click <strong>+ {cta.label}</strong> to get started.
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Pagination — the KW Cluster detail view renders its own paginated footer */}
         {!(activeTab === 'KW Cluster' && selectedKwProject !== null) && (
