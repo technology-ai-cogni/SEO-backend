@@ -10,6 +10,24 @@
 # safely be set above 1 to check ranks faster (each one is just another
 # consumer pulling from the same 'rank_checks' queue).
 
+# The `rq` CLI does NOT read job_queue.py's dotenv config -- python's
+# load_dotenv() only affects environment variables inside a Python
+# process that calls it, and `rq worker <queue>` on its own defaults to
+# redis://localhost:6379, silently ignoring your actual REDIS_URL. Load
+# .env into THIS SHELL directly so $REDIS_URL is available to pass along
+# explicitly via --url below.
+if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+fi
+
+if [ -z "$REDIS_URL" ]; then
+    echo "REDIS_URL is not set (checked .env and the current environment). Aborting."
+    exit 1
+fi
+
 RANK_WORKER_COUNT="${RANK_WORKER_COUNT:-2}"
 
 pids=()
@@ -26,12 +44,12 @@ cleanup() {
 trap cleanup INT TERM
 
 echo "Starting category worker on queue 'category_checks' (single worker only)..."
-rq worker category_checks &
+rq worker category_checks --url "$REDIS_URL" &
 pids+=("$!")
 
 echo "Starting $RANK_WORKER_COUNT rank worker(s) on queue 'rank_checks'..."
 for i in $(seq 1 "$RANK_WORKER_COUNT"); do
-    rq worker rank_checks &
+    rq worker rank_checks --url "$REDIS_URL" &
     pids+=("$!")
 done
 
