@@ -724,8 +724,8 @@ def categorize_keyword(keyword, domain, country_code=None):
     Best/Top rule, whether Best/Top fired, and whether this keyword
     matched an already-existing category or created a new one.
     """
-    import db  # local import to avoid a hard dependency for callers that
-               # only want the pure scraping/naming functions above
+    from core import db  # local import to avoid a hard dependency for callers that
+                         # only want the pure scraping/naming functions above
 
     top3 = get_top3_for_category(keyword, country_code)
     titles, majority_type = build_majority_titles(top3)
@@ -856,7 +856,7 @@ def cluster_all_categories(domain):
     Deterministic greedy clustering over every category currently in this
     domain. Returns {category_name: cluster_name} covering ALL of them.
     """
-    import db
+    from core import db
 
     categories = db.list_category_names(domain)
     remaining = {cat: _cluster_significant_words(cat) for cat in categories}

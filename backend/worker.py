@@ -37,7 +37,7 @@ import sys
 
 from rq import Worker
 
-from job_queue import redis_conn, category_queue, rank_queue
+from core.job_queue import redis_conn, category_queue, rank_queue
 
 QUEUES_BY_NAME = {
     "category_checks": category_queue,

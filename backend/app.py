@@ -46,14 +46,15 @@ Endpoints:
     GET  /jobs/{job_id}/download              same results, as a CSV download
     GET  /health
 
-Run locally (needs a worker running separately too -- see README.md):
-    python db.py              # one-time: creates/updates shared tables
+Run locally, from the `backend/` directory (needs a worker running
+separately too -- see README.md):
+    python -m core.db              # one-time: creates/updates shared tables
     uvicorn app:app --reload --port 8000
     rq worker category_checks     # in a separate terminal -- run ONLY ONE
 """
 
 from dotenv import load_dotenv
-load_dotenv()  # must happen before importing db / job_queue
+load_dotenv()  # must happen before importing core.db / core.job_queue
 
 import io
 import csv
@@ -65,11 +66,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-import db
-import category_checker
-from job_queue import category_queue, rank_queue
-from category_tasks import categorize_keyword_task
-from rank_tasks import check_rank_task
+from core import db
+from services import category_checker
+from core.job_queue import category_queue, rank_queue
+from tasks.category_tasks import categorize_keyword_task
+from tasks.rank_tasks import check_rank_task
 
 MIN_SEARCH_VOLUME = 5
 NEAR_ME_PHRASE = "near me"

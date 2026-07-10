@@ -39,9 +39,9 @@ change, mid-deploy), it falls back to inserting a brand-new row via the
 legacy db.insert_category_result() path instead of crashing.
 """
 
-import db
-import category_checker
-from job_queue import category_queue
+from core import db
+from services import category_checker
+from core.job_queue import category_queue
 
 
 def categorize_keyword_task(job_id, domain, keyword, country_code=None, row_id=None):

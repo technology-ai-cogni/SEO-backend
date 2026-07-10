@@ -48,10 +48,11 @@ Setup:
     2. Project Settings -> Database -> Connection string (URI format,
        "Transaction" pooler mode is fine for this use case)
     3. Put it in your .env as DATABASE_URL (see .env.example)
-    4. Run `python db.py` once to create all shared tables
+    4. From the `backend/` directory, run `python -m core.db` once to
+       create all shared tables
     5. If you have data sitting in per-project physical tables from the
        previous design, run:
-           python db.py migrate-to-shared
+           python -m core.db migrate-to-shared
        to copy it all into the new shared tables (see the function's
        docstring for details -- it's safe to re-run).
 """
@@ -917,11 +918,11 @@ def _migrate_one_project_to_shared(slug):
 
 
 if __name__ == "__main__":
-    # Create/update the shared tables:
-    #   python db.py
+    # Create/update the shared tables (run from the `backend/` directory):
+    #   python -m core.db
     #
     # One-time migration from the old per-project physical tables:
-    #   python db.py migrate-to-shared
+    #   python -m core.db migrate-to-shared
     if len(sys.argv) >= 2 and sys.argv[1] == "migrate-to-shared":
         init_db()
         migrate_per_project_tables_to_shared()

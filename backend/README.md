@@ -1,51 +1,142 @@
-# Keyword Categorizer
+# SEO Backend
 
-Category-only pipeline: uploads a keyword list, fetches the top-3 organic
-Google results per keyword (via Bright Data), and uses OpenAI to assign a
-short, word-constrained category name -- matching against categories
-already created earlier in the run, stored in Postgres.
+FastAPI + Postgres (Supabase) + Redis (Upstash/RQ) backend for the SEO
+dashboard's keyword pipeline: upload a keyword sheet, automatically assign
+each keyword a **category**, group categories into **clusters**, then
+optionally check each keyword's actual Google **rank**.
 
-## Files
+## Pipeline, end to end
 
-- `db.py` — Postgres (Supabase): `jobs`, `categories`, `keyword_categories`
-- `job_queue.py` — Redis (Upstash) + the `category_checks` RQ queue
-- `app.py` — FastAPI backend, `POST /jobs/category` + status/results endpoints
-- `category_checker.py` — the actual scraping + OpenAI logic
-- `category_tasks.py` — worker task run by `rq worker category_checks`
-- `requirements.txt`, `.env.example`/`.env`, `.gitignore`, `start_workers.sh`
+```
+1. Upload            POST /jobs/category (csv/xlsx + country + project name)
+                      -> one row per keyword pre-inserted into keyword_categories
+                      -> one categorize_keyword_task enqueued per keyword
 
-## ⚠️ Worker concurrency
+2. Categorize         (category_checks queue, run with exactly ONE worker)
+                      For each keyword: fetch top-3 Google results (Bright Data),
+                      derive a category name from words common across those
+                      titles + the keyword itself (OpenAI, word-constrained),
+                      match against existing categories or create a new one.
 
-Run only **ONE** `rq worker category_checks` process at a time. Category
-assignment is sequential by design -- each decision depends on categories
-already created by prior keywords in the run, to avoid creating duplicate
-near-identical categories.
+3. Cluster             Auto-triggered once every keyword in the job is
+   (automatic)         categorized. Deterministic, no LLM: groups the
+                      project's entire category list by shared vocabulary.
 
-## Local setup
+4. Rank check          Manually triggered: POST /jobs/{job_id}/check-rank
+   (on demand)         -> one check_rank_task enqueued per keyword
+                      (rank_checks queue, safe to run MANY workers --
+                      each keyword's rank check is fully independent).
+```
+
+## Folder structure
+
+```
+backend/
+├── app.py                 FastAPI app -- all HTTP endpoints (entrypoint: uvicorn app:app)
+├── worker.py               RQ worker entrypoint (entrypoint: python worker.py <queue_name>)
+├── start_workers.sh         Local dev convenience script -- starts both queues at once
+├── requirements.txt
+├── .env                    Local secrets (never committed)
+│
+├── core/                   Shared infrastructure, no business logic
+│   ├── db.py                Postgres access -- every table read/write goes through here
+│   └── job_queue.py          Redis connection + the two RQ Queue objects
+│
+├── services/                Pure business logic (the "how")
+│   ├── category_checker.py   Category naming + deterministic clustering
+│   └── rank_checker.py        Google SERP rank-checking against Bright Data
+│
+├── tasks/                   RQ task wrappers (the "when/where it runs")
+│   ├── category_tasks.py      Tasks on the category_checks queue
+│   └── rank_tasks.py           Tasks on the rank_checks queue
+│
+└── scripts/                 One-off / migration scripts, not imported by the app
+    └── add_target_type_and_region.py
+```
+
+**Why this split:** `core/` has no idea categories or ranks exist -- it's
+just Postgres and Redis plumbing. `services/` has no idea RQ exists -- it's
+plain functions you could unit-test or call from a script. `tasks/` is the
+thin glue that lets RQ's workers find and run those functions. `app.py`
+wires an HTTP request to either inserting data (`core.db`) or enqueuing a
+task (`tasks.*`) -- it never contains business logic itself.
+
+## Setup
 
 ```bash
+cd backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# fill in DATABASE_URL, REDIS_URL, BRIGHTDATA_API_KEY, BRIGHTDATA_SERP_ZONE, OPENAI_API_KEY
+# fill in: DATABASE_URL, REDIS_URL, BRIGHTDATA_API_KEY, BRIGHTDATA_SERP_ZONE,
+#          OPENAI_API_KEY, OPENAI_CHAT_MODEL, DEFAULT_DOMAIN
 
-python3 db.py          # one-time: create tables
-uvicorn app:app --reload --port 8000     # terminal 1
-./start_workers.sh                        # terminal 2
+python -m core.db          # one-time: create/update tables
+uvicorn app:app --reload --port 8000     # terminal 1 -- the API
+./start_workers.sh                        # terminal 2 -- both queues
 ```
 
-```bash
-curl http://localhost:8000/health
-curl -F "file=@keywords.csv" http://localhost:8000/jobs/category
-curl http://localhost:8000/jobs/<job_id>
-curl http://localhost:8000/jobs/<job_id>/results
-curl http://localhost:8000/jobs/<job_id>/download -o results.csv
+Health check: `curl http://localhost:8000/health`
+
+Interactive API docs (Swagger UI, auto-generated by FastAPI): `http://localhost:8000/docs`
+
+## Worker concurrency -- read before touching workers
+
+| Queue | Worker count | Why |
+|---|---|---|
+| `category_checks` | **exactly 1** | Category assignment is sequential -- each decision depends on categories already created earlier in the SAME run, to avoid creating near-duplicate categories. Running more than one worker WILL create duplicates. |
+| `rank_checks` | 1+, as many as you want | Each keyword's rank check is fully independent -- no shared state, safe to parallelize freely. `start_workers.sh`'s `RANK_WORKER_COUNT` controls this locally. |
+
+On Render (or any host), this means **two separate background worker
+services**, not one:
 ```
+Service 1: python worker.py category_checks     (instance count: 1, always)
+Service 2: python worker.py rank_checks          (instance count: 1+)
+```
+
+## A gotcha from this folder restructure
+
+RQ serializes enqueued jobs as a **string module path** to the task function
+(e.g. `tasks.category_tasks.categorize_keyword_task`). If you deploy this
+restructured layout over a previous flat-file deployment (where the same
+task lived at `category_tasks.categorize_keyword_task`), any jobs still
+sitting in the Redis queue from before the deploy will fail to resolve on
+the new workers. Let both queues fully drain before deploying this
+structure, or just accept that pre-existing stuck jobs will need to be
+re-enqueued afterward.
+
+## Environment variables
+
+| Variable | Used by | Purpose |
+|---|---|---|
+| `DATABASE_URL` | `core/db.py` | Postgres (Supabase) connection string |
+| `REDIS_URL` | `core/job_queue.py` | Redis (Upstash) connection string |
+| `BRIGHTDATA_API_KEY` | `services/category_checker.py`, `services/rank_checker.py` | Bright Data Web Unlocker auth |
+| `BRIGHTDATA_SERP_ZONE` | same | Which Bright Data zone to hit |
+| `OPENAI_API_KEY` | `services/category_checker.py` | Category naming + intent matching |
+| `OPENAI_CHAT_MODEL` | same | Defaults to `gpt-4o-mini` if unset |
+| `DEFAULT_DOMAIN` | `services/rank_checker.py` | Fallback domain for rank matching when a keyword row has no registered project domain |
+
+## Key API endpoints
+
+```
+POST /domains                            register a domain <-> project (the "Create Project" form)
+POST /jobs/category                       upload a sheet -> creates/reuses a project, starts categorization
+GET  /jobs/{job_id}                        poll job status/progress
+GET  /jobs/{job_id}/results                 per-keyword results for one job
+POST /jobs/{job_id}/check-rank               manually trigger rank-checking for a completed job
+GET  /projects/{project}/results             ALL results ever processed for a project, across every job
+POST /projects/{project}/recluster            manually re-run clustering for one project
+GET  /health
+```
+
+Full list with details lives in `app.py`'s module docstring.
 
 ## Before deploying
 
 - Rotate every credential in `.env` if it was ever pasted anywhere outside your own machine
-- Lock down CORS in `app.py`
-- Decide on auth before the API is public
+- Lock down CORS in `app.py` (currently `allow_origins=["*"]`)
+- Decide on auth before the API is public -- there is none right now
+- Read the RQ module-path gotcha above before deploying this restructure over an existing one

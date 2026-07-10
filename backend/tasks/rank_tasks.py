@@ -14,8 +14,8 @@ module docstring for why this is safe (no shared mutable state beyond a
 thread-local HTTP session used purely for connection pooling).
 """
 
-import db
-import rank_checker
+from core import db
+from services import rank_checker
 
 
 def check_rank_task(job_id, project_slug, row_id, keyword, landing_page_url, country_code=None):
