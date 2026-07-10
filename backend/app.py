@@ -312,6 +312,47 @@ async def create_category_job(
     }
 
 
+class CategorizeExistingRequest(BaseModel):
+    country: str
+
+
+@app.post("/projects/{project}/categorize")
+def categorize_existing_keywords(project: str, payload: CategorizeExistingRequest):
+    """Trigger categorization for keywords ALREADY sitting in this
+    project (e.g. imported earlier without categorization ever
+    completing, or added some other way) -- unlike /jobs/category, this
+    does NOT insert any new rows. It only enqueues one
+    categorize_keyword_task per EXISTING row that doesn't have a category
+    yet (status='queued'), so re-running it can never duplicate keywords.
+    This is what the frontend's "AI cluster" button calls."""
+    proj = _resolve_project_or_404(project)
+
+    country_code = category_checker.resolve_country_code(payload.country)
+    if not country_code:
+        raise HTTPException(
+            400,
+            f"Unknown country: '{payload.country}'. Try a full country name "
+            f"(e.g. 'India', 'United States') or its 2-letter code (e.g. 'in', 'us')."
+        )
+
+    rows = db.get_uncategorized_keyword_rows(proj["slug"])
+    if not rows:
+        raise HTTPException(400, "No un-categorized keywords found for this project.")
+
+    job_id = db.create_job(
+        "existing-keywords", proj["slug"], proj["name"], payload.country, country_code, total=len(rows),
+    )
+    db.set_job_status(job_id, "running")
+
+    for r in rows:
+        category_queue.enqueue(
+            categorize_keyword_task, job_id, proj["slug"], r["keyword"], country_code, r["id"],
+            job_timeout=180,
+        )
+
+    return {"job_id": job_id, "project": proj["name"], "keywords_enqueued": len(rows)}
+
+
 @app.get("/projects")
 def get_projects():
     """Every project that has ever been created."""

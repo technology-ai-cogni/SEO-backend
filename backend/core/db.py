@@ -655,6 +655,29 @@ def get_job_keyword_rows_for_rank_check(job_id):
         return [dict(r) for r in rows]
 
 
+def get_uncategorized_keyword_rows(domain):
+    """Every keyword_categories row for this project that hasn't been
+    categorized yet, ordered by id (i.e. original upload/insertion
+    order). Used by the 'trigger categorization' endpoint, which
+    categorizes ALREADY-INSERTED rows in place -- it never inserts new
+    rows, so it can't create duplicates the way re-uploading the same
+    sheet through /jobs/category would.
+
+    Matched on `category IS NULL` rather than `status = 'queued'` --
+    that's the real signal a row needs categorizing, and it's robust to
+    rows that ended up in this table some other way than the normal
+    upload pipeline (e.g. seeded directly via Supabase, or a row whose
+    previous categorization attempt errored out) where `status` might be
+    NULL or something other than 'queued'."""
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT id, keyword FROM keyword_categories
+            WHERE project_name = :project_name AND category IS NULL
+            ORDER BY id
+        """), {"project_name": domain}).mappings().fetchall()
+        return [dict(r) for r in rows]
+
+
 def insert_category_result(job_id, domain, keyword, category, cluster, status, meta=None, error=None):
     """LEGACY fallback path -- inserts a brand-new row rather than
     updating a pre-inserted one. Kept only so any task already sitting in

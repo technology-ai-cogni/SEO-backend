@@ -25,9 +25,6 @@ import os
 
 from dotenv import load_dotenv
 from redis import Redis
-from redis.backoff import ExponentialBackoff
-from redis.exceptions import ConnectionError as RedisConnectionError, TimeoutError as RedisTimeoutError
-from redis.retry import Retry
 from rq import Queue
 
 load_dotenv()
@@ -40,20 +37,29 @@ if not REDIS_URL:
     )
 
 # Upstash (and most managed Redis) silently closes connections that sit
-# idle for a while. Without these options, redis-py doesn't notice until
-# it tries to USE the dead connection -- which surfaced as a
+# idle for a while. Without `health_check_interval`, redis-py doesn't
+# notice until it tries to USE the dead connection -- which surfaced as a
 # BrokenPipeError crashing the whole POST /jobs/category request (after
 # keyword rows were already inserted, but before any tasks got enqueued)
 # on a backend process that had been sitting idle. `health_check_interval`
-# proactively pings and refreshes a connection that's been idle too long;
-# `retry_on_error` + `retry` transparently retries a handful of times with
-# a fresh connection if a command still hits a dead one.
+# PROACTIVELY pings and transparently reconnects a connection that's been
+# idle too long, BEFORE the real command is sent on it.
+#
+# Deliberately NOT using redis-py's `retry_on_error` / `retry` here, even
+# though that looks like the obvious complementary fix: this connection is
+# shared with RQ's worker, which uses a BLOCKING pop (BRPOP) to dequeue
+# jobs. Retrying a blocking pop after a timeout is unsafe -- if the
+# command actually succeeded server-side but the response was what got
+# lost (not the command), a transparent retry pops the NEXT item and the
+# first one is gone with no error, no log, nothing. That silently dropped
+# a keyword mid-job during testing (task enqueued, never processed, not in
+# any queue/failed/started registry afterward). health_check_interval
+# avoids the dead-connection scenario proactively instead, without ever
+# blindly re-issuing a command that might have already taken effect.
 redis_conn = Redis.from_url(
     REDIS_URL,
     health_check_interval=30,
     socket_keepalive=True,
-    retry_on_error=[RedisConnectionError, RedisTimeoutError, BrokenPipeError],
-    retry=Retry(ExponentialBackoff(base=1, cap=10), 3),
 )
 category_queue = Queue("category_checks", connection=redis_conn)
 rank_queue = Queue("rank_checks", connection=redis_conn)

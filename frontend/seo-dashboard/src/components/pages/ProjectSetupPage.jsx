@@ -1741,15 +1741,6 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
     return freshRows;
   };
 
-  const buildKeywordsCsvFile = (rowsToExport) => {
-    const escape = (val) => {
-      const s = String(val ?? '');
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const lines = ['Keywords,Search Volume', ...rowsToExport.map(r => `${escape(r.kw)},${escape(r.sv ?? '')}`)];
-    return new File([lines.join('\n')], 'keywords.csv', { type: 'text/csv' });
-  };
-
   // Categorization runs on the backend's async job queue (one SERP check per
   // keyword) -- this triggers the job and polls until it's done, refreshing
   // cluster/category from the DB on every tick.
@@ -1807,11 +1798,14 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
 
     setClustering(true);
     try {
-      const formData = new FormData();
-      formData.append('file', buildKeywordsCsvFile(rows));
-      formData.append('project', project.slug);
-      formData.append('country', country);
-      const res = await fetch(`${CATEGORY_API_BASE}/jobs/category`, { method: 'POST', body: formData });
+      // Categorizes keywords ALREADY sitting in this project -- never
+      // re-uploads/re-inserts rows (that's what /jobs/category is for,
+      // and calling it again here was duplicating every keyword).
+      const res = await fetch(`${CATEGORY_API_BASE}/projects/${project.slug}/categorize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ country }),
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.detail?.[0]?.msg || body?.detail || 'Failed to start categorization job.');
