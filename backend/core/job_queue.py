@@ -25,6 +25,9 @@ import os
 
 from dotenv import load_dotenv
 from redis import Redis
+from redis.backoff import ExponentialBackoff
+from redis.exceptions import ConnectionError as RedisConnectionError, TimeoutError as RedisTimeoutError
+from redis.retry import Retry
 from rq import Queue
 
 load_dotenv()
@@ -36,6 +39,21 @@ if not REDIS_URL:
         "Upstash connection string."
     )
 
-redis_conn = Redis.from_url(REDIS_URL)
+# Upstash (and most managed Redis) silently closes connections that sit
+# idle for a while. Without these options, redis-py doesn't notice until
+# it tries to USE the dead connection -- which surfaced as a
+# BrokenPipeError crashing the whole POST /jobs/category request (after
+# keyword rows were already inserted, but before any tasks got enqueued)
+# on a backend process that had been sitting idle. `health_check_interval`
+# proactively pings and refreshes a connection that's been idle too long;
+# `retry_on_error` + `retry` transparently retries a handful of times with
+# a fresh connection if a command still hits a dead one.
+redis_conn = Redis.from_url(
+    REDIS_URL,
+    health_check_interval=30,
+    socket_keepalive=True,
+    retry_on_error=[RedisConnectionError, RedisTimeoutError, BrokenPipeError],
+    retry=Retry(ExponentialBackoff(base=1, cap=10), 3),
+)
 category_queue = Queue("category_checks", connection=redis_conn)
 rank_queue = Queue("rank_checks", connection=redis_conn)
