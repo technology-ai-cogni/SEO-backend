@@ -586,6 +586,8 @@ function AddPagesModal({ open, onClose, projects, onImportPages, lockedProject }
 
 // ─── Add Keywords Modal ──────────────────────────────────────────────────────
 
+// Local dev: pointed at the backend running on localhost:8000 for testing.
+// Swap back to 'https://seo-backend-fqlp.onrender.com' before deploying.
 const CATEGORY_API_BASE = 'https://seo-backend-fqlp.onrender.com';
 
 function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedProject }) {

@@ -199,6 +199,35 @@ def strip_location_from_category(candidate_name, titles):
     return cleaned or candidate_name
 
 
+# Generic, non-topical words that were still slipping into derived
+# category names (e.g. "companies use social media marketing" -> the
+# keyword's own "use" surviving into the category, or "social media
+# agency names ideas marketing") -- category_checker.py's own _STOPWORDS
+# set doesn't cover these; they're filtered out here, deterministically,
+# since this is a fixed small word list, not something requiring
+# semantic judgment (no LLM call needed). Includes basic singular/
+# plural/verb-form variants of each word given.
+_FILLER_WORDS = {
+    "use", "uses", "used", "using",
+    "guide", "guides",
+    "name", "names",
+    "idea", "ideas",
+    "report", "reports",
+    "size", "sizes",
+}
+
+
+def strip_filler_words_from_category(candidate_name):
+    """Removes any _FILLER_WORDS entries from a candidate category name,
+    keeping every other word exactly as-is and in order. Only called
+    AFTER derive_category_name + the Best/Top rule + location-stripping
+    have already run, as one more cleanup pass, not a replacement for
+    any of them."""
+    words = candidate_name.split()
+    kept = [w for w in words if w.lower() not in _FILLER_WORDS]
+    return " ".join(kept) if kept else candidate_name
+
+
 def reset_categories_for_project(domain):
     """
     Delete every category already stored for this project before this run
@@ -240,6 +269,7 @@ def categorize_from_top3(keyword, top3, domain):
     raw_candidate = category_checker.derive_category_name(titles, keyword)
     candidate_name = category_checker._apply_best_top_rule(raw_candidate, titles)
     candidate_name = strip_location_from_category(candidate_name, titles)
+    candidate_name = strip_filler_words_from_category(candidate_name)
 
     existing_category_names = [
         name for name in db.list_category_names(domain)

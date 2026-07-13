@@ -379,9 +379,30 @@ def run_pipeline(input_path, project_display_name=None, num_tabs=serp_scraper.NU
 
     project_display_name = project_display_name or os.path.basename(base)
     domain = db.get_or_create_project(project_display_name)
-    reset_categories_for_project(domain)
-    print(f"Using project '{project_display_name}' (slug: {domain}) -- reset to a clean category slate\n")
+    print(f"Using project '{project_display_name}' (slug: {domain})\n")
 
+    # Resume behavior: skip any keyword that a PREVIOUS run of this
+    # pipeline already crawled+categorized successfully for this project
+    # (i.e. already has a non-empty top-3 result sitting in Supabase) --
+    # only keywords still missing, or that came back empty last time, get
+    # scraped/categorized/clustered/landing-blog/info-comm'd again.
+    #
+    # NOTE: this is why the categories table is no longer wiped
+    # (reset_categories_for_project) at the start of every run anymore --
+    # doing so would erase the very categories a resumed run needs to
+    # match new keywords against. reset_categories_for_project() is still
+    # available (below) for when you deliberately want a fully fresh run.
+    already_crawled = db.get_crawled_keywords(domain)
+    rows_to_process = [r for r in rows if r["keyword"] not in already_crawled]
+    skipped = len(rows) - len(rows_to_process)
+    print(f"{skipped} of {len(rows)} keyword(s) already crawled -- skipping those; "
+          f"{len(rows_to_process)} left to process.\n")
+
+    if not rows_to_process:
+        print("Nothing new to process.")
+        return output_path
+
+    rows = rows_to_process
     run = PipelineRun(domain, output_path)
     empty_top3_rows = []  # keywords whose first pass came back with no top-3 results
 

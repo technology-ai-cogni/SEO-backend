@@ -721,6 +721,23 @@ def insert_pipeline_result(domain, keyword, category, target_type, subtype, meta
         })
 
 
+def get_crawled_keywords(domain):
+    """Every keyword in this project that ALREADY has a non-empty top-3
+    result stored (meta->'top3' is a real, non-empty JSON array) -- used
+    by scripts/run_pipeline.py to skip re-scraping/re-categorizing
+    keywords a previous run already finished successfully, so re-running
+    the pipeline on the same (or an overlapping) input file only does
+    work for keywords that are still missing or came back empty."""
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT DISTINCT keyword FROM keyword_categories
+            WHERE project_name = :project_name
+              AND meta IS NOT NULL
+              AND jsonb_array_length(COALESCE(meta -> 'top3', '[]'::jsonb)) > 0
+        """), {"project_name": domain}).fetchall()
+        return {r.keyword for r in rows}
+
+
 def get_job_category_results(job_id):
     """job_id alone is enough to filter (globally unique in the shared
     table) -- no need to look up the job's project first anymore."""
