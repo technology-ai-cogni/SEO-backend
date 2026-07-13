@@ -3,6 +3,7 @@ uvicorn[standard]
 python-multipart
 sqlalchemy
 psycopg2-binary
+pandas
 openpyxl
 requests
 beautifulsoup4
