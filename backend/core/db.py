@@ -600,7 +600,7 @@ def insert_keyword_rows(job_id, domain, rows):
 
 
 def update_keyword_result(domain, row_id, category, cluster, status, meta=None, error=None,
-                           computed_target_type=None, computed_region_name=None):
+                           computed_target_type=None, computed_region_name=None, computed_subtype=None):
     """Called by the background worker after processing ONE keyword row
     (identified by the id returned from insert_keyword_rows at upload
     time). `row_id` is globally unique (shared table), so no project
@@ -609,6 +609,9 @@ def update_keyword_result(domain, row_id, category, cluster, status, meta=None, 
 
     Updates category/cluster/status/meta/error, PLUS:
     - target_type: ALWAYS overwritten with computed_target_type.
+    - subtype: ALWAYS overwritten with computed_subtype (Informational/
+      Commercial, same column scripts/run_pipeline.py's
+      insert_pipeline_result() writes).
     - target_geo: filled in with computed_region_name ONLY IF the row's
       target_geo is currently NULL/blank -- never overwrites a target
       geo the user explicitly supplied in their upload.
@@ -621,13 +624,14 @@ def update_keyword_result(domain, row_id, category, cluster, status, meta=None, 
             UPDATE keyword_categories
             SET category = :category, cluster = :cluster, status = :status,
                 meta = CAST(:meta AS JSONB), error = :error, checked_at = now(),
-                target_type = :computed_target_type,
+                target_type = :computed_target_type, subtype = :computed_subtype,
                 target_geo = COALESCE(NULLIF(target_geo, ''), :computed_region_name)
             WHERE id = :id
         """), {
             "id": row_id, "category": category, "cluster": cluster, "status": status,
             "meta": json.dumps(meta) if meta is not None else None, "error": error,
             "computed_target_type": computed_target_type, "computed_region_name": computed_region_name,
+            "computed_subtype": computed_subtype,
         })
 
 

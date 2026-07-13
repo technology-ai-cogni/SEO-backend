@@ -14,14 +14,20 @@ Creating a domain also registers (or reuses) the matching project. One
 domain maps to exactly one project.
 
 Job/result state lives in Postgres (Supabase, db.py) -- that's the ONLY
-external service this API depends on now. There is no separate job
-queue/worker process anymore: category/cluster/landing-blog/info-comm
-work is done by scripts/run_pipeline.py (run directly, or via
-test_api.py), which writes straight into the SAME shared tables this API
-reads from (see scripts/run_pipeline.py and core/db.py's
-insert_pipeline_result()). This app is a read/query layer over that data
-plus the domain/project registry -- it no longer accepts uploads or
-enqueues any processing itself.
+external service this API depends on now. There is no separate RQ/Redis
+job queue or worker process anymore -- two kinds of processing happen
+here instead:
+  1. scripts/run_pipeline.py, run directly (or via test_api.py) on a
+     machine with a real browser -- for bulk SERP scraping of a whole
+     new sheet. Writes straight into the SAME shared tables this API
+     reads from (see core/db.py's insert_pipeline_result()).
+  2. This app's own /projects/{project}/categorize and
+     /jobs/{job_id}/check-rank endpoints -- for keywords the FRONTEND
+     already inserted directly into Supabase (uncategorized) and now
+     wants processed. These run in a background thread inside this same
+     process (scripts/hosted_categorize.py, scripts/hosted_rank_check.py)
+     using Bright Data + plain `requests` instead of Selenium, since a
+     real browser isn't available on a hosted deployment like Render.
 
 Auth is intentionally NOT wired in here yet -- every endpoint is open.
 Lock this down before deploying publicly.
@@ -42,8 +48,14 @@ Endpoints:
                                            this project + its categories
     POST /projects/{project}/recluster       manually re-run clustering
                                            for one project
+    POST /projects/{project}/categorize      categorize existing
+                                           un-categorized keywords in a
+                                           project (background thread)
     GET  /jobs                             list all jobs (every project)
     GET  /jobs/{job_id}                     poll job status/progress
+    POST /jobs/{job_id}/check-rank            check rank for every keyword
+                                           in a completed job (background
+                                           thread)
     GET  /jobs/{job_id}/results               per-keyword results for one job
     GET  /jobs/{job_id}/download              same results, as a CSV download
     GET  /health
@@ -67,6 +79,8 @@ from pydantic import BaseModel
 
 from core import db
 from services import category_checker
+from scripts.hosted_categorize import run_categorize_job_in_background
+from scripts.hosted_rank_check import run_rank_check_job_in_background
 
 app = FastAPI(title="Category API")
 
@@ -176,6 +190,54 @@ def recluster_project(project: str):
     return {"project": proj["name"], "categories_clustered": len(assignment)}
 
 
+class CategorizeExistingRequest(BaseModel):
+    country: str
+
+
+@app.post("/projects/{project}/categorize")
+def categorize_existing_keywords(project: str, payload: CategorizeExistingRequest):
+    """Trigger categorization for keywords ALREADY sitting in this
+    project (inserted directly into Supabase by the frontend -- see
+    projectsApi.js's insertKeywordRows -- with no category yet). This is
+    what the frontend's "AI cluster" button calls.
+
+    Runs entirely in-process, on a background thread
+    (scripts/hosted_categorize.py) -- no RQ/Redis, no separate worker.
+    SERP fetch uses Bright Data (category_checker.get_top3_for_category)
+    and info/comm uses a plain-requests fetch
+    (intent_classifier.classify_single_result_via_requests) instead of
+    Selenium, since this runs on Render where no real browser is
+    available -- category/landing-blog assignment themselves are
+    unchanged, reusing category_assigner.py/landing_blog_classifier.py
+    exactly as scripts/run_pipeline.py does locally.
+
+    Never inserts new rows -- only enqueues (as a background job) one
+    keyword per EXISTING row that doesn't have a category yet
+    (status='queued'), so re-running it can never duplicate keywords."""
+    proj = _resolve_project_or_404(project)
+
+    country_code = category_checker.resolve_country_code(payload.country)
+    if not country_code:
+        raise HTTPException(
+            400,
+            f"Unknown country: '{payload.country}'. Try a full country name "
+            f"(e.g. 'India', 'United States') or its 2-letter code (e.g. 'in', 'us')."
+        )
+
+    rows = db.get_uncategorized_keyword_rows(proj["slug"])
+    if not rows:
+        raise HTTPException(400, "No un-categorized keywords found for this project.")
+
+    job_id = db.create_job(
+        "existing-keywords", proj["slug"], proj["name"], payload.country, country_code, total=len(rows),
+    )
+    db.set_job_status(job_id, "running")
+
+    run_categorize_job_in_background(job_id, proj["slug"], rows, country_code)
+
+    return {"job_id": job_id, "project": proj["name"], "keywords_enqueued": len(rows)}
+
+
 @app.get("/jobs")
 def list_jobs():
     """All jobs, across every project."""
@@ -188,6 +250,47 @@ def get_job(job_id: str):
     if job is None:
         raise HTTPException(404, "Job not found")
     return job
+
+
+@app.post("/jobs/{job_id}/check-rank")
+def check_rank_for_job(job_id: str):
+    """Manual trigger (the "check rank" button) -- runs one rank-check
+    per keyword in this job on a background thread (scripts/
+    hosted_rank_check.py, a thread pool -- no ordering dependency
+    between keywords, so no single-worker restriction here unlike
+    categorization). Not auto-triggered by categorization/clustering;
+    call this once you're happy with how a job's category/cluster
+    results look.
+
+    Requires the job to have finished categorization (status
+    'completed') -- rank-checking a still-running job would race against
+    rows that haven't been categorized yet, and re-running this on the
+    same job re-checks every keyword's rank again (safe to do, e.g. to
+    refresh stale rankings, but each call re-checks ALL of the job's
+    keywords, not just ones missing a rank)."""
+    job = db.get_job(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found")
+    if job["status"] != "completed":
+        raise HTTPException(
+            400,
+            f"Job status is '{job['status']}', not 'completed' -- wait for "
+            f"categorization to finish before checking rank."
+        )
+    if not job.get("clustering_triggered_at"):
+        raise HTTPException(
+            400,
+            "Clustering hasn't been triggered for this job yet -- it usually "
+            "fires within moments of the job completing; try again shortly."
+        )
+
+    country_code = job.get("country_code")
+    project_slug = job["domain"]
+
+    rows = db.get_job_keyword_rows_for_rank_check(job_id)
+    run_rank_check_job_in_background(project_slug, rows, country_code)
+
+    return {"job_id": job_id, "rank_checks_enqueued": len(rows)}
 
 
 @app.get("/jobs/{job_id}/results")

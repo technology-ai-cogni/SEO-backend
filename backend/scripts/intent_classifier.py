@@ -31,6 +31,7 @@ import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI, APIConnectionError, APITimeoutError, RateLimitError
 from dotenv import load_dotenv
@@ -413,6 +414,44 @@ def classify_single_result(url, title):
         return None
 
     html, fetch_error = fetch_page(url)
+    if html:
+        signals = extract_page_signals(url, html)
+    else:
+        signals = {"url": url, "title": title, "fetch_error": fetch_error}
+
+    result = classify_page_intent(signals)
+    result["url"] = url
+    return result
+
+
+def fetch_page_via_requests(url):
+    """Selenium-free fetch, for environments with no real browser
+    available (e.g. app.py's hosted /projects/{project}/categorize
+    endpoint on Render) -- a plain HTTP GET instead of a headless Chrome
+    driver. Best-effort: several JS-heavy sites won't render fully via a
+    raw GET the way they do through fetch_page() above, but
+    classify_page_intent() already degrades gracefully to title-only
+    signals when a fetch fails entirely, same as it does for a failed
+    Selenium fetch -- so this is a reasonable tradeoff for a deployment
+    that can't run a browser at all, not a replacement for fetch_page()
+    where a browser IS available."""
+    try:
+        resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=FETCH_TIMEOUT)
+        resp.raise_for_status()
+        return resp.text, None
+    except requests.exceptions.RequestException as e:
+        return None, str(e)
+
+
+def classify_single_result_via_requests(url, title):
+    """Same as classify_single_result() above, but via
+    fetch_page_via_requests() instead of a headless Chrome driver -- no
+    thread-local browser is created or tracked, so close_all_drivers()
+    is a no-op for calls made through this path."""
+    if not url:
+        return None
+
+    html, fetch_error = fetch_page_via_requests(url)
     if html:
         signals = extract_page_signals(url, html)
     else:
