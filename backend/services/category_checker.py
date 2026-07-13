@@ -461,9 +461,11 @@ def derive_category_name(titles, keyword=None):
         seen_norms = set()
         qualifying_words = []
         for w in re.findall(r"[A-Za-z0-9]+", titles[0].lower()):
-            if w in _LOCATION_WORDS or w in _STOPWORDS or w in _RANKING_WORDS or w.isdigit():
-                continue
             norm = _singularize_word(w)
+            if (w in _LOCATION_WORDS or norm in _LOCATION_WORDS
+                    or w in _STOPWORDS or norm in _STOPWORDS
+                    or w in _RANKING_WORDS or norm in _RANKING_WORDS or w.isdigit()):
+                continue
             if norm in seen_norms:
                 continue
             seen_norms.add(norm)
@@ -807,7 +809,7 @@ def categorize_keyword(keyword, domain, country_code=None):
 
 _STOPWORDS = {
     "a", "an", "the", "in", "of", "on", "at", "to", "for", "and", "or",
-    "with", "by", "is", "are", "vs", "your", "you",
+    "with", "by", "is", "are", "vs", "your", "you", "list",
 }
 # "best"/"top" are excluded separately, only where the caller wants them
 # excluded (cluster words always; category qualifying-words too, since
