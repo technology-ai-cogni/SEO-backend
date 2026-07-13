@@ -3,12 +3,11 @@ uvicorn[standard]
 python-multipart
 sqlalchemy
 psycopg2-binary
-redis
-rq
-pandas
 openpyxl
 requests
 beautifulsoup4
 openai
 python-dotenv
 pycountry
+selenium
+webdriver_manager

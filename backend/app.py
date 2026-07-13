@@ -10,13 +10,18 @@ slug (e.g. "real_estate_clients") -- both resolve to the same project.
 
 DOMAINS: a separate registry capturing the "Create Project" form (domain,
 project name, target regions, platforms, domain authority, users).
-Creating a domain also registers (or reuses) the matching project, so
-you can immediately follow up with a /jobs/category upload against that
-same project name. One domain maps to exactly one project.
+Creating a domain also registers (or reuses) the matching project. One
+domain maps to exactly one project.
 
-Job/result state lives in Postgres (db.py). Actual categorization happens
-in a separate worker process via RQ (job_queue.py, category_tasks.py) --
-this process only enqueues work and reads state.
+Job/result state lives in Postgres (Supabase, db.py) -- that's the ONLY
+external service this API depends on now. There is no separate job
+queue/worker process anymore: category/cluster/landing-blog/info-comm
+work is done by scripts/run_pipeline.py (run directly, or via
+test_api.py), which writes straight into the SAME shared tables this API
+reads from (see scripts/run_pipeline.py and core/db.py's
+insert_pipeline_result()). This app is a read/query layer over that data
+plus the domain/project registry -- it no longer accepts uploads or
+enqueues any processing itself.
 
 Auth is intentionally NOT wired in here yet -- every endpoint is open.
 Lock this down before deploying publicly.
@@ -26,9 +31,6 @@ Endpoints:
                                            (the "Create Project" form)
     GET  /domains                          list every domain that's been
                                            registered
-    POST /jobs/category                   upload -> category job for a
-                                           project (creates the project on
-                                           first use), one task per keyword
     GET  /projects                         list every project that exists
     GET  /projects/{project}/results        ALL keyword results ever
                                            processed for a project, across
@@ -46,34 +48,25 @@ Endpoints:
     GET  /jobs/{job_id}/download              same results, as a CSV download
     GET  /health
 
-Run locally, from the `backend/` directory (needs a worker running
-separately too -- see README.md):
+Run locally, from the `backend/` directory:
     python -m core.db              # one-time: creates/updates shared tables
     uvicorn app:app --reload --port 8000
-    rq worker category_checks     # in a separate terminal -- run ONLY ONE
 """
 
 from dotenv import load_dotenv
-load_dotenv()  # must happen before importing core.db / core.job_queue
+load_dotenv()  # must happen before importing core.db
 
 import io
 import csv
 from typing import List, Optional
 
-import pandas as pd
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core import db
 from services import category_checker
-from core.job_queue import category_queue, rank_queue
-from tasks.category_tasks import categorize_keyword_task
-from tasks.rank_tasks import check_rank_task
-
-MIN_SEARCH_VOLUME = 5
-NEAR_ME_PHRASE = "near me"
 
 app = FastAPI(title="Category API")
 
@@ -99,107 +92,6 @@ class CreateDomainRequest(BaseModel):
     users: Optional[List[DomainUser]] = None
 
 
-
-
-def _find_column(columns, candidates):
-    lower_map = {c.lower().strip(): c for c in columns}
-    for candidate in candidates:
-        if candidate in lower_map:
-            return lower_map[candidate]
-    return None
-
-
-def _load_dataframe(file_bytes, filename):
-    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
-    buf = io.BytesIO(file_bytes)
-    if ext == "csv":
-        return pd.read_csv(buf)
-    elif ext in ("xlsx", "xls"):
-        return pd.read_excel(buf)
-    else:
-        raise ValueError(f"Unsupported file type: .{ext} (use .csv or .xlsx)")
-
-
-def _parse_upload(df):
-    """Column resolution + SV/'near me' filtering. Returns a list of
-    dicts, one per keyword row, with keys:
-        keyword, skip_reason,
-        sv, kw_diff, type, target_type, target_subtype, target_geo, priority, landing_page_url
-    skip_reason is None for rows that should actually be processed.
-
-    Every pass-through field (everything except keyword/skip_reason) is
-    stored EXACTLY as it appears in the sheet -- None if that column
-    isn't present at all, or if this particular row's cell is blank.
-    Nothing here is inferred or generated -- that's the whole point."""
-    df.columns = [str(c).strip() for c in df.columns]
-
-    keyword_col = _find_column(df.columns, ["keywords", "keyword", "kw"])
-    if keyword_col is None:
-        raise HTTPException(400, f"No 'Keywords' column found. Columns present: {list(df.columns)}")
-
-    sv_col = _find_column(df.columns, ["search volume", "sv", "volume", "search_volume"])
-    kw_diff_col = _find_column(df.columns, ["kw diff", "keyword difficulty", "kd", "difficulty", "kw_diff", "kw difficulty"])
-    type_col = _find_column(df.columns, ["type"])
-    target_type_col = _find_column(df.columns, ["target type", "target_type"])
-    target_subtype_col = _find_column(df.columns, ["target subtype", "subtype", "target_subtype"])
-    target_geo_col = _find_column(df.columns, ["target geo", "geo", "location", "target_geo"])
-    priority_col = _find_column(df.columns, ["priority"])
-    landing_page_col = _find_column(df.columns, ["landing page(url)", "landing page (url)", "landing page", "landing_page", "landing page url", "url"])
-
-    def _cell(row, col):
-        """Raw pass-through value for one cell -- None if the column
-        doesn't exist, or if this row's value is blank/NaN. Never
-        transformed, inferred, or defaulted to anything else -- EXCEPT
-        for undoing pandas' own float-coercion artifact: a numeric
-        column with any blank cell gets read as float64, so a whole
-        number like 500 comes back as 500.0. That's pandas' doing, not
-        the sheet's -- we strip a trailing ".0" so what's stored matches
-        what was actually typed in the sheet."""
-        if col is None:
-            return None
-        value = row.get(col)
-        if value is None:
-            return None
-        if isinstance(value, float) and value.is_integer():
-            text_value = str(int(value))
-        else:
-            text_value = str(value).strip()
-        if text_value == "" or text_value.lower() == "nan":
-            return None
-        return text_value
-
-    rows = []
-    for _, row in df.iterrows():
-        keyword = str(row.get(keyword_col, "")).strip()
-        if keyword == "" or keyword.lower() == "nan":
-            continue
-
-        skip_reason = None
-        if NEAR_ME_PHRASE in keyword.lower():
-            skip_reason = "Skipped - contains 'near me'"
-        elif sv_col:
-            raw_sv = row.get(sv_col)
-            try:
-                sv_value = float(raw_sv)
-                if sv_value <= MIN_SEARCH_VOLUME:
-                    skip_reason = f"Skipped - low search volume ({raw_sv})"
-            except (TypeError, ValueError):
-                pass  # SV missing/non-numeric -> don't filter on it
-
-        rows.append({
-            "keyword": keyword,
-            "skip_reason": skip_reason,
-            "sv": _cell(row, sv_col),
-            "kw_diff": _cell(row, kw_diff_col),
-            "type": _cell(row, type_col),
-            "target_type": _cell(row, target_type_col),
-            "target_subtype": _cell(row, target_subtype_col),
-            "target_geo": _cell(row, target_geo_col),
-            "priority": _cell(row, priority_col),
-            "landing_page_url": _cell(row, landing_page_col),
-        })
-
-    return rows
 
 
 def _resolve_project_or_404(project_param):
@@ -240,117 +132,6 @@ def create_domain(payload: CreateDomainRequest):
 def list_domains_endpoint():
     """Every domain that's been registered -- the project listing view."""
     return {"domains": db.list_domain_records()}
-
-
-@app.post("/jobs/category")
-async def create_category_job(
-    file: UploadFile = File(...),
-    country: str = Form(...),
-    project: str = Form(...),
-):
-    """Upload a .csv/.xlsx with a 'Keywords' column (optionally 'Search
-    Volume'). `country` is a country name (e.g. "India", "United States")
-    or a 2-letter code (e.g. "in", "us") -- every SERP search in this job
-    runs against that country's Google region. `project` is any name you
-    want -- if it's never been used before, it's created automatically
-    (along with its own dedicated tables) right here. Creates a category
-    job and enqueues one task per keyword that passes the SV/'near me'
-    filters."""
-    country_code = category_checker.resolve_country_code(country)
-    if not country_code:
-        raise HTTPException(
-            400,
-            f"Unknown country: '{country}'. Try a full country name "
-            f"(e.g. 'India', 'United States') or its 2-letter code (e.g. 'in', 'us')."
-        )
-
-    project_name = (project or "").strip()
-    if not project_name:
-        raise HTTPException(400, "Project name is required.")
-    try:
-        project_slug = db.get_or_create_project(project_name)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-    filename = file.filename or "upload.csv"
-    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
-    if ext not in ("csv", "xlsx", "xls"):
-        raise HTTPException(400, "File must be .csv, .xlsx, or .xls")
-
-    contents = await file.read()
-    try:
-        df = _load_dataframe(contents, filename)
-    except Exception as e:
-        raise HTTPException(400, f"Could not read file: {e}")
-
-    rows = _parse_upload(df)
-    to_process = [r for r in rows if r["skip_reason"] is None]
-    if not to_process:
-        raise HTTPException(400, "No usable keyword rows found after filtering")
-
-    job_id = db.create_job(filename, project_slug, project_name, country, country_code, total=len(to_process))
-    db.set_job_status(job_id, "running")
-
-    # Pre-insert one row per keyword RIGHT NOW, with whatever pass-through
-    # sheet data (sv/kw_diff/type/target_subtype/target_geo/priority/
-    # landing_page_url) it had -- stored immediately, regardless of
-    # whether/when categorization succeeds. The worker task below only
-    # ever fills in category/cluster/status/meta on these SAME rows.
-    row_ids = db.insert_keyword_rows(job_id, project_slug, to_process)
-
-    for r, row_id in zip(to_process, row_ids):
-        category_queue.enqueue(
-            categorize_keyword_task,
-            job_id, project_slug, r["keyword"], country_code, row_id,
-            job_timeout=180,
-        )
-
-    return {
-        "job_id": job_id, "status": "running", "project": project_name, "project_slug": project_slug,
-        "country": country, "country_code": country_code,
-        "total": len(to_process), "skipped": len(rows) - len(to_process),
-    }
-
-
-class CategorizeExistingRequest(BaseModel):
-    country: str
-
-
-@app.post("/projects/{project}/categorize")
-def categorize_existing_keywords(project: str, payload: CategorizeExistingRequest):
-    """Trigger categorization for keywords ALREADY sitting in this
-    project (e.g. imported earlier without categorization ever
-    completing, or added some other way) -- unlike /jobs/category, this
-    does NOT insert any new rows. It only enqueues one
-    categorize_keyword_task per EXISTING row that doesn't have a category
-    yet (status='queued'), so re-running it can never duplicate keywords.
-    This is what the frontend's "AI cluster" button calls."""
-    proj = _resolve_project_or_404(project)
-
-    country_code = category_checker.resolve_country_code(payload.country)
-    if not country_code:
-        raise HTTPException(
-            400,
-            f"Unknown country: '{payload.country}'. Try a full country name "
-            f"(e.g. 'India', 'United States') or its 2-letter code (e.g. 'in', 'us')."
-        )
-
-    rows = db.get_uncategorized_keyword_rows(proj["slug"])
-    if not rows:
-        raise HTTPException(400, "No un-categorized keywords found for this project.")
-
-    job_id = db.create_job(
-        "existing-keywords", proj["slug"], proj["name"], payload.country, country_code, total=len(rows),
-    )
-    db.set_job_status(job_id, "running")
-
-    for r in rows:
-        category_queue.enqueue(
-            categorize_keyword_task, job_id, proj["slug"], r["keyword"], country_code, r["id"],
-            job_timeout=180,
-        )
-
-    return {"job_id": job_id, "project": proj["name"], "keywords_enqueued": len(rows)}
 
 
 @app.get("/projects")
@@ -407,48 +188,6 @@ def get_job(job_id: str):
     if job is None:
         raise HTTPException(404, "Job not found")
     return job
-
-
-@app.post("/jobs/{job_id}/check-rank")
-def check_rank_for_job(job_id: str):
-    """Manual trigger (the "check rank" button) -- enqueues one rank-check
-    task per keyword in this job onto the SEPARATE 'rank_checks' queue.
-    Not auto-triggered by categorization/clustering; call this once
-    you're happy with how a job's category/cluster results look.
-
-    Requires the job to have finished categorization (status
-    'completed') -- rank-checking a still-running job would race against
-    rows that haven't been categorized yet, and re-running this on the
-    same job re-checks every keyword's rank again (safe to do, e.g. to
-    refresh stale rankings, but each call re-enqueues ALL of the job's
-    keywords, not just ones missing a rank)."""
-    job = db.get_job(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
-    if job["status"] != "completed":
-        raise HTTPException(
-            400,
-            f"Job status is '{job['status']}', not 'completed' -- wait for "
-            f"categorization to finish before checking rank."
-        )
-    if not job.get("clustering_triggered_at"):
-        raise HTTPException(
-            400,
-            "Clustering hasn't been triggered for this job yet -- it usually "
-            "fires within moments of the job completing; try again shortly."
-        )
-
-    country_code = job.get("country_code")
-    project_slug = job["domain"]
-
-    rows = db.get_job_keyword_rows_for_rank_check(job_id)
-    for row in rows:
-        rank_queue.enqueue(
-            check_rank_task, job_id, project_slug, row["id"], row["keyword"], row["landing_page_url"],
-            country_code, job_timeout=300,
-        )
-
-    return {"job_id": job_id, "rank_checks_enqueued": len(rows)}
 
 
 @app.get("/jobs/{job_id}/results")

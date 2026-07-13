@@ -261,6 +261,10 @@ def init_db():
         conn.execute(text("ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank INTEGER"))
         conn.execute(text("ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank_checked_at TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank_meta JSONB"))
+        # Informational/Commercial classification from scripts/intent_classifier.py,
+        # written by scripts/run_pipeline.py. target_type (Landing/Blog Page,
+        # from scripts/landing_blog_classifier.py) already has a column above.
+        conn.execute(text("ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS subtype TEXT"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_keyword_categories_job ON keyword_categories (job_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_keyword_categories_project ON keyword_categories (project_name)"))
 
@@ -693,6 +697,27 @@ def insert_category_result(job_id, domain, keyword, category, cluster, status, m
             "cluster": cluster, "status": status,
             "meta": json.dumps(meta) if meta is not None else None,
             "error": error,
+        })
+
+
+def insert_pipeline_result(domain, keyword, category, target_type, subtype, meta=None):
+    """Used by scripts/run_pipeline.py -- no RQ/Redis job involved, so
+    job_id is always NULL here (no `jobs` row exists for a script-driven
+    run). `cluster` is deliberately left out/NULL at insert time -- it's
+    filled in afterward, in bulk, by replace_domain_clusters() (called
+    from scripts/cluster_assigner.py's cluster_project(), once every
+    keyword in the run has a category) matching on project_name+category,
+    the same way it already does for the rest of this table."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO keyword_categories
+                (job_id, project_name, keyword, category, status, target_type, subtype, meta)
+            VALUES
+                (NULL, :project_name, :keyword, :category, 'processed', :target_type, :subtype, CAST(:meta AS JSONB))
+        """), {
+            "project_name": domain, "keyword": keyword, "category": category,
+            "target_type": target_type, "subtype": subtype,
+            "meta": json.dumps(meta) if meta is not None else None,
         })
 
 
