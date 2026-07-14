@@ -1290,7 +1290,7 @@ function EditPageModal({ open, onClose, page, onSave }) {
 const PAGE_BULK_FIELDS = [
   { value: 'cluster', label: 'Cluster', type: 'text' },
   { value: 'category', label: 'Category', type: 'text' },
-  { value: 'targetCategory', label: 'Target Category', type: 'select', options: ['Landing Page', 'Topical Blog'] },
+  { value: 'targetCategory', label: 'Target Category', type: 'select', options: ['Blogs', 'Landing Page'] },
   { value: 'targetType', label: 'Target Type', type: 'select', options: ['Commercial', 'Informational'] },
 ];
 
@@ -1679,7 +1679,7 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
               <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
             ))}
             <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-              <HeaderQuickSelect placeholder="Target Category" options={['Landing Page', 'Topical Blog']} onSet={v => bulkUpdate('targetCategory', v)} />
+              <HeaderQuickSelect placeholder="Target Category" options={['Blogs', 'Landing Page']} onSet={v => bulkUpdate('targetCategory', v)} />
             </th>
             <th style={{ padding: '6px 16px', textAlign: 'left' }}>
               <HeaderQuickSelect placeholder="Target Type" options={['Commercial', 'Informational']} onSet={v => bulkUpdate('targetType', v)} />
