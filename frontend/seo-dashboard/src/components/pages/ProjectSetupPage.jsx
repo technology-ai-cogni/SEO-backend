@@ -1361,6 +1361,18 @@ function BulkEditModal({ open, onClose, count, onApply, fields }) {
   );
 }
 
+function RecclusterConfirmModal({ open, onClose, onConfirm }) {
+  return (
+    <Modal open={open} onClose={onClose} title="Already clustered"
+      footer={<><Btn variant="primary" onClick={() => { onConfirm(); onClose(); }}>Re-cluster</Btn><Btn variant="outline" onClick={onClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
+    >
+      <div style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+        It is already clustered, do you want to re-cluster?
+      </div>
+    </Modal>
+  );
+}
+
 function BulkDeleteModal({ open, onClose, count, onConfirm }) {
   return (
     <Modal open={open} onClose={onClose} title="Confirm Delete"
@@ -1719,6 +1731,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
 
   const [clustering, setClustering] = useState(false);
   const [clusterError, setClusterError] = useState('');
+  const [showReclusterConfirm, setShowReclusterConfirm] = useState(false);
 
   // Target Type / Target Subtype header dropdowns filter the visible rows
   // rather than editing them -- selecting a value shows only rows whose
@@ -1876,7 +1889,32 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
     tick(0);
   };
 
-  const handleRunClustering = async () => {
+  const runClusteringJob = async (recluster) => {
+    setClustering(true);
+    setClusterError('');
+    try {
+      const country = project.location && project.location !== 'Global' ? project.location : '';
+      // Categorizes keywords ALREADY sitting in this project -- never
+      // re-uploads/re-inserts rows (that's what /jobs/category is for,
+      // and calling it again here was duplicating every keyword).
+      const res = await fetch(`${CATEGORY_API_BASE}/projects/${project.slug}/categorize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ country, recluster }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail?.[0]?.msg || body?.detail || 'Failed to start categorization job.');
+      }
+      const job = await res.json();
+      pollClusterJob(job.job_id);
+    } catch (err) {
+      setClustering(false);
+      setClusterError(err.message || 'Failed to start categorization job.');
+    }
+  };
+
+  const handleRunClustering = () => {
     if (clustering) return;
     setClusterError('');
 
@@ -1897,31 +1935,12 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
     // Every row already has a category -- there's nothing left for the
     // normal (uncategorized-only) pass to do, so confirm before
     // overwriting existing results instead of just erroring out.
-    const alreadyClustered = rows.every(r => r.category);
-    if (alreadyClustered && !window.confirm('It is already clustered, do you want to re-cluster?')) {
+    if (rows.every(r => r.category)) {
+      setShowReclusterConfirm(true);
       return;
     }
 
-    setClustering(true);
-    try {
-      // Categorizes keywords ALREADY sitting in this project -- never
-      // re-uploads/re-inserts rows (that's what /jobs/category is for,
-      // and calling it again here was duplicating every keyword).
-      const res = await fetch(`${CATEGORY_API_BASE}/projects/${project.slug}/categorize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ country, recluster: alreadyClustered }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.detail?.[0]?.msg || body?.detail || 'Failed to start categorization job.');
-      }
-      const job = await res.json();
-      pollClusterJob(job.job_id);
-    } catch (err) {
-      setClustering(false);
-      setClusterError(err.message || 'Failed to start categorization job.');
-    }
+    runClusteringJob(false);
   };
 
   // Merges just the `rank` field from the DB into local rows, keyed by row id
@@ -2359,6 +2378,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
 
       <BulkEditModal open={showBulkEdit} onClose={() => setShowBulkEdit(false)} count={selectedRows.size} onApply={handleBulkEditApply} fields={KW_BULK_FIELDS} />
       <BulkDeleteModal open={showBulkDelete} onClose={() => setShowBulkDelete(false)} count={selectedRows.size} onConfirm={handleBulkDelete} />
+      <RecclusterConfirmModal open={showReclusterConfirm} onClose={() => setShowReclusterConfirm(false)} onConfirm={() => runClusteringJob(true)} />
 
       <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1500 }}>
