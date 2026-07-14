@@ -1790,6 +1790,14 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
   const [rankChecking, setRankChecking] = useState(false);
   const [rankCheckError, setRankCheckError] = useState('');
 
+  // Auto-reveal the Rank column whenever loaded rows already have a rank
+  // (a previous check that finished in an earlier session) -- otherwise
+  // it only shows up during an active check-rank run and disappears again
+  // on the next reload/reselect, hiding real data that already exists.
+  useEffect(() => {
+    if (rows.some(r => r.rank != null)) setShowRankColumn(true);
+  }, [rows]);
+
   const [clustering, setClustering] = useState(false);
   const [clusterError, setClusterError] = useState('');
   const [showReclusterConfirm, setShowReclusterConfirm] = useState(false);
@@ -2004,32 +2012,33 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
     runClusteringJob(false);
   };
 
-  // Merges just the `rank` field from the DB into local rows, keyed by row id
-  // -- deliberately leaves everything else in `rows` (including any unsaved
-  // pendingUpdates edits) untouched.
+  // Merges just the `rank`/`rankCheckedAt` fields from the DB into local
+  // rows, keyed by row id -- deliberately leaves everything else in
+  // `rows` (including any unsaved pendingUpdates edits) untouched.
   const refreshRanksFromDb = async () => {
     const freshRows = await fetchKeywordRows(project.slug);
-    const rankById = new Map(freshRows.map(r => [String(r.id), r.rank]));
-    setRows(prev => prev.map(r => rankById.has(String(r.id)) ? { ...r, rank: rankById.get(String(r.id)) } : r));
+    const byId = new Map(freshRows.map(r => [String(r.id), r]));
+    setRows(prev => prev.map(r => {
+      const fresh = byId.get(String(r.id));
+      return fresh ? { ...r, rank: fresh.rank, rankCheckedAt: fresh.rankCheckedAt } : r;
+    }));
     return freshRows;
   };
 
   // Rank-checking runs on the backend's separate 'rank_checks' queue, which
   // is safe to (and does) run with multiple concurrent workers -- see
   // rank_checker.py's module docstring. This just triggers that job and
-  // polls until every keyword in it has been checked.
-  const pollRankCheckJob = (jobId) => {
+  // polls (via Supabase directly, not a job's job_id) until every
+  // categorized keyword has been checked.
+  const pollRankCheckJob = () => {
     const POLL_INTERVAL_MS = 8000;
     const MAX_ATTEMPTS = 90; // ~12 minutes
 
     const tick = async (attempt) => {
       try {
-        const res = await fetch(`${CATEGORY_API_BASE}/jobs/${jobId}/results`);
-        const data = await res.json();
-        const results = data.results || [];
-        await refreshRanksFromDb();
-
-        const allChecked = results.length > 0 && results.every(r => r.rank_checked_at);
+        const freshRows = await refreshRanksFromDb();
+        const categorized = freshRows.filter(r => r.category);
+        const allChecked = categorized.length > 0 && categorized.every(r => r.rankCheckedAt);
         if (allChecked || attempt >= MAX_ATTEMPTS) {
           setRankChecking(false);
           return;
@@ -2052,25 +2061,26 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
       if (!project.slug) {
         throw new Error("This project is missing its backend project reference -- reload the page and try again.");
       }
-
-      const jobsRes = await fetch(`${CATEGORY_API_BASE}/jobs`);
-      if (!jobsRes.ok) throw new Error('Failed to look up this project\'s keyword import jobs.');
-      const jobsData = await jobsRes.json();
-      const latestJob = (jobsData.jobs || [])
-        .filter(j => j.domain === project.slug && j.status === 'completed' && j.clustering_triggered_at)
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-
-      if (!latestJob) {
-        throw new Error('No completed keyword import found for this project yet -- import keywords first.');
+      const country = project.location && project.location !== 'Global' ? project.location : '';
+      if (!country) {
+        throw new Error('This project has no target region set -- set one via Edit Project before checking rank.');
       }
 
-      const res = await fetch(`${CATEGORY_API_BASE}/jobs/${latestJob.id}/check-rank`, { method: 'POST' });
+      // Project-scoped -- checks every already-categorized keyword
+      // directly, no job_id lookup needed (see check_rank_for_project in
+      // app.py for why the old job-based version silently checked
+      // nothing for keywords added via Add Keywords).
+      const res = await fetch(`${CATEGORY_API_BASE}/projects/${project.slug}/check-rank`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ country }),
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        throw new Error(body?.detail || 'Failed to start rank check.');
+        throw new Error(body?.detail?.[0]?.msg || body?.detail || 'Failed to start rank check.');
       }
 
-      pollRankCheckJob(latestJob.id);
+      pollRankCheckJob();
     } catch (err) {
       setRankChecking(false);
       setRankCheckError(err.message || 'Failed to check ranking.');

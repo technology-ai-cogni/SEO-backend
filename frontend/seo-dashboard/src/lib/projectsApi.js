@@ -373,6 +373,7 @@ function kwRowToUi(row) {
     priority: row.priority,
     landingPage: row.landing_page_url,
     rank: row.rank,
+    rankCheckedAt: row.rank_checked_at,
   };
 }
 

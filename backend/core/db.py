@@ -848,6 +848,24 @@ def get_uncategorized_keyword_rows(domain):
         return [dict(r) for r in rows]
 
 
+def get_categorized_keyword_rows(domain):
+    """Every keyword_categories row for this project that already has a
+    category (i.e. has already been through AI-Clustering) -- used by the
+    project-scoped rank-check endpoint. Deliberately NOT scoped by
+    job_id/a specific job the way the old job-based rank-check endpoint
+    was: a project's rows may span several categorization runs, or (via
+    the frontend's Add Keywords flow, which inserts straight into
+    Supabase) may never have had a job_id at all -- rank-checking should
+    still work as long as the row has actually been clustered."""
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT id, keyword, landing_page_url FROM keyword_categories
+            WHERE project_name = :project_name AND category IS NOT NULL
+            ORDER BY id
+        """), {"project_name": domain}).mappings().fetchall()
+        return [dict(r) for r in rows]
+
+
 def set_keyword_rows_job(job_id, row_ids):
     """Backfills job_id onto keyword rows that were inserted directly (no
     job -- e.g. via the frontend's Add Keywords flow, which never creates

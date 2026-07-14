@@ -70,6 +70,10 @@ Endpoints:
     POST /projects/{project}/categorize      categorize existing
                                            un-categorized keywords in a
                                            project (background thread)
+    POST /projects/{project}/check-rank      check rank for every already-
+                                           categorized keyword in a
+                                           project (background thread) --
+                                           what the frontend's button calls
     GET  /pages/counts                     {project_slug: page_count} for
                                            every project with >=1 page row
     GET  /projects/{project}/pages          every page row uploaded via
@@ -607,6 +611,45 @@ def get_job(job_id: str):
     return job
 
 
+class CheckRankRequest(BaseModel):
+    country: str
+
+
+@app.post("/projects/{project}/check-rank")
+def check_rank_for_project(project: str, payload: CheckRankRequest):
+    """Rank-checks every ALREADY-CATEGORIZED keyword in this project, on a
+    background thread (scripts/hosted_rank_check.py) -- scoped by
+    PROJECT, not by a specific job's job_id like the older
+    /jobs/{job_id}/check-rank below. This is what the frontend's "Check
+    initial ranking" button calls.
+
+    The job-scoped version required first finding "the latest completed
+    job" for a project and only rank-checked that job's rows -- which
+    silently checked nothing for any row inserted via the frontend's Add
+    Keywords flow (job_id stays NULL there) unless the project was
+    re-clustered so its rows got backfilled onto a job. This endpoint
+    sidesteps all of that: any row with a category (i.e. has already been
+    through AI-Clustering, regardless of which run or whether a job even
+    exists for it) is eligible, immediately, no re-clustering required."""
+    proj = _resolve_project_or_404(project)
+
+    country_code = category_checker.resolve_country_code(payload.country)
+    if not country_code:
+        raise HTTPException(
+            400,
+            f"Unknown country: '{payload.country}'. Try a full country name "
+            f"(e.g. 'India', 'United States') or its 2-letter code (e.g. 'in', 'us')."
+        )
+
+    rows = db.get_categorized_keyword_rows(proj["slug"])
+    if not rows:
+        raise HTTPException(400, "No categorized keywords found for this project yet -- run AI-Clustering first.")
+
+    run_rank_check_job_in_background(proj["slug"], rows, country_code)
+
+    return {"project": proj["name"], "rank_checks_enqueued": len(rows)}
+
+
 @app.post("/jobs/{job_id}/check-rank")
 def check_rank_for_job(job_id: str):
     """Manual trigger (the "check rank" button) -- runs one rank-check
@@ -616,6 +659,10 @@ def check_rank_for_job(job_id: str):
     categorization). Not auto-triggered by categorization/clustering;
     call this once you're happy with how a job's category/cluster
     results look.
+
+    Superseded by POST /projects/{project}/check-rank (project-scoped,
+    no job_id lookup needed) for the frontend's own button -- kept here
+    for any caller that specifically wants to re-check one job's rows.
 
     Requires the job to have finished categorization (status
     'completed') -- rank-checking a still-running job would race against
