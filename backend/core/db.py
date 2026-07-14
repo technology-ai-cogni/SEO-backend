@@ -771,6 +771,19 @@ def get_page_rows(project_slug):
         return [dict(r) for r in rows]
 
 
+def get_pages_counts():
+    """{project_slug: page_count} for every project that currently has at
+    least one page row -- lets the Pages tab know upfront (without
+    fetching each project's full page list) which projects to list, so a
+    project whose pages were all deleted stops showing up there without
+    needing a per-row 'hidden' flag anywhere."""
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT project_name, COUNT(*) AS count FROM pages GROUP BY project_name
+        """)).mappings().fetchall()
+        return {r["project_name"]: r["count"] for r in rows}
+
+
 def update_page_row(row_id, updates):
     """Updates whichever of page_name/url/cluster/category/target_category/
     target_type are present in `updates` (snake_case keys) -- silently

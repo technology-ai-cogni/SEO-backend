@@ -70,6 +70,8 @@ Endpoints:
     POST /projects/{project}/categorize      categorize existing
                                            un-categorized keywords in a
                                            project (background thread)
+    GET  /pages/counts                     {project_slug: page_count} for
+                                           every project with >=1 page row
     GET  /projects/{project}/pages          every page row uploaded via
                                            Add Pages for this project
     POST /projects/{project}/pages          bulk-insert page rows parsed
@@ -517,6 +519,17 @@ def _page_row_to_json(row):
         "targetCategory": row.get("target_category"),
         "targetType": row.get("target_type"),
     }
+
+
+@app.get("/pages/counts")
+def get_pages_counts_endpoint():
+    """{project_slug: page_count} for every project that currently has at
+    least one page row. Lets the Pages tab list show accurate Total Pages
+    and know which projects to display without fetching every project's
+    full page list up front -- and, after a project's pages are all
+    deleted, its count drops off the response entirely so the tab knows
+    to stop showing it."""
+    return {"counts": db.get_pages_counts()}
 
 
 @app.get("/projects/{project}/pages")

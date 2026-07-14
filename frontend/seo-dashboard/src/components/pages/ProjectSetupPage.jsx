@@ -7,7 +7,7 @@ import { Badge } from '../ui/Card';
 import {
   fetchDomainRows, createProject, updateDomainRow, deleteDomainRow,
   fetchKwProjects, fetchKeywordRows, insertKeywordRows, updateKeywordRow, bulkDeleteKeywordRows, deleteKwClusterData,
-  fetchPageRows, insertPageRows, updatePageRow, deletePageRow, bulkDeletePageRows, deletePagesData,
+  fetchPageRows, insertPageRows, updatePageRow, deletePageRow, bulkDeletePageRows, deletePagesData, fetchPagesCounts,
 } from '../../lib/projectsApi';
 
 // ─── shared tiny components ────────────────────────────────────────────────
@@ -2780,6 +2780,7 @@ export default function ProjectSetupPage({ tab }) {
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsError, setProjectsError] = useState('');
   const [pages, setPages] = useState([]);
+  const [pagesCounts, setPagesCounts] = useState({});
   const [kwClusters, setKwClusters] = useState([]);
   const [kwClustersLoading, setKwClustersLoading] = useState(true);
   const [kwClustersError, setKwClustersError] = useState('');
@@ -2811,37 +2812,49 @@ export default function ProjectSetupPage({ tab }) {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetchPagesCounts()
+      .then(counts => { if (!cancelled) setPagesCounts(counts); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   // The Pages tab has no dedicated backend table of its own -- its rows are
   // derived straight from the real, DB-backed project list (`projects`,
   // fetched for the Domain tab) plus KW Cluster's counts (Commercial vs
-  // Others / Blog Pages / Keywords), matched by slug. Any `detailPages`
-  // already imported locally via Add Pages are preserved across re-syncs;
-  // projects no longer in `projects` (deleted) simply drop out since this
-  // maps over `projects`, not the previous `pages` list.
+  // Others / Blog Pages / Keywords), matched by slug. Only projects with
+  // >=1 real page row (per pagesCounts, fetched from GET /pages/counts)
+  // are included -- so a project whose pages get fully deleted drops off
+  // this list instead of lingering with a permanent "0" row, and it comes
+  // back on its own once pages are added to it again. Any `detailPages`
+  // already loaded locally are preserved across re-syncs.
   useEffect(() => {
     setPages(prev => {
       const bySlug = new Map(prev.map(p => [p.slug, p]));
-      return projects.map(proj => {
-        const kwProject = kwClusters.find(k => k.slug === proj.slug);
-        const existing = bySlug.get(proj.slug);
-        return {
-          ...existing,
-          slug: proj.slug,
-          name: proj.name,
-          domain: proj.domain,
-          locationIcon: proj.locationIcon,
-          location: proj.location,
-          totalPages: existing?.totalPages ?? 0,
-          commercialPct: kwProject?.commercialPct ?? '0/0',
-          blogPages: kwProject?.blogPages ?? 0,
-          blogDir: null,
-          keywords: kwProject?.totalPages ?? 0,
-          keywordsDir: null,
-          updated: proj.updated,
-        };
-      });
+      return projects
+        .filter(proj => (pagesCounts[proj.slug] ?? 0) > 0)
+        .map(proj => {
+          const kwProject = kwClusters.find(k => k.slug === proj.slug);
+          const existing = bySlug.get(proj.slug);
+          return {
+            ...existing,
+            slug: proj.slug,
+            name: proj.name,
+            domain: proj.domain,
+            locationIcon: proj.locationIcon,
+            location: proj.location,
+            totalPages: pagesCounts[proj.slug] ?? 0,
+            commercialPct: kwProject?.commercialPct ?? '0/0',
+            blogPages: kwProject?.blogPages ?? 0,
+            blogDir: null,
+            keywords: kwProject?.totalPages ?? 0,
+            keywordsDir: null,
+            updated: proj.updated,
+          };
+        });
     });
-  }, [projects, kwClusters]);
+  }, [projects, kwClusters, pagesCounts]);
 
   useEffect(() => {
     if (selectedKwProject === null) return;
@@ -2894,17 +2907,20 @@ export default function ProjectSetupPage({ tab }) {
 
   // Deletes just this project's page rows -- deliberately does NOT touch
   // `projects`/`kwClusters`, so the project keeps showing up on the
-  // Domain and KW Cluster tabs. Zeroes out the row's page count in place
-  // rather than removing it from `pages`, since the project still exists.
+  // Domain and KW Cluster tabs. Drops its entry from `pagesCounts` (the
+  // Pages tab's sync effect only lists projects with a >0 count there),
+  // so the row disappears from the Pages tab specifically instead of
+  // lingering with a permanent "0" row.
   const handleDeletePagesProject = async (project) => {
     await deletePagesData(project.slug);
-    setPages(prev => prev.map(p => p.slug === project.slug
-      ? { ...p, totalPages: 0, detailPages: [] }
-      : p));
+    setPagesCounts(prev => { const next = { ...prev }; delete next[project.slug]; return next; });
+    setPages(prev => prev.filter(p => p.slug !== project.slug));
   };
 
   const handleImportPages = async (data) => {
     const insertedRows = await insertPageRows(data.slug, data.pages);
+
+    setPagesCounts(prev => ({ ...prev, [data.slug]: (prev[data.slug] || 0) + insertedRows.length }));
 
     setPages(prev => {
       const targetIdx = typeof data.targetIndex === 'number' ? data.targetIndex : prev.findIndex(p => p.slug === data.slug);
@@ -3128,7 +3144,16 @@ export default function ProjectSetupPage({ tab }) {
           <PageDetailView
             project={pages[selectedPageProject]}
             onBack={() => setSelectedPageProject(null)}
-            onUpdatePages={(updated) => setPages(prev => prev.map((p, i) => i === selectedPageProject ? { ...p, detailPages: updated, totalPages: updated.length } : p))}
+            onUpdatePages={(updated) => {
+              const slug = pages[selectedPageProject]?.slug;
+              if (slug) setPagesCounts(prev => ({ ...prev, [slug]: updated.length }));
+              setPages(prev => prev.map((p, i) => i === selectedPageProject ? { ...p, detailPages: updated, totalPages: updated.length } : p));
+              // Once a project's last page is deleted, its row drops out of
+              // `pages` (see the sync effect above) -- bail back to the list
+              // so `pages[selectedPageProject]` doesn't end up pointing at
+              // the wrong row (or nothing) once that happens.
+              if (updated.length === 0) setSelectedPageProject(null);
+            }}
           />
         ) : activeTab === 'Competitors' && selectedCompetitor !== null ? (
           <CompetitorDetailView

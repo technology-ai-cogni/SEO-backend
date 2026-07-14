@@ -599,6 +599,27 @@ function pageRowToUi(row) {
   };
 }
 
+// {slug: count} for every project with >=1 page row -- used to decide
+// which projects the Pages tab lists (and, after all of a project's pages
+// are deleted, this stops including it, so it drops off the tab without
+// needing a per-row "hidden" flag anywhere).
+export async function fetchPagesCounts() {
+  if (isLocalMode) {
+    const pageRows = JSON.parse(localStorage.getItem('seo_pages') || '[]');
+    const counts = {};
+    pageRows.forEach(r => { counts[r.project_name] = (counts[r.project_name] || 0) + 1; });
+    return counts;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/pages/counts`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to load page counts.');
+  }
+  const data = await res.json();
+  return data.counts || {};
+}
+
 export async function fetchPageRows(slug) {
   if (isLocalMode) {
     const pageRows = JSON.parse(localStorage.getItem('seo_pages') || '[]');
