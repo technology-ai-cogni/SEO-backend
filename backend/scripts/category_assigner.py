@@ -228,6 +228,85 @@ def strip_filler_words_from_category(candidate_name):
     return " ".join(kept) if kept else candidate_name
 
 
+def dedupe_related_words_in_category(candidate_name):
+    """
+    Extra cleanup on top of derive_category_name's own word selection --
+    that function's prompt says "use AS MANY of the allowed words as you
+    sensibly can", which was producing category names with a redundant
+    word tacked on: e.g. "Best/Top website development company web"
+    (trailing "web" is just a shorter, redundant restatement of
+    "website" already in the name), or "web design company web
+    development" (the word "web" appearing twice).
+
+    Deterministic, word-level cleanup, applied left-to-right:
+      - An exact duplicate word (same word, or same after singularizing)
+        that already appears earlier in the name is dropped.
+      - A word that is a plain PREFIX of another word already kept (or
+        vice versa) -- e.g. "web" vs "website" -- is redundant; only the
+        LONGER, more specific word is kept. Only applies when the LONGER
+        of the two words is at least 6 characters, so two short
+        unrelated words that happen to share a prefix (e.g. "app" vs
+        "apple") aren't falsely merged -- "website" (7) vs "web" (3)
+        clears that bar, "apple" (5) vs "app" (3) doesn't.
+    """
+    words = candidate_name.split()
+    normed = [category_checker._singularize_word(w) for w in words]
+    keep = [True] * len(words)
+
+    for i in range(len(words)):
+        if not keep[i]:
+            continue
+        for j in range(i + 1, len(words)):
+            if not keep[j]:
+                continue
+            wi, wj = normed[i], normed[j]
+            if wi == wj:
+                keep[j] = False
+                continue
+            if max(len(wi), len(wj)) >= 6 and (wi.startswith(wj) or wj.startswith(wi)):
+                if len(wi) >= len(wj):
+                    keep[j] = False
+                else:
+                    keep[i] = False
+                    break
+
+    kept_words = [w for w, k in zip(words, keep) if k]
+    return " ".join(kept_words) if kept_words else candidate_name
+
+
+def resolve_plural_or_existing_category(candidate_name, existing_category_names):
+    """
+    Extra fix on top of category_checker's own _find_plural_variant().
+    That function is meant to merge a candidate that's a pure singular/
+    plural variant of an existing category into ONE category -- but when
+    the EXISTING category is singular and the new candidate is plural
+    (or vice versa in some orderings), it returns the candidate's own
+    (new) spelling rather than the category that's already there. Since
+    the caller then does db.add_category() with whatever this returns,
+    that silently created a SECOND, separate category for the exact same
+    topic -- e.g. "Best/Top social media marketing agency" and
+    "...agencies" both ending up as distinct categories instead of one.
+
+    This wraps that call so that ANY singular/plural match ALWAYS
+    resolves to whichever category name is ALREADY sitting in
+    `existing_category_names`, never a new spelling -- guaranteeing at
+    most one category ever exists per singular/plural family.
+
+    Returns the existing category name to reuse, or None (no plural/
+    singular match -- category_checker.find_matching_category /
+    find_matching_category_generalized should be tried next).
+    """
+    result = category_checker._find_plural_variant(candidate_name, existing_category_names)
+    if result is None:
+        return None
+
+    candidate_sig = category_checker._plural_normalized_signature(candidate_name)
+    for existing in existing_category_names:
+        if category_checker._plural_normalized_signature(existing) == candidate_sig:
+            return existing
+    return result
+
+
 def reset_categories_for_project(domain):
     """
     Delete every category already stored for this project before this run
@@ -270,13 +349,14 @@ def categorize_from_top3(keyword, top3, domain):
     candidate_name = category_checker._apply_best_top_rule(raw_candidate, titles)
     candidate_name = strip_location_from_category(candidate_name, titles)
     candidate_name = strip_filler_words_from_category(candidate_name)
+    candidate_name = dedupe_related_words_in_category(candidate_name)
 
     existing_category_names = [
         name for name in db.list_category_names(domain)
         if name.lower().startswith("best/top") == has_best_top
     ]
 
-    plural_variant = category_checker._find_plural_variant(candidate_name, existing_category_names)
+    plural_variant = resolve_plural_or_existing_category(candidate_name, existing_category_names)
     if plural_variant:
         db.add_category(domain, plural_variant)
         return plural_variant
