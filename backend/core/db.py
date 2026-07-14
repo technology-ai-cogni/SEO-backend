@@ -808,6 +808,23 @@ def bulk_delete_page_rows(ids):
         conn.execute(text("DELETE FROM pages WHERE id = ANY(:ids)"), {"ids": ids})
 
 
+def get_all_keyword_rows(domain):
+    """Every keyword_categories row for this project, regardless of
+    whether it's already been categorized -- used by the 'trigger
+    categorization' endpoint's recluster=True path (re-running AI
+    clustering over a project that's already fully categorized, when the
+    user explicitly confirms they want to overwrite it), as opposed to
+    get_uncategorized_keyword_rows() below, which only picks up rows that
+    have never been categorized."""
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT id, keyword FROM keyword_categories
+            WHERE project_name = :project_name
+            ORDER BY id
+        """), {"project_name": domain}).mappings().fetchall()
+        return [dict(r) for r in rows]
+
+
 def get_uncategorized_keyword_rows(domain):
     """Every keyword_categories row for this project that hasn't been
     categorized yet, ordered by id (i.e. original upload/insertion

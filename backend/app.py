@@ -443,6 +443,7 @@ async def create_category_job(
 
 class CategorizeExistingRequest(BaseModel):
     country: str
+    recluster: bool = False
 
 
 @app.post("/projects/{project}/categorize")
@@ -463,8 +464,15 @@ def categorize_existing_keywords(project: str, payload: CategorizeExistingReques
     exactly as scripts/run_pipeline.py does locally.
 
     Never inserts new rows -- only enqueues (as a background job) one
-    keyword per EXISTING row that doesn't have a category yet
-    (status='queued'), so re-running it can never duplicate keywords."""
+    keyword per row, so re-running it can never duplicate keywords.
+
+    payload.recluster=False (default): only rows that have never been
+    categorized (category IS NULL) are enqueued -- the normal "AI
+    Clustering" button behavior, safe to click repeatedly without redoing
+    work. payload.recluster=True: EVERY row in the project is re-enqueued
+    and its existing category/cluster gets overwritten with fresh results
+    -- only reachable after the frontend has explicitly confirmed with the
+    user ("It is already clustered, do you want to re-cluster?")."""
     proj = _resolve_project_or_404(project)
 
     country_code = category_checker.resolve_country_code(payload.country)
@@ -475,7 +483,7 @@ def categorize_existing_keywords(project: str, payload: CategorizeExistingReques
             f"(e.g. 'India', 'United States') or its 2-letter code (e.g. 'in', 'us')."
         )
 
-    rows = db.get_uncategorized_keyword_rows(proj["slug"])
+    rows = db.get_all_keyword_rows(proj["slug"]) if payload.recluster else db.get_uncategorized_keyword_rows(proj["slug"])
     if not rows:
         raise HTTPException(400, "No un-categorized keywords found for this project.")
 

@@ -1894,6 +1894,14 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
       return;
     }
 
+    // Every row already has a category -- there's nothing left for the
+    // normal (uncategorized-only) pass to do, so confirm before
+    // overwriting existing results instead of just erroring out.
+    const alreadyClustered = rows.every(r => r.category);
+    if (alreadyClustered && !window.confirm('It is already clustered, do you want to re-cluster?')) {
+      return;
+    }
+
     setClustering(true);
     try {
       // Categorizes keywords ALREADY sitting in this project -- never
@@ -1902,7 +1910,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
       const res = await fetch(`${CATEGORY_API_BASE}/projects/${project.slug}/categorize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ country }),
+        body: JSON.stringify({ country, recluster: alreadyClustered }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
