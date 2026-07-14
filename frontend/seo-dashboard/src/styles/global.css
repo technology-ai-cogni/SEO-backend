@@ -66,6 +66,13 @@ body {
 .robot-cluster-icon .robot-eye { animation: robotBlink 3.2s ease-in-out infinite; transform-origin: center; }
 .robot-cluster-icon.is-busy { animation-duration: 0.6s; }
 
+/* Refresh button */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spin-icon { animation: spin 0.8s linear infinite; }
+
 /* Utilities */
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flex { display: flex; }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Plus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2 } from 'lucide-react';
+import { Search, Plus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { Badge } from '../ui/Card';
@@ -1461,6 +1461,7 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
   const [pendingDeleteIds, setPendingDeleteIds] = useState(new Set());
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const hasPendingChanges = pendingUpdates.size > 0 || pendingDeleteIds.size > 0;
 
   useEffect(() => {
@@ -1547,6 +1548,24 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
     }
   };
 
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    if (hasPendingChanges && !window.confirm('You have unsaved changes. Discard them and refresh?')) return;
+    setRefreshing(true);
+    setSaveError('');
+    try {
+      const freshRows = await fetchPageRows(project.slug);
+      setRows(freshRows);
+      setPendingUpdates(new Map());
+      setPendingDeleteIds(new Set());
+      onUpdatePages(freshRows);
+    } catch (err) {
+      setSaveError(err.message || 'Failed to refresh.');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const handleBackClick = () => {
     if (hasPendingChanges && !window.confirm('You have unsaved changes. Discard them?')) return;
     onBack();
@@ -1565,6 +1584,20 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
           <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{project.name}</span>
           <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>{project.domain}</span>
         </div>
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          title="Refresh"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'none', border: 'none', borderRadius: 6, padding: 4,
+            cursor: refreshing ? 'default' : 'pointer', color: 'var(--text-muted)',
+          }}
+          onMouseEnter={e => { if (!refreshing) { e.currentTarget.style.background = 'var(--surface-2)'; e.currentTarget.style.color = 'var(--text-primary)'; } }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+        >
+          <RefreshCw size={14} className={refreshing ? 'spin-icon' : ''} />
+        </button>
         <div style={{ flex: 1 }} />
         {saveError && (
           <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError}</span>
@@ -1688,6 +1721,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
   const [pendingDeleteIds, setPendingDeleteIds] = useState(new Set());
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const hasPendingChanges = pendingUpdates.size > 0 || pendingDeleteIds.size > 0;
 
   const [showExcludeDropdown, setShowExcludeDropdown] = useState(false);
@@ -2112,6 +2146,24 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
     }
   };
 
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    if (hasPendingChanges && !window.confirm('You have unsaved changes. Discard them and refresh?')) return;
+    setRefreshing(true);
+    setSaveError('');
+    try {
+      const freshRows = await fetchKeywordRows(project.slug);
+      setRows(freshRows);
+      setPendingUpdates(new Map());
+      setPendingDeleteIds(new Set());
+      onUpdateKeywords(freshRows);
+    } catch (err) {
+      setSaveError(err.message || 'Failed to refresh.');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const handleBackClick = () => {
     if (hasPendingChanges && !window.confirm('You have unsaved changes. Discard them?')) return;
     onBack();
@@ -2136,6 +2188,20 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
             {(search || columnFilters.targetType || columnFilters.targetSubtype) ? ` of ${rows.length}` : ''}
           </span>
         </div>
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          title="Refresh"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'none', border: 'none', borderRadius: 6, padding: 4,
+            cursor: refreshing ? 'default' : 'pointer', color: 'var(--text-muted)',
+          }}
+          onMouseEnter={e => { if (!refreshing) { e.currentTarget.style.background = 'var(--surface-2)'; e.currentTarget.style.color = 'var(--text-primary)'; } }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+        >
+          <RefreshCw size={14} className={refreshing ? 'spin-icon' : ''} />
+        </button>
         <div style={{ flex: 1 }} />
         {saveError && (
           <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError}</span>
