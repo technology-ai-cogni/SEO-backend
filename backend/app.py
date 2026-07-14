@@ -491,6 +491,11 @@ def categorize_existing_keywords(project: str, payload: CategorizeExistingReques
         "existing-keywords", proj["slug"], proj["name"], payload.country, country_code, total=len(rows),
     )
     db.set_job_status(job_id, "running")
+    # These rows were inserted directly (frontend's Add Keywords flow, no
+    # job involved), so job_id is still NULL on them -- link them to THIS
+    # job now so a later rank-check (which looks rows up by job_id) can
+    # find them.
+    db.set_keyword_rows_job(job_id, [r["id"] for r in rows])
 
     run_categorize_job_in_background(job_id, proj["slug"], rows, country_code)
 

@@ -848,6 +848,22 @@ def get_uncategorized_keyword_rows(domain):
         return [dict(r) for r in rows]
 
 
+def set_keyword_rows_job(job_id, row_ids):
+    """Backfills job_id onto keyword rows that were inserted directly (no
+    job -- e.g. via the frontend's Add Keywords flow, which never creates
+    a `jobs` row) once a categorization job picks them up. Without this,
+    those rows keep job_id NULL forever, and
+    get_job_keyword_rows_for_rank_check(job_id) -- which the "Check
+    initial ranking" button relies on to find a project's latest
+    completed job's rows -- would always find zero rows for them, so rank
+    checks silently enqueue nothing."""
+    if not row_ids:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE keyword_categories SET job_id = :job_id WHERE id = ANY(:ids)"),
+                     {"job_id": job_id, "ids": row_ids})
+
+
 def insert_category_result(job_id, domain, keyword, category, cluster, status, meta=None, error=None):
     """LEGACY fallback path -- inserts a brand-new row rather than
     updating a pre-inserted one. Kept only so any task already sitting in
