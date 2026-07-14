@@ -38,6 +38,10 @@ Endpoints:
     GET  /domains                          list every domain that's been
                                            registered
     GET  /projects                         list every project that exists
+    DELETE /projects/{project}              delete a project and everything
+                                           scoped to it (domains,
+                                           keyword_categories, categories,
+                                           clusters, category_cluster_map)
     GET  /projects/{project}/results        ALL keyword results ever
                                            processed for a project, across
                                            every job -- the "project table"
@@ -261,6 +265,19 @@ def list_domains_endpoint():
 def get_projects():
     """Every project that has ever been created."""
     return {"projects": db.list_projects()}
+
+
+@app.delete("/projects/{project}")
+def delete_project_endpoint(project: str):
+    """Deletes a project and everything scoped to it (domains,
+    keyword_categories, categories, clusters, category_cluster_map) in one
+    transaction. Runs through this app's direct Postgres connection rather
+    than the frontend's Supabase client, since the categories/clusters/
+    category_cluster_map tables aren't exposed to the frontend's
+    (RLS-restricted) anon key."""
+    proj = _resolve_project_or_404(project)
+    db.delete_project(proj["slug"])
+    return {"deleted": proj["slug"]}
 
 
 @app.get("/projects/{project}/results")

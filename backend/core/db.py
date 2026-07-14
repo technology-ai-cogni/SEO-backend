@@ -318,6 +318,26 @@ def list_projects():
         return [dict(r) for r in rows]
 
 
+def delete_project(slug):
+    """Removes a project and everything scoped to it in one transaction --
+    domains, keyword_categories, categories, clusters, and
+    category_cluster_map all carry a FK on projects.slug, so they have to
+    go before the projects row itself or the DB rejects the delete.
+
+    Runs over the same direct Postgres connection as the rest of this
+    module, which is why this lives here rather than in the frontend --
+    the frontend's Supabase client is subject to RLS policies that only
+    permit it to touch domains/projects/keyword_categories, not the
+    categories/clusters/category_cluster_map tables."""
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM keyword_categories WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM domains WHERE project_slug = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM categories WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM clusters WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM category_cluster_map WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM projects WHERE slug = :slug"), {"slug": slug})
+
+
 # --- Domains (the "Create Project" form) --------------------------------
 
 def create_domain(domain, project_name=None, target_regions=None, platforms=None,

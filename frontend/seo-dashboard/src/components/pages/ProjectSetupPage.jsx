@@ -7,7 +7,7 @@ import { Badge } from '../ui/Card';
 import { derivedPages, projectSetupData, brandMentionKeywords } from '../../data/mockData';
 import {
   fetchDomainRows, createProject, updateDomainRow, deleteDomainRow,
-  fetchKwProjects, fetchKeywordRows, insertKeywordRows, updateKeywordRow, bulkDeleteKeywordRows,
+  fetchKwProjects, fetchKeywordRows, insertKeywordRows, updateKeywordRow, bulkDeleteKeywordRows, deleteKwProject,
 } from '../../lib/projectsApi';
 
 // ─── shared tiny components ────────────────────────────────────────────────
@@ -867,9 +867,6 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
   const [platforms, setPlatforms] = useState([]);
   const [da, setDa] = useState('');
   const [traffic, setTraffic] = useState('');
-  const [keywords, setKeywords] = useState('');
-  const [targetPages, setTargetPages] = useState('');
-  const [blogPages, setBlogPages] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [apiError, setApiError] = useState('');
@@ -881,9 +878,6 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
       setPlatforms(project.targetPlatforms || ALL_PLATFORMS);
       setDa(project.da ?? '');
       setTraffic(project.traffic ?? '');
-      setKeywords(project.keywords ?? '');
-      setTargetPages(project.targetPages ?? '');
-      setBlogPages(project.blogPages ?? '');
       setConfirmDelete(false);
       setSubmitting(false);
       setApiError('');
@@ -906,9 +900,6 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
         targetPlatforms: platforms,
         da: da !== '' ? Number(da) : null,
         traffic: traffic !== '' ? Number(traffic) : 0,
-        keywords: keywords !== '' ? Number(keywords) : 0,
-        targetPages: targetPages !== '' ? Number(targetPages) : 0,
-        blogPages: blogPages !== '' ? Number(blogPages) : 0,
       });
       handleClose();
     } catch (err) {
@@ -983,9 +974,6 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
 
       <Input label="Domain Authority" placeholder="e.g. 42" value={da} onChange={setDa} type="number" />
       <Input label="Traffic" placeholder="e.g. 44.29" value={traffic} onChange={setTraffic} type="number" />
-      <Input label="Keywords" placeholder="e.g. 120" value={keywords} onChange={setKeywords} type="number" />
-      <Input label="Target Pages" placeholder="e.g. 10" value={targetPages} onChange={setTargetPages} type="number" />
-      <Input label="Blog Pages" placeholder="e.g. 25" value={blogPages} onChange={setBlogPages} type="number" />
     </Modal>
   );
 }
@@ -1086,8 +1074,8 @@ function DomainTab({ projects, filter, onUpdateProject, onDeleteProject, loading
               <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)' }}>{p.traffic}</span>
             </td>
             <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: p.keywordsDir === 'up' ? 'var(--green)' : 'var(--red)' }}>
-                {p.keywordsDir === 'up' ? '↑' : '↓'}{p.keywords}
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: p.keywordsDir === 'up' ? 'var(--green)' : p.keywordsDir === 'down' ? 'var(--red)' : 'var(--text-primary)' }}>
+                {p.keywordsDir === 'up' ? '↑' : p.keywordsDir === 'down' ? '↓' : ''}{p.keywords}
               </span>
             </td>
             <td style={{ padding: '14px 16px', textAlign: 'right' }}>
@@ -1168,10 +1156,31 @@ const INITIAL_PAGES = [
   },
 ];
 
-function PagesTab({ pages, onSelectProject, loading, error }) {
+function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, totalLabel = 'Total  Pages', keywordsLabel = 'Keywords' }) {
+  const [deletingSlug, setDeletingSlug] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
+
+  const handleDelete = async (p) => {
+    if (!onDeleteProject) return;
+    if (!window.confirm(`Are you sure you want to delete "${p.name || p.domain}"? This will remove the project and all its keywords. This action cannot be undone.`)) {
+      return;
+    }
+    setDeleteError('');
+    setDeletingSlug(p.slug);
+    try {
+      await onDeleteProject?.(p);
+    } catch (err) {
+      setDeleteError(err.message || 'Failed to delete project.');
+    } finally {
+      setDeletingSlug(null);
+    }
+  };
 
   return (
     <>
+      {deleteError && (
+        <div style={{ padding: '8px 16px', fontSize: 12.5, color: 'var(--red, #dc2626)' }}>{deleteError}</div>
+      )}
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
           <thead>
@@ -1179,10 +1188,10 @@ function PagesTab({ pages, onSelectProject, loading, error }) {
               {[
                 { label: 'Project', align: 'left' },
                 { label: 'Location', align: 'left' },
-                { label: 'Total  Pages', align: 'right' },
+                { label: totalLabel, align: 'right' },
                 { label: 'Commercial vs Others', align: 'right' },
                 { label: 'Blog Pages', align: 'right' },
-                { label: 'Keywords', align: 'right' },
+                { label: keywordsLabel, align: 'right' },
                 { label: 'Updated', align: 'right' },
                 { label: '', align: 'right' },
               ].map((h, i) => (
@@ -1238,10 +1247,13 @@ function PagesTab({ pages, onSelectProject, loading, error }) {
                 </td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                  <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'none'}>
-                    <Edit2 size={14} />
+                  <button
+                    onClick={() => handleDelete(p)}
+                    disabled={deletingSlug === p.slug}
+                    style={{ background: 'none', border: 'none', cursor: deletingSlug === p.slug ? 'default' : 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6, opacity: deletingSlug === p.slug ? 0.5 : 1 }}
+                    onMouseEnter={e => { if (deletingSlug !== p.slug) { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; } }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
+                    <Trash2 size={14} />
                   </button>
                 </td>
               </tr>
@@ -1414,10 +1426,11 @@ function ActionsDropdown({ selectedCount, onBulkEdit, onBulkDelete }) {
   );
 }
 
-function HeaderQuickSelect({ placeholder, options, onSet }) {
+function HeaderQuickSelect({ placeholder, options, onSet, value }) {
+  const isControlled = value !== undefined;
   return (
-    <select value="" onChange={e => { if (e.target.value) onSet(e.target.value); }}
-      style={{ appearance: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '5px 28px 5px 10px', fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)', color: 'var(--text-muted)', background: `#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center`, cursor: 'pointer', outline: 'none', minWidth: 130, letterSpacing: '0.3px' }}>
+    <select value={isControlled ? value : ''} onChange={e => { if (isControlled || e.target.value) onSet(e.target.value); }}
+      style={{ appearance: 'none', border: isControlled && value ? '1px solid var(--accent)' : '1px solid var(--border)', borderRadius: 6, padding: '5px 28px 5px 10px', fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)', color: isControlled && value ? 'var(--accent)' : 'var(--text-muted)', background: `#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center`, cursor: 'pointer', outline: 'none', minWidth: 130, letterSpacing: '0.3px' }}>
       <option value="">{placeholder}</option>
       {options.map(o => <option key={o} value={o}>{o}</option>)}
     </select>
@@ -1653,6 +1666,11 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
 
   const [clustering, setClustering] = useState(false);
   const [clusterError, setClusterError] = useState('');
+
+  // Target Type / Target Subtype header dropdowns filter the visible rows
+  // rather than editing them -- selecting a value shows only rows whose
+  // field already matches it; picking the blank placeholder option clears it.
+  const [columnFilters, setColumnFilters] = useState({ targetType: '', targetSubtype: '' });
 
   const addKwTag = () => {
     if (!tempKwInput.trim()) return;
@@ -1920,13 +1938,19 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
 
   const filteredIndices = rows
     .map((_, i) => i)
-    .filter(i => !search || rows[i].kw?.toLowerCase().includes(search.toLowerCase()));
+    .filter(i => {
+      const r = rows[i];
+      if (search && !r.kw?.toLowerCase().includes(search.toLowerCase())) return false;
+      if (columnFilters.targetType && r.targetType !== columnFilters.targetType) return false;
+      if (columnFilters.targetSubtype && r.targetSubtype !== columnFilters.targetSubtype) return false;
+      return true;
+    });
 
   const pageCount = Math.max(1, Math.ceil(filteredIndices.length / KW_PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const pagedIndices = filteredIndices.slice((safePage - 1) * KW_PAGE_SIZE, safePage * KW_PAGE_SIZE);
 
-  useEffect(() => { setPage(1); }, [search, project]);
+  useEffect(() => { setPage(1); }, [search, columnFilters, project]);
 
   useEffect(() => {
     setRows(project.detailKeywords || []);
@@ -2029,7 +2053,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
           </div>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             {filteredIndices.length} keyword{filteredIndices.length !== 1 ? 's' : ''}
-            {search ? ` of ${rows.length}` : ''}
+            {(search || columnFilters.targetType || columnFilters.targetSubtype) ? ` of ${rows.length}` : ''}
           </span>
         </div>
         <div style={{ flex: 1 }} />
@@ -2307,10 +2331,10 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
               <HeaderQuickSelect placeholder="Type" options={['AI Mode', 'AI Overview', 'Google', 'ChatGPT', 'Gemini']} onSet={v => bulkUpdate('type', v)} />
             </th>
             <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-              <HeaderQuickSelect placeholder="Target Type" options={['Blogs', 'Landing Page', 'Topical Blogs']} onSet={v => bulkUpdate('targetType', v)} />
+              <HeaderQuickSelect placeholder="Target Type" options={['Blogs', 'Landing Page']} value={columnFilters.targetType} onSet={v => setColumnFilters(prev => ({ ...prev, targetType: v }))} />
             </th>
             <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-              <HeaderQuickSelect placeholder="Target Subtype" options={['Informational', 'Commercial']} onSet={v => bulkUpdate('targetSubtype', v)} />
+              <HeaderQuickSelect placeholder="Target Subtype" options={['Informational', 'Commercial']} value={columnFilters.targetSubtype} onSet={v => setColumnFilters(prev => ({ ...prev, targetSubtype: v }))} />
             </th>
             <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Target Geo</th>
             <th style={{ padding: '6px 16px', textAlign: 'left' }}>
@@ -2328,7 +2352,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
           ) : rows.length === 0 ? (
             <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No keywords added yet. Use Add Keywords to import.</td></tr>
           ) : pagedIndices.length === 0 ? (
-            <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No keywords match "{search}".</td></tr>
+            <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{search ? `No keywords match "${search}".` : 'No keywords match the selected filters.'}</td></tr>
           ) : pagedIndices.map(i => {
             const r = rows[i];
             return (
@@ -2360,7 +2384,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
               <td style={{ padding: '10px 16px', fontSize: 13, color: r.type ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.type || '—'}</td>
               <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetType ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetType || '—'}</td>
               <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetSubtype ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetSubtype || '—'}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.targetGeo || '—'}</td>
+              <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{project.location || '—'}</td>
               <td style={{ padding: '10px 16px', fontSize: 13, color: r.priority ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.priority || '—'}</td>
               <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--accent)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.landingPage || '—'}</td>
               <td style={{ padding: '10px 16px' }}>
@@ -2779,6 +2803,11 @@ export default function ProjectSetupPage({ tab }) {
     setProjects(prev => prev.filter(p => p !== project));
   };
 
+  const handleDeleteKwProject = async (project) => {
+    await deleteKwProject(project.slug);
+    setKwClusters(prev => prev.filter(p => p.slug !== project.slug));
+  };
+
   const handleImportPages = (data) => {
     const newRows = data.pages.map(r => ({
       pageName: r.pageName,
@@ -3027,7 +3056,7 @@ export default function ProjectSetupPage({ tab }) {
         ) : (
           <div style={{ overflowX: 'auto' }}>
             {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} />}
-            {activeTab === 'KW Cluster' && <PagesTab pages={kwClusters} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} loading={kwClustersLoading} error={kwClustersError} />}
+            {activeTab === 'KW Cluster' && <PagesTab pages={kwClusters} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" />}
             {activeTab === 'Pages' && <PagesTab pages={pages} onSelectProject={setSelectedPageProject} />}
             {activeTab === 'Competitors' && <CompetitorsTab onSelectCompetitor={setSelectedCompetitor} />}
             {(activeTab === 'Outreach' || activeTab === 'Connectors') && (

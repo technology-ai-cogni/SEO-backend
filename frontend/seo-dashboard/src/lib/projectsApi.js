@@ -30,7 +30,40 @@ function iconForPlatforms(platformLabels) {
   return 'desktop';
 }
 
-function domainRowToProject(row) {
+// Aggregates keyword_categories rows (project_name, subtype, target_type)
+// into per-project counts -- shared by the Domain tab and the KW Cluster
+// tab so both surfaces report the exact same numbers instead of the
+// Domain tab's own (never-updated) keywords_count/target_pages_count/
+// blog_pages_count columns. target_type is ALWAYS overwritten by the
+// AI-Clustering pipeline with either "Landing Page" or "Blog Page" (see
+// scripts/landing_blog_classifier.py), so those are the two values these
+// counts key off of.
+const EMPTY_KW_COUNTS = { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
+
+function aggregateKwCounts(kwRows) {
+  const counts = new Map();
+  (kwRows || []).forEach(r => {
+    const c = counts.get(r.project_name) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
+    c.total += 1;
+    if (r.subtype === 'Commercial') c.commercial += 1;
+    if (r.target_type === 'Landing Page') c.landingPages += 1;
+    if (r.target_type === 'Blog Page') c.blogPages += 1;
+    counts.set(r.project_name, c);
+  });
+  return counts;
+}
+
+async function fetchKwCountsForSlug(slug) {
+  if (isLocalMode) {
+    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
+    return aggregateKwCounts(kwRows.filter(r => r.project_name === slug)).get(slug) || EMPTY_KW_COUNTS;
+  }
+  const { data, error } = await supabase.from('keyword_categories').select('project_name, subtype, target_type').eq('project_name', slug);
+  if (error) throw error;
+  return aggregateKwCounts(data).get(slug) || EMPTY_KW_COUNTS;
+}
+
+function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
   const targetPlatforms = row.platforms || [];
   return {
     id: row.id,
@@ -42,11 +75,11 @@ function domainRowToProject(row) {
     traffic: Number(row.traffic) || 0,
     trafficDir: null,
     da: row.domain_authority,
-    keywords: Number(row.keywords_count) || 0,
+    keywords: kwCounts.total,
     keywordsDir: null,
-    targetPages: Number(row.target_pages_count) || 0,
+    targetPages: kwCounts.landingPages,
     targetDir: null,
-    blogPages: Number(row.blog_pages_count) || 0,
+    blogPages: kwCounts.blogPages,
     updated: timeAgo(row.updated_at),
     targetPlatforms,
   };
@@ -103,7 +136,7 @@ function initializeLocalStorage() {
       category: k.category,
       type: k.type,
       target_type: k.targetType === 'Topical Blogs' ? 'Topical Blog' : (k.targetType === 'Landing Page' ? 'Landing Page' : 'Blog'),
-      target_subtype: k.targetSubtype,
+      subtype: k.targetSubtype,
       target_geo: k.targetGeo,
       priority: k.priority,
       landing_page_url: k.landingPage
@@ -121,11 +154,18 @@ if (isLocalMode) {
 export async function fetchDomainRows() {
   if (isLocalMode) {
     const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
-    return domains.map(domainRowToProject);
+    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
+    const counts = aggregateKwCounts(kwRows);
+    return domains.map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
   }
-  const { data, error } = await supabase.from('domains').select('*').order('created_at', { ascending: false });
-  if (error) throw error;
-  return (data || []).map(domainRowToProject);
+  const [{ data: domains, error: domainsError }, { data: kwRows, error: kwError }] = await Promise.all([
+    supabase.from('domains').select('*').order('created_at', { ascending: false }),
+    supabase.from('keyword_categories').select('project_name, subtype, target_type'),
+  ]);
+  if (domainsError) throw domainsError;
+  if (kwError) throw kwError;
+  const counts = aggregateKwCounts(kwRows);
+  return (domains || []).map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
 }
 
 export async function createProject({ name, domain, regions, platforms, da, users }) {
@@ -196,20 +236,18 @@ export async function updateDomainRow(id, updates) {
     const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
     const index = domains.findIndex(d => String(d.id) === String(id));
     if (index === -1) throw new Error('Domain not found');
-    
+
     const dbUpdates = { ...domains[index], updated_at: new Date().toISOString() };
     if ('name' in updates) dbUpdates.project_name = updates.name;
     if ('location' in updates) dbUpdates.target_regions = updates.location ? [updates.location] : [];
     if ('targetPlatforms' in updates) dbUpdates.platforms = updates.targetPlatforms;
     if ('da' in updates) dbUpdates.domain_authority = updates.da != null ? String(updates.da) : null;
     if ('traffic' in updates) dbUpdates.traffic = String(updates.traffic);
-    if ('keywords' in updates) dbUpdates.keywords_count = String(updates.keywords);
-    if ('targetPages' in updates) dbUpdates.target_pages_count = String(updates.targetPages);
-    if ('blogPages' in updates) dbUpdates.blog_pages_count = String(updates.blogPages);
-    
+
     domains[index] = dbUpdates;
     localStorage.setItem('seo_domains', JSON.stringify(domains));
-    return domainRowToProject(dbUpdates);
+    const kwCounts = await fetchKwCountsForSlug(dbUpdates.project_slug);
+    return domainRowToProject(dbUpdates, kwCounts);
   }
 
   const dbUpdates = { updated_at: new Date().toISOString() };
@@ -218,13 +256,11 @@ export async function updateDomainRow(id, updates) {
   if ('targetPlatforms' in updates) dbUpdates.platforms = updates.targetPlatforms;
   if ('da' in updates) dbUpdates.domain_authority = updates.da != null ? String(updates.da) : null;
   if ('traffic' in updates) dbUpdates.traffic = String(updates.traffic);
-  if ('keywords' in updates) dbUpdates.keywords_count = String(updates.keywords);
-  if ('targetPages' in updates) dbUpdates.target_pages_count = String(updates.targetPages);
-  if ('blogPages' in updates) dbUpdates.blog_pages_count = String(updates.blogPages);
 
   const { data, error } = await supabase.from('domains').update(dbUpdates).eq('id', id).select().single();
   if (error) throw error;
-  return domainRowToProject(data);
+  const kwCounts = await fetchKwCountsForSlug(data.project_slug);
+  return domainRowToProject(data, kwCounts);
 }
 
 export async function deleteDomainRow(id) {
@@ -252,15 +288,17 @@ export async function fetchKwProjects() {
 
     const counts = new Map();
     (kwRows || []).forEach(r => {
-      const c = counts.get(r.project_name) || { total: 0, commercial: 0 };
+      const c = counts.get(r.project_name) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
       c.total += 1;
-      if (r.target_subtype === 'Commercial') c.commercial += 1;
+      if (r.subtype === 'Commercial') c.commercial += 1;
+      if (r.target_type === 'Landing Page') c.landingPages += 1;
+      if (r.target_type === 'Blog Page') c.blogPages += 1;
       counts.set(r.project_name, c);
     });
 
     return (projects || []).map(p => {
       const domainRow = domainBySlug.get(p.slug);
-      const c = counts.get(p.slug) || { total: 0, commercial: 0 };
+      const c = counts.get(p.slug) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
       return {
         slug: p.slug,
         name: p.name,
@@ -269,9 +307,9 @@ export async function fetchKwProjects() {
         location: domainRow?.target_regions?.[0] || 'Global',
         totalPages: c.total,
         commercialPct: `${c.commercial}/${c.total}`,
-        blogPages: 0,
+        blogPages: c.blogPages,
         blogDir: null,
-        keywords: c.total,
+        keywords: c.landingPages,
         keywordsDir: null,
         updated: timeAgo(domainRow?.updated_at || p.created_at),
       };
@@ -281,7 +319,7 @@ export async function fetchKwProjects() {
   const [{ data: projects, error: projectsError }, { data: domains, error: domainsError }, { data: kwRows, error: kwError }] = await Promise.all([
     supabase.from('projects').select('*'),
     supabase.from('domains').select('*'),
-    supabase.from('keyword_categories').select('project_name, target_subtype'),
+    supabase.from('keyword_categories').select('project_name, subtype, target_type'),
   ]);
   if (projectsError) throw projectsError;
   if (domainsError) throw domainsError;
@@ -292,15 +330,17 @@ export async function fetchKwProjects() {
 
   const counts = new Map();
   (kwRows || []).forEach(r => {
-    const c = counts.get(r.project_name) || { total: 0, commercial: 0 };
+    const c = counts.get(r.project_name) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
     c.total += 1;
-    if (r.target_subtype === 'Commercial') c.commercial += 1;
+    if (r.subtype === 'Commercial') c.commercial += 1;
+    if (r.target_type === 'Landing Page') c.landingPages += 1;
+    if (r.target_type === 'Blog Page') c.blogPages += 1;
     counts.set(r.project_name, c);
   });
 
   return (projects || []).map(p => {
     const domainRow = domainBySlug.get(p.slug);
-    const c = counts.get(p.slug) || { total: 0, commercial: 0 };
+    const c = counts.get(p.slug) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
     return {
       slug: p.slug,
       name: p.name,
@@ -309,9 +349,9 @@ export async function fetchKwProjects() {
       location: domainRow?.target_regions?.[0] || 'Global',
       totalPages: c.total,
       commercialPct: `${c.commercial}/${c.total}`,
-      blogPages: 0,
+      blogPages: c.blogPages,
       blogDir: null,
-      keywords: c.total,
+      keywords: c.landingPages,
       keywordsDir: null,
       updated: timeAgo(domainRow?.updated_at || p.created_at),
     };
@@ -328,7 +368,7 @@ function kwRowToUi(row) {
     category: row.category,
     type: row.type,
     targetType: row.target_type,
-    targetSubtype: row.target_subtype,
+    targetSubtype: row.subtype,
     targetGeo: row.target_geo,
     priority: row.priority,
     landingPage: row.landing_page_url,
@@ -346,7 +386,7 @@ export async function insertKeywordRows(projectSlug, rows) {
     category: r.category || null,
     type: r.type || null,
     target_type: r.targetType || null,
-    target_subtype: r.targetSubtype || null,
+    subtype: r.targetSubtype || null,
     target_geo: r.targetGeo || null,
     priority: r.priority || null,
     landing_page_url: r.landingPage || null,
@@ -389,7 +429,7 @@ const KW_FIELD_TO_COLUMN = {
   category: 'category',
   type: 'type',
   targetType: 'target_type',
-  targetSubtype: 'target_subtype',
+  targetSubtype: 'subtype',
   targetGeo: 'target_geo',
   priority: 'priority',
   landingPage: 'landing_page_url',
@@ -463,4 +503,34 @@ export async function bulkDeleteKeywordRows(ids) {
 
   const { error } = await supabase.from('keyword_categories').delete().in('id', ids);
   if (error) throw error;
+}
+
+const CATEGORY_API_BASE = 'https://seo-backend-fqlp.onrender.com';
+
+// Removes a project entirely from the KW Cluster list -- its domain
+// registration(s), the shared `projects` row, every keyword row filed
+// under its slug, and the shared categories/clusters/category_cluster_map
+// rows scoped to it. Routed through the backend's own DELETE
+// /projects/{project} endpoint (core/db.py's delete_project()) rather than
+// direct Supabase calls -- categories/clusters/category_cluster_map aren't
+// exposed to the frontend's RLS-restricted anon key, only the backend's
+// direct Postgres connection can touch them.
+export async function deleteKwProject(slug) {
+  if (isLocalMode) {
+    const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
+    localStorage.setItem('seo_domains', JSON.stringify(domains.filter(d => d.project_slug !== slug)));
+
+    const projects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
+    localStorage.setItem('seo_projects', JSON.stringify(projects.filter(p => p.slug !== slug)));
+
+    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
+    localStorage.setItem('seo_keyword_categories', JSON.stringify(kwRows.filter(r => r.project_name !== slug)));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete project.');
+  }
 }
