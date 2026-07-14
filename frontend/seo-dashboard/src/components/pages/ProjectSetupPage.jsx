@@ -1157,30 +1157,21 @@ function DomainTab({ projects, filter, onUpdateProject, onDeleteProject, loading
   );
 }
 function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, totalLabel = 'Total  Pages', keywordsLabel = 'Keywords', deleteScopeLabel = 'the project and all its keywords' }) {
-  const [deletingSlug, setDeletingSlug] = useState(null);
-  const [deleteError, setDeleteError] = useState('');
+  const [confirmingProject, setConfirmingProject] = useState(null);
 
-  const handleDelete = async (p) => {
-    if (!onDeleteProject) return;
-    if (!window.confirm(`Are you sure you want to delete ${deleteScopeLabel} for "${p.name || p.domain}"? This action cannot be undone.`)) {
-      return;
-    }
-    setDeleteError('');
-    setDeletingSlug(p.slug);
-    try {
-      await onDeleteProject?.(p);
-    } catch (err) {
-      setDeleteError(err.message || 'Failed to delete project.');
-    } finally {
-      setDeletingSlug(null);
-    }
+  const handleConfirmDelete = async () => {
+    await onDeleteProject?.(confirmingProject);
   };
 
   return (
     <>
-      {deleteError && (
-        <div style={{ padding: '8px 16px', fontSize: 12.5, color: 'var(--red, #dc2626)' }}>{deleteError}</div>
-      )}
+      <DeleteProjectDataModal
+        open={confirmingProject !== null}
+        onClose={() => setConfirmingProject(null)}
+        project={confirmingProject}
+        scopeLabel={deleteScopeLabel}
+        onConfirm={handleConfirmDelete}
+      />
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
           <thead>
@@ -1247,14 +1238,15 @@ function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, tot
                 </td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                  <button
-                    onClick={() => handleDelete(p)}
-                    disabled={deletingSlug === p.slug}
-                    style={{ background: 'none', border: 'none', cursor: deletingSlug === p.slug ? 'default' : 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6, opacity: deletingSlug === p.slug ? 0.5 : 1 }}
-                    onMouseEnter={e => { if (deletingSlug !== p.slug) { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; } }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
-                    <Trash2 size={14} />
-                  </button>
+                  {onDeleteProject && (
+                    <button
+                      onClick={() => setConfirmingProject(p)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -1357,6 +1349,41 @@ function BulkEditModal({ open, onClose, count, onApply, fields }) {
           options={selectedField.options.map(o => ({ value: o, label: o }))}
         />
       )}
+    </Modal>
+  );
+}
+
+function DeleteProjectDataModal({ open, onClose, project, scopeLabel, onConfirm }) {
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleClose = () => { setDeleting(false); setError(''); onClose(); };
+
+  const handleConfirm = async () => {
+    setDeleting(true);
+    setError('');
+    try {
+      await onConfirm();
+      handleClose();
+    } catch (err) {
+      setDeleting(false);
+      setError(err.message || 'Failed to delete.');
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={handleClose} title="Confirm delete"
+      footer={<>
+        <Btn variant="primary" onClick={handleConfirm} style={deleting ? { background: 'var(--red)', opacity: 0.6, pointerEvents: 'none' } : { background: 'var(--red)' }}>{deleting ? 'Deleting…' : 'Delete'}</Btn>
+        <Btn variant="outline" onClick={handleClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
+      </>}
+    >
+      {error && (
+        <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{error}</span>
+      )}
+      <div style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+        Are you sure you want to delete <strong>{scopeLabel}</strong> for <strong>{project?.name || project?.domain}</strong>? This action cannot be undone.
+      </div>
     </Modal>
   );
 }
@@ -2899,8 +2926,13 @@ export default function ProjectSetupPage({ tab }) {
   useEffect(() => {
     let cancelled = false;
     setKwClustersLoading(true);
+    // Only lists projects that currently have >=1 keyword -- mirrors how
+    // the Pages tab only lists projects with >=1 page (see pagesCounts
+    // below). A project with none still exists (Domain tab) and can still
+    // be targeted via "+ Add Keywords"; it just doesn't clutter this list
+    // until it actually has keyword data.
     fetchKwProjects()
-      .then(rows => { if (!cancelled) { setKwClusters(rows); setKwClustersError(''); } })
+      .then(rows => { if (!cancelled) { setKwClusters(rows.filter(p => p.totalPages > 0)); setKwClustersError(''); } })
       .catch(err => { if (!cancelled) setKwClustersError(err.message || 'Failed to load projects.'); })
       .finally(() => { if (!cancelled) setKwClustersLoading(false); });
     return () => { cancelled = true; };
@@ -2990,13 +3022,13 @@ export default function ProjectSetupPage({ tab }) {
   // Deletes just this project's KW Cluster data (keyword_categories/
   // categories/clusters/category_cluster_map) -- deliberately does NOT
   // touch `projects`, so the project itself keeps showing up on the
-  // Domain and Pages tabs. Zeroes out the row's counts in place rather
-  // than removing it from `kwClusters`, since the project still exists.
+  // Domain and Pages tabs. Removes the row from `kwClusters` entirely
+  // (rather than zeroing it in place) since this tab only lists projects
+  // with >=1 keyword -- it comes back on its own once keywords are added
+  // to it again via "+ Add Keywords".
   const handleDeleteKwProject = async (project) => {
     await deleteKwClusterData(project.slug);
-    setKwClusters(prev => prev.map(p => p.slug === project.slug
-      ? { ...p, totalPages: 0, commercialPct: '0/0', blogPages: 0, keywords: 0, detailKeywords: [] }
-      : p));
+    setKwClusters(prev => prev.filter(p => p.slug !== project.slug));
   };
 
   // Deletes just this project's page rows -- deliberately does NOT touch
