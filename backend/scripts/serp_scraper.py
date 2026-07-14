@@ -49,10 +49,13 @@ NUM_TABS      = 10
 TAB_TIMEOUT   = 50
 
 
+_KEYWORD_COLUMN_NAMES = ("keywords", "keyword", "kw")
+
+
 def _find_columns(headers: list[str]):
     keyword_col = None
     for i, h in enumerate(headers):
-        if h.lower() == "keywords":
+        if h.lower() in _KEYWORD_COLUMN_NAMES:
             keyword_col = i
 
     if keyword_col is None:

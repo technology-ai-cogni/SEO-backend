@@ -12,3 +12,5 @@ python-dotenv
 pycountry
 selenium
 webdriver_manager
+anthropic
+crawl4ai

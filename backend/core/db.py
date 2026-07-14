@@ -919,10 +919,15 @@ def get_job_category_results(job_id):
 
 def get_domain_results(domain):
     """All keyword results ever processed for a project, across every job
-    -- this is what your UI's per-project 'project table' view reads from."""
+    -- this is what your UI's per-project 'project table' view reads from.
+
+    `id` is included so callers can target a specific row for a
+    follow-up update (e.g. test_api.py's agentic rank checker calling
+    update_keyword_rank(row["id"], ...) below) -- existing callers that
+    only read by key are unaffected by the extra field."""
     with engine.begin() as conn:
         rows = conn.execute(text("""
-            SELECT keyword, category, cluster, status, error, meta, checked_at, job_id,
+            SELECT id, keyword, category, cluster, status, error, meta, checked_at, job_id,
                    sv, kw_diff, type, target_type, target_subtype, target_geo, priority, landing_page_url,
                    rank, rank_checked_at, rank_meta
             FROM keyword_categories WHERE project_name = :project_name ORDER BY checked_at DESC
