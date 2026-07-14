@@ -1299,7 +1299,7 @@ const PAGE_BULK_FIELDS = [
   { value: 'cluster', label: 'Cluster', type: 'text' },
   { value: 'category', label: 'Category', type: 'text' },
   { value: 'targetCategory', label: 'Target Category', type: 'select', options: ['Landing Page', 'Topical Blog'] },
-  { value: 'targetType', label: 'Target Type', type: 'select', options: ['Commercial', 'Informational', 'Informational/Commercial', 'Transactional', 'Navigational'] },
+  { value: 'targetType', label: 'Target Type', type: 'select', options: ['Commercial', 'Informational'] },
 ];
 
 const KW_BULK_FIELDS = [
@@ -1655,7 +1655,7 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
               <HeaderQuickSelect placeholder="Target Category" options={['Landing Page', 'Topical Blog']} onSet={v => bulkUpdate('targetCategory', v)} />
             </th>
             <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-              <HeaderQuickSelect placeholder="Target Type" options={['Commercial', 'Informational', 'Informational/Commercial', 'Transactional', 'Navigational']} onSet={v => bulkUpdate('targetType', v)} />
+              <HeaderQuickSelect placeholder="Target Type" options={['Commercial', 'Informational']} onSet={v => bulkUpdate('targetType', v)} />
             </th>
             <th style={{ padding: '10px 16px' }}></th>
           </tr>
