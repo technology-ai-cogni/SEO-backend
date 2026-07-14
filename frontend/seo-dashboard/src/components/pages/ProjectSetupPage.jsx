@@ -4,10 +4,10 @@ import { Search, Plus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCir
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { Badge } from '../ui/Card';
-import { derivedPages, projectSetupData, brandMentionKeywords } from '../../data/mockData';
 import {
   fetchDomainRows, createProject, updateDomainRow, deleteDomainRow,
-  fetchKwProjects, fetchKeywordRows, insertKeywordRows, updateKeywordRow, bulkDeleteKeywordRows, deleteKwProject,
+  fetchKwProjects, fetchKeywordRows, insertKeywordRows, updateKeywordRow, bulkDeleteKeywordRows, deleteKwClusterData,
+  fetchPageRows, insertPageRows, updatePageRow, deletePageRow, bulkDeletePageRows, deletePagesData,
 } from '../../lib/projectsApi';
 
 // ─── shared tiny components ────────────────────────────────────────────────
@@ -433,15 +433,16 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
 // ─── Add Pages Modal ─────────────────────────────────────────────────────────
 
 function AddPagesModal({ open, onClose, projects, onImportPages, lockedProject }) {
-  const [clustered, setClustered] = useState(false);
   const [project, setProject] = useState('');
   const [share, setShare] = useState(false);
   const [csvRows, setCsvRows] = useState([]);
   const [fileName, setFileName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [apiError, setApiError] = useState('');
 
   const projectOptions = projects
     .filter(p => p.name)
-    .map(p => ({ value: p.domain, label: p.name }));
+    .map(p => ({ value: p.slug, label: p.name }));
 
   const parseDelimited = (text, delimiter) => {
     const lines = text.split('\n').filter(l => l.trim());
@@ -488,44 +489,81 @@ function AddPagesModal({ open, onClose, projects, onImportPages, lockedProject }
   };
 
   const resetForm = () => {
-    setClustered(false); setProject('');
-    setShare(false); setCsvRows([]); setFileName('');
+    setProject('');
+    setShare(false); setCsvRows([]); setFileName(''); setApiError('');
   };
 
-  const handleImport = () => {
-    if (lockedProject) {
-      if (csvRows.length === 0) return;
-      onImportPages({
-        domain: lockedProject.domain,
-        name: lockedProject.name,
-        targetIndex: lockedProject.index,
-        clustered,
+  const downloadSampleTemplate = async () => {
+    const headers = ['Page Name', 'URL', 'Cluster', 'Category'];
+    const sampleRows = [
+      ['ICSE Board Schools', 'https://example.com/icse-board-schools', 'ICSE Board', 'Icse vs cbse'],
+      ['Best Schools in Bangalore', 'https://example.com/best-schools-bangalore', 'High School', 'Fees Structure'],
+      ['Best Schools in Hyderabad', 'https://example.com/best-schools-hyderabad', 'CBSE School', 'Best/Top Schools'],
+    ];
+
+    const thinGrayBorder = { style: 'thin', color: { argb: 'FF999999' } };
+    const cellBorder = { top: thinGrayBorder, left: thinGrayBorder, bottom: thinGrayBorder, right: thinGrayBorder };
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Pages');
+    sheet.columns = headers.map(h => ({ header: h, width: Math.max(14, h.length + 4) }));
+
+    sheet.getRow(1).eachCell(cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC0C000' } };
+      cell.font = { bold: true, color: { argb: 'FF000000' } };
+      cell.border = cellBorder;
+    });
+
+    sampleRows.forEach(rowValues => {
+      const row = sheet.addRow(rowValues);
+      row.eachCell(cell => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC8C8C8' } };
+        cell.border = cellBorder;
+      });
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'pages-template.xlsx';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = async () => {
+    const slug = lockedProject ? lockedProject.slug : project;
+    if (!slug || csvRows.length === 0) return;
+
+    setApiError('');
+    setSubmitting(true);
+    try {
+      const matchedProject = lockedProject ? null : projects.find(p => p.slug === project);
+      await onImportPages({
+        slug,
+        domain: lockedProject ? lockedProject.domain : matchedProject?.domain,
+        name: lockedProject ? lockedProject.name : (matchedProject?.name || project),
+        targetIndex: lockedProject ? lockedProject.index : undefined,
         pages: csvRows,
         share,
       });
       resetForm();
       onClose();
-      return;
+    } catch (err) {
+      setApiError(err.message || 'Failed to import pages.');
+    } finally {
+      setSubmitting(false);
     }
-    if (!project && csvRows.length === 0) return;
-    const matchedProject = projects.find(p => p.domain === project);
-    onImportPages({
-      domain: project,
-      name: matchedProject?.name || project,
-      project,
-      clustered,
-      pages: csvRows,
-      share,
-    });
-    resetForm();
-    onClose();
   };
 
-  const canImport = lockedProject ? csvRows.length > 0 : true;
+  const canImport = (lockedProject?.slug || project) && csvRows.length > 0 && !submitting;
 
   return (
     <Modal open={open} onClose={onClose} title="Add Pages"
-      footer={<><Btn variant="primary" onClick={handleImport} style={canImport ? {} : { opacity: 0.5, pointerEvents: 'none' }}>Import Pages</Btn><Btn variant="outline" onClick={onClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
+      footer={<><Btn variant="primary" onClick={handleImport} style={canImport ? {} : { opacity: 0.5, pointerEvents: 'none' }}>{submitting ? 'Importing…' : 'Import Pages'}</Btn><Btn variant="outline" onClick={onClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
     >
       {lockedProject ? (
         <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
@@ -541,13 +579,24 @@ function AddPagesModal({ open, onClose, projects, onImportPages, lockedProject }
         />
       )}
 
+      {apiError && (
+        <span style={{ fontSize: 12, color: 'var(--red, #dc2626)', display: 'block', marginBottom: 12 }}>{apiError}</span>
+      )}
 
-      <Checkbox label="Is this project's keywords already clustered?" checked={clustered} onChange={setClustered} />
       <div style={{ height: 1, background: 'var(--border)' }} />
 
       {/* Import Pages section */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Import Pages</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Import Pages</span>
+          <button
+            type="button"
+            onClick={downloadSampleTemplate}
+            style={{ border: 'none', background: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)', fontSize: 12.5, padding: 0 }}
+          >
+            Download sample template
+          </button>
+        </div>
         <input
           type="file"
           accept=".csv,.tsv,.xls,.xlsx"
@@ -830,8 +879,6 @@ function AddCompetitorsModal({ open, onClose }) {
 
 // ─── Table rows data ─────────────────────────────────────────────────────────
 
-const blogPageCount = derivedPages.filter(p => p.targetCategory === 'Topical Blog').length;
-
 const ALL_PLATFORMS = ['AI Mode', 'AI Overview', 'Google', 'ChatGPT', 'Gemini'];
 
 const PLATFORM_BADGE_STYLES = {
@@ -1109,60 +1156,13 @@ function DomainTab({ projects, filter, onUpdateProject, onDeleteProject, loading
     </>
   );
 }
-const commercialPages = derivedPages.filter(p => p.targetType.toLowerCase().includes('commercial')).length;
-
-const INITIAL_PAGES = [
-  {
-    name: 'OWIS Singapore',
-    domain: 'owis.org',
-    locationIcon: 'desktop',
-    location: 'Singapore',
-    totalPages: derivedPages.length,
-    commercialPct: `${commercialPages}/${derivedPages.length}`,
-    blogPages: blogPageCount,
-    blogDir: 'up',
-    keywords: projectSetupData.totalKeywords,
-    keywordsDir: 'up',
-    updated: '20h ago',
-    detailPages: derivedPages.map(p => ({
-      pageName: p.pageName,
-      url: p.url,
-      cluster: p.cluster,
-      category: p.category,
-      targetCategory: p.targetCategory,
-      targetType: p.targetType,
-    })),
-  },
-  {
-    name: 'owis.org (AI)',
-    domain: 'owis.org',
-    locationIcon: 'ai',
-    location: 'Singapore',
-    totalPages: brandMentionKeywords.length,
-    commercialPct: '—',
-    blogPages: projectSetupData.aiMentionCount,
-    blogDir: 'up',
-    keywords: brandMentionKeywords.length,
-    keywordsDir: 'up',
-    updated: '19h ago',
-    detailPages: brandMentionKeywords.map(kw => ({
-      pageName: kw,
-      url: '/' + kw.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-      cluster: 'Brand Mention',
-      category: 'AI Visibility',
-      targetCategory: '',
-      targetType: 'commercial',
-    })),
-  },
-];
-
-function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, totalLabel = 'Total  Pages', keywordsLabel = 'Keywords' }) {
+function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, totalLabel = 'Total  Pages', keywordsLabel = 'Keywords', deleteScopeLabel = 'the project and all its keywords' }) {
   const [deletingSlug, setDeletingSlug] = useState(null);
   const [deleteError, setDeleteError] = useState('');
 
   const handleDelete = async (p) => {
     if (!onDeleteProject) return;
-    if (!window.confirm(`Are you sure you want to delete "${p.name || p.domain}"? This will remove the project and all its keywords. This action cannot be undone.`)) {
+    if (!window.confirm(`Are you sure you want to delete ${deleteScopeLabel} for "${p.name || p.domain}"? This action cannot be undone.`)) {
       return;
     }
     setDeleteError('');
@@ -1439,13 +1439,23 @@ function HeaderQuickSelect({ placeholder, options, onSet, value }) {
 
 function PageDetailView({ project, onBack, onUpdatePages }) {
   const [rows, setRows] = useState(project.detailPages || []);
+  const loading = project.detailPages === undefined;
+  const error = project.detailPagesError || '';
   const [selectedRows, setSelectedRows] = useState(new Set());
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [editingPage, setEditingPage] = useState(null);
+  const [pendingUpdates, setPendingUpdates] = useState(new Map());
+  const [pendingDeleteIds, setPendingDeleteIds] = useState(new Set());
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const hasPendingChanges = pendingUpdates.size > 0 || pendingDeleteIds.size > 0;
 
   useEffect(() => {
     setRows(project.detailPages || []);
+    setPendingUpdates(new Map());
+    setPendingDeleteIds(new Set());
+    setSaveError('');
   }, [project]);
 
   const allSelected = rows.length > 0 && selectedRows.size === rows.length;
@@ -1468,52 +1478,72 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
     });
   };
 
-  const updateRow = (idx, field, value) => {
-    setRows(prev => {
-      const updated = prev.map((r, i) => i === idx ? { ...r, [field]: value } : r);
-      onUpdatePages(updated);
-      return updated;
+  const stageUpdates = (ids, field, value) => {
+    setPendingUpdates(prev => {
+      const next = new Map(prev);
+      ids.forEach(id => next.set(id, { ...(next.get(id) || {}), [field]: value }));
+      return next;
     });
+  };
+
+  const updateRow = (idx, field, value) => {
+    setRows(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
+    stageUpdates([rows[idx].id], field, value);
   };
 
   const deleteRow = (idx) => {
-    setRows(prev => {
-      const updated = prev.filter((_, i) => i !== idx);
-      onUpdatePages(updated);
-      return updated;
-    });
+    const id = rows[idx].id;
+    setPendingDeleteIds(prev => new Set(prev).add(id));
+    setPendingUpdates(prev => { if (!prev.has(id)) return prev; const next = new Map(prev); next.delete(id); return next; });
+    setRows(prev => prev.filter((_, i) => i !== idx));
   };
 
   const bulkUpdate = (field, value) => {
-    setRows(prev => {
-      const updated = prev.map(r => ({ ...r, [field]: value }));
-      onUpdatePages(updated);
-      return updated;
-    });
+    stageUpdates(rows.map(r => r.id), field, value);
+    setRows(prev => prev.map(r => ({ ...r, [field]: value })));
   };
 
   const handleBulkEditApply = (field, value) => {
-    setRows(prev => {
-      const updated = prev.map((r, i) => selectedRows.has(i) ? { ...r, [field]: value } : r);
-      onUpdatePages(updated);
-      return updated;
-    });
+    stageUpdates(rows.filter((_, i) => selectedRows.has(i)).map(r => r.id), field, value);
+    setRows(prev => prev.map((r, i) => selectedRows.has(i) ? { ...r, [field]: value } : r));
     setSelectedRows(new Set());
   };
 
   const handleBulkDelete = () => {
-    setRows(prev => {
-      const updated = prev.filter((_, i) => !selectedRows.has(i));
-      onUpdatePages(updated);
-      return updated;
-    });
+    const ids = rows.filter((_, i) => selectedRows.has(i)).map(r => r.id);
+    setPendingDeleteIds(prev => { const next = new Set(prev); ids.forEach(id => next.add(id)); return next; });
+    setPendingUpdates(prev => { const next = new Map(prev); ids.forEach(id => next.delete(id)); return next; });
+    setRows(prev => prev.filter((_, i) => !selectedRows.has(i)));
     setSelectedRows(new Set());
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError('');
+    try {
+      if (pendingDeleteIds.size > 0) {
+        await bulkDeletePageRows(Array.from(pendingDeleteIds));
+      }
+      await Promise.all(Array.from(pendingUpdates.entries()).map(([id, updates]) => updatePageRow(id, updates)));
+      setPendingUpdates(new Map());
+      setPendingDeleteIds(new Set());
+      onUpdatePages(rows);
+    } catch (err) {
+      setSaveError(err.message || 'Failed to save changes.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleBackClick = () => {
+    if (hasPendingChanges && !window.confirm('You have unsaved changes. Discard them?')) return;
+    onBack();
   };
 
   return (
     <div>
       <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
-        <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 0', fontFamily: 'var(--font-body)', fontSize: 13 }}
+        <button onClick={handleBackClick} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 0', fontFamily: 'var(--font-body)', fontSize: 13 }}
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}>
           <ArrowLeft size={16} /> Back
@@ -1524,12 +1554,31 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
           <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>{project.domain}</span>
         </div>
         <div style={{ flex: 1 }} />
+        {saveError && (
+          <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError}</span>
+        )}
         <ActionsDropdown
           selectedCount={selectedRows.size}
           onBulkEdit={() => setShowBulkEdit(true)}
           onBulkDelete={() => setShowBulkDelete(true)}
         />
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{rows.length} page{rows.length !== 1 ? 's' : ''}</span>
+        {(hasPendingChanges || saving) && (
+          <button
+            onClick={handleSave}
+            disabled={!hasPendingChanges || saving}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: '#0f1523', color: '#fff',
+              border: 'none', borderRadius: 8,
+              padding: '7px 16px', fontSize: 13, fontWeight: 600,
+              cursor: saving ? 'default' : 'pointer',
+              fontFamily: 'var(--font-body)', opacity: saving ? 0.7 : 1,
+            }}
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+        )}
       </div>
 
       <BulkEditModal open={showBulkEdit} onClose={() => setShowBulkEdit(false)} count={selectedRows.size} onApply={handleBulkEditApply} fields={PAGE_BULK_FIELDS} />
@@ -1567,7 +1616,11 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 ? (
+          {loading ? (
+            <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading pages…</td></tr>
+          ) : error ? (
+            <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+          ) : rows.length === 0 ? (
             <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No pages added yet. Use Add Pages to import.</td></tr>
           ) : rows.map((r, i) => (
             <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}
@@ -2726,7 +2779,7 @@ export default function ProjectSetupPage({ tab }) {
   const [projects, setProjects] = useState([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsError, setProjectsError] = useState('');
-  const [pages, setPages] = useState(INITIAL_PAGES);
+  const [pages, setPages] = useState([]);
   const [kwClusters, setKwClusters] = useState([]);
   const [kwClustersLoading, setKwClustersLoading] = useState(true);
   const [kwClustersError, setKwClustersError] = useState('');
@@ -2758,6 +2811,38 @@ export default function ProjectSetupPage({ tab }) {
     return () => { cancelled = true; };
   }, []);
 
+  // The Pages tab has no dedicated backend table of its own -- its rows are
+  // derived straight from the real, DB-backed project list (`projects`,
+  // fetched for the Domain tab) plus KW Cluster's counts (Commercial vs
+  // Others / Blog Pages / Keywords), matched by slug. Any `detailPages`
+  // already imported locally via Add Pages are preserved across re-syncs;
+  // projects no longer in `projects` (deleted) simply drop out since this
+  // maps over `projects`, not the previous `pages` list.
+  useEffect(() => {
+    setPages(prev => {
+      const bySlug = new Map(prev.map(p => [p.slug, p]));
+      return projects.map(proj => {
+        const kwProject = kwClusters.find(k => k.slug === proj.slug);
+        const existing = bySlug.get(proj.slug);
+        return {
+          ...existing,
+          slug: proj.slug,
+          name: proj.name,
+          domain: proj.domain,
+          locationIcon: proj.locationIcon,
+          location: proj.location,
+          totalPages: existing?.totalPages ?? 0,
+          commercialPct: kwProject?.commercialPct ?? '0/0',
+          blogPages: kwProject?.blogPages ?? 0,
+          blogDir: null,
+          keywords: kwProject?.totalPages ?? 0,
+          keywordsDir: null,
+          updated: proj.updated,
+        };
+      });
+    });
+  }, [projects, kwClusters]);
+
   useEffect(() => {
     if (selectedKwProject === null) return;
     const slug = kwClusters[selectedKwProject]?.slug;
@@ -2769,28 +2854,20 @@ export default function ProjectSetupPage({ tab }) {
     return () => { cancelled = true; };
   }, [selectedKwProject]);
 
-  const handleCreateProject = async (data) => {
-    const location = data.regions[0] || 'Global';
-    const locationIcon = data.platforms.includes('google') ? 'google'
-      : data.platforms.includes('ai_mode') || data.platforms.includes('ai_overview') ? 'ai'
-      : 'desktop';
+  useEffect(() => {
+    if (selectedPageProject === null) return;
+    const slug = pages[selectedPageProject]?.slug;
+    if (!slug) return;
+    let cancelled = false;
+    fetchPageRows(slug)
+      .then(rows => { if (!cancelled) setPages(prev => prev.map((p, i) => i === selectedPageProject ? { ...p, detailPages: rows, totalPages: rows.length, detailPagesError: '' } : p)); })
+      .catch(err => { if (!cancelled) setPages(prev => prev.map((p, i) => i === selectedPageProject ? { ...p, detailPagesError: err.message || 'Failed to load pages.' } : p)); });
+    return () => { cancelled = true; };
+  }, [selectedPageProject]);
 
+  const handleCreateProject = async (data) => {
     const created = await createProject(data);
     setProjects(prev => [created, ...prev]);
-
-    setPages(prev => [...prev, {
-      name: data.name,
-      domain: data.domain,
-      locationIcon,
-      location,
-      totalPages: 0,
-      commercialPct: '0/0',
-      blogPages: 0,
-      blogDir: null,
-      keywords: 0,
-      keywordsDir: null,
-      updated: 'Just now',
-    }]);
   };
 
   const handleUpdateProject = async (project, updates) => {
@@ -2803,53 +2880,58 @@ export default function ProjectSetupPage({ tab }) {
     setProjects(prev => prev.filter(p => p !== project));
   };
 
+  // Deletes just this project's KW Cluster data (keyword_categories/
+  // categories/clusters/category_cluster_map) -- deliberately does NOT
+  // touch `projects`, so the project itself keeps showing up on the
+  // Domain and Pages tabs. Zeroes out the row's counts in place rather
+  // than removing it from `kwClusters`, since the project still exists.
   const handleDeleteKwProject = async (project) => {
-    await deleteKwProject(project.slug);
-    setKwClusters(prev => prev.filter(p => p.slug !== project.slug));
+    await deleteKwClusterData(project.slug);
+    setKwClusters(prev => prev.map(p => p.slug === project.slug
+      ? { ...p, totalPages: 0, commercialPct: '0/0', blogPages: 0, keywords: 0, detailKeywords: [] }
+      : p));
   };
 
-  const handleImportPages = (data) => {
-    const newRows = data.pages.map(r => ({
-      pageName: r.pageName,
-      url: r.url,
-      cluster: r.cluster,
-      category: r.category,
-      targetCategory: '',
-      targetType: '',
-    }));
+  // Deletes just this project's page rows -- deliberately does NOT touch
+  // `projects`/`kwClusters`, so the project keeps showing up on the
+  // Domain and KW Cluster tabs. Zeroes out the row's page count in place
+  // rather than removing it from `pages`, since the project still exists.
+  const handleDeletePagesProject = async (project) => {
+    await deletePagesData(project.slug);
+    setPages(prev => prev.map(p => p.slug === project.slug
+      ? { ...p, totalPages: 0, detailPages: [] }
+      : p));
+  };
+
+  const handleImportPages = async (data) => {
+    const insertedRows = await insertPageRows(data.slug, data.pages);
 
     setPages(prev => {
-      const targetIdx = typeof data.targetIndex === 'number' ? data.targetIndex : prev.findIndex(p => p.domain === data.domain);
+      const targetIdx = typeof data.targetIndex === 'number' ? data.targetIndex : prev.findIndex(p => p.slug === data.slug);
 
       if (targetIdx !== -1) {
         return prev.map((p, i) => {
           if (i !== targetIdx) return p;
-          const detailPages = [...(p.detailPages || []), ...newRows];
-          const commercialPages = detailPages.filter(r => (r.targetType || '').toLowerCase().includes('commercial')).length;
-          return {
-            ...p,
-            detailPages,
-            totalPages: detailPages.length,
-            commercialPct: `${commercialPages}/${detailPages.length}`,
-            updated: 'Just now',
-          };
+          const detailPages = [...(p.detailPages || []), ...insertedRows];
+          return { ...p, detailPages, totalPages: detailPages.length, updated: 'Just now' };
         });
       }
 
-      const matchedProject = projects.find(p => p.domain === data.domain);
+      const matchedProject = projects.find(p => p.slug === data.slug);
       return [...prev, {
+        slug: data.slug,
         name: data.name,
         domain: data.domain,
         locationIcon: matchedProject?.locationIcon || 'desktop',
         location: matchedProject?.location || 'Global',
-        totalPages: newRows.length,
-        commercialPct: `0/${newRows.length}`,
+        totalPages: insertedRows.length,
+        commercialPct: '0/0',
         blogPages: 0,
-        blogDir: 'up',
+        blogDir: null,
         keywords: 0,
         keywordsDir: null,
         updated: 'Just now',
-        detailPages: newRows,
+        detailPages: insertedRows,
       }];
     });
   };
@@ -3046,7 +3128,7 @@ export default function ProjectSetupPage({ tab }) {
           <PageDetailView
             project={pages[selectedPageProject]}
             onBack={() => setSelectedPageProject(null)}
-            onUpdatePages={(updated) => setPages(prev => prev.map((p, i) => i === selectedPageProject ? { ...p, detailPages: updated } : p))}
+            onUpdatePages={(updated) => setPages(prev => prev.map((p, i) => i === selectedPageProject ? { ...p, detailPages: updated, totalPages: updated.length } : p))}
           />
         ) : activeTab === 'Competitors' && selectedCompetitor !== null ? (
           <CompetitorDetailView
@@ -3056,8 +3138,8 @@ export default function ProjectSetupPage({ tab }) {
         ) : (
           <div style={{ overflowX: 'auto' }}>
             {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} />}
-            {activeTab === 'KW Cluster' && <PagesTab pages={kwClusters} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" />}
-            {activeTab === 'Pages' && <PagesTab pages={pages} onSelectProject={setSelectedPageProject} />}
+            {activeTab === 'KW Cluster' && <PagesTab pages={kwClusters} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's KW Cluster data (keywords, categories, clusters)" />}
+            {activeTab === 'Pages' && <PagesTab pages={pages} onSelectProject={setSelectedPageProject} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" />}
             {activeTab === 'Competitors' && <CompetitorsTab onSelectCompetitor={setSelectedCompetitor} />}
             {(activeTab === 'Outreach' || activeTab === 'Connectors') && (
               <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
@@ -3096,7 +3178,7 @@ export default function ProjectSetupPage({ tab }) {
         onClose={() => setShowAddPages(false)}
         projects={projects}
         onImportPages={handleImportPages}
-        lockedProject={activeTab === 'Pages' && selectedPageProject !== null ? { index: selectedPageProject, name: pages[selectedPageProject].name, domain: pages[selectedPageProject].domain } : null}
+        lockedProject={activeTab === 'Pages' && selectedPageProject !== null ? { index: selectedPageProject, slug: pages[selectedPageProject].slug, name: pages[selectedPageProject].name, domain: pages[selectedPageProject].domain } : null}
       />
       <AddKeywordsModal
         open={showAddKeywords}

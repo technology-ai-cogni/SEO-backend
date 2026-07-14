@@ -268,6 +268,22 @@ def init_db():
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_keyword_categories_job ON keyword_categories (job_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_keyword_categories_project ON keyword_categories (project_name)"))
 
+        # --- Pages (the frontend's "Add Pages" sheet upload) -------------
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS pages (
+                id BIGSERIAL PRIMARY KEY,
+                project_name TEXT NOT NULL REFERENCES projects(slug),
+                page_name TEXT,
+                url TEXT,
+                cluster TEXT,
+                category TEXT,
+                target_category TEXT,
+                target_type TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pages_project ON pages (project_name)"))
+
 
 # --- Projects -------------------------------------------------------------
 
@@ -320,22 +336,47 @@ def list_projects():
 
 def delete_project(slug):
     """Removes a project and everything scoped to it in one transaction --
-    domains, keyword_categories, categories, clusters, and
-    category_cluster_map all carry a FK on projects.slug, so they have to
-    go before the projects row itself or the DB rejects the delete.
+    domains, keyword_categories, categories, clusters,
+    category_cluster_map, and pages all carry a FK on projects.slug, so
+    they have to go before the projects row itself or the DB rejects the
+    delete.
 
     Runs over the same direct Postgres connection as the rest of this
     module, which is why this lives here rather than in the frontend --
     the frontend's Supabase client is subject to RLS policies that only
     permit it to touch domains/projects/keyword_categories, not the
-    categories/clusters/category_cluster_map tables."""
+    categories/clusters/category_cluster_map/pages tables."""
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM keyword_categories WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM domains WHERE project_slug = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM categories WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM clusters WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM category_cluster_map WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM pages WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM projects WHERE slug = :slug"), {"slug": slug})
+
+
+def delete_project_kw_data(slug):
+    """Removes just this project's KW Cluster data (keyword_categories,
+    categories, clusters, category_cluster_map) -- leaves the project
+    itself, its domain registration, and its pages untouched, so it still
+    shows up on the Domain and Pages tabs afterward. This is what the KW
+    Cluster tab's delete button calls -- unlike delete_project() above,
+    which removes the project everywhere."""
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM keyword_categories WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM categories WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM clusters WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM category_cluster_map WHERE project_name = :slug"), {"slug": slug})
+
+
+def delete_project_pages(slug):
+    """Removes just this project's page rows (Add Pages uploads) -- leaves
+    the project, its domain registration, and its KW Cluster data
+    untouched, so it still shows up on the Domain and KW Cluster tabs
+    afterward. This is what the Pages tab's delete button calls."""
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM pages WHERE project_name = :slug"), {"slug": slug})
 
 
 # --- Domains (the "Create Project" form) --------------------------------
@@ -681,6 +722,77 @@ def get_job_keyword_rows_for_rank_check(job_id):
             FROM keyword_categories WHERE job_id = :job_id ORDER BY id
         """), {"job_id": job_id}).mappings().fetchall()
         return [dict(r) for r in rows]
+
+
+# --- Pages (the frontend's "Add Pages" sheet upload) ----------------------
+# Routed through this direct-Postgres module rather than the frontend's
+# Supabase client -- new tables aren't reachable by the frontend's
+# RLS-restricted anon key until policies are added for them (see
+# categories/clusters/category_cluster_map, which hit the same wall), so
+# pages goes through this app's own endpoints from the start.
+
+_PAGE_UPDATABLE_COLUMNS = {"page_name", "url", "cluster", "category", "target_category", "target_type"}
+
+
+def insert_page_rows(project_slug, rows):
+    """Bulk-inserts page rows (page_name/url/cluster/category) uploaded via
+    the frontend's Add Pages flow. Returns the inserted rows (with ids), in
+    the same order as `rows`."""
+    if not rows:
+        return []
+    inserted = []
+    with engine.begin() as conn:
+        for batch in _chunked(rows, 500):
+            values_sql = ", ".join(
+                f"(:project_name, :page_name{i}, :url{i}, :cluster{i}, :category{i})"
+                for i in range(len(batch))
+            )
+            params = {"project_name": project_slug}
+            for i, r in enumerate(batch):
+                params[f"page_name{i}"] = r.get("pageName")
+                params[f"url{i}"] = r.get("url")
+                params[f"cluster{i}"] = r.get("cluster")
+                params[f"category{i}"] = r.get("category")
+            result = conn.execute(text(f"""
+                INSERT INTO pages (project_name, page_name, url, cluster, category)
+                VALUES {values_sql}
+                RETURNING id, page_name, url, cluster, category, target_category, target_type
+            """), params)
+            inserted.extend(dict(r) for r in result.mappings().fetchall())
+    return inserted
+
+
+def get_page_rows(project_slug):
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT id, page_name, url, cluster, category, target_category, target_type
+            FROM pages WHERE project_name = :project_name ORDER BY id
+        """), {"project_name": project_slug}).mappings().fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_page_row(row_id, updates):
+    """Updates whichever of page_name/url/cluster/category/target_category/
+    target_type are present in `updates` (snake_case keys) -- silently
+    ignores anything else."""
+    fields = {k: v for k, v in updates.items() if k in _PAGE_UPDATABLE_COLUMNS}
+    if not fields:
+        return
+    set_sql = ", ".join(f"{k} = :{k}" for k in fields)
+    with engine.begin() as conn:
+        conn.execute(text(f"UPDATE pages SET {set_sql} WHERE id = :id"), {**fields, "id": row_id})
+
+
+def delete_page_row(row_id):
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM pages WHERE id = :id"), {"id": row_id})
+
+
+def bulk_delete_page_rows(ids):
+    if not ids:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM pages WHERE id = ANY(:ids)"), {"ids": ids})
 
 
 def get_uncategorized_keyword_rows(domain):

@@ -41,7 +41,18 @@ Endpoints:
     DELETE /projects/{project}              delete a project and everything
                                            scoped to it (domains,
                                            keyword_categories, categories,
-                                           clusters, category_cluster_map)
+                                           clusters, category_cluster_map,
+                                           pages) -- not currently wired
+                                           to any UI button, see below
+    DELETE /projects/{project}/kw-data      delete just this project's KW
+                                           Cluster data (keyword_categories/
+                                           categories/clusters/
+                                           category_cluster_map) -- what
+                                           the KW Cluster tab's delete
+                                           button calls
+    DELETE /projects/{project}/pages        delete just this project's page
+                                           rows -- what the Pages tab's
+                                           delete button calls
     GET  /projects/{project}/results        ALL keyword results ever
                                            processed for a project, across
                                            every job -- the "project table"
@@ -59,6 +70,13 @@ Endpoints:
     POST /projects/{project}/categorize      categorize existing
                                            un-categorized keywords in a
                                            project (background thread)
+    GET  /projects/{project}/pages          every page row uploaded via
+                                           Add Pages for this project
+    POST /projects/{project}/pages          bulk-insert page rows parsed
+                                           from an Add Pages sheet upload
+    PATCH /pages/{page_id}                  update one page row
+    DELETE /pages/{page_id}                 delete one page row
+    POST /pages/bulk-delete                 delete many page rows at once
     GET  /jobs                             list all jobs (every project)
     GET  /jobs/{job_id}                     poll job status/progress
     POST /jobs/{job_id}/check-rank            check rank for every keyword
@@ -102,6 +120,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def _run_migrations():
+    """CREATE TABLE/COLUMN IF NOT EXISTS only (see db.init_db()) -- safe to
+    run on every boot, so a fresh table/column added here shows up in
+    production on the next deploy without a manual `python -m core.db`
+    step."""
+    db.init_db()
 
 
 class DomainUser(BaseModel):
@@ -270,14 +297,40 @@ def get_projects():
 @app.delete("/projects/{project}")
 def delete_project_endpoint(project: str):
     """Deletes a project and everything scoped to it (domains,
-    keyword_categories, categories, clusters, category_cluster_map) in one
-    transaction. Runs through this app's direct Postgres connection rather
-    than the frontend's Supabase client, since the categories/clusters/
-    category_cluster_map tables aren't exposed to the frontend's
-    (RLS-restricted) anon key."""
+    keyword_categories, categories, clusters, category_cluster_map, pages)
+    in one transaction. Not currently called by any tab's delete button --
+    the Domain tab deletes just its `domains` row directly via Supabase,
+    and the KW Cluster/Pages tabs each only delete their own slice (see
+    delete_project_kw_data_endpoint/delete_project_pages_endpoint below),
+    so deleting from one tab doesn't make a project vanish from the
+    others. Kept as a full-teardown capability for if/when that's
+    actually wanted from the UI."""
     proj = _resolve_project_or_404(project)
     db.delete_project(proj["slug"])
     return {"deleted": proj["slug"]}
+
+
+@app.delete("/projects/{project}/kw-data")
+def delete_project_kw_data_endpoint(project: str):
+    """Removes just this project's KW Cluster data (keyword_categories,
+    categories, clusters, category_cluster_map) -- leaves the project,
+    its domain registration, and its pages intact, so it still shows up
+    on the Domain and Pages tabs afterward. This is what the KW Cluster
+    tab's delete button calls."""
+    proj = _resolve_project_or_404(project)
+    db.delete_project_kw_data(proj["slug"])
+    return {"project": proj["name"], "kw_data_deleted": True}
+
+
+@app.delete("/projects/{project}/pages")
+def delete_project_pages_endpoint(project: str):
+    """Removes just this project's page rows (Add Pages uploads) -- leaves
+    the project, its domain registration, and its KW Cluster data intact,
+    so it still shows up on the Domain and KW Cluster tabs afterward. This
+    is what the Pages tab's delete button calls."""
+    proj = _resolve_project_or_404(project)
+    db.delete_project_pages(proj["slug"])
+    return {"project": proj["name"], "pages_deleted": True}
 
 
 @app.get("/projects/{project}/results")
@@ -432,6 +485,86 @@ def categorize_existing_keywords(project: str, payload: CategorizeExistingReques
     run_categorize_job_in_background(job_id, proj["slug"], rows, country_code)
 
     return {"job_id": job_id, "project": proj["name"], "keywords_enqueued": len(rows)}
+
+
+class PageRow(BaseModel):
+    pageName: Optional[str] = None
+    url: Optional[str] = None
+    cluster: Optional[str] = None
+    category: Optional[str] = None
+
+
+class PageUpdateRequest(BaseModel):
+    pageName: Optional[str] = None
+    url: Optional[str] = None
+    cluster: Optional[str] = None
+    category: Optional[str] = None
+    targetCategory: Optional[str] = None
+    targetType: Optional[str] = None
+
+
+class BulkDeletePagesRequest(BaseModel):
+    ids: List[int]
+
+
+def _page_row_to_json(row):
+    return {
+        "id": row["id"],
+        "pageName": row.get("page_name"),
+        "url": row.get("url"),
+        "cluster": row.get("cluster"),
+        "category": row.get("category"),
+        "targetCategory": row.get("target_category"),
+        "targetType": row.get("target_type"),
+    }
+
+
+@app.get("/projects/{project}/pages")
+def list_project_pages(project: str):
+    """Every page row uploaded for this project via Add Pages, in upload
+    order."""
+    proj = _resolve_project_or_404(project)
+    return {"project": proj["name"], "pages": [_page_row_to_json(r) for r in db.get_page_rows(proj["slug"])]}
+
+
+@app.post("/projects/{project}/pages")
+def create_project_pages(project: str, rows: List[PageRow]):
+    """Bulk-inserts page rows parsed from an Add Pages sheet upload (Page
+    Name, URL, Cluster, Category columns) -- mirrors /jobs/category's
+    upload flow but for pages, which have no categorization job of their
+    own. Returns the inserted rows with their new ids."""
+    proj = _resolve_project_or_404(project)
+    if not rows:
+        raise HTTPException(400, "No page rows to import.")
+    inserted = db.insert_page_rows(proj["slug"], [r.dict() for r in rows])
+    return {"project": proj["name"], "pages": [_page_row_to_json(r) for r in inserted]}
+
+
+@app.patch("/pages/{page_id}")
+def update_project_page(page_id: int, payload: PageUpdateRequest):
+    """Updates whichever fields are present on a single page row (inline
+    edits and the Target Category/Target Type header dropdowns in the
+    Pages detail view)."""
+    updates = {
+        "page_name": payload.pageName, "url": payload.url, "cluster": payload.cluster,
+        "category": payload.category, "target_category": payload.targetCategory,
+        "target_type": payload.targetType,
+    }
+    updates = {k: v for k, v in updates.items() if v is not None}
+    db.update_page_row(page_id, updates)
+    return {"id": page_id}
+
+
+@app.delete("/pages/{page_id}")
+def delete_project_page(page_id: int):
+    db.delete_page_row(page_id)
+    return {"deleted": page_id}
+
+
+@app.post("/pages/bulk-delete")
+def bulk_delete_project_pages(payload: BulkDeletePagesRequest):
+    db.bulk_delete_page_rows(payload.ids)
+    return {"deleted": len(payload.ids)}
 
 
 @app.get("/jobs")

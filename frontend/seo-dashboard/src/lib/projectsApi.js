@@ -507,14 +507,18 @@ export async function bulkDeleteKeywordRows(ids) {
 
 const CATEGORY_API_BASE = 'https://seo-backend-fqlp.onrender.com';
 
-// Removes a project entirely from the KW Cluster list -- its domain
-// registration(s), the shared `projects` row, every keyword row filed
-// under its slug, and the shared categories/clusters/category_cluster_map
-// rows scoped to it. Routed through the backend's own DELETE
-// /projects/{project} endpoint (core/db.py's delete_project()) rather than
-// direct Supabase calls -- categories/clusters/category_cluster_map aren't
-// exposed to the frontend's RLS-restricted anon key, only the backend's
-// direct Postgres connection can touch them.
+// Removes a project entirely, everywhere -- its domain registration(s),
+// the shared `projects` row, every keyword row filed under its slug, its
+// pages, and the shared categories/clusters/category_cluster_map rows
+// scoped to it. NOT currently called by any tab's delete button (the KW
+// Cluster and Pages tabs each only delete their own slice below, so
+// deleting from one doesn't make the project vanish from the others) --
+// kept as a full-teardown capability. Routed through the backend's own
+// DELETE /projects/{project} endpoint (core/db.py's delete_project())
+// rather than direct Supabase calls -- categories/clusters/
+// category_cluster_map/pages aren't exposed to the frontend's
+// RLS-restricted anon key, only the backend's direct Postgres connection
+// can touch them.
 export async function deleteKwProject(slug) {
   if (isLocalMode) {
     const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
@@ -525,6 +529,9 @@ export async function deleteKwProject(slug) {
 
     const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
     localStorage.setItem('seo_keyword_categories', JSON.stringify(kwRows.filter(r => r.project_name !== slug)));
+
+    const pageRows = JSON.parse(localStorage.getItem('seo_pages') || '[]');
+    localStorage.setItem('seo_pages', JSON.stringify(pageRows.filter(r => r.project_name !== slug)));
     return;
   }
 
@@ -532,5 +539,163 @@ export async function deleteKwProject(slug) {
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail || 'Failed to delete project.');
+  }
+}
+
+// Removes just this project's KW Cluster data (keyword_categories,
+// categories, clusters, category_cluster_map) -- leaves the project, its
+// domain registration, and its pages intact, so it still shows up on the
+// Domain and Pages tabs afterward. This is what the KW Cluster tab's
+// delete button calls.
+export async function deleteKwClusterData(slug) {
+  if (isLocalMode) {
+    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
+    localStorage.setItem('seo_keyword_categories', JSON.stringify(kwRows.filter(r => r.project_name !== slug)));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/kw-data`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete keyword data.');
+  }
+}
+
+// Removes just this project's page rows (Add Pages uploads) -- leaves the
+// project, its domain registration, and its KW Cluster data intact, so it
+// still shows up on the Domain and KW Cluster tabs afterward. This is
+// what the Pages tab's delete button calls.
+export async function deletePagesData(slug) {
+  if (isLocalMode) {
+    const pageRows = JSON.parse(localStorage.getItem('seo_pages') || '[]');
+    localStorage.setItem('seo_pages', JSON.stringify(pageRows.filter(r => r.project_name !== slug)));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/pages`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete pages.');
+  }
+}
+
+// ─── Pages tab ──────────────────────────────────────────────────────────────
+// Routed through the backend's own /projects/{project}/pages and
+// /pages/{id} endpoints (core/db.py's insert_page_rows()/etc.) rather than
+// direct Supabase calls -- the `pages` table is brand new and hasn't had
+// RLS policies set up for the frontend's anon key (same reason
+// deleteKwProject routes categories/clusters/category_cluster_map through
+// the backend instead of Supabase directly).
+
+function pageRowToUi(row) {
+  return {
+    id: row.id,
+    pageName: row.pageName,
+    url: row.url,
+    cluster: row.cluster,
+    category: row.category,
+    targetCategory: row.targetCategory,
+    targetType: row.targetType,
+  };
+}
+
+export async function fetchPageRows(slug) {
+  if (isLocalMode) {
+    const pageRows = JSON.parse(localStorage.getItem('seo_pages') || '[]');
+    return pageRows.filter(r => r.project_name === slug).map(pageRowToUi);
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/pages`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to load pages.');
+  }
+  const data = await res.json();
+  return (data.pages || []).map(pageRowToUi);
+}
+
+export async function insertPageRows(slug, rows) {
+  if (isLocalMode) {
+    const pageRows = JSON.parse(localStorage.getItem('seo_pages') || '[]');
+    const maxId = pageRows.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
+    const inserted = rows.map((r, i) => ({
+      id: maxId + i + 1,
+      project_name: slug,
+      pageName: r.pageName || '',
+      url: r.url || '',
+      cluster: r.cluster || '',
+      category: r.category || '',
+      targetCategory: '',
+      targetType: '',
+    }));
+    localStorage.setItem('seo_pages', JSON.stringify([...pageRows, ...inserted]));
+    return inserted.map(pageRowToUi);
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/pages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(rows),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail?.[0]?.msg || body?.detail || 'Failed to import pages.');
+  }
+  const data = await res.json();
+  return (data.pages || []).map(pageRowToUi);
+}
+
+export async function updatePageRow(id, updates) {
+  if (isLocalMode) {
+    const pageRows = JSON.parse(localStorage.getItem('seo_pages') || '[]');
+    const index = pageRows.findIndex(r => String(r.id) === String(id));
+    if (index !== -1) {
+      pageRows[index] = { ...pageRows[index], ...updates };
+      localStorage.setItem('seo_pages', JSON.stringify(pageRows));
+    }
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/pages/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to update page.');
+  }
+}
+
+export async function deletePageRow(id) {
+  if (isLocalMode) {
+    const pageRows = JSON.parse(localStorage.getItem('seo_pages') || '[]');
+    localStorage.setItem('seo_pages', JSON.stringify(pageRows.filter(r => String(r.id) !== String(id))));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/pages/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete page.');
+  }
+}
+
+export async function bulkDeletePageRows(ids) {
+  if (isLocalMode) {
+    const pageRows = JSON.parse(localStorage.getItem('seo_pages') || '[]');
+    const stringIds = ids.map(String);
+    localStorage.setItem('seo_pages', JSON.stringify(pageRows.filter(r => !stringIds.includes(String(r.id)))));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/pages/bulk-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete pages.');
   }
 }
