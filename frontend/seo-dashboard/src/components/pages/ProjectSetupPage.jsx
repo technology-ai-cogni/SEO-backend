@@ -1593,6 +1593,22 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
     }
   };
 
+  // Auto-refresh: silently re-pulls this project's pages every 10s while
+  // this view is open, on top of the manual refresh icon. Skips a cycle
+  // (rather than discarding anything) if a save/refresh is already in
+  // flight or there are unsaved local edits -- it never overwrites those
+  // without the explicit confirm the manual button already asks for.
+  useEffect(() => {
+    const AUTO_REFRESH_MS = 10000;
+    const interval = setInterval(() => {
+      if (refreshing || saving || hasPendingChanges) return;
+      fetchPageRows(project.slug)
+        .then(freshRows => { setRows(freshRows); onUpdatePages(freshRows); })
+        .catch(() => {});
+    }, AUTO_REFRESH_MS);
+    return () => clearInterval(interval);
+  }, [project.slug, refreshing, saving, hasPendingChanges]);
+
   const handleBackClick = () => {
     if (hasPendingChanges && !window.confirm('You have unsaved changes. Discard them?')) return;
     onBack();
@@ -2200,6 +2216,23 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
       setRefreshing(false);
     }
   };
+
+  // Auto-refresh: silently re-pulls this project's keywords every 10s
+  // while this view is open, on top of the manual refresh icon. Skips a
+  // cycle (rather than discarding anything) if a save/refresh/clustering/
+  // rank-check is already in flight or there are unsaved local edits -- it
+  // never overwrites those without the explicit confirm the manual button
+  // already asks for.
+  useEffect(() => {
+    const AUTO_REFRESH_MS = 10000;
+    const interval = setInterval(() => {
+      if (refreshing || saving || clustering || rankChecking || hasPendingChanges) return;
+      fetchKeywordRows(project.slug)
+        .then(freshRows => { setRows(freshRows); onUpdateKeywords(freshRows); })
+        .catch(() => {});
+    }, AUTO_REFRESH_MS);
+    return () => clearInterval(interval);
+  }, [project.slug, refreshing, saving, clustering, rankChecking, hasPendingChanges]);
 
   const handleBackClick = () => {
     if (hasPendingChanges && !window.confirm('You have unsaved changes. Discard them?')) return;
@@ -2955,6 +2988,34 @@ export default function ProjectSetupPage({ tab }) {
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
+
+  // Auto-refresh the KW Cluster project LIST every 10s (only while it's
+  // actually on screen -- i.e. that tab is active and no project is open,
+  // since a detail view has its own separate auto-refresh for its rows).
+  useEffect(() => {
+    if (activeTab !== 'KW Cluster' || selectedKwProject !== null) return;
+    const interval = setInterval(() => {
+      fetchKwProjects().then(rows => setKwClusters(rows.filter(p => p.totalPages > 0))).catch(() => {});
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [activeTab, selectedKwProject]);
+
+  // Auto-refresh the Pages project LIST every 10s -- re-pulls all three
+  // sources it's derived from (projects/kwClusters/pagesCounts); the sync
+  // effect below rebuilds `pages` from whatever comes back.
+  useEffect(() => {
+    if (activeTab !== 'Pages' || selectedPageProject !== null) return;
+    const interval = setInterval(() => {
+      Promise.all([fetchDomainRows(), fetchKwProjects(), fetchPagesCounts()])
+        .then(([domainRows, kwRows, counts]) => {
+          setProjects(domainRows);
+          setKwClusters(kwRows.filter(p => p.totalPages > 0));
+          setPagesCounts(counts);
+        })
+        .catch(() => {});
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [activeTab, selectedPageProject]);
 
   // The Pages tab has no dedicated backend table of its own -- its rows are
   // derived straight from the real, DB-backed project list (`projects`,
