@@ -57,6 +57,24 @@ def _union(parent, a, b):
         parent[ra] = rb
 
 
+_BEST_TOP_PREFIX_RE = re.compile(r"^(best/top|best|top)\s+", re.IGNORECASE)
+
+
+def _strip_best_top(label):
+    """Cluster names must never carry a Best/Top prefix -- that's a
+    per-CATEGORY tag (whether THIS specific keyword's own titles said
+    best/top), not a cluster-level concept, and categories sharing one
+    cluster can disagree on it. _cluster_significant_words() already
+    excludes "best"/"top" from the word sets used to BUILD a multi-member
+    label, but the singleton-cluster fallback below reuses a category's
+    RAW name verbatim (and the multi-member path also falls back to the
+    raw name if no shared words survive) -- either path can otherwise let
+    "Best/Top " straight through. Applied as a final safety net to every
+    label this function returns, regardless of which path produced it."""
+    stripped = _BEST_TOP_PREFIX_RE.sub("", label).strip()
+    return stripped or label
+
+
 def cluster_categories(categories):
     """categories: list of category name strings (may contain
     duplicates -- harmless, just processed redundantly). Returns
@@ -85,7 +103,7 @@ def cluster_categories(categories):
     assignment = {}
     for members in groups.values():
         if len(members) == 1 or not any(word_sets[m] for m in members):
-            label = members[0]
+            label = _strip_best_top(members[0])
             for cat in members:
                 assignment[cat] = label
             continue
@@ -116,6 +134,7 @@ def cluster_categories(categories):
             key=lambda w: position_totals.get(w, 0) / position_counts.get(w, 1),
         )
         cluster_label = " ".join(_display_form(w, members).title() for w in ordered_words) or members[0]
+        cluster_label = _strip_best_top(cluster_label)
 
         for cat in members:
             assignment[cat] = cluster_label
