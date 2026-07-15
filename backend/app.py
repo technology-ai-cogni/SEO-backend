@@ -83,6 +83,11 @@ Endpoints:
     PATCH /pages/{page_id}                  update one page row
     DELETE /pages/{page_id}                 delete one page row
     POST /pages/bulk-delete                 delete many page rows at once
+    GET  /competitors                       every tracked competitor
+                                           (global list, not project-scoped)
+    POST /competitors                       add a tracked competitor
+    PATCH /competitors/{competitor_id}       update one competitor
+    DELETE /competitors/{competitor_id}      delete one competitor
     GET  /jobs                             list all jobs (every project)
     GET  /jobs/{job_id}                     poll job status/progress
     POST /jobs/{job_id}/check-rank            check rank for every keyword
@@ -595,6 +600,76 @@ def delete_project_page(page_id: int):
 def bulk_delete_project_pages(payload: BulkDeletePagesRequest):
     db.bulk_delete_page_rows(payload.ids)
     return {"deleted": len(payload.ids)}
+
+
+class CompetitorCreateRequest(BaseModel):
+    domain: str
+    name: Optional[str] = None
+    da: Optional[str] = None
+    targetRegions: Optional[List[str]] = None
+
+
+class CompetitorUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    domain: Optional[str] = None
+    da: Optional[str] = None
+    targetRegions: Optional[List[str]] = None
+
+
+def _competitor_to_json(row):
+    return {
+        "id": row["id"],
+        "domain": row.get("domain"),
+        "name": row.get("name"),
+        "da": row.get("da"),
+        "targetRegions": row.get("target_regions") or [],
+        "device": row.get("device"),
+        "location": row.get("location"),
+        "commonKw": row.get("common_kw"),
+        "commonKwChange": row.get("common_kw_change"),
+        "totalKw": row.get("total_kw"),
+        "totalKwChange": row.get("total_kw_change"),
+        "aiCompLevel": row.get("ai_comp_level"),
+        "aiCompChange": row.get("ai_comp_change"),
+        "serpCompLevel": row.get("serp_comp_level"),
+        "compLevel": row.get("comp_level"),
+        "createdAt": row.get("created_at").isoformat() if row.get("created_at") else None,
+        "updatedAt": row.get("updated_at").isoformat() if row.get("updated_at") else None,
+    }
+
+
+@app.get("/competitors")
+def list_competitors():
+    """Every tracked competitor -- global list, not scoped to a project
+    (the Competitors tab is a top-level nav item, not nested inside a
+    specific project)."""
+    return {"competitors": [_competitor_to_json(r) for r in db.get_competitors()]}
+
+
+@app.post("/competitors")
+def create_competitor(payload: CompetitorCreateRequest):
+    domain = payload.domain.strip()
+    if not domain:
+        raise HTTPException(400, "Domain is required.")
+    row = db.insert_competitor(domain, payload.name, payload.da, payload.targetRegions)
+    return _competitor_to_json(row)
+
+
+@app.patch("/competitors/{competitor_id}")
+def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequest):
+    updates = {
+        "name": payload.name, "domain": payload.domain, "da": payload.da,
+        "target_regions": payload.targetRegions,
+    }
+    updates = {k: v for k, v in updates.items() if v is not None}
+    db.update_competitor(competitor_id, updates)
+    return {"id": competitor_id}
+
+
+@app.delete("/competitors/{competitor_id}")
+def delete_competitor_endpoint(competitor_id: int):
+    db.delete_competitor(competitor_id)
+    return {"deleted": competitor_id}
 
 
 @app.get("/jobs")

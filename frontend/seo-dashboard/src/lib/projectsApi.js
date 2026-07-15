@@ -721,3 +721,108 @@ export async function bulkDeletePageRows(ids) {
     throw new Error(body?.detail || 'Failed to delete pages.');
   }
 }
+
+// ─── Competitors tab ────────────────────────────────────────────────────────
+// Global list, not scoped to a project -- routed through the backend (new
+// table, same RLS-not-set-up-yet reasoning as pages) rather than Supabase
+// directly.
+
+function competitorRowToUi(row) {
+  return {
+    id: row.id,
+    domain: row.domain,
+    name: row.name,
+    da: row.da,
+    targetRegions: row.targetRegions || [],
+    device: row.device,
+    location: row.location,
+    commonKw: row.commonKw,
+    commonKwChange: row.commonKwChange,
+    totalKw: row.totalKw,
+    totalKwChange: row.totalKwChange,
+    aiCompLevel: row.aiCompLevel,
+    aiCompChange: row.aiCompChange,
+    serpCompLevel: row.serpCompLevel,
+    compLevel: row.compLevel,
+    updated: timeAgo(row.updatedAt || row.createdAt),
+    details: [],
+  };
+}
+
+export async function fetchCompetitors() {
+  if (isLocalMode) {
+    const rows = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
+    return rows.map(competitorRowToUi);
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/competitors`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to load competitors.');
+  }
+  const data = await res.json();
+  return (data.competitors || []).map(competitorRowToUi);
+}
+
+export async function insertCompetitor({ domain, name, da, targetRegions }) {
+  if (isLocalMode) {
+    const rows = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
+    const maxId = rows.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
+    const now = new Date().toISOString();
+    const inserted = {
+      id: maxId + 1, domain, name: name || null, da: da || null, targetRegions: targetRegions || [],
+      commonKw: 0, commonKwChange: 0, totalKw: 0, totalKwChange: 0,
+      aiCompLevel: 0, aiCompChange: 0, serpCompLevel: 0, compLevel: 0,
+      createdAt: now, updatedAt: now,
+    };
+    localStorage.setItem('seo_competitors', JSON.stringify([...rows, inserted]));
+    return competitorRowToUi(inserted);
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/competitors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ domain, name, da, targetRegions }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail?.[0]?.msg || body?.detail || 'Failed to add competitor.');
+  }
+  return competitorRowToUi(await res.json());
+}
+
+export async function updateCompetitor(id, updates) {
+  if (isLocalMode) {
+    const rows = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
+    const index = rows.findIndex(r => String(r.id) === String(id));
+    if (index !== -1) {
+      rows[index] = { ...rows[index], ...updates, updatedAt: new Date().toISOString() };
+      localStorage.setItem('seo_competitors', JSON.stringify(rows));
+    }
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/competitors/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to update competitor.');
+  }
+}
+
+export async function deleteCompetitor(id) {
+  if (isLocalMode) {
+    const rows = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
+    localStorage.setItem('seo_competitors', JSON.stringify(rows.filter(r => String(r.id) !== String(id))));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/competitors/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete competitor.');
+  }
+}

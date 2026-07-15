@@ -284,6 +284,34 @@ def init_db():
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pages_project ON pages (project_name)"))
 
+        # --- Competitors ---------------------------------------------------
+        # Global list, not scoped to a project -- the Competitors tab is its
+        # own top-level nav item (like Domain/KW Cluster/Pages), not nested
+        # inside a specific project, so unlike pages/keyword_categories
+        # there's no project_name column here.
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS competitors (
+                id BIGSERIAL PRIMARY KEY,
+                domain TEXT NOT NULL,
+                name TEXT,
+                da TEXT,
+                target_regions TEXT[],
+                device TEXT,
+                location TEXT,
+                common_kw NUMERIC,
+                common_kw_change NUMERIC,
+                total_kw INTEGER,
+                total_kw_change INTEGER,
+                ai_comp_level INTEGER,
+                ai_comp_change INTEGER,
+                serp_comp_level INTEGER,
+                comp_level INTEGER,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_competitors_created ON competitors (created_at DESC)"))
+
 
 # --- Projects -------------------------------------------------------------
 
@@ -806,6 +834,51 @@ def bulk_delete_page_rows(ids):
         return
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM pages WHERE id = ANY(:ids)"), {"ids": ids})
+
+
+# --- Competitors (global list, not project-scoped -- see init_db()) -------
+
+_COMPETITOR_UPDATABLE_COLUMNS = {"name", "domain", "da", "target_regions"}
+
+
+def insert_competitor(domain, name=None, da=None, target_regions=None):
+    """The analytics columns (common_kw/total_kw/ai_comp_level/
+    serp_comp_level/comp_level and their *_change counterparts) have no
+    real computation pipeline behind them yet -- they start at 0, same as
+    a freshly-added KW Cluster/Pages project shows 0 until real data
+    exists, rather than fabricating numbers."""
+    with engine.begin() as conn:
+        row = conn.execute(text("""
+            INSERT INTO competitors
+                (domain, name, da, target_regions, common_kw, common_kw_change,
+                 total_kw, total_kw_change, ai_comp_level, ai_comp_change, serp_comp_level, comp_level)
+            VALUES (:domain, :name, :da, :target_regions, 0, 0, 0, 0, 0, 0, 0, 0)
+            RETURNING *
+        """), {"domain": domain, "name": name, "da": da, "target_regions": target_regions or []}).mappings().fetchone()
+        return dict(row)
+
+
+def get_competitors():
+    with engine.begin() as conn:
+        rows = conn.execute(text("SELECT * FROM competitors ORDER BY created_at DESC")).mappings().fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_competitor(competitor_id, updates):
+    """Updates whichever of name/domain/da/target_regions are present in
+    `updates` (snake_case keys) -- silently ignores anything else (the
+    analytics columns aren't user-editable)."""
+    fields = {k: v for k, v in updates.items() if k in _COMPETITOR_UPDATABLE_COLUMNS}
+    if not fields:
+        return
+    set_sql = ", ".join(f"{k} = :{k}" for k in fields) + ", updated_at = now()"
+    with engine.begin() as conn:
+        conn.execute(text(f"UPDATE competitors SET {set_sql} WHERE id = :id"), {**fields, "id": competitor_id})
+
+
+def delete_competitor(competitor_id):
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM competitors WHERE id = :id"), {"id": competitor_id})
 
 
 def get_all_keyword_rows(domain):

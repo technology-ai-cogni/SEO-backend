@@ -8,6 +8,7 @@ import {
   fetchDomainRows, createProject, updateDomainRow, deleteDomainRow,
   fetchKwProjects, fetchKeywordRows, insertKeywordRows, updateKeywordRow, bulkDeleteKeywordRows, deleteKwClusterData,
   fetchPageRows, insertPageRows, updatePageRow, deletePageRow, bulkDeletePageRows, deletePagesData, fetchPagesCounts,
+  fetchCompetitors, insertCompetitor, updateCompetitor, deleteCompetitor,
 } from '../../lib/projectsApi';
 
 // ─── shared tiny components ────────────────────────────────────────────────
@@ -850,16 +851,44 @@ function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedPro
 
 // ─── Add Competitors Modal ───────────────────────────────────────────────────
 
-function AddCompetitorsModal({ open, onClose }) {
+function AddCompetitorsModal({ open, onClose, onAdd }) {
   const [domain, setDomain] = useState('');
   const [name, setName] = useState('');
   const [da, setDa] = useState('');
   const [regions, setRegions] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [apiError, setApiError] = useState('');
+
+  const resetForm = () => {
+    setDomain(''); setName(''); setDa(''); setRegions([]); setApiError('');
+  };
+
+  const handleClose = () => { resetForm(); onClose(); };
+
+  const handleAdd = async () => {
+    if (!domain.trim()) {
+      setApiError('Domain is required.');
+      return;
+    }
+    setApiError('');
+    setSubmitting(true);
+    try {
+      await onAdd({ domain: domain.trim(), name: name.trim() || null, da: da.trim() || null, targetRegions: regions });
+      handleClose();
+    } catch (err) {
+      setApiError(err.message || 'Failed to add competitor.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <Modal open={open} onClose={onClose} title="Add Competitors"
-      footer={<><Btn variant="primary">Add Competitor</Btn><Btn variant="outline" onClick={onClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
+    <Modal open={open} onClose={handleClose} title="Add Competitors"
+      footer={<><Btn variant="primary" onClick={handleAdd} style={submitting ? { opacity: 0.6, pointerEvents: 'none' } : {}}>{submitting ? 'Adding…' : 'Add Competitor'}</Btn><Btn variant="outline" onClick={handleClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
     >
+      {apiError && (
+        <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{apiError}</span>
+      )}
       <Input label="Domain" hint="domain" placeholder="domain.com" value={domain} onChange={setDomain} />
       <Input label="Name" placeholder="Auto-generated if left blank" value={name} onChange={setName} />
       <Input label="DA" placeholder="e.g. 45" value={da} onChange={setDa} />
@@ -2653,29 +2682,6 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
   );
 }
 
-const COMPETITOR_ROWS = [
-  {
-    name: 'OWIS Singapore', domain: 'owis.org', device: 'desktop', location: 'Singapore', da: null, commonKw: 44.29, commonKwChange: -0.47, totalKw: 139, totalKwChange: 139, aiCompLevel: 137, aiCompChange: -137, serpCompLevel: 757, compLevel: 82, dated: '20h ago',
-    details: [
-      { domain: 'owis.org', name: 'OWIS Main Site', regions: ['Singapore', 'India'], da: 42, rankingKeywords: 139, device: 'desktop', location: 'Singapore', commonKw: 38.12, totalKw: 139, aiCompLevel: 95, serpCompLevel: 520, compLevel: 78, dated: '20h ago' },
-      { domain: 'owis.org/admissions', name: 'OWIS Admissions', regions: ['Singapore'], da: 42, rankingKeywords: 47, device: 'desktop', location: 'Singapore', commonKw: 4.80, totalKw: 47, aiCompLevel: 28, serpCompLevel: 152, compLevel: 45, dated: '20h ago' },
-      { domain: 'owis.org/blog', name: 'OWIS Blog', regions: ['Singapore', 'Malaysia'], da: 42, rankingKeywords: 68, device: 'web', location: 'Singapore', commonKw: 1.37, totalKw: 68, aiCompLevel: 14, serpCompLevel: 85, compLevel: 31, dated: '20h ago' },
-    ],
-  },
-  {
-    name: 'owis.org', domain: 'owis.org', device: 'web', location: 'Singapore', da: null, commonKw: 24.44, commonKwChange: 2.40, totalKw: 90, totalKwChange: 1, aiCompLevel: 0, aiCompChange: 0, serpCompLevel: 4, compLevel: 12, dated: '19h ago',
-    details: [
-      { domain: 'owis.org', name: 'OWIS AI Presence', regions: ['Singapore'], da: 42, rankingKeywords: 1, device: 'web', location: 'Singapore', commonKw: 24.44, totalKw: 90, aiCompLevel: 0, serpCompLevel: 4, compLevel: 12, dated: '19h ago' },
-    ],
-  },
-  {
-    name: null, domain: null, device: 'google', location: 'Singapore', da: null, commonKw: 5.56, commonKwChange: 10.44, totalKw: 190, totalKwChange: 3, aiCompLevel: 0, aiCompChange: 0, serpCompLevel: 3, compLevel: 95, dated: '18h ago',
-    details: [
-      { domain: 'google.com', name: 'Google Search', regions: ['Singapore'], da: 98, rankingKeywords: 3, device: 'google', location: 'Singapore', commonKw: 5.56, totalKw: 90, aiCompLevel: 0, serpCompLevel: 3, compLevel: 95, dated: '18h ago' },
-    ],
-  },
-];
-
 const GoogleIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
     <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
@@ -2789,8 +2795,8 @@ function CompetitorDetailView({ competitor, onBack }) {
                   </div>
                 </td>
                 <td style={{ padding: '12px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 600, color: 'var(--text-primary)' }}>{Math.round(((d.commonKw ?? 0) / 100) * d.totalKw)}<span style={{ fontSize: 18, fontWeight: 300, margin: '0 1px' }}>/</span>{d.totalKw}</td>
-                <td style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: d.totalKw > 0 ? 'var(--green)' : 'var(--text-muted)' }}>
-                  {d.totalKw > 0 ? '↑' : ''}{d.totalKw}
+                <td style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {d.totalKw}
                 </td>
                 <td style={{ padding: '12px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{Math.min(d.aiCompLevel, 100)}%</td>
                 <td style={{ padding: '12px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{Math.min(d.serpCompLevel, 100)}%</td>
@@ -2805,26 +2811,93 @@ function CompetitorDetailView({ competitor, onBack }) {
   );
 }
 
-function EditCompetitorModal({ open, onClose, competitor }) {
+function EditCompetitorModal({ open, onClose, competitor, onSave, onDelete }) {
   const [name, setName] = useState('');
   const [regions, setRegions] = useState([]);
   const [da, setDa] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [apiError, setApiError] = useState('');
+
+  useEffect(() => {
+    if (competitor) {
+      setName(competitor.name || '');
+      setRegions(competitor.targetRegions || []);
+      setDa(competitor.da != null ? String(competitor.da) : '');
+      setConfirmDelete(false);
+      setSubmitting(false);
+      setApiError('');
+    }
+  }, [competitor]);
+
+  const handleClose = () => { setConfirmDelete(false); onClose(); };
 
   if (!open) return null;
 
-  const initName = competitor?.name || competitor?.domain || '';
-  const initDa = competitor?.da ?? '';
+  const handleSave = async () => {
+    setSubmitting(true);
+    setApiError('');
+    try {
+      await onSave({ name: name.trim() || null, targetRegions: regions, da: da.trim() || null });
+      handleClose();
+    } catch (err) {
+      setSubmitting(false);
+      setApiError(err.message || 'Failed to save competitor.');
+    }
+  };
+
+  const handleDelete = async () => {
+    setSubmitting(true);
+    setApiError('');
+    try {
+      await onDelete?.();
+      handleClose();
+    } catch (err) {
+      setSubmitting(false);
+      setApiError(err.message || 'Failed to delete competitor.');
+    }
+  };
+
+  if (confirmDelete) {
+    return (
+      <Modal open={open} onClose={handleClose} title="Delete Competitor"
+        footer={<>
+          <Btn variant="primary" onClick={handleDelete} style={submitting ? { background: 'var(--red)', opacity: 0.6, pointerEvents: 'none' } : { background: 'var(--red)' }}>{submitting ? 'Deleting…' : 'Delete'}</Btn>
+          <Btn variant="outline" onClick={() => setConfirmDelete(false)} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
+        </>}
+      >
+        {apiError && (
+          <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{apiError}</span>
+        )}
+        <div style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+          Are you sure you want to delete <strong>{competitor?.name || competitor?.domain}</strong>? This action cannot be undone.
+        </div>
+      </Modal>
+    );
+  }
 
   return (
-    <Modal open={open} onClose={onClose} title="Edit Competitor"
+    <Modal open={open} onClose={handleClose} title="Edit Competitor"
       footer={
         <>
-          <Btn variant="primary" onClick={onClose}>Save</Btn>
-          <Btn variant="outline" onClick={onClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
+          <Btn variant="primary" onClick={handleSave} style={submitting ? { opacity: 0.6, pointerEvents: 'none' } : {}}>{submitting ? 'Saving…' : 'Save'}</Btn>
+          <Btn variant="outline" onClick={handleClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
+          {onDelete && (
+            <Btn variant="outline" onClick={() => setConfirmDelete(true)} style={{ flex: 'none', padding: '10px 16px', border: '1.5px solid var(--red)', color: 'var(--red)' }}>Delete</Btn>
+          )}
         </>
       }
     >
-      <Input label="Name" placeholder="e.g. ISS International School" value={name || initName} onChange={setName} />
+      {apiError && (
+        <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{apiError}</span>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Domain</span>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '10px 14px', background: 'var(--surface-2)', borderRadius: 8, border: '1.5px solid var(--border)' }}>
+          {competitor?.domain}
+        </div>
+      </div>
+      <Input label="Name" placeholder="e.g. ISS International School" value={name} onChange={setName} />
       <CountryTagInput
         label="Target Regions"
         tags={regions}
@@ -2832,12 +2905,12 @@ function EditCompetitorModal({ open, onClose, competitor }) {
         onRemove={r => setRegions(prev => prev.filter(x => x !== r))}
         placeholder="e.g. India, Singapore, USA"
       />
-      <Input label="DA" placeholder="e.g. 45" value={da !== '' ? da : String(initDa)} onChange={setDa} />
+      <Input label="DA" placeholder="e.g. 45" value={da} onChange={setDa} />
     </Modal>
   );
 }
 
-function CompetitorsTab({ onSelectCompetitor }) {
+function CompetitorsTab({ competitors, onSelectCompetitor, onDeleteCompetitor, onSaveCompetitor, loading, error }) {
   const [editingIdx, setEditingIdx] = useState(null);
 
   return (
@@ -2859,8 +2932,14 @@ function CompetitorsTab({ onSelectCompetitor }) {
         </tr>
       </thead>
       <tbody>
-        {COMPETITOR_ROWS.map((c, i) => (
-          <tr key={i} style={{ borderBottom: i < COMPETITOR_ROWS.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
+        {loading ? (
+          <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
+        ) : error ? (
+          <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+        ) : competitors.length === 0 ? (
+          <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors yet. Click <strong>+ Add Competitors</strong> to get started.</td></tr>
+        ) : competitors.map((c, i) => (
+          <tr key={i} style={{ borderBottom: i < competitors.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
             onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
             onClick={() => onSelectCompetitor(i)}>
@@ -2892,8 +2971,8 @@ function CompetitorsTab({ onSelectCompetitor }) {
               {Math.round((c.commonKw / 100) * c.totalKw)}<span style={{ fontSize: 18, fontWeight: 300, margin: '0 1px' }}>/</span>{c.totalKw}
             </td>
             {/* Tot. KW's */}
-            <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: c.totalKwChange > 0 ? 'var(--green)' : c.totalKwChange < 0 ? 'var(--red)' : 'var(--text-muted)' }}>
-              {c.totalKwChange > 0 ? '↑' : c.totalKwChange < 0 ? '↓' : ''}{Math.abs(c.totalKwChange)}
+            <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+              {Math.abs(c.totalKwChange)}
             </td>
             {/* AI Comp. Level */}
             <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -2909,7 +2988,7 @@ function CompetitorsTab({ onSelectCompetitor }) {
             </td>
             {/* Dated */}
             <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-              {c.dated}
+              {c.updated}
             </td>
             {/* Edit */}
             <td style={{ padding: '14px 16px', textAlign: 'right' }}>
@@ -2927,7 +3006,9 @@ function CompetitorsTab({ onSelectCompetitor }) {
     <EditCompetitorModal
       open={editingIdx !== null}
       onClose={() => setEditingIdx(null)}
-      competitor={editingIdx !== null ? COMPETITOR_ROWS[editingIdx] : null}
+      competitor={editingIdx !== null ? competitors[editingIdx] : null}
+      onSave={editingIdx !== null ? (updates) => onSaveCompetitor?.(competitors[editingIdx], updates) : undefined}
+      onDelete={editingIdx !== null ? () => onDeleteCompetitor?.(editingIdx) : undefined}
     />
     </>
   );
@@ -2949,6 +3030,9 @@ export default function ProjectSetupPage({ tab }) {
   const [kwClustersLoading, setKwClustersLoading] = useState(true);
   const [kwClustersError, setKwClustersError] = useState('');
   const [selectedPageProject, setSelectedPageProject] = useState(null);
+  const [competitors, setCompetitors] = useState([]);
+  const [competitorsLoading, setCompetitorsLoading] = useState(true);
+  const [competitorsError, setCompetitorsError] = useState('');
   const [selectedCompetitor, setSelectedCompetitor] = useState(null);
   const [selectedKwProject, setSelectedKwProject] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -2978,6 +3062,16 @@ export default function ProjectSetupPage({ tab }) {
       .then(rows => { if (!cancelled) { setKwClusters(rows.filter(p => p.totalPages > 0)); setKwClustersError(''); } })
       .catch(err => { if (!cancelled) setKwClustersError(err.message || 'Failed to load projects.'); })
       .finally(() => { if (!cancelled) setKwClustersLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCompetitorsLoading(true);
+    fetchCompetitors()
+      .then(rows => { if (!cancelled) { setCompetitors(rows); setCompetitorsError(''); } })
+      .catch(err => { if (!cancelled) setCompetitorsError(err.message || 'Failed to load competitors.'); })
+      .finally(() => { if (!cancelled) setCompetitorsLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
@@ -3112,6 +3206,22 @@ export default function ProjectSetupPage({ tab }) {
     await deletePagesData(project.slug);
     setPagesCounts(prev => { const next = { ...prev }; delete next[project.slug]; return next; });
     setPages(prev => prev.filter(p => p.slug !== project.slug));
+  };
+
+  const handleAddCompetitor = async (data) => {
+    const created = await insertCompetitor(data);
+    setCompetitors(prev => [created, ...prev]);
+  };
+
+  const handleSaveCompetitor = async (competitor, updates) => {
+    await updateCompetitor(competitor.id, updates);
+    setCompetitors(prev => prev.map(c => c.id === competitor.id ? { ...c, ...updates } : c));
+  };
+
+  const handleDeleteCompetitor = async (idx) => {
+    const competitor = competitors[idx];
+    await deleteCompetitor(competitor.id);
+    setCompetitors(prev => prev.filter((_, i) => i !== idx));
   };
 
   const handleImportPages = async (data) => {
@@ -3354,7 +3464,7 @@ export default function ProjectSetupPage({ tab }) {
           />
         ) : activeTab === 'Competitors' && selectedCompetitor !== null ? (
           <CompetitorDetailView
-            competitor={COMPETITOR_ROWS[selectedCompetitor]}
+            competitor={competitors[selectedCompetitor]}
             onBack={() => setSelectedCompetitor(null)}
           />
         ) : (
@@ -3362,7 +3472,7 @@ export default function ProjectSetupPage({ tab }) {
             {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} />}
             {activeTab === 'KW Cluster' && <PagesTab pages={kwClusters} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's KW Cluster data (keywords, categories, clusters)" />}
             {activeTab === 'Pages' && <PagesTab pages={pages} onSelectProject={setSelectedPageProject} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" />}
-            {activeTab === 'Competitors' && <CompetitorsTab onSelectCompetitor={setSelectedCompetitor} />}
+            {activeTab === 'Competitors' && <CompetitorsTab competitors={competitors} onSelectCompetitor={setSelectedCompetitor} onDeleteCompetitor={handleDeleteCompetitor} onSaveCompetitor={handleSaveCompetitor} loading={competitorsLoading} error={competitorsError} />}
             {(activeTab === 'Outreach' || activeTab === 'Connectors') && (
               <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
                 No {activeTab.toLowerCase()} configured yet. Click <strong>+ {cta.label}</strong> to get started.
@@ -3409,7 +3519,7 @@ export default function ProjectSetupPage({ tab }) {
         onImportKeywords={handleImportKeywords}
         lockedProject={activeTab === 'KW Cluster' && selectedKwProject !== null ? { index: selectedKwProject, slug: kwClusters[selectedKwProject].slug, name: kwClusters[selectedKwProject].name, domain: kwClusters[selectedKwProject].domain } : null}
       />
-      <AddCompetitorsModal open={showAddCompetitors} onClose={() => setShowAddCompetitors(false)} />
+      <AddCompetitorsModal open={showAddCompetitors} onClose={() => setShowAddCompetitors(false)} onAdd={handleAddCompetitor} />
     </div>
   );
 }
