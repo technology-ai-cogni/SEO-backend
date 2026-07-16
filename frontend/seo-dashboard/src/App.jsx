@@ -28,7 +28,7 @@ const PAGE_TITLES = {
   'search-visibility/link-outreach': { title: 'Link Outreach', subtitle: 'Manage backlink acquisition campaigns' },
   'search-visibility/off-page-scheduler': { title: 'Off-Page Scheduler', subtitle: 'Schedule off-page SEO activities' },
   'search-visibility/on-page': { title: 'On-Page Optimization', subtitle: 'On-page SEO recommendations' },
-  'search-visibility/competitors': { title: 'Competitors', subtitle: 'Competitor SEO intelligence' },
+  'search-visibility/competitors': { title: 'Project', subtitle: 'Competitor SEO intelligence' },
   'search-visibility/search/overview': { title: 'Search Overview', subtitle: 'High-level search performance summary' },
   'search-visibility/search/predictive-analysis': { title: 'Predictive Analysis', subtitle: 'AI-powered rank predictions' },
   'search-visibility/search/domain-overview': { title: 'Domain Overview', subtitle: 'Full domain search metrics' },

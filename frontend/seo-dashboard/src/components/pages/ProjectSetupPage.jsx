@@ -9,6 +9,7 @@ import {
   fetchKwProjects, fetchKeywordRows, insertKeywordRows, updateKeywordRow, bulkDeleteKeywordRows, deleteKwClusterData,
   fetchPageRows, insertPageRows, updatePageRow, deletePageRow, bulkDeletePageRows, deletePagesData, fetchPagesCounts,
   fetchCompetitors, insertCompetitor, updateCompetitor, deleteCompetitor,
+  findCompetitors, fetchCompetitorSnapshots,
 } from '../../lib/projectsApi';
 
 // ─── shared tiny components ────────────────────────────────────────────────
@@ -851,29 +852,28 @@ function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedPro
 
 // ─── Add Competitors Modal ───────────────────────────────────────────────────
 
-function AddCompetitorsModal({ open, onClose, onAdd }) {
-  const [domain, setDomain] = useState('');
-  const [name, setName] = useState('');
-  const [da, setDa] = useState('');
+function AddCompetitorsModal({ open, onClose, onAdd, projects }) {
+  const [projectSlug, setProjectSlug] = useState('');
   const [regions, setRegions] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [apiError, setApiError] = useState('');
 
   const resetForm = () => {
-    setDomain(''); setName(''); setDa(''); setRegions([]); setApiError('');
+    setProjectSlug(''); setRegions([]); setApiError('');
   };
 
   const handleClose = () => { resetForm(); onClose(); };
 
   const handleAdd = async () => {
-    if (!domain.trim()) {
-      setApiError('Domain is required.');
+    const project = projects.find(p => p.slug === projectSlug);
+    if (!project) {
+      setApiError('Project is required.');
       return;
     }
     setApiError('');
     setSubmitting(true);
     try {
-      await onAdd({ domain: domain.trim(), name: name.trim() || null, da: da.trim() || null, targetRegions: regions });
+      await onAdd({ domain: project.domain, name: project.name, da: project.da ?? null, targetRegions: regions, projectSlug });
       handleClose();
     } catch (err) {
       setApiError(err.message || 'Failed to add competitor.');
@@ -889,9 +889,13 @@ function AddCompetitorsModal({ open, onClose, onAdd }) {
       {apiError && (
         <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{apiError}</span>
       )}
-      <Input label="Domain" hint="domain" placeholder="domain.com" value={domain} onChange={setDomain} />
-      <Input label="Name" placeholder="Auto-generated if left blank" value={name} onChange={setName} />
-      <Input label="DA" placeholder="e.g. 45" value={da} onChange={setDa} />
+      <Select
+        label="Project"
+        placeholder={projects.length ? 'Select a project' : 'No projects yet — add one in the Domain tab'}
+        value={projectSlug}
+        onChange={setProjectSlug}
+        options={projects.map(p => ({ value: p.slug, label: p.name }))}
+      />
 
       <div style={{ height: 1, background: 'var(--border)' }} />
 
@@ -1334,7 +1338,12 @@ const KW_BULK_FIELDS = [
   { value: 'landingPage', label: 'Landing Page (URL)', type: 'text' },
 ];
 
-function BulkEditModal({ open, onClose, count, onApply, fields }) {
+const COMPETITOR_BULK_FIELDS = [
+  { value: 'name', label: 'Name', type: 'text' },
+  { value: 'da', label: 'DA', type: 'text' },
+];
+
+function BulkEditModal({ open, onClose, count, onApply, fields, itemLabel = 'page' }) {
   const [field, setField] = useState('');
   const [value, setValue] = useState('');
 
@@ -1351,10 +1360,10 @@ function BulkEditModal({ open, onClose, count, onApply, fields }) {
 
   return (
     <Modal open={open} onClose={() => { onClose(); setField(''); setValue(''); }} title="Bulk Edit"
-      footer={<><Btn variant="primary" onClick={handleApply}>Apply to {count} page{count !== 1 ? 's' : ''}</Btn><Btn variant="outline" onClick={() => { onClose(); setField(''); setValue(''); }} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
+      footer={<><Btn variant="primary" onClick={handleApply}>Apply to {count} {itemLabel}{count !== 1 ? 's' : ''}</Btn><Btn variant="outline" onClick={() => { onClose(); setField(''); setValue(''); }} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
     >
       <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>
-        Editing <strong>{count}</strong> selected page{count !== 1 ? 's' : ''}
+        Editing <strong>{count}</strong> selected {itemLabel}{count !== 1 ? 's' : ''}
       </div>
 
       <Select
@@ -1429,13 +1438,25 @@ function RecclusterConfirmModal({ open, onClose, onConfirm }) {
   );
 }
 
-function BulkDeleteModal({ open, onClose, count, onConfirm }) {
+function RefindCompetitorsConfirmModal({ open, onClose, projectName, onConfirm }) {
   return (
-    <Modal open={open} onClose={onClose} title="Confirm Delete"
-      footer={<><Btn variant="primary" onClick={() => { onConfirm(); onClose(); }} style={{ background: 'var(--red)' }}>Delete {count} page{count !== 1 ? 's' : ''}</Btn><Btn variant="outline" onClick={onClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
+    <Modal open={open} onClose={onClose} title="Competitors already found"
+      footer={<><Btn variant="primary" onClick={() => { onConfirm(); onClose(); }}>Re-run search</Btn><Btn variant="outline" onClick={onClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
     >
       <div style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-        Are you sure you want to delete <strong>{count}</strong> selected page{count !== 1 ? 's' : ''}? This action cannot be undone.
+        Competitors have already been found for <strong>{projectName}</strong>. Re-run the search to refresh their rankings?
+      </div>
+    </Modal>
+  );
+}
+
+function BulkDeleteModal({ open, onClose, count, onConfirm, itemLabel = 'page' }) {
+  return (
+    <Modal open={open} onClose={onClose} title="Confirm Delete"
+      footer={<><Btn variant="primary" onClick={() => { onConfirm(); onClose(); }} style={{ background: 'var(--red)' }}>Delete {count} {itemLabel}{count !== 1 ? 's' : ''}</Btn><Btn variant="outline" onClick={onClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
+    >
+      <div style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+        Are you sure you want to delete <strong>{count}</strong> selected {itemLabel}{count !== 1 ? 's' : ''}? This action cannot be undone.
       </div>
     </Modal>
   );
@@ -2732,8 +2753,30 @@ function RegionTags({ regions }) {
 }
 
 function CompetitorDetailView({ competitor, onBack }) {
-  const details = competitor.details || [];
+  const [details, setDetails] = useState([]);
+  const [detailsLoading, setDetailsLoading] = useState(true);
+  const [kwPage, setKwPage] = useState(1);
   const title = competitor.name || competitor.domain || 'Competitor';
+
+  // details[0] is the most recent analysis run (get_competitor_snapshots
+  // orders by created_at DESC) -- its keyword_positions is the current set
+  // of keywords this competitor ranks for, sorted best-position-first.
+  const rankingKeywordRows = Object.entries(details[0]?.keywordPositions || {})
+    .sort((a, b) => a[1] - b[1]);
+  const kwPageCount = Math.max(1, Math.ceil(rankingKeywordRows.length / COMPETITORS_PAGE_SIZE));
+  const safeKwPage = Math.min(kwPage, kwPageCount);
+  const pagedKeywordRows = rankingKeywordRows.slice((safeKwPage - 1) * COMPETITORS_PAGE_SIZE, safeKwPage * COMPETITORS_PAGE_SIZE);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDetailsLoading(true);
+    setKwPage(1);
+    fetchCompetitorSnapshots(competitor.id)
+      .then(rows => { if (!cancelled) setDetails(rows); })
+      .catch(() => { if (!cancelled) setDetails([]); })
+      .finally(() => { if (!cancelled) setDetailsLoading(false); });
+    return () => { cancelled = true; };
+  }, [competitor.id]);
 
   return (
     <div>
@@ -2775,8 +2818,10 @@ function CompetitorDetailView({ competitor, onBack }) {
             </tr>
           </thead>
           <tbody>
-            {details.length === 0 ? (
-              <tr><td colSpan={12} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No detail entries yet.</td></tr>
+            {detailsLoading ? (
+              <tr><td colSpan={12} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
+            ) : details.length === 0 ? (
+              <tr><td colSpan={12} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No detail entries yet. Click <strong>Find Competitors</strong> to run an analysis.</td></tr>
             ) : details.map((d, i) => (
               <tr key={i} style={{ borderBottom: i < details.length - 1 ? '1px solid var(--border)' : 'none' }}
                 onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
@@ -2807,6 +2852,39 @@ function CompetitorDetailView({ competitor, onBack }) {
           </tbody>
         </table>
       </div>
+
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Ranking Keywords</span>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{rankingKeywordRows.length} keyword{rankingKeywordRows.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 400 }}>
+          <thead>
+            <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
+              <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.3px' }}>Keyword</th>
+              <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.3px' }}>Rank</th>
+            </tr>
+          </thead>
+          <tbody>
+            {detailsLoading ? (
+              <tr><td colSpan={2} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
+            ) : pagedKeywordRows.length === 0 ? (
+              <tr><td colSpan={2} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No ranking keyword data yet. Click <strong>Find Competitors</strong> to run an analysis.</td></tr>
+            ) : pagedKeywordRows.map(([kw, pos], i) => (
+              <tr key={kw} style={{ borderBottom: i < pagedKeywordRows.length - 1 ? '1px solid var(--border)' : 'none' }}
+                onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-primary)' }}>{kw}</td>
+                <td style={{ padding: '10px 16px', textAlign: 'right', fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>#{pos}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {rankingKeywordRows.length > 0 && (
+        <PaginationFooter page={kwPage} setPage={setKwPage} pageCount={kwPageCount} />
+      )}
     </div>
   );
 }
@@ -2910,16 +2988,229 @@ function EditCompetitorModal({ open, onClose, competitor, onSave, onDelete }) {
   );
 }
 
-function CompetitorsTab({ competitors, onSelectCompetitor, onDeleteCompetitor, onSaveCompetitor, loading, error }) {
-  const [editingIdx, setEditingIdx] = useState(null);
+// Shared 100-per-page footer for the Competitors tab's three list views
+// (project list, competitors-in-a-project, ranking keywords) -- same
+// page-size convention as KW_PAGE_SIZE above.
+const COMPETITORS_PAGE_SIZE = 100;
+
+function PaginationFooter({ page, setPage, pageCount, pageSize = COMPETITORS_PAGE_SIZE }) {
+  const safePage = Math.min(page, pageCount);
+  return (
+    <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-muted)' }}>
+        <button
+          onClick={() => setPage(p => Math.max(1, p - 1))}
+          disabled={safePage <= 1}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, border: '1px solid var(--border)', borderRadius: 4, background: '#fff', cursor: safePage <= 1 ? 'default' : 'pointer', opacity: safePage <= 1 ? 0.5 : 1 }}
+        >
+          <ChevronLeft size={14} />
+        </button>
+        Page:
+        <input
+          value={safePage}
+          onChange={e => {
+            const n = parseInt(e.target.value, 10);
+            if (!Number.isNaN(n)) setPage(Math.min(Math.max(1, n), pageCount));
+          }}
+          style={{ width: 36, border: '1px solid var(--border)', borderRadius: 4, padding: '2px 6px', textAlign: 'center', fontSize: 13, fontFamily: 'var(--font-body)', outline: 'none' }}
+        />
+        of {pageCount}
+        <button
+          onClick={() => setPage(p => Math.min(pageCount, p + 1))}
+          disabled={safePage >= pageCount}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, border: '1px solid var(--border)', borderRadius: 4, background: '#fff', cursor: safePage >= pageCount ? 'default' : 'pointer', opacity: safePage >= pageCount ? 0.5 : 1 }}
+        >
+          <ChevronRight size={14} />
+        </button>
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{pageSize} per page</div>
+    </div>
+  );
+}
+
+// One row per project that has at least one tracked competitor -- mirrors
+// the Domain/KW Cluster/Pages tabs' "list of projects, drill into one"
+// pattern instead of dumping every competitor from every project into one
+// flat list.
+function CompetitorProjectsTab({ projects, competitors, onSelectProject, loading, error }) {
+  const [page, setPage] = useState(1);
+  const allRows = projects
+    .map(p => ({ ...p, competitorCount: competitors.filter(c => c.projectSlug === p.slug).length }))
+    .filter(p => p.competitorCount > 0);
+  const pageCount = Math.max(1, Math.ceil(allRows.length / COMPETITORS_PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const rows = allRows.slice((safePage - 1) * COMPETITORS_PAGE_SIZE, safePage * COMPETITORS_PAGE_SIZE);
 
   return (
     <>
     <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid var(--border)' }}>
+            {['Project', 'Location', 'Competitors', 'Updated'].map((h, i) => (
+              <th key={i} style={{ padding: '10px 16px', textAlign: i <= 1 ? 'left' : 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {loading ? (
+            <tr><td colSpan={4} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
+          ) : error ? (
+            <tr><td colSpan={4} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+          ) : rows.length === 0 ? (
+            <tr><td colSpan={4} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors tracked yet. Click <strong>+ Add Competitors</strong> to get started.</td></tr>
+          ) : rows.map((p, i) => (
+            <tr key={p.slug} style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
+              onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              onClick={() => onSelectProject(p)}>
+              <td style={{ padding: '14px 16px' }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)' }}
+                  onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                  onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
+                  {p.name}
+                </div>
+                {p.domain && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{p.domain}</div>}
+              </td>
+              <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{p.location}</td>
+              <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{p.competitorCount}</td>
+              <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <PaginationFooter page={page} setPage={setPage} pageCount={pageCount} />
+    </>
+  );
+}
+
+function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, hasPendingChanges, saving, saveError, onSaveChanges, loading, error }) {
+  const [editingIdx, setEditingIdx] = useState(null);
+  const [page, setPage] = useState(1);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [showBulkEdit, setShowBulkEdit] = useState(false);
+  const [showBulkDelete, setShowBulkDelete] = useState(false);
+  const [bulkError, setBulkError] = useState('');
+
+  // `competitors` is always the FULL list (never pre-filtered) so that
+  // competitors.indexOf(c) below still resolves to the right index for
+  // onSelectCompetitor/setEditingIdx, which the parent uses to index that
+  // same full array -- only `filtered`/`paged` (what's rendered, scoped +
+  // sorted + paginated) are derived copies. Bulk selection tracks by id
+  // instead (stable across sorting/pagination, unlike position).
+  const filtered = (scopedProject ? competitors.filter(c => c.projectSlug === scopedProject.slug) : competitors)
+    .slice()
+    .sort((a, b) => (b.commonKw ?? 0) - (a.commonKw ?? 0));
+  const pageCount = Math.max(1, Math.ceil(filtered.length / COMPETITORS_PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const paged = filtered.slice((safePage - 1) * COMPETITORS_PAGE_SIZE, safePage * COMPETITORS_PAGE_SIZE);
+
+  const allSelected = paged.length > 0 && paged.every(c => selectedIds.has(c.id));
+  const someSelected = !allSelected && paged.some(c => selectedIds.has(c.id));
+
+  const toggleAll = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allSelected) paged.forEach(c => next.delete(c.id));
+      else paged.forEach(c => next.add(c.id));
+      return next;
+    });
+  };
+
+  const toggleRow = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkEditApply = async (field, value) => {
+    setBulkError('');
+    try {
+      await onBulkEditCompetitors(Array.from(selectedIds), field, value);
+      setSelectedIds(new Set());
+    } catch (err) {
+      setBulkError(err.message || 'Failed to bulk edit.');
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    setBulkError('');
+    try {
+      await onBulkDeleteCompetitors(Array.from(selectedIds));
+      setSelectedIds(new Set());
+    } catch (err) {
+      setBulkError(err.message || 'Failed to bulk delete.');
+    }
+  };
+
+  useEffect(() => { setPage(1); setSelectedIds(new Set()); }, [scopedProject?.slug]);
+
+  return (
+    <>
+    {scopedProject && (
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 0', fontFamily: 'var(--font-body)', fontSize: 13 }}
+          onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
+          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}>
+          <ArrowLeft size={16} /> Back
+        </button>
+        <div style={{ height: 20, width: 1, background: 'var(--border)' }} />
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{scopedProject.name}</span>
+        {scopedProject.domain && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>{scopedProject.domain}</span>}
+        <div style={{ flex: 1 }} />
+        {(saveError || bulkError) && (
+          <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError || bulkError}</span>
+        )}
+        {hasPendingChanges && !saving && (
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Unsaved changes</span>
+        )}
+        <ActionsDropdown
+          selectedCount={selectedIds.size}
+          onBulkEdit={() => setShowBulkEdit(true)}
+          onBulkDelete={() => setShowBulkDelete(true)}
+        />
+        {hasPendingChanges && (
+          <button
+            onClick={onSaveChanges}
+            disabled={saving}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+              padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: saving ? 'default' : 'pointer',
+              fontFamily: 'var(--font-body)', opacity: saving ? 0.6 : 1, transition: 'opacity 0.15s',
+            }}
+            onMouseEnter={e => { if (!saving) e.currentTarget.style.opacity = '0.85'; }}
+            onMouseLeave={e => { if (!saving) e.currentTarget.style.opacity = '1'; }}
+          >
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
+        )}
+      </div>
+    )}
+    <div style={{ overflowX: 'auto' }}>
     <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1000 }}>
       <thead>
         <tr style={{ borderBottom: '1px solid var(--border)' }}>
-          <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Competitors</th>
+          <th style={{ padding: '10px 12px 10px 16px', width: 36 }}>
+            <div
+              onClick={toggleAll}
+              style={{
+                width: 18, height: 18, borderRadius: 4,
+                border: allSelected || someSelected ? '2px solid var(--accent)' : '2px solid #d1d5db',
+                background: allSelected || someSelected ? 'var(--accent)' : '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
+              }}
+            >
+              {allSelected && <Check size={11} color="#fff" strokeWidth={3} />}
+              {someSelected && <span style={{ width: 8, height: 2, background: '#fff', borderRadius: 1, display: 'block' }} />}
+            </div>
+          </th>
+          <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Project</th>
           <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Location</th>
           <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>DA</th>
           <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Common KW's</th>
@@ -2933,16 +3224,32 @@ function CompetitorsTab({ competitors, onSelectCompetitor, onDeleteCompetitor, o
       </thead>
       <tbody>
         {loading ? (
-          <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
+          <tr><td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
         ) : error ? (
-          <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
-        ) : competitors.length === 0 ? (
-          <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors yet. Click <strong>+ Add Competitors</strong> to get started.</td></tr>
-        ) : competitors.map((c, i) => (
-          <tr key={i} style={{ borderBottom: i < competitors.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
+          <tr><td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+        ) : paged.length === 0 ? (
+          <tr><td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+            No competitors for this project yet. Click <strong>+ Add Competitors</strong> or <strong>Find Competitors</strong> to get started.
+          </td></tr>
+        ) : paged.map((c, i) => (
+          <tr key={c.id} style={{ borderBottom: i < paged.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
             onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            onClick={() => onSelectCompetitor(i)}>
+            onClick={() => onSelectCompetitor(competitors.indexOf(c))}>
+            <td style={{ padding: '10px 12px 10px 16px', width: 36 }} onClick={e => e.stopPropagation()}>
+              <div
+                onClick={() => toggleRow(c.id)}
+                style={{
+                  width: 18, height: 18, borderRadius: 4,
+                  border: selectedIds.has(c.id) ? '2px solid var(--accent)' : '2px solid #d1d5db',
+                  background: selectedIds.has(c.id) ? 'var(--accent)' : '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
+                }}
+              >
+                {selectedIds.has(c.id) && <Check size={11} color="#fff" strokeWidth={3} />}
+              </div>
+            </td>
             {/* Competitor name & domain */}
             <td style={{ padding: '14px 16px' }}>
               {c.name && (
@@ -2955,11 +3262,13 @@ function CompetitorsTab({ competitors, onSelectCompetitor, onDeleteCompetitor, o
               {c.domain && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{c.domain}</div>}
               {c.name && <div style={{ marginTop: 4, fontSize: 16, color: 'var(--border)' }}></div>}
             </td>
-            {/* Location */}
+            {/* Location -- pulled from the project's own Domain page entry
+                (scopedProject.location), since competitors don't carry
+                their own location data. */}
             <td style={{ padding: '14px 16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
                 <CompDeviceIcon type={c.device} />
-                {c.location}
+                {scopedProject?.location || c.location}
               </div>
             </td>
             {/* DA */}
@@ -2992,7 +3301,7 @@ function CompetitorsTab({ competitors, onSelectCompetitor, onDeleteCompetitor, o
             </td>
             {/* Edit */}
             <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-              <button onClick={e => { e.stopPropagation(); setEditingIdx(i); }} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'border-color 0.15s' }}
+              <button onClick={e => { e.stopPropagation(); setEditingIdx(competitors.indexOf(c)); }} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'border-color 0.15s' }}
                 onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--border-hover)'}
                 onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}>
                 <Edit2 size={13} color="var(--text-muted)" />
@@ -3003,6 +3312,7 @@ function CompetitorsTab({ competitors, onSelectCompetitor, onDeleteCompetitor, o
       </tbody>
     </table>
     </div>
+    <PaginationFooter page={page} setPage={setPage} pageCount={pageCount} />
     <EditCompetitorModal
       open={editingIdx !== null}
       onClose={() => setEditingIdx(null)}
@@ -3010,6 +3320,8 @@ function CompetitorsTab({ competitors, onSelectCompetitor, onDeleteCompetitor, o
       onSave={editingIdx !== null ? (updates) => onSaveCompetitor?.(competitors[editingIdx], updates) : undefined}
       onDelete={editingIdx !== null ? () => onDeleteCompetitor?.(editingIdx) : undefined}
     />
+    <BulkEditModal open={showBulkEdit} onClose={() => setShowBulkEdit(false)} count={selectedIds.size} onApply={handleBulkEditApply} fields={COMPETITOR_BULK_FIELDS} itemLabel="competitor" />
+    <BulkDeleteModal open={showBulkDelete} onClose={() => setShowBulkDelete(false)} count={selectedIds.size} onConfirm={handleBulkDelete} itemLabel="competitor" />
     </>
   );
 }
@@ -3018,7 +3330,7 @@ function CompetitorsTab({ competitors, onSelectCompetitor, onDeleteCompetitor, o
 
 export default function ProjectSetupPage({ tab }) {
   const [activeTab, setActiveTab] = useState(tab || 'Domain');
-  useEffect(() => { if (tab) { setActiveTab(tab); setSelectedPageProject(null); setSelectedCompetitor(null); setSelectedKwProject(null); setSearch(''); } }, [tab]);
+  useEffect(() => { if (tab) { setActiveTab(tab); setSelectedPageProject(null); setSelectedCompetitor(null); setSelectedCompetitorProject(null); setSelectedKwProject(null); setSearch(''); } }, [tab]);
   const [filter, setFilter] = useState(null);
   const [search, setSearch] = useState('');
   const [projects, setProjects] = useState([]);
@@ -3034,11 +3346,22 @@ export default function ProjectSetupPage({ tab }) {
   const [competitorsLoading, setCompetitorsLoading] = useState(true);
   const [competitorsError, setCompetitorsError] = useState('');
   const [selectedCompetitor, setSelectedCompetitor] = useState(null);
+  const [selectedCompetitorProject, setSelectedCompetitorProject] = useState(null);
   const [selectedKwProject, setSelectedKwProject] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showAddPages, setShowAddPages] = useState(false);
   const [showAddKeywords, setShowAddKeywords] = useState(false);
   const [showAddCompetitors, setShowAddCompetitors] = useState(false);
+  const [findingCompetitors, setFindingCompetitors] = useState(false);
+  const [findCompetitorsMessage, setFindCompetitorsMessage] = useState('');
+  const [competitorsRefreshing, setCompetitorsRefreshing] = useState(false);
+  const [showRefindConfirm, setShowRefindConfirm] = useState(false);
+  const [pendingFindProject, setPendingFindProject] = useState(null);
+  const [competitorPendingUpdates, setCompetitorPendingUpdates] = useState(new Map());
+  const [competitorPendingDeleteIds, setCompetitorPendingDeleteIds] = useState(new Set());
+  const [competitorSaving, setCompetitorSaving] = useState(false);
+  const [competitorSaveError, setCompetitorSaveError] = useState('');
+  const hasCompetitorPendingChanges = competitorPendingUpdates.size > 0 || competitorPendingDeleteIds.size > 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -3074,6 +3397,23 @@ export default function ProjectSetupPage({ tab }) {
       .finally(() => { if (!cancelled) setCompetitorsLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  // Auto-refresh: silently re-fetches the competitors list every 30s while
+  // the Competitors tab is open, so results from a "Find Competitors" run
+  // started elsewhere (or by a teammate) show up without a manual reload.
+  // Self-contained (doesn't reuse the button's guarded handler) so it isn't
+  // affected by stale closures over competitorsRefreshing. Skips a cycle
+  // (rather than discarding anything) while there are unsaved edits --
+  // same rule PageDetailView's auto-refresh follows.
+  useEffect(() => {
+    if (activeTab !== 'Competitors') return;
+    let cancelled = false;
+    const interval = setInterval(() => {
+      if (hasCompetitorPendingChanges) return;
+      fetchCompetitors().then(rows => { if (!cancelled) setCompetitors(rows); }).catch(() => {});
+    }, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [activeTab, hasCompetitorPendingChanges]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3213,15 +3553,109 @@ export default function ProjectSetupPage({ tab }) {
     setCompetitors(prev => [created, ...prev]);
   };
 
-  const handleSaveCompetitor = async (competitor, updates) => {
-    await updateCompetitor(competitor.id, updates);
+  // Edits/deletes below only STAGE locally (into competitorPendingUpdates/
+  // competitorPendingDeleteIds) -- nothing hits the backend until the
+  // Competitors tab's "Save Changes" button calls
+  // handleSaveCompetitorChanges(), same staged-edit pattern PageDetailView/
+  // KwClusterDetailView already use.
+  const stageCompetitorUpdates = (ids, updates) => {
+    setCompetitorPendingUpdates(prev => {
+      const next = new Map(prev);
+      ids.forEach(id => next.set(id, { ...(next.get(id) || {}), ...updates }));
+      return next;
+    });
+  };
+
+  const handleSaveCompetitor = (competitor, updates) => {
+    stageCompetitorUpdates([competitor.id], updates);
     setCompetitors(prev => prev.map(c => c.id === competitor.id ? { ...c, ...updates } : c));
   };
 
-  const handleDeleteCompetitor = async (idx) => {
+  const handleDeleteCompetitor = (idx) => {
     const competitor = competitors[idx];
-    await deleteCompetitor(competitor.id);
+    setCompetitorPendingDeleteIds(prev => new Set(prev).add(competitor.id));
+    setCompetitorPendingUpdates(prev => { if (!prev.has(competitor.id)) return prev; const next = new Map(prev); next.delete(competitor.id); return next; });
     setCompetitors(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleBulkEditCompetitors = (ids, field, value) => {
+    stageCompetitorUpdates(ids, { [field]: value });
+    setCompetitors(prev => prev.map(c => ids.includes(c.id) ? { ...c, [field]: value } : c));
+  };
+
+  const handleBulkDeleteCompetitors = (ids) => {
+    setCompetitorPendingDeleteIds(prev => { const next = new Set(prev); ids.forEach(id => next.add(id)); return next; });
+    setCompetitorPendingUpdates(prev => { const next = new Map(prev); ids.forEach(id => next.delete(id)); return next; });
+    setCompetitors(prev => prev.filter(c => !ids.includes(c.id)));
+  };
+
+  const handleSaveCompetitorChanges = async () => {
+    setCompetitorSaving(true);
+    setCompetitorSaveError('');
+    try {
+      if (competitorPendingDeleteIds.size > 0) {
+        await Promise.all(Array.from(competitorPendingDeleteIds).map(id => deleteCompetitor(id)));
+      }
+      await Promise.all(Array.from(competitorPendingUpdates.entries()).map(([id, updates]) => updateCompetitor(id, updates)));
+      setCompetitorPendingUpdates(new Map());
+      setCompetitorPendingDeleteIds(new Set());
+    } catch (err) {
+      setCompetitorSaveError(err.message || 'Failed to save changes.');
+    } finally {
+      setCompetitorSaving(false);
+    }
+  };
+
+  // "Find Competitors" upserts on the backend (same domain+project rediscovered
+  // again just updates its existing row), so merge by id here too rather than
+  // always prepending -- otherwise a repeat run would duplicate every row.
+  const handleFoundCompetitors = (foundRows) => {
+    setCompetitors(prev => {
+      const byId = new Map(prev.map(c => [c.id, c]));
+      foundRows.forEach(c => byId.set(c.id, c));
+      const foundIds = new Set(foundRows.map(c => c.id));
+      const unchanged = prev.filter(c => !foundIds.has(c.id));
+      const updated = foundRows.map(c => byId.get(c.id));
+      return [...updated, ...unchanged];
+    });
+  };
+
+  // One-click trigger, no form -- confirms via a popup only if this project
+  // already has competitors (to avoid silently re-running something that
+  // just ran), otherwise runs immediately.
+  const runFindCompetitors = async (project) => {
+    setFindingCompetitors(true);
+    setFindCompetitorsMessage('');
+    try {
+      const { competitors: found, message } = await findCompetitors(project.slug, { useAi: true });
+      handleFoundCompetitors(found);
+      setFindCompetitorsMessage(found.length === 0 ? (message || '0 competitors found.') : `Found ${found.length} competitor${found.length === 1 ? '' : 's'}.`);
+    } catch (err) {
+      setFindCompetitorsMessage(err.message || 'Failed to find competitors.');
+    } finally {
+      setFindingCompetitors(false);
+    }
+  };
+
+  const handleFindCompetitorsClick = (project) => {
+    const hasExisting = competitors.some(c => c.projectSlug === project.slug);
+    if (hasExisting) {
+      setPendingFindProject(project);
+      setShowRefindConfirm(true);
+      return;
+    }
+    runFindCompetitors(project);
+  };
+
+  const handleRefreshCompetitors = () => {
+    if (competitorsRefreshing) return;
+    if (hasCompetitorPendingChanges && !window.confirm('You have unsaved changes. Discard them and refresh?')) return;
+    setCompetitorsRefreshing(true);
+    setCompetitorsError('');
+    fetchCompetitors()
+      .then(rows => { setCompetitors(rows); setCompetitorPendingUpdates(new Map()); setCompetitorPendingDeleteIds(new Set()); })
+      .catch(err => setCompetitorsError(err.message || 'Failed to refresh competitors.'))
+      .finally(() => setCompetitorsRefreshing(false));
   };
 
   const handleImportPages = async (data) => {
@@ -3330,7 +3764,7 @@ export default function ProjectSetupPage({ tab }) {
         {TABS.map(t => (
           <button
             key={t}
-            onClick={() => { setActiveTab(t); setSelectedPageProject(null); setSelectedCompetitor(null); setSelectedKwProject(null); setSearch(''); }}
+            onClick={() => { setActiveTab(t); setSelectedPageProject(null); setSelectedCompetitor(null); setSelectedCompetitorProject(null); setSelectedKwProject(null); setSearch(''); }}
             style={{
               padding: '10px 20px',
               fontSize: 14,
@@ -3391,7 +3825,21 @@ export default function ProjectSetupPage({ tab }) {
 
           {/* CTA */}
           {activeTab === 'Competitors' ? (
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button
+                onClick={handleRefreshCompetitors}
+                disabled={competitorsRefreshing}
+                title="Refresh"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'none', border: '1.5px solid var(--border)', borderRadius: 8, padding: 9,
+                  cursor: competitorsRefreshing ? 'default' : 'pointer', color: 'var(--text-muted)',
+                }}
+                onMouseEnter={e => { if (!competitorsRefreshing) { e.currentTarget.style.borderColor = 'var(--border-hover)'; e.currentTarget.style.color = 'var(--text-primary)'; } }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+              >
+                <RefreshCw size={14} className={competitorsRefreshing ? 'spin-icon' : ''} />
+              </button>
               <button
                 onClick={() => setShowAddCompetitors(true)}
                 style={{
@@ -3406,6 +3854,24 @@ export default function ProjectSetupPage({ tab }) {
                 <Plus size={15} />
                 Add Competitors
               </button>
+              {selectedCompetitorProject !== null && (
+                <button
+                  onClick={() => handleFindCompetitorsClick(selectedCompetitorProject)}
+                  disabled={findingCompetitors}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    background: '#fff', color: '#0f1523', border: '1.5px solid #0f1523', borderRadius: 8,
+                    padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: findingCompetitors ? 'default' : 'pointer',
+                    fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                    opacity: findingCompetitors ? 0.6 : 1,
+                  }}
+                  onMouseEnter={e => { if (!findingCompetitors) e.currentTarget.style.opacity = '0.75'; }}
+                  onMouseLeave={e => { if (!findingCompetitors) e.currentTarget.style.opacity = '1'; }}
+                >
+                  <RefreshCw size={14} className={findingCompetitors ? 'spin-icon' : ''} />
+                  {findingCompetitors ? 'Searching…' : 'Find Competitors'}
+                </button>
+              )}
               <button
                 onClick={() => setShowAddPages(true)}
                 style={{
@@ -3438,6 +3904,12 @@ export default function ProjectSetupPage({ tab }) {
             </button>
           )}
         </div>
+
+        {activeTab === 'Competitors' && findCompetitorsMessage && (
+          <div style={{ padding: '10px 20px 0', fontSize: 12.5, color: 'var(--text-secondary)' }}>
+            {findCompetitorsMessage}
+          </div>
+        )}
 
         {/* Table */}
         {activeTab === 'KW Cluster' && selectedKwProject !== null ? (
@@ -3472,7 +3944,33 @@ export default function ProjectSetupPage({ tab }) {
             {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} />}
             {activeTab === 'KW Cluster' && <PagesTab pages={kwClusters} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's KW Cluster data (keywords, categories, clusters)" />}
             {activeTab === 'Pages' && <PagesTab pages={pages} onSelectProject={setSelectedPageProject} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" />}
-            {activeTab === 'Competitors' && <CompetitorsTab competitors={competitors} onSelectCompetitor={setSelectedCompetitor} onDeleteCompetitor={handleDeleteCompetitor} onSaveCompetitor={handleSaveCompetitor} loading={competitorsLoading} error={competitorsError} />}
+            {activeTab === 'Competitors' && selectedCompetitorProject === null && (
+              <CompetitorProjectsTab projects={projects} competitors={competitors} onSelectProject={(p) => { setSelectedCompetitorProject(p); setFindCompetitorsMessage(''); }} loading={competitorsLoading} error={competitorsError} />
+            )}
+            {activeTab === 'Competitors' && selectedCompetitorProject !== null && (
+              <CompetitorsTab
+                competitors={competitors}
+                scopedProject={selectedCompetitorProject}
+                onBack={() => {
+                  if (hasCompetitorPendingChanges && !window.confirm('You have unsaved changes. Discard them?')) return;
+                  setSelectedCompetitorProject(null);
+                  setFindCompetitorsMessage('');
+                  setCompetitorPendingUpdates(new Map());
+                  setCompetitorPendingDeleteIds(new Set());
+                }}
+                onSelectCompetitor={setSelectedCompetitor}
+                onDeleteCompetitor={handleDeleteCompetitor}
+                onSaveCompetitor={handleSaveCompetitor}
+                onBulkEditCompetitors={handleBulkEditCompetitors}
+                onBulkDeleteCompetitors={handleBulkDeleteCompetitors}
+                hasPendingChanges={hasCompetitorPendingChanges}
+                saving={competitorSaving}
+                saveError={competitorSaveError}
+                onSaveChanges={handleSaveCompetitorChanges}
+                loading={competitorsLoading}
+                error={competitorsError}
+              />
+            )}
             {(activeTab === 'Outreach' || activeTab === 'Connectors') && (
               <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
                 No {activeTab.toLowerCase()} configured yet. Click <strong>+ {cta.label}</strong> to get started.
@@ -3481,8 +3979,10 @@ export default function ProjectSetupPage({ tab }) {
           </div>
         )}
 
-        {/* Pagination — the KW Cluster detail view renders its own paginated footer */}
-        {!(activeTab === 'KW Cluster' && selectedKwProject !== null) && (
+        {/* Pagination — the KW Cluster detail view and the Competitors tab's
+            own views (project list / competitors list / ranking keywords)
+            each render their own real paginated footer */}
+        {!(activeTab === 'KW Cluster' && selectedKwProject !== null) && activeTab !== 'Competitors' && (
           <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-muted)' }}>
               Page:
@@ -3519,7 +4019,13 @@ export default function ProjectSetupPage({ tab }) {
         onImportKeywords={handleImportKeywords}
         lockedProject={activeTab === 'KW Cluster' && selectedKwProject !== null ? { index: selectedKwProject, slug: kwClusters[selectedKwProject].slug, name: kwClusters[selectedKwProject].name, domain: kwClusters[selectedKwProject].domain } : null}
       />
-      <AddCompetitorsModal open={showAddCompetitors} onClose={() => setShowAddCompetitors(false)} onAdd={handleAddCompetitor} />
+      <AddCompetitorsModal open={showAddCompetitors} onClose={() => setShowAddCompetitors(false)} onAdd={handleAddCompetitor} projects={projects} />
+      <RefindCompetitorsConfirmModal
+        open={showRefindConfirm}
+        onClose={() => setShowRefindConfirm(false)}
+        projectName={pendingFindProject?.name}
+        onConfirm={() => { if (pendingFindProject) runFindCompetitors(pendingFindProject); }}
+      />
     </div>
   );
 }

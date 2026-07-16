@@ -83,11 +83,17 @@ Endpoints:
     PATCH /pages/{page_id}                  update one page row
     DELETE /pages/{page_id}                 delete one page row
     POST /pages/bulk-delete                 delete many page rows at once
-    GET  /competitors                       every tracked competitor
-                                           (global list, not project-scoped)
+    GET  /competitors                       every tracked competitor,
+                                           optionally ?project=<slug>
     POST /competitors                       add a tracked competitor
+                                           (scoped to a project)
     PATCH /competitors/{competitor_id}       update one competitor
     DELETE /competitors/{competitor_id}      delete one competitor
+    POST /projects/{project}/find-competitors  run comp_analysis SERP
+                                           discovery for a project, upsert
+                                           one competitor per rival domain
+    GET  /competitors/{competitor_id}/snapshots  dated history of analysis
+                                           runs for one competitor
     GET  /jobs                             list all jobs (every project)
     GET  /jobs/{job_id}                     poll job status/progress
     POST /jobs/{job_id}/check-rank            check rank for every keyword
@@ -119,6 +125,7 @@ from core import db
 from services import category_checker
 from scripts.hosted_categorize import run_categorize_job_in_background
 from scripts.hosted_rank_check import run_rank_check_job_in_background
+from scripts.comp_analysis import find_competitors_for_rows
 
 MIN_SEARCH_VOLUME = 5
 NEAR_ME_PHRASE = "near me"
@@ -607,6 +614,7 @@ class CompetitorCreateRequest(BaseModel):
     name: Optional[str] = None
     da: Optional[str] = None
     targetRegions: Optional[List[str]] = None
+    projectSlug: Optional[str] = None
 
 
 class CompetitorUpdateRequest(BaseModel):
@@ -614,6 +622,7 @@ class CompetitorUpdateRequest(BaseModel):
     domain: Optional[str] = None
     da: Optional[str] = None
     targetRegions: Optional[List[str]] = None
+    projectSlug: Optional[str] = None
 
 
 def _competitor_to_json(row):
@@ -623,6 +632,7 @@ def _competitor_to_json(row):
         "name": row.get("name"),
         "da": row.get("da"),
         "targetRegions": row.get("target_regions") or [],
+        "projectSlug": row.get("project_slug"),
         "device": row.get("device"),
         "location": row.get("location"),
         "commonKw": row.get("common_kw"),
@@ -639,11 +649,10 @@ def _competitor_to_json(row):
 
 
 @app.get("/competitors")
-def list_competitors():
-    """Every tracked competitor -- global list, not scoped to a project
-    (the Competitors tab is a top-level nav item, not nested inside a
-    specific project)."""
-    return {"competitors": [_competitor_to_json(r) for r in db.get_competitors()]}
+def list_competitors(project: Optional[str] = None):
+    """Every tracked competitor, optionally filtered to one project via
+    ?project=<slug> (each competitor is tracked against one project)."""
+    return {"competitors": [_competitor_to_json(r) for r in db.get_competitors(project)]}
 
 
 @app.post("/competitors")
@@ -651,7 +660,10 @@ def create_competitor(payload: CompetitorCreateRequest):
     domain = payload.domain.strip()
     if not domain:
         raise HTTPException(400, "Domain is required.")
-    row = db.insert_competitor(domain, payload.name, payload.da, payload.targetRegions)
+    project_slug = (payload.projectSlug or "").strip()
+    if not project_slug:
+        raise HTTPException(400, "Project is required.")
+    row = db.insert_competitor(domain, payload.name, payload.da, payload.targetRegions, project_slug)
     return _competitor_to_json(row)
 
 
@@ -659,7 +671,7 @@ def create_competitor(payload: CompetitorCreateRequest):
 def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequest):
     updates = {
         "name": payload.name, "domain": payload.domain, "da": payload.da,
-        "target_regions": payload.targetRegions,
+        "target_regions": payload.targetRegions, "project_slug": payload.projectSlug,
     }
     updates = {k: v for k, v in updates.items() if v is not None}
     db.update_competitor(competitor_id, updates)
@@ -670,6 +682,111 @@ def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequ
 def delete_competitor_endpoint(competitor_id: int):
     db.delete_competitor(competitor_id)
     return {"deleted": competitor_id}
+
+
+class FindCompetitorsRequest(BaseModel):
+    targetRegions: Optional[List[str]] = None
+    useAi: bool = True
+    topN: Optional[int] = None
+
+
+# comp_analysis.py's rule-based/AI levels are the categorical "High"/
+# "Medium"/"Low" the CLI prints -- the competitors table's *_level
+# columns are 0-100 ints (same shape the frontend already renders as a
+# percentage), so this is the one place that maps between the two.
+_LEVEL_TO_SCORE = {"High": 90, "Medium": 60, "Low": 25}
+
+
+def _level_score(level, fallback_score=None):
+    if level in _LEVEL_TO_SCORE:
+        return _LEVEL_TO_SCORE[level]
+    if fallback_score is not None:
+        return round(fallback_score * 100)
+    return 0
+
+
+def _snapshot_to_json(row):
+    return {
+        "id": row["id"],
+        "domain": row.get("domain"),
+        "name": row.get("name"),
+        "targetRegions": row.get("target_regions") or [],
+        "da": row.get("da"),
+        "rankingKeywords": row.get("ranking_keywords"),
+        "totalKeywords": row.get("total_keywords"),
+        "commonKw": row.get("common_kw"),
+        "aiCompLevel": row.get("ai_comp_level"),
+        "serpCompLevel": row.get("serp_comp_level"),
+        "compLevel": row.get("comp_level"),
+        "device": row.get("device"),
+        "location": row.get("location"),
+        "keywordPositions": row.get("keyword_positions") or {},
+        "createdAt": row.get("created_at").isoformat() if row.get("created_at") else None,
+    }
+
+
+@app.post("/projects/{project}/find-competitors")
+def find_competitors_endpoint(project: str, payload: FindCompetitorsRequest):
+    """Runs comp_analysis's SERP-based competitor discovery (see
+    scripts/comp_analysis.py) against this project's already rank-checked
+    keywords (keyword_categories.rank_meta) and upserts one `competitors`
+    row per discovered rival domain, keyed by (domain, project_slug) --
+    re-running this for the same project updates the existing rows
+    instead of duplicating them. Also appends one competitor_snapshots row
+    per competitor so the detail view keeps a dated history of each run."""
+    proj = _resolve_project_or_404(project)
+    rows = db.get_domain_results(proj["slug"])
+    results, own_domain = find_competitors_for_rows(
+        rows, proj["name"], top_n=payload.topN, use_ai=payload.useAi,
+    )
+    if not results:
+        return {
+            "competitors": [], "ownDomain": own_domain,
+            "message": "No ranked keywords found for this project yet -- run rank checking first.",
+        }
+
+    created = []
+    for r in results:
+        serp_score = _level_score(r["serp_comp_level"], r.get("serp_comp_score"))
+        ai_score = _level_score(r["ai_comp_level"]) if r.get("ai_comp_level") else None
+        comp_score = round((serp_score + ai_score) / 2) if ai_score is not None else serp_score
+
+        existing = db.get_competitor_by_domain_and_project(r["competitor_domain"], proj["slug"])
+        if existing:
+            competitor_id = existing["id"]
+            if payload.targetRegions:
+                db.update_competitor(competitor_id, {"target_regions": payload.targetRegions})
+        else:
+            inserted = db.insert_competitor(
+                domain=r["competitor_domain"], name=None, da=None,
+                target_regions=payload.targetRegions, project_slug=proj["slug"],
+            )
+            competitor_id = inserted["id"]
+
+        db.set_competitor_analysis(competitor_id, {
+            "common_kw": r["coverage_pct"],
+            "total_kw": r["total_keywords"],
+            "total_kw_change": r["total_keywords"],
+            "ai_comp_level": ai_score or 0,
+            "serp_comp_level": serp_score,
+            "comp_level": comp_score,
+        })
+        db.insert_competitor_snapshot(
+            competitor_id, domain=r["competitor_domain"], name=None,
+            target_regions=payload.targetRegions, da=None,
+            ranking_keywords=r["ranking_keywords"], total_keywords=r["total_keywords"],
+            common_kw=r["coverage_pct"], ai_comp_level=ai_score or 0,
+            serp_comp_level=serp_score, comp_level=comp_score,
+            keyword_positions=r.get("keyword_positions") or {},
+        )
+        created.append(db.get_competitor(competitor_id))
+
+    return {"competitors": [_competitor_to_json(c) for c in created], "ownDomain": own_domain}
+
+
+@app.get("/competitors/{competitor_id}/snapshots")
+def get_competitor_snapshots_endpoint(competitor_id: int):
+    return {"snapshots": [_snapshot_to_json(r) for r in db.get_competitor_snapshots(competitor_id)]}
 
 
 @app.get("/jobs")

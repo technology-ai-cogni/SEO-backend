@@ -285,10 +285,9 @@ def init_db():
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pages_project ON pages (project_name)"))
 
         # --- Competitors ---------------------------------------------------
-        # Global list, not scoped to a project -- the Competitors tab is its
-        # own top-level nav item (like Domain/KW Cluster/Pages), not nested
-        # inside a specific project, so unlike pages/keyword_categories
-        # there's no project_name column here.
+        # Each competitor is tracked against one of the projects registered
+        # in the `projects` table (project_slug), so the Competitors tab can
+        # be filtered per project.
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS competitors (
                 id BIGSERIAL PRIMARY KEY,
@@ -311,6 +310,37 @@ def init_db():
             )
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_competitors_created ON competitors (created_at DESC)"))
+        conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS project_slug TEXT"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_competitors_project ON competitors (project_slug)"))
+
+        # --- Competitor snapshots -------------------------------------------
+        # One row per "Find Competitors" run for a given competitor -- lets
+        # the Competitor detail view show a dated history instead of only
+        # ever reflecting the latest analysis.
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS competitor_snapshots (
+                id BIGSERIAL PRIMARY KEY,
+                competitor_id BIGINT NOT NULL REFERENCES competitors (id) ON DELETE CASCADE,
+                domain TEXT,
+                name TEXT,
+                target_regions TEXT[],
+                da TEXT,
+                ranking_keywords INTEGER,
+                total_keywords INTEGER,
+                common_kw NUMERIC,
+                ai_comp_level INTEGER,
+                serp_comp_level INTEGER,
+                comp_level INTEGER,
+                device TEXT,
+                location TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_competitor_snapshots_competitor ON competitor_snapshots (competitor_id, created_at DESC)"))
+        # {keyword: position} this competitor ranked at in this run -- lets
+        # the detail view show which specific keywords it's ranking on, not
+        # just the aggregate ranking_keywords count.
+        conn.execute(text("ALTER TABLE competitor_snapshots ADD COLUMN IF NOT EXISTS keyword_positions JSONB"))
 
 
 # --- Projects -------------------------------------------------------------
@@ -836,12 +866,12 @@ def bulk_delete_page_rows(ids):
         conn.execute(text("DELETE FROM pages WHERE id = ANY(:ids)"), {"ids": ids})
 
 
-# --- Competitors (global list, not project-scoped -- see init_db()) -------
+# --- Competitors (each scoped to a project via project_slug) --------------
 
-_COMPETITOR_UPDATABLE_COLUMNS = {"name", "domain", "da", "target_regions"}
+_COMPETITOR_UPDATABLE_COLUMNS = {"name", "domain", "da", "target_regions", "project_slug"}
 
 
-def insert_competitor(domain, name=None, da=None, target_regions=None):
+def insert_competitor(domain, name=None, da=None, target_regions=None, project_slug=None):
     """The analytics columns (common_kw/total_kw/ai_comp_level/
     serp_comp_level/comp_level and their *_change counterparts) have no
     real computation pipeline behind them yet -- they start at 0, same as
@@ -850,24 +880,30 @@ def insert_competitor(domain, name=None, da=None, target_regions=None):
     with engine.begin() as conn:
         row = conn.execute(text("""
             INSERT INTO competitors
-                (domain, name, da, target_regions, common_kw, common_kw_change,
+                (domain, name, da, target_regions, project_slug, common_kw, common_kw_change,
                  total_kw, total_kw_change, ai_comp_level, ai_comp_change, serp_comp_level, comp_level)
-            VALUES (:domain, :name, :da, :target_regions, 0, 0, 0, 0, 0, 0, 0, 0)
+            VALUES (:domain, :name, :da, :target_regions, :project_slug, 0, 0, 0, 0, 0, 0, 0, 0)
             RETURNING *
-        """), {"domain": domain, "name": name, "da": da, "target_regions": target_regions or []}).mappings().fetchone()
+        """), {"domain": domain, "name": name, "da": da, "target_regions": target_regions or [], "project_slug": project_slug}).mappings().fetchone()
         return dict(row)
 
 
-def get_competitors():
+def get_competitors(project_slug=None):
     with engine.begin() as conn:
-        rows = conn.execute(text("SELECT * FROM competitors ORDER BY created_at DESC")).mappings().fetchall()
+        if project_slug:
+            rows = conn.execute(
+                text("SELECT * FROM competitors WHERE project_slug = :project_slug ORDER BY created_at DESC"),
+                {"project_slug": project_slug},
+            ).mappings().fetchall()
+        else:
+            rows = conn.execute(text("SELECT * FROM competitors ORDER BY created_at DESC")).mappings().fetchall()
         return [dict(r) for r in rows]
 
 
 def update_competitor(competitor_id, updates):
-    """Updates whichever of name/domain/da/target_regions are present in
-    `updates` (snake_case keys) -- silently ignores anything else (the
-    analytics columns aren't user-editable)."""
+    """Updates whichever of name/domain/da/target_regions/project_slug are
+    present in `updates` (snake_case keys) -- silently ignores anything
+    else (the analytics columns aren't user-editable)."""
     fields = {k: v for k, v in updates.items() if k in _COMPETITOR_UPDATABLE_COLUMNS}
     if not fields:
         return
@@ -879,6 +915,75 @@ def update_competitor(competitor_id, updates):
 def delete_competitor(competitor_id):
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM competitors WHERE id = :id"), {"id": competitor_id})
+
+
+def get_competitor(competitor_id):
+    with engine.begin() as conn:
+        row = conn.execute(text("SELECT * FROM competitors WHERE id = :id"), {"id": competitor_id}).mappings().fetchone()
+        return dict(row) if row else None
+
+
+def get_competitor_by_domain_and_project(domain, project_slug):
+    with engine.begin() as conn:
+        row = conn.execute(
+            text("SELECT * FROM competitors WHERE domain = :domain AND project_slug = :project_slug"),
+            {"domain": domain, "project_slug": project_slug},
+        ).mappings().fetchone()
+        return dict(row) if row else None
+
+
+_COMPETITOR_ANALYSIS_COLUMNS = {
+    "common_kw", "common_kw_change", "total_kw", "total_kw_change",
+    "ai_comp_level", "ai_comp_change", "serp_comp_level", "comp_level",
+}
+
+
+def set_competitor_analysis(competitor_id, fields):
+    """Writes the analytics columns (common_kw/total_kw/ai_comp_level/
+    serp_comp_level/comp_level and their *_change counterparts) -- the one
+    path allowed to touch them, called only from the 'Find Competitors'
+    analysis pipeline (update_competitor()'s allowlist deliberately
+    excludes these since they aren't user-editable)."""
+    fields = {k: v for k, v in fields.items() if k in _COMPETITOR_ANALYSIS_COLUMNS}
+    if not fields:
+        return
+    set_sql = ", ".join(f"{k} = :{k}" for k in fields) + ", updated_at = now()"
+    with engine.begin() as conn:
+        conn.execute(text(f"UPDATE competitors SET {set_sql} WHERE id = :id"), {**fields, "id": competitor_id})
+
+
+def insert_competitor_snapshot(competitor_id, domain=None, name=None, target_regions=None, da=None,
+                                ranking_keywords=None, total_keywords=None, common_kw=None,
+                                ai_comp_level=None, serp_comp_level=None, comp_level=None,
+                                device=None, location=None, keyword_positions=None):
+    with engine.begin() as conn:
+        row = conn.execute(text("""
+            INSERT INTO competitor_snapshots
+                (competitor_id, domain, name, target_regions, da, ranking_keywords, total_keywords,
+                 common_kw, ai_comp_level, serp_comp_level, comp_level, device, location, keyword_positions)
+            VALUES (:competitor_id, :domain, :name, :target_regions, :da, :ranking_keywords, :total_keywords,
+                    :common_kw, :ai_comp_level, :serp_comp_level, :comp_level, :device, :location,
+                    CAST(:keyword_positions AS JSONB))
+            RETURNING *
+        """), {
+            "competitor_id": competitor_id, "domain": domain, "name": name,
+            "target_regions": target_regions or [], "da": da,
+            "ranking_keywords": ranking_keywords, "total_keywords": total_keywords,
+            "common_kw": common_kw, "ai_comp_level": ai_comp_level,
+            "serp_comp_level": serp_comp_level, "comp_level": comp_level,
+            "device": device, "location": location,
+            "keyword_positions": json.dumps(keyword_positions) if keyword_positions is not None else None,
+        }).mappings().fetchone()
+        return dict(row)
+
+
+def get_competitor_snapshots(competitor_id):
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text("SELECT * FROM competitor_snapshots WHERE competitor_id = :competitor_id ORDER BY created_at DESC"),
+            {"competitor_id": competitor_id},
+        ).mappings().fetchall()
+        return [dict(r) for r in rows]
 
 
 def get_all_keyword_rows(domain):

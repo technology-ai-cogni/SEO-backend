@@ -232,7 +232,7 @@ export default function CompetitorsPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['Competitors', 'Device & Location', 'Target Platforms', 'PA', "Common KW's", '', "Tot. KW's", 'AI Comp. Level', 'SERP Comp Level', 'Comp Level', 'dated', ''].map((h, i) => (
+                {['Project', 'Device & Location', 'Target Platforms', 'PA', "Common KW's", '', "Tot. KW's", 'AI Comp. Level', 'SERP Comp Level', 'Comp Level', 'dated', ''].map((h, i) => (
                   <th key={i} style={{
                     padding: '10px 16px',
                     textAlign: i === 0 || i === 1 || i === 2 ? 'left' : 'right',
