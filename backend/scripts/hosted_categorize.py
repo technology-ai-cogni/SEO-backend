@@ -197,16 +197,21 @@ def _run_categorize_job_selenium(job_id, domain, rows):
 # =====================================================================
 
 def _classify_intent(top3_results):
-    results = []
-    for r in (top3_results or [])[:5]:
+    from concurrent.futures import ThreadPoolExecutor
+    def classify(r):
         url = (r or {}).get("url")
         title = (r or {}).get("title")
         if not url:
-            continue
+            return None
         try:
-            results.append(classify_single_result_via_requests(url, title))
+            return classify_single_result_via_requests(url, title)
         except Exception as e:
-            results.append({"classification": "Unknown", "confidence": 0, "reason": f"Error: {e}", "url": url})
+            return {"classification": "Unknown", "confidence": 0, "reason": f"Error: {e}", "url": url}
+
+    valid_results = (top3_results or [])[:5]
+    with ThreadPoolExecutor(max_workers=len(valid_results) or 1) as executor:
+        futures = [executor.submit(classify, r) for r in valid_results]
+        results = [f.result() for f in futures if f.result() is not None]
     return majority_subtype(results)
 
 
