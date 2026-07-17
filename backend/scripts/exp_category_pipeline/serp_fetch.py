@@ -28,6 +28,9 @@ import csv
 import json
 import random
 import time
+import os
+import zipfile
+import tempfile
 from datetime import datetime
 from typing import Optional
 from urllib.parse import quote_plus
@@ -48,8 +51,88 @@ DELAY_MIN = 5
 DELAY_MAX = 12
 
 
+def create_proxy_auth_extension(proxy_url: str) -> str:
+    """Helper to dynamically generate a Chrome extension zip that handles proxy authentication."""
+    from urllib.parse import urlparse
+    parsed = urlparse(proxy_url)
+    host = parsed.hostname
+    port = parsed.port or 80
+    username = parsed.username
+    password = parsed.password
+    
+    manifest_json = """
+    {
+        "version": "1.0.0",
+        "manifest_version": 2,
+        "name": "Chrome Proxy",
+        "permissions": [
+            "proxy",
+            "tabs",
+            "unlimitedStorage",
+            "storage",
+            "<all_urls>",
+            "webRequest",
+            "webRequestBlocking"
+        ],
+        "background": {
+            "scripts": ["background.js"]
+        },
+        "minimum_chrome_version":"22.0.0"
+    }
+    """
+
+    background_js = f"""
+    var config = {{
+        mode: "fixed_servers",
+        rules: {{
+          singleProxy: {{
+            scheme: "http",
+            host: "{host}",
+            port: parseInt({port})
+          }},
+          bypassList: []
+        }}
+      }};
+
+    chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{}});
+
+    chrome.webRequest.onAuthRequired.addListener(
+        function callback(details) {{
+            return {{
+                authCredentials: {{
+                    username: "{username}",
+                    password: "{password}"
+                }}
+            }};
+        }},
+        {{urls: ["<all_urls>"]}},
+        ['blocking']
+    );
+    """
+    
+    temp_dir = tempfile.gettempdir()
+    plugin_file = os.path.join(temp_dir, f"proxy_auth_plugin_{port}.zip")
+    
+    with zipfile.ZipFile(plugin_file, 'w') as zp:
+        zp.writestr("manifest.json", manifest_json)
+        zp.writestr("background.js", background_js)
+        
+    return plugin_file
+
+
 def get_driver() -> webdriver.Chrome:
     options = Options()
+    
+    # Configure proxy if SCRAPING_PROXY is defined
+    proxy_url = os.environ.get("SCRAPING_PROXY")
+    if proxy_url:
+        try:
+            plugin_file = create_proxy_auth_extension(proxy_url)
+            options.add_extension(plugin_file)
+            print(f"[serp_fetch] Configured proxy extension via {proxy_url.split('@')[-1]}")
+        except Exception as e:
+            print(f"[serp_fetch] Warning: failed to configure proxy extension: {e}")
+
     options.page_load_strategy = "eager"
     # Non-headless -- a real visible Chrome window opens. On a server
     # with no display attached (e.g. a bare EC2 instance or this repo's
