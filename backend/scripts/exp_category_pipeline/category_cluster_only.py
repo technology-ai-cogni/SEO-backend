@@ -61,7 +61,7 @@ def _categorize_row(i, total, keyword, row, words_per_title):
     except json.JSONDecodeError:
         top3 = []
 
-    titles = [(r or {}).get("title", "") for r in top3[:3]]
+    titles = [(r or {}).get("title", "") for r in top3[:5]]
     try:
         category = category_namer.categorize_from_title_words(keyword, titles, words_per_title)
     except Exception as e:

@@ -515,7 +515,7 @@ def process_row(row, top3_column):
         top3 = []
 
     results = []
-    for r in (top3 or [])[:3]:
+    for r in (top3 or [])[:5]:
         url = (r or {}).get("url")
         title = (r or {}).get("title")
         if not url:

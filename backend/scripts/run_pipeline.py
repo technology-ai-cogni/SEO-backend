@@ -98,7 +98,7 @@ from concurrent.futures import ThreadPoolExecutor
 from core import db
 from scripts import serp_scraper
 from scripts.category_assigner import categorize_from_top3, reset_categories_for_project
-from scripts.landing_blog_classifier import classify_landing_or_blog
+from scripts.landing_blog_classifier import classify_landing_or_blog, force_blog_if_best_top
 from scripts.intent_classifier import classify_single_result, majority_subtype, close_all_drivers, DEFAULT_WORKERS
 from scripts.cluster_assigner import cluster_project
 
@@ -114,7 +114,7 @@ def _classify_intent(top3_results):
     """Runs in an intent-pool worker thread: classify each of the (up to
     3) SERP results' destination pages, then take the majority vote."""
     results = []
-    for r in (top3_results or [])[:3]:
+    for r in (top3_results or [])[:5]:
         url = (r or {}).get("url")
         title = (r or {}).get("title")
         if not url:
@@ -171,6 +171,9 @@ class PipelineRun:
                 category = ""
 
             target_type = classify_landing_or_blog(top3_results) or ""
+            # HARD override: a Best/Top category is always a Blog Page,
+            # no matter what the classifier above decided.
+            target_type = force_blog_if_best_top(category, target_type)
 
             self._report(row_id, category=category, target_type=target_type)
             self.category_queue.task_done()
@@ -339,6 +342,9 @@ def _retry_failed_keywords(failed_rows, domain, output_path, num_tabs):
             print(f"  [RETRY CATEGORY ERROR] '{keyword}': {e}")
         try:
             target_type = classify_landing_or_blog(results) or ""
+            # HARD override: a Best/Top category is always a Blog Page,
+            # no matter what the classifier above decided.
+            target_type = force_blog_if_best_top(category, target_type)
         except Exception as e:
             print(f"  [RETRY LANDING/BLOG ERROR] '{keyword}': {e}")
         try:

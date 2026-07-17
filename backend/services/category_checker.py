@@ -224,7 +224,7 @@ def get_top3_for_category(keyword, country_code=None):
             continue
         seen.add(href)
         results.append({"url": href, "title": title})
-        if len(results) >= 3:
+        if len(results) >= 5:
             break
 
     return results

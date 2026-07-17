@@ -121,3 +121,16 @@ def classify_landing_or_blog(top3_results):
     if blog_count >= landing_count:
         return BLOG_PAGE
     return LANDING_PAGE
+
+
+def force_blog_if_best_top(category, target_type):
+    """HARD override, called AFTER category and target_type have both
+    already been independently computed: if `category` starts with
+    "Best/Top" (case-insensitive), `target_type` is unconditionally
+    forced to BLOG_PAGE, regardless of whatever the LLM-based
+    classification above (or the Selenium engine's own
+    exp_category_pipeline/classifiers.py) actually decided. Any other
+    category leaves `target_type` untouched."""
+    if category and category.strip().lower().startswith("best/top"):
+        return BLOG_PAGE
+    return target_type

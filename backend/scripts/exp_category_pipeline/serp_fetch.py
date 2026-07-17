@@ -258,7 +258,7 @@ def run_search_pool(driver, rows: list, output_path: Optional[str] = None, on_re
                         jobs[h] = None
                     continue
 
-                results = extract_results(driver)[:3]
+                results = extract_results(driver)[:5]
                 print(f"{label(h)}            Top 3 URLs:")
                 for idx, r in enumerate(results, 1):
                     print(f"{label(h)}              {idx}. {r['title']} — {r['url']}")

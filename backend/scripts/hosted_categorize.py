@@ -46,14 +46,14 @@ from concurrent.futures import ThreadPoolExecutor
 from core import db
 from services import category_checker
 from scripts.category_assigner import categorize_from_top3
-from scripts.landing_blog_classifier import classify_landing_or_blog
+from scripts.landing_blog_classifier import classify_landing_or_blog, force_blog_if_best_top
 from scripts.intent_classifier import classify_single_result_via_requests, majority_subtype
 from scripts.cluster_assigner import cluster_project
 
 from scripts import intent_classifier
 from scripts.exp_category_pipeline import serp_fetch, category_namer, classifiers, cluster_grouper
 
-INTENT_WORKERS = 8
+INTENT_WORKERS = 15
 
 # Only one categorize job runs at a time across this whole process --
 # see module docstring for why both engines need this.
@@ -82,7 +82,7 @@ def _process_keyword_selenium(keyword, top3):
     uses, reused here as-is rather than reimplemented."""
     signals_list = []
     per_url_results = []
-    for r in (top3 or [])[:3]:
+    for r in (top3 or [])[:5]:
         url = (r or {}).get("url")
         title = (r or {}).get("title")
         if not url:
@@ -112,6 +112,10 @@ def _process_keyword_selenium(keyword, top3):
             landing_blog = classifiers.classify_landing_or_blog(signals_list)
         except Exception as e:
             print(f"[hosted_categorize/selenium] landing/blog error '{keyword}': {e}")
+
+    # HARD override: a Best/Top category is always a Blog Page, no
+    # matter what the classifier above decided.
+    landing_blog = force_blog_if_best_top(category, landing_blog)
 
     return {"top3": top3, "category": category, "target_type": landing_blog or "", "subtype": info_comm}
 
@@ -194,7 +198,7 @@ def _run_categorize_job_selenium(job_id, domain, rows):
 
 def _classify_intent(top3_results):
     results = []
-    for r in (top3_results or [])[:3]:
+    for r in (top3_results or [])[:5]:
         url = (r or {}).get("url")
         title = (r or {}).get("title")
         if not url:
@@ -217,6 +221,9 @@ def _process_one_keyword_bright_data(job_id, domain, row, country_code, intent_p
 
         category = categorize_from_top3(keyword, top3, domain)
         target_type = classify_landing_or_blog(top3)
+        # HARD override: a Best/Top category is always a Blog Page, no
+        # matter what the classifier above decided.
+        target_type = force_blog_if_best_top(category, target_type)
         subtype = intent_pool.submit(_classify_intent, top3).result()
 
         db.update_keyword_result(

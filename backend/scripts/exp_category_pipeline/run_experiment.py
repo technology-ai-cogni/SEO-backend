@@ -96,7 +96,7 @@ def _fetch_metadata_and_info_comm(keyword, top3):
     signals_list = []
     per_url_results = []
 
-    for r in (top3 or [])[:3]:
+    for r in (top3 or [])[:5]:
         url = (r or {}).get("url")
         title = (r or {}).get("title")
         if not url:

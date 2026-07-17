@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from core import db
 from services import rank_checker
 
-RANK_CHECK_WORKERS = 8
+RANK_CHECK_WORKERS = 15
 
 
 def _check_one(project_slug, row, country_code, default_domain):

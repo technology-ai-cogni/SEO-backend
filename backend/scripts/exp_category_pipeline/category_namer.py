@@ -527,7 +527,7 @@ def categorize_from_title_words(keyword, titles, words_per_title=3):
     more tightly-scoped vocabulary pool. Every rule downstream of that is
     the exact same, unchanged chain in _categorize_from_documents()."""
     documents = []
-    for title in (titles or [])[:3]:
+    for title in (titles or [])[:5]:
         text = _first_n_words_text(title, words_per_title)
         if text.strip():
             documents.append(text)

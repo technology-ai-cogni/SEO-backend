@@ -148,7 +148,7 @@ def fetch_top3_metadata(top3_results):
     """top3_results: list of {"url":..., "title":...} (up to 3). Returns
     the same-length list of full metadata dicts, in order."""
     out = []
-    for r in (top3_results or [])[:3]:
+    for r in (top3_results or [])[:5]:
         url = (r or {}).get("url")
         title = (r or {}).get("title")
         if not url:
