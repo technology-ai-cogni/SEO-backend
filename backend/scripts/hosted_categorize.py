@@ -213,7 +213,19 @@ def _classify_intent(top3_results):
 def _process_one_keyword_bright_data(job_id, domain, row, country_code, intent_pool):
     row_id, keyword = row["id"], row["keyword"]
     try:
-        top3 = category_checker.get_top3_for_category(keyword, country_code)
+        import time
+        top3 = []
+        for attempt in range(1, 4):
+            try:
+                top3 = category_checker.get_top3_for_category(keyword, country_code)
+                if top3:
+                    break
+                print(f"[hosted_categorize/bright_data] Attempt {attempt} for '{keyword}' returned empty. Retrying...")
+            except Exception as e:
+                print(f"[hosted_categorize/bright_data] Attempt {attempt} for '{keyword}' failed: {e}")
+                if attempt == 3:
+                    raise e
+            time.sleep(2)
 
         if not top3:
             db.update_keyword_result(domain, row_id, None, None, "no_data")
