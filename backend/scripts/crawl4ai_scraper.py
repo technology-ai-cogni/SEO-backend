@@ -174,11 +174,33 @@ async def main():
 
     print(f"Loaded {len(keywords)} keywords from input sheet.\n")
 
+    proxy_url = os.environ.get("SCRAPING_PROXY")
+    proxy_config = None
+    if proxy_url:
+        from urllib.parse import urlparse
+        try:
+            parsed = urlparse(proxy_url)
+            server_url = f"{parsed.scheme}://{parsed.hostname}"
+            if parsed.port:
+                server_url += f":{parsed.port}"
+            
+            proxy_config = {
+                "server": server_url
+            }
+            if parsed.username:
+                proxy_config["username"] = parsed.username
+            if parsed.password:
+                proxy_config["password"] = parsed.password
+            print(f"Configuring Crawl4AI proxy to route through: {server_url}")
+        except Exception as e:
+            print(f"Warning: Failed to parse SCRAPING_PROXY: {e}")
+
     browser_config = BrowserConfig(
         headless=True,
         viewport_width=1280,
         viewport_height=800,
-        extra_args=["--disable-blink-features=AutomationControlled"]
+        extra_args=["--disable-blink-features=AutomationControlled"],
+        proxy_config=proxy_config
     )
     run_config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
