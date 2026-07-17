@@ -20,7 +20,7 @@ from urllib.parse import quote_plus
 from datetime import datetime
 from bs4 import BeautifulSoup
 
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode, ProxyConfig
 
 INPUT_FILE = "backend/datasets/its category test 14 july - Sheet1_categories.csv"
 OUTPUT_FILE = "backend/datasets/its category.csv"
@@ -234,13 +234,11 @@ async def main():
             if parsed.port:
                 server_url += f":{parsed.port}"
             
-            proxy_config = {
-                "server": server_url
-            }
-            if parsed.username:
-                proxy_config["username"] = parsed.username
-            if parsed.password:
-                proxy_config["password"] = parsed.password
+            proxy_config = ProxyConfig(
+                server=server_url,
+                username=parsed.username,
+                password=parsed.password
+            )
             print(f"Configuring Crawl4AI proxy to route through: {server_url}")
         except Exception as e:
             print(f"Warning: Failed to parse SCRAPING_PROXY: {e}")

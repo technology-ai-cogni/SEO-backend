@@ -50,7 +50,7 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from anthropic import Anthropic
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode, ProxyConfig
 
 load_dotenv()
 
@@ -245,13 +245,11 @@ async def _crawl_google_with_crawl4ai(search_url: str) -> str:
             if parsed.port:
                 server_url += f":{parsed.port}"
             
-            proxy_config = {
-                "server": server_url
-            }
-            if parsed.username:
-                proxy_config["username"] = parsed.username
-            if parsed.password:
-                proxy_config["password"] = parsed.password
+            proxy_config = ProxyConfig(
+                server=server_url,
+                username=parsed.username,
+                password=parsed.password
+            )
         except Exception as e:
             print(f"[agentic_rank_checker] Warning: Failed to parse SCRAPING_PROXY: {e}")
 
