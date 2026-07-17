@@ -51,7 +51,10 @@ DELAY_MAX = 12
 def get_driver() -> webdriver.Chrome:
     options = Options()
     options.page_load_strategy = "eager"
-    options.add_argument("--headless=new")
+    # Non-headless -- a real visible Chrome window opens. On a server
+    # with no display attached (e.g. a bare EC2 instance or this repo's
+    # Docker image), this requires a virtual framebuffer (Xvfb) running
+    # first, with DISPLAY set -- otherwise Chrome fails to launch at all.
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
