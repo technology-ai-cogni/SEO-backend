@@ -15,6 +15,7 @@ import json
 import os
 import random
 import asyncio
+import requests
 from urllib.parse import quote_plus
 from datetime import datetime
 from bs4 import BeautifulSoup
@@ -28,6 +29,41 @@ CONCURRENCY_LIMIT = 10
 
 # Lock for writing to CSV file safely across async tasks
 csv_write_lock = asyncio.Lock()
+
+
+def fetch_top5_via_brightdata(keyword: str) -> list[dict]:
+    """Fallback fetcher using Bright Data SERP API when Crawl4AI fails or hits a CAPTCHA."""
+    api_key = os.environ.get("BRIGHTDATA_API_KEY")
+    zone = os.environ.get("BRIGHTDATA_SERP_ZONE", "serp_api1")
+    if not api_key:
+        print("  [Fallback Warning] BRIGHTDATA_API_KEY is not configured in .env. Cannot run fallback.")
+        return []
+
+    search_url = f"https://www.google.com/search?q={quote_plus(keyword)}&num=10&hl=en"
+    payload = {
+        "zone": zone,
+        "url": search_url,
+        "format": "raw"
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        resp = requests.post("https://api.brightdata.com/request", json=payload, headers=headers, timeout=60)
+        resp.raise_for_status()
+        content_type = resp.headers.get("content-type", "")
+        if "application/json" in content_type:
+            html = resp.json().get("body", "")
+        else:
+            html = resp.text
+
+        if html:
+            return extract_organic_results(html)
+    except Exception as e:
+        print(f"  [Fallback Error] Bright Data fetch failed for '{keyword}': {e}")
+    return []
 
 
 def extract_organic_results(html_content: str) -> list[dict]:
@@ -117,17 +153,28 @@ async def scrape_keyword(crawler, keyword, idx, total_keywords, semaphore, run_c
         
         try:
             result = await crawler.arun(search_url, config=run_config)
-            if not result.success:
-                print(f"[{idx}/{total_keywords}] Crawl failed: {result.error_message}")
-                async with csv_write_lock:
-                    writer.writerow([keyword] + [""] * 10)
-                json_results.append({"keyword": keyword, "results": []})
-                return
-
-            # Extract top 5 results
-            top5 = extract_organic_results(result.html)
-            print(f"[{idx}/{total_keywords}] Found {len(top5)} organic results.")
             
+            html = result.html if result.success else ""
+            is_captcha = "captcha" in html.lower() or "recaptcha" in html.lower() or "unusual traffic" in html.lower()
+            top5 = []
+            
+            if result.success and not is_captcha:
+                top5 = extract_organic_results(html)
+            
+            # Fallback to Bright Data if Crawl4AI failed, hit a captcha, or yielded no organic results
+            if not result.success or is_captcha or not top5:
+                reason = "Crawl failed" if not result.success else ("CAPTCHA hit" if is_captcha else "No organic results found")
+                print(f"[{idx}/{total_keywords}] Crawl4AI Warning: {reason}. Falling back to Bright Data SERP API...")
+                
+                # Execute the synchronous HTTP call in a thread pool to avoid blocking the asyncio loop
+                loop = asyncio.get_running_loop()
+                top5 = await loop.run_in_executor(None, fetch_top5_via_brightdata, keyword)
+                
+                if top5:
+                    print(f"[{idx}/{total_keywords}] Bright Data fallback succeeded. Found {len(top5)} results.")
+                else:
+                    print(f"[{idx}/{total_keywords}] Bright Data fallback failed or returned empty.")
+
             row_data = [keyword]
             for rank_idx, res in enumerate(top5, 1):
                 row_data.extend([res['url'], res['title']])

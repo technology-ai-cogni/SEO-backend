@@ -286,6 +286,7 @@ def fetch_serp_crawl4ai(keyword: str, start: int = 0, country_code: str = None) 
 
         if "captcha" in html.lower() or "recaptcha" in html.lower() or "unusual traffic" in html.lower():
             print(f"[Captcha Warning] Crawl4AI encountered a CAPTCHA challenge.")
+            raise ValueError("Crawl4AI hit a CAPTCHA challenge.")
 
         # Verify if search results exist in page html
         if "class=\"g\"" not in html and "id=\"search\"" not in html and "id=\"rso\"" not in html:
