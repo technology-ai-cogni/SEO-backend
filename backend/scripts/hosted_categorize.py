@@ -53,7 +53,7 @@ from scripts.cluster_assigner import cluster_project
 from scripts import intent_classifier
 from scripts.exp_category_pipeline import serp_fetch, category_namer, classifiers, cluster_grouper
 
-INTENT_WORKERS = 1
+INTENT_WORKERS = 8
 
 # Only one categorize job runs at a time across this whole process --
 # see module docstring for why both engines need this.
