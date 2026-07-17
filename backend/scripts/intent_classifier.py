@@ -37,7 +37,6 @@ from openai import OpenAI, APIConnectionError, APITimeoutError, RateLimitError
 from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import TimeoutException, WebDriverException
 
 load_dotenv()
@@ -225,7 +224,11 @@ _drivers_lock = threading.Lock()
 
 def _new_chrome_driver():
     options = Options()
-    options.add_argument("--headless=new")
+    # Non-headless -- see scripts/exp_category_pipeline/serp_fetch.py's
+    # get_driver() for why this needs Xvfb + DISPLAY on a server with no
+    # attached display. Up to INTENT_WORKERS (15) of these can run
+    # concurrently -- each one is a real Chrome window rendered into the
+    # virtual framebuffer, not literally shown on any physical screen.
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -236,13 +239,15 @@ def _new_chrome_driver():
     options.add_argument(f"user-agent={USER_AGENT}")
     options.page_load_strategy = "eager"
 
-    try:
-        from webdriver_manager.chrome import ChromeDriverManager
-        service = Service(ChromeDriverManager().install())
-    except ImportError:
-        service = Service()
-
-    driver = webdriver.Chrome(service=service, options=options)
+    # No explicit Service/webdriver_manager -- Selenium's own built-in
+    # Selenium Manager (bundled since Selenium 4.6) resolves and downloads
+    # whichever chromedriver build EXACTLY matches the installed Chrome
+    # browser. webdriver_manager's ChromeDriverManager().install() was
+    # used here previously, but it fetched a chromedriver build number
+    # that didn't match the installed Chrome, causing every launch to
+    # crash immediately with "Service chromedriver unexpectedly exited.
+    # Status code was: -9".
+    driver = webdriver.Chrome(options=options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     driver.set_page_load_timeout(FETCH_TIMEOUT)
     return driver

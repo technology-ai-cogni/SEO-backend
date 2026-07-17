@@ -40,7 +40,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import (
     TimeoutException, NoSuchElementException, StaleElementReferenceException
 )
-from selenium.webdriver.chrome.service import Service
 
 NUM_TABS = 8
 TAB_TIMEOUT = 50
@@ -51,13 +50,10 @@ DELAY_MAX = 12
 def get_driver() -> webdriver.Chrome:
     options = Options()
     options.page_load_strategy = "eager"
-    # Headless -- everything else about the tab round-robin process below
-    # (open_tabs, run_search_pool, extract_results, ...) is unchanged;
-    # only whether a visible window ever appears differs. "--start-
-    # maximized" has no effect headless, so an explicit window size takes
-    # its place (still large enough that Google renders its normal
-    # desktop layout, not a cramped/mobile one).
-    options.add_argument("--headless=new")
+    # Non-headless -- a real visible Chrome window opens. On a server
+    # with no display attached (e.g. a bare EC2 instance), this requires
+    # a virtual framebuffer (Xvfb) running first, with DISPLAY set --
+    # otherwise Chrome fails to launch at all (no X server to attach to).
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
@@ -71,13 +67,15 @@ def get_driver() -> webdriver.Chrome:
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     )
-    try:
-        from webdriver_manager.chrome import ChromeDriverManager
-        service = Service(ChromeDriverManager().install())
-    except ImportError:
-        service = Service()
-
-    driver = webdriver.Chrome(service=service, options=options)
+    # No explicit Service/webdriver_manager -- Selenium's own built-in
+    # Selenium Manager (bundled since Selenium 4.6) resolves and downloads
+    # whichever chromedriver build EXACTLY matches the installed Chrome
+    # browser. webdriver_manager's ChromeDriverManager().install() was
+    # used here previously, but it fetched a chromedriver build number
+    # that didn't match the installed Chrome, causing every launch to
+    # crash immediately with "Service chromedriver unexpectedly exited.
+    # Status code was: -9".
+    driver = webdriver.Chrome(options=options)
     driver.execute_script(
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
