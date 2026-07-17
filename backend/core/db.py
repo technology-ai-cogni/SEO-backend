@@ -842,6 +842,23 @@ def get_pages_counts():
         return {r["project_name"]: r["count"] for r in rows}
 
 
+def get_pages_stats():
+    """Per-project {total, commercial, blog} counts computed from the pages
+    table's own target_type/target_category columns (set via the Pages
+    detail view's dropdowns or Bulk Edit) -- lets the Pages tab list show
+    Commercial vs Others / Blog Pages sourced from actual page rows instead
+    of KW Cluster's keyword counts."""
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT project_name,
+                   COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE target_type = 'Commercial') AS commercial,
+                   COUNT(*) FILTER (WHERE target_category = 'Blogs') AS blog
+            FROM pages GROUP BY project_name
+        """)).mappings().fetchall()
+        return {r["project_name"]: {"total": r["total"], "commercial": r["commercial"], "blog": r["blog"]} for r in rows}
+
+
 def update_page_row(row_id, updates):
     """Updates whichever of page_name/url/cluster/category/target_category/
     target_type are present in `updates` (snake_case keys) -- silently

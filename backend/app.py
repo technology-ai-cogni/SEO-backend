@@ -557,8 +557,12 @@ def get_pages_counts_endpoint():
     and know which projects to display without fetching every project's
     full page list up front -- and, after a project's pages are all
     deleted, its count drops off the response entirely so the tab knows
-    to stop showing it."""
-    return {"counts": db.get_pages_counts()}
+    to stop showing it. Also returns `stats`: per-project {total,
+    commercial, blog} counts from the pages table's own target_type/
+    target_category columns, so the Pages tab's Commercial vs Others /
+    Blog Pages figures reflect actual page rows instead of KW Cluster's
+    keyword counts."""
+    return {"counts": db.get_pages_counts(), "stats": db.get_pages_stats()}
 
 
 @app.get("/projects/{project}/pages")
