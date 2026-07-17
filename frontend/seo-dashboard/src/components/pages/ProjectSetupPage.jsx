@@ -637,9 +637,7 @@ function AddPagesModal({ open, onClose, projects, onImportPages, lockedProject }
 
 // ─── Add Keywords Modal ──────────────────────────────────────────────────────
 
-// Local dev: pointed at the backend running on localhost:8000 for testing.
-// Swap back to 'https://seo-backend-fqlp.onrender.com' before deploying.
-const CATEGORY_API_BASE = 'https://seo-backend-fqlp.onrender.com';
+const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://54.196.75.9:8080';
 
 function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedProject }) {
   const [project, setProject] = useState('');
@@ -3338,6 +3336,7 @@ export default function ProjectSetupPage({ tab }) {
   const [projectsError, setProjectsError] = useState('');
   const [pages, setPages] = useState([]);
   const [pagesCounts, setPagesCounts] = useState({});
+  const [pagesStats, setPagesStats] = useState({});
   const [kwClusters, setKwClusters] = useState([]);
   const [kwClustersLoading, setKwClustersLoading] = useState(true);
   const [kwClustersError, setKwClustersError] = useState('');
@@ -3418,7 +3417,7 @@ export default function ProjectSetupPage({ tab }) {
   useEffect(() => {
     let cancelled = false;
     fetchPagesCounts()
-      .then(counts => { if (!cancelled) setPagesCounts(counts); })
+      .then(({ counts, stats }) => { if (!cancelled) { setPagesCounts(counts); setPagesStats(stats); } })
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
@@ -3441,10 +3440,11 @@ export default function ProjectSetupPage({ tab }) {
     if (activeTab !== 'Pages' || selectedPageProject !== null) return;
     const interval = setInterval(() => {
       Promise.all([fetchDomainRows(), fetchKwProjects(), fetchPagesCounts()])
-        .then(([domainRows, kwRows, counts]) => {
+        .then(([domainRows, kwRows, { counts, stats }]) => {
           setProjects(domainRows);
           setKwClusters(kwRows.filter(p => p.totalPages > 0));
           setPagesCounts(counts);
+          setPagesStats(stats);
         })
         .catch(() => {});
     }, 10000);
@@ -3453,13 +3453,17 @@ export default function ProjectSetupPage({ tab }) {
 
   // The Pages tab has no dedicated backend table of its own -- its rows are
   // derived straight from the real, DB-backed project list (`projects`,
-  // fetched for the Domain tab) plus KW Cluster's counts (Commercial vs
-  // Others / Blog Pages / Keywords), matched by slug. Only projects with
-  // >=1 real page row (per pagesCounts, fetched from GET /pages/counts)
-  // are included -- so a project whose pages get fully deleted drops off
-  // this list instead of lingering with a permanent "0" row, and it comes
-  // back on its own once pages are added to it again. Any `detailPages`
-  // already loaded locally are preserved across re-syncs.
+  // fetched for the Domain tab) plus this project's own page stats
+  // (Commercial vs Others / Blog Pages, from GET /pages/counts's `stats`,
+  // computed off the pages table's target_type/target_category columns --
+  // NOT KW Cluster's keyword counts, which cover keywords rather than the
+  // pages actually added here) and KW Cluster's counts (just for the
+  // Keywords column), matched by slug. Only projects with >=1 real page
+  // row (per pagesCounts) are included -- so a project whose pages get
+  // fully deleted drops off this list instead of lingering with a
+  // permanent "0" row, and it comes back on its own once pages are added
+  // to it again. Any `detailPages` already loaded locally are preserved
+  // across re-syncs.
   useEffect(() => {
     setPages(prev => {
       const bySlug = new Map(prev.map(p => [p.slug, p]));
@@ -3467,6 +3471,7 @@ export default function ProjectSetupPage({ tab }) {
         .filter(proj => (pagesCounts[proj.slug] ?? 0) > 0)
         .map(proj => {
           const kwProject = kwClusters.find(k => k.slug === proj.slug);
+          const stats = pagesStats[proj.slug] ?? { total: pagesCounts[proj.slug] ?? 0, commercial: 0, blog: 0 };
           const existing = bySlug.get(proj.slug);
           return {
             ...existing,
@@ -3476,8 +3481,8 @@ export default function ProjectSetupPage({ tab }) {
             locationIcon: proj.locationIcon,
             location: proj.location,
             totalPages: pagesCounts[proj.slug] ?? 0,
-            commercialPct: kwProject?.commercialPct ?? '0/0',
-            blogPages: kwProject?.blogPages ?? 0,
+            commercialPct: `${stats.commercial}/${stats.total}`,
+            blogPages: stats.blog,
             blogDir: null,
             keywords: kwProject?.totalPages ?? 0,
             keywordsDir: null,
@@ -3485,7 +3490,7 @@ export default function ProjectSetupPage({ tab }) {
           };
         });
     });
-  }, [projects, kwClusters, pagesCounts]);
+  }, [projects, kwClusters, pagesCounts, pagesStats]);
 
   useEffect(() => {
     if (selectedKwProject === null) return;
@@ -3545,6 +3550,7 @@ export default function ProjectSetupPage({ tab }) {
   const handleDeletePagesProject = async (project) => {
     await deletePagesData(project.slug);
     setPagesCounts(prev => { const next = { ...prev }; delete next[project.slug]; return next; });
+    setPagesStats(prev => { const next = { ...prev }; delete next[project.slug]; return next; });
     setPages(prev => prev.filter(p => p.slug !== project.slug));
   };
 
@@ -3662,6 +3668,10 @@ export default function ProjectSetupPage({ tab }) {
     const insertedRows = await insertPageRows(data.slug, data.pages);
 
     setPagesCounts(prev => ({ ...prev, [data.slug]: (prev[data.slug] || 0) + insertedRows.length }));
+    setPagesStats(prev => {
+      const s = prev[data.slug] || { total: 0, commercial: 0, blog: 0 };
+      return { ...prev, [data.slug]: { ...s, total: s.total + insertedRows.length } };
+    });
 
     setPages(prev => {
       const targetIdx = typeof data.targetIndex === 'number' ? data.targetIndex : prev.findIndex(p => p.slug === data.slug);
@@ -3925,7 +3935,17 @@ export default function ProjectSetupPage({ tab }) {
             onBack={() => setSelectedPageProject(null)}
             onUpdatePages={(updated) => {
               const slug = pages[selectedPageProject]?.slug;
-              if (slug) setPagesCounts(prev => ({ ...prev, [slug]: updated.length }));
+              if (slug) {
+                setPagesCounts(prev => ({ ...prev, [slug]: updated.length }));
+                setPagesStats(prev => ({
+                  ...prev,
+                  [slug]: {
+                    total: updated.length,
+                    commercial: updated.filter(r => r.targetType === 'Commercial').length,
+                    blog: updated.filter(r => r.targetCategory === 'Blogs').length,
+                  },
+                }));
+              }
               setPages(prev => prev.map((p, i) => i === selectedPageProject ? { ...p, detailPages: updated, totalPages: updated.length } : p));
               // Once a project's last page is deleted, its row drops out of
               // `pages` (see the sync effect above) -- bail back to the list

@@ -506,7 +506,7 @@ export async function bulkDeleteKeywordRows(ids) {
   if (error) throw error;
 }
 
-const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'https://seo-backend-fqlp.onrender.com';
+const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://54.196.75.9:8080';
 
 // Removes a project entirely, everywhere -- its domain registration(s),
 // the shared `projects` row, every keyword row filed under its slug, its
@@ -608,8 +608,16 @@ export async function fetchPagesCounts() {
   if (isLocalMode) {
     const pageRows = JSON.parse(localStorage.getItem('seo_pages') || '[]');
     const counts = {};
-    pageRows.forEach(r => { counts[r.project_name] = (counts[r.project_name] || 0) + 1; });
-    return counts;
+    const stats = {};
+    pageRows.forEach(r => {
+      counts[r.project_name] = (counts[r.project_name] || 0) + 1;
+      const s = stats[r.project_name] || { total: 0, commercial: 0, blog: 0 };
+      s.total += 1;
+      if (r.targetType === 'Commercial') s.commercial += 1;
+      if (r.targetCategory === 'Blogs') s.blog += 1;
+      stats[r.project_name] = s;
+    });
+    return { counts, stats };
   }
 
   const res = await fetch(`${CATEGORY_API_BASE}/pages/counts`);
@@ -618,7 +626,7 @@ export async function fetchPagesCounts() {
     throw new Error(body?.detail || 'Failed to load page counts.');
   }
   const data = await res.json();
-  return data.counts || {};
+  return { counts: data.counts || {}, stats: data.stats || {} };
 }
 
 export async function fetchPageRows(slug) {
