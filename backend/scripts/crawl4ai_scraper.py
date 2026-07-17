@@ -204,6 +204,9 @@ async def scrape_keyword(crawler, keyword, idx, total_keywords, semaphore, run_c
 
 
 async def main():
+    from dotenv import load_dotenv
+    load_dotenv()
+
     print(f"\n{'='*60}")
     print(f"  Google Top-5 URL Fetcher (Crawl4AI)")
     print(f"  Input File  : {INPUT_FILE}")
