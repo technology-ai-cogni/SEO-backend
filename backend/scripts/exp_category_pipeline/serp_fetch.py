@@ -51,12 +51,6 @@ DELAY_MAX = 12
 def get_driver() -> webdriver.Chrome:
     options = Options()
     options.page_load_strategy = "eager"
-    # Headless -- everything else about the tab round-robin process below
-    # (open_tabs, run_search_pool, extract_results, ...) is unchanged;
-    # only whether a visible window ever appears differs. "--start-
-    # maximized" has no effect headless, so an explicit window size takes
-    # its place (still large enough that Google renders its normal
-    # desktop layout, not a cramped/mobile one).
     options.add_argument("--headless=new")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-gpu")
@@ -143,6 +137,19 @@ def tab_ready(driver) -> bool:
     return bool(driver.find_elements(By.ID, "search"))
 
 
+def is_captcha_page(driver) -> bool:
+    """Google redirects to /sorry/... or embeds a reCAPTCHA iframe instead
+    of real results when it flags this tab's traffic as automated."""
+    try:
+        if "/sorry/" in driver.current_url:
+            return True
+    except Exception:
+        pass
+    return bool(driver.find_elements(
+        By.CSS_SELECTOR, "iframe[src*='recaptcha'], form#captcha-form"
+    ))
+
+
 def open_tabs(driver, count: int) -> list:
     handles = driver.window_handles
     while len(handles) < count:
@@ -160,13 +167,20 @@ class TabJob:
         self.retried = False
 
 
-def run_search_pool(driver, rows: list, output_path: Optional[str] = None, on_result=None, num_tabs: int = NUM_TABS):
+def run_search_pool(driver, rows: list, output_path: Optional[str] = None, on_result=None,
+                     num_tabs: int = NUM_TABS, is_retry_pass: bool = False) -> list:
     """Tab round-robin loop -- identical logic to serp_scraper.py's
     run_search_pool(), duplicated here rather than imported.
 
     `on_result(row, results, start_time, stop_time)` is called the
     instant each tab's job finishes. `row` is the full dict from `rows`
-    (must contain at least a "keyword" key)."""
+    (must contain at least a "keyword" key).
+
+    Returns the list of rows that hit a CAPTCHA instead of real results.
+    On `is_retry_pass=True` (the second, retry call from
+    fetch_top3_batch), a CAPTCHA hit is instead finalized immediately as
+    an empty result via `on_result` -- there's no third pass."""
+    captcha_rows: list = []
     handles = open_tabs(driver, num_tabs)
     print(f"  Opened {len(handles)} browser tabs\n")
 
@@ -208,6 +222,22 @@ def run_search_pool(driver, rows: list, output_path: Optional[str] = None, on_re
                     continue
 
                 if not tab_ready(driver):
+                    if is_captcha_page(driver):
+                        stop_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        if is_retry_pass:
+                            print(f"{label(h)}            CAPTCHA again on retry -- giving up on this one\n")
+                            if on_result:
+                                on_result(job.row, [], job.start_time, stop_time)
+                            if writer:
+                                writer.writerow([job.row["keyword"], job.start_time, stop_time, json.dumps([])])
+                                out_file.flush()
+                        else:
+                            print(f"{label(h)}            CAPTCHA hit -- skipping for now, will retry at the end\n")
+                            captcha_rows.append(job.row)
+                        done += 1
+                        cooldown[h] = time.time() + random.uniform(DELAY_MIN, DELAY_MAX)
+                        jobs[h] = None
+                        continue
                     if time.time() > job.deadline and not job.retried:
                         accept_consent(driver)  # results may be stuck behind a consent screen
                         job.retried = True
@@ -248,6 +278,8 @@ def run_search_pool(driver, rows: list, output_path: Optional[str] = None, on_re
         if out_file:
             out_file.close()
 
+    return captcha_rows
+
 
 def fetch_top3_batch(keywords, num_tabs: int = NUM_TABS, on_result=None):
     """The entry point run_experiment.py calls: opens ONE Chrome browser
@@ -272,7 +304,11 @@ def fetch_top3_batch(keywords, num_tabs: int = NUM_TABS, on_result=None):
 
     driver = get_driver()
     try:
-        run_search_pool(driver, rows, output_path=None, on_result=_on_tab_result, num_tabs=num_tabs)
+        captcha_rows = run_search_pool(driver, rows, output_path=None, on_result=_on_tab_result, num_tabs=num_tabs)
+        if captcha_rows:
+            print(f"\n  Retrying {len(captcha_rows)} keyword(s) that hit a CAPTCHA...\n")
+            run_search_pool(driver, captcha_rows, output_path=None, on_result=_on_tab_result,
+                             num_tabs=num_tabs, is_retry_pass=True)
     finally:
         driver.quit()
 
