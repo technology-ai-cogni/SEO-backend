@@ -368,12 +368,21 @@ def run_search_pool(driver, rows: list, output_path: Optional[str] = None, on_re
                         job.retried = True
                         job.deadline = time.time() + TAB_TIMEOUT
                     elif time.time() > job.deadline:
-                        print(f"{label(h)}            Timed out waiting for results\n")
+                        print(f"{label(h)}            Timed out waiting for results. Triggering Firecrawl search fallback...")
                         stop_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        
+                        results = []
+                        try:
+                            from backend.scripts.firecrawl_scraper import fetch_top_results_via_firecrawl
+                            fc_data = fetch_top_results_via_firecrawl(job.row["keyword"])
+                            results = [{"url": r["url"], "title": r["title"]} for r in fc_data.get("top_3", [])]
+                        except Exception as fe:
+                            print(f"{label(h)}            Firecrawl fallback failed: {fe}")
+                            
                         if on_result:
-                            on_result(job.row, [], job.start_time, stop_time)
+                            on_result(job.row, results, job.start_time, stop_time)
                         if writer:
-                            writer.writerow([job.row["keyword"], job.start_time, stop_time, json.dumps([])])
+                            writer.writerow([job.row["keyword"], job.start_time, stop_time, json.dumps(results, ensure_ascii=False)])
                             out_file.flush()
                         done += 1
                         cooldown[h] = time.time() + random.uniform(DELAY_MIN, DELAY_MAX)
@@ -381,8 +390,17 @@ def run_search_pool(driver, rows: list, output_path: Optional[str] = None, on_re
                     continue
 
                 results = extract_results(driver)[:5]
+                if not results:
+                    print(f"{label(h)}            No results found. Triggering Firecrawl search fallback...")
+                    try:
+                        from backend.scripts.firecrawl_scraper import fetch_top_results_via_firecrawl
+                        fc_data = fetch_top_results_via_firecrawl(job.row["keyword"])
+                        results = [{"url": r["url"], "title": r["title"]} for r in fc_data.get("top_3", [])]
+                    except Exception as fe:
+                        print(f"{label(h)}            Firecrawl fallback failed: {fe}")
+
                 print(f"{label(h)}            Top 3 URLs:")
-                for idx, r in enumerate(results, 1):
+                for idx, r in enumerate(results[:3], 1):
                     print(f"{label(h)}              {idx}. {r['title']} — {r['url']}")
 
                 stop_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
