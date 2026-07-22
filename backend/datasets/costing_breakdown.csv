@@ -1,0 +1,62 @@
+SERVICE,COMPONENT / USE CASE IN THIS PROJECT,PLAN / TIER,UNIT COST,PER 1000 KEYWORDS (LOW),PER 1000 KEYWORDS (HIGH),PER 1000 KEYWORDS (NOTES),MONTHLY ESTIMATE (5K KW),MONTHLY ESTIMATE (20K KW),CURRENT STATUS IN PROJECT
+,,,,,,,,,,
+
+=== INFRASTRUCTURE ===,,,,,,,,,,
+
+AWS EC2,Run Docker container (FastAPI + Chrome + Selenium),t3.medium (2 vCPU / 4GB RAM),$0.0416/hr,$0,$0,Fixed cost — does not scale with keyword count,$30,$30,Used — Dockerfile present in /backend/
+AWS EC2,Run Docker container (FastAPI + Chrome + Selenium),t3.large (2 vCPU / 8GB RAM) — recommended for Selenium,$0.0832/hr,$0,$0,Fixed cost — does not scale with keyword count,$60,$60,Recommended if Chrome crashes
+AWS EC2,Data transfer out (results / API responses),Pay-per-GB,$0.09/GB,~$0,~$0.50,Negligible for this use case,~$1,~$3,Active
+AWS EC2 EBS,Storage for Docker image + datasets,gp3 30GB,$0.08/GB/mo,$0,$0,Fixed,~$2.50,$2.50,Active
+
+Supabase (Postgres),Database — stores all keywords / categories / clusters / ranks / jobs / pages / competitors,Free tier (500MB / 50K rows),$0,$0,$0,Free up to 50K rows,FREE,FREE,Active — used heavily
+Supabase (Postgres),Database — if exceeding free tier,Pro plan,$25/mo,$0,$0,Fixed cost,$25,$25,Future — upgrade when >50K rows
+Upstash Redis,Previously used as RQ job queue — now removed per branch feature/remove-vercel,Serverless,$0.2/100K commands,$0,$0,No longer used in current branch,REMOVED,REMOVED,NOT IN USE (removed)
+
+,,,,,,,,,,
+=== SERP / WEB SCRAPING ===,,,,,,,,,,
+
+Bright Data SERP Zone,Category pipeline — fetches top-3 organic titles per keyword to derive category name (category_checker.py),SERP API zone — Pay-per-GB,$1.50-3.00/GB,~$0.75,~$1.50,"~1 request/keyword, ~50-100KB per response",$3.75,$15,ACTIVE — used in every category job
+Bright Data SERP Zone,Rank checker — fetches top-40 organic results per keyword (rank_checker.py) — up to 4 SERP pages per keyword,SERP API zone — Pay-per-GB,$1.50-3.00/GB,~$3.00,~$6.00,"~4 requests/keyword for top-40 check, larger pages",$15,$60,ACTIVE — used in every rank check job
+Bright Data SERP Zone,Competitor analysis (comp_analysis.py) — additional SERP fetches for competitor discovery,SERP API zone — Pay-per-GB,$1.50-3.00/GB,~$0.50,~$1.50,Optional feature — not always triggered,$2.50,$10,ACTIVE when competitor discovery is run
+Bright Data TOTAL,All SERP fetches combined (category + rank + comp),,,$4.25,$9.00,Combined estimate for all 3 pipelines,$21.25,$85,Current API key in .env
+
+Firecrawl,Alternative SERP scraper — used in firecrawl_scraper.py as experimental replacement for Bright Data,Hobby plan,$16/mo (3000 credits) or $83/mo (100K credits),~$5.33,~$16,"$16/1000 on Hobby, drops to $0.83/1000 on Scale",$26.65,$106.4,EXPERIMENTAL — firecrawl_scraper.py exists in /scripts/. Not in main pipeline yet.
+Crawl4AI,Open-source web crawler — crawl4ai_scraper.py — self-hosted on same EC2 instance,Self-hosted / Free,$0,$0,$0,Free — runs on EC2. No extra cost if EC2 is already running,$0,$0,EXPERIMENTAL — crawl4ai_scraper.py exists in /scripts/. Not in main pipeline yet.
+
+,,,,,,,,,,
+=== AI / LLM APIs ===,,,,,,,,,,
+
+OpenAI GPT-4o-mini,Category naming — derive_category_name() in category_checker.py. ~300 in + ~40 out tokens/call,Pay-per-token,$0.15/M in + $0.60/M out,~$0.06,~$0.10,"1 call/keyword, small tokens",$0.30,$1.20,ACTIVE — primary category naming model
+OpenAI GPT-4o-mini,Category matching — find_matching_category() in category_checker.py. ~400 in + ~20 out tokens/call,Pay-per-token,$0.15/M in + $0.60/M out,~$0.07,~$0.12,"1 call/keyword, compares against existing categories",$0.35,$1.40,ACTIVE — runs for every keyword that has existing categories to compare against
+OpenAI GPT-4o-mini,Competitor analysis summarisation — comp_analysis.py,Pay-per-token,$0.15/M in + $0.60/M out,~$0.02,~$0.05,Optional — only when comp discovery is run,$0.10,$0.40,ACTIVE when competitor feature is triggered
+OpenAI GPT-4o-mini,SEO Summary generation — exp/ai_test_open_ai.py — generates client-specific SEO report per keyword,Pay-per-token,$0.15/M in + $0.60/M out,~$0.09,~$0.15,"~600 in + ~500 out tokens. Currently experimental, not in main pipeline",$0.45,$1.80,EXPERIMENTAL — in /exp/ folder only
+OpenAI GPT-4o-search-preview,AI Search Visibility — exp/ai_test_open_ai.py — live web search to find top 10 URLs per keyword with citations,Pay-per-token + $10/1000 tool calls,$2.50/M in + $10/M out + $10/1000 search calls,~$11.00,~$14.00,"Dominant cost is $10/1000 search calls = $10/1000 KW, plus tokens",$55,$220,EXPERIMENTAL — in /exp/ folder only
+OpenAI TOTAL (main pipeline only),GPT-4o-mini for category naming + matching,,,$0.13,$0.22,Does not include experimental exp/ scripts,$0.65,$2.60,Current API key: sk-proj-jj1Z... (in .env)
+
+Anthropic Claude,Intent classifier — scripts/intent_classifier.py uses ANTHROPIC_API_KEY (found in Dockerfile env comment),claude-3-haiku (cheapest) — $0.25/M in + $1.25/M out,claude-3-5-sonnet — $3/M in + $15/M out,~$0.05 (haiku),~$0.50 (sonnet),"intent_classifier.py exists — Anthropic SDK in requirements.txt. Model TBD",$0.25 (haiku),$2 (sonnet),PRESENT — anthropic package in requirements.txt. ANTHROPIC_API_KEY referenced in Dockerfile. Not in .env yet.
+Anthropic Claude API — if added to AI mode tracking,Full pipeline parity with OpenAI web search (not yet possible — no native web search in Claude API),$3/M in + $15/M out,N/A,N/A,N/A,Claude API does NOT support native web citation grounding yet — must inject search results manually,N/A,N/A,NOT POSSIBLE YET — Claude has no grounded web search API
+
+Google Gemini,AI Search Visibility — potential addition to exp/ pipeline — grounded search returns citations natively,Gemini 2.0 Flash + Google Search grounding,$0.10/M in + $0.40/M out + $14/1000 grounding calls,~$14.10,~$14.20,"Dominated by $14/1000 grounding calls. 5000 FREE queries/month",$0 (within free tier for 5K),$196,NOT YET ADDED — discussed in session. Recommended next addition.
+
+Perplexity (sonar-pro),AI Search Visibility — potential addition to exp/ pipeline — returns citations natively,Pay-per-token,$2/M in + $8/M out,~$0.70,~$1.00,"Web search included in token cost. No separate tool call fee",$3.50,$14,NOT YET ADDED — discussed in session. Recommended first AI mode addition.
+
+,,,,,,,,,,
+=== COMBINED TOTALS (PER 1000 KEYWORDS) ===,,,,,,,,,,
+
+SCENARIO: Main pipeline only (category + rank check),EC2 (fixed) + Supabase (free tier) + Bright Data (category+rank) + OpenAI GPT-4o-mini,,,$4.38,$9.22,This is the cost of running the EXISTING production pipeline,$21.90,$46.10,Current production state
+SCENARIO: Main pipeline + AI mode (OpenAI search preview only),Above + GPT-4o-search-preview for AI visibility,,,$15.38,$23.22,Adds ~$11-14 per 1000 KW from search preview,$76.90,$266.10,If exp/ script is promoted to production
+SCENARIO: Main pipeline + AI mode (Perplexity),Above but using Perplexity sonar-pro instead of OpenAI search,,,$5.08,$10.22,Perplexity is much cheaper than OpenAI search preview,$25.40,$51.10,Recommended cheaper alternative
+SCENARIO: Main pipeline + AI mode (all 3: OpenAI + Perplexity + Gemini),Full AI visibility across 3 platforms,,,$29.58,$37.62,Gemini has 5K free/mo which helps at lower volumes,$147.90,$752.40,Maximum coverage — future roadmap
+SCENARIO: Main pipeline + Firecrawl (replacing Bright Data),If Firecrawl replaces Bright Data for SERP scraping,,,$5.46,$16.13,Firecrawl Hobby plan ($16/mo flat) at low volume is cheaper,$28.30,$161.30,Only worth it if Bright Data costs exceed Firecrawl Scale plan
+
+,,,,,,,,,,
+=== NOTES ===,,,,,,,,,,
+
+NOTE 1,EC2 cost is FIXED regardless of keyword volume. Spread over more keywords = cheaper per keyword.,,,,,,,,
+NOTE 2,Bright Data is the LARGEST variable cost. It scales linearly with every SERP request.,,,,,,,,
+NOTE 3,OpenAI GPT-4o-mini is very cheap for the main pipeline. The big cost jumper is gpt-4o-search-preview in the experimental script.,,,,,,,,
+NOTE 4,"Supabase free tier covers ~50,000 rows. At 1000 keywords per project with metadata, this covers 50 projects before upgrade needed.",,,,,,,,
+NOTE 5,Firecrawl API key (fc-3897dbc7f2da4e3ba0da80d146edd393) is HARDCODED in firecrawl_scraper.py line 29 — should be moved to .env immediately.,,,,,,,,
+NOTE 6,Redis/Upstash is no longer used in the current branch (feature/remove-vercel). Removing it saves $0 (was on free tier) but avoids connection overhead.,,,,,,,,
+NOTE 7,Claude API is referenced in the Dockerfile env comment (ANTHROPIC_API_KEY) and anthropic package is in requirements.txt — but no .env key is set yet.,,,,,,,,
+NOTE 8,All per-keyword costs assume 1 keyword = 1 run. Re-running the same keyword doubles the cost.,,,,,,,,
