@@ -28,6 +28,9 @@ import csv
 import json
 import random
 import time
+import os
+import zipfile
+import tempfile
 from datetime import datetime
 from typing import Optional
 from urllib.parse import quote_plus
@@ -46,39 +49,7 @@ NUM_TABS = 8
 TAB_TIMEOUT = 50
 DELAY_MIN = 5
 DELAY_MAX = 12
-
-
-def get_driver() -> webdriver.Chrome:
-    options = Options()
-    options.page_load_strategy = "eager"
-    # Non-headless -- a real visible Chrome window opens. On a server
-    # with no display attached (e.g. a bare EC2 instance or this repo's
-    # Docker image), this requires a virtual framebuffer (Xvfb) running
-    # first, with DISPLAY set -- otherwise Chrome fails to launch at all.
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-notifications")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option("useAutomationExtension", False)
-    options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    )
-    try:
-        from webdriver_manager.chrome import ChromeDriverManager
-        service = Service(ChromeDriverManager().install())
-    except ImportError:
-        service = Service()
-
-    driver = webdriver.Chrome(service=service, options=options)
-    driver.execute_script(
-        "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-    )
-    return driver
+from scripts.serp_scraper import create_proxy_auth_extension, get_driver, run_search_pool
 
 
 def accept_consent(driver):
@@ -168,120 +139,6 @@ class TabJob:
         self.start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.deadline = time.time() + TAB_TIMEOUT
         self.retried = False
-
-
-def run_search_pool(driver, rows: list, output_path: Optional[str] = None, on_result=None,
-                     num_tabs: int = NUM_TABS, is_retry_pass: bool = False) -> list:
-    """Tab round-robin loop -- identical logic to serp_scraper.py's
-    run_search_pool(), duplicated here rather than imported.
-
-    `on_result(row, results, start_time, stop_time)` is called the
-    instant each tab's job finishes. `row` is the full dict from `rows`
-    (must contain at least a "keyword" key).
-
-    Returns the list of rows that hit a CAPTCHA instead of real results.
-    On `is_retry_pass=True` (the second, retry call from
-    fetch_top3_batch), a CAPTCHA hit is instead finalized immediately as
-    an empty result via `on_result` -- there's no third pass."""
-    captcha_rows: list = []
-    handles = open_tabs(driver, num_tabs)
-    print(f"  Opened {len(handles)} browser tabs\n")
-
-    # Warm up tab 1 so the "Accept all" consent screen is dismissed once,
-    # instead of every tab hitting it independently.
-    driver.switch_to.window(handles[0])
-    driver.get("https://www.google.com")
-    accept_consent(driver)
-
-    queue: list = list(rows)
-    total = len(rows)
-    done = 0
-    jobs = {h: None for h in handles}
-    cooldown = {h: 0.0 for h in handles}
-
-    def label(h):
-        return f"[Tab {handles.index(h) + 1}]"
-
-    out_file = open(output_path, "w", newline="", encoding="utf-8-sig") if output_path else None
-    writer = None
-    try:
-        if out_file:
-            writer = csv.writer(out_file)
-            writer.writerow(["Keyword", "Start Time", "Stop Time", "Top 3 URLs (JSON)"])
-
-        while queue or any(jobs[h] is not None for h in handles):
-            for h in handles:
-                driver.switch_to.window(h)
-                job = jobs[h]
-
-                if job is None:
-                    if not queue or time.time() < cooldown[h]:
-                        continue
-
-                    row = queue.pop(0)
-                    print(f"{label(h)} [{done + 1}/{total}] \"{row['keyword']}\"")
-                    start_search(driver, row["keyword"])
-                    jobs[h] = TabJob(row)
-                    continue
-
-                if not tab_ready(driver):
-                    if is_captcha_page(driver):
-                        stop_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        if is_retry_pass:
-                            print(f"{label(h)}            CAPTCHA again on retry -- giving up on this one\n")
-                            if on_result:
-                                on_result(job.row, [], job.start_time, stop_time)
-                            if writer:
-                                writer.writerow([job.row["keyword"], job.start_time, stop_time, json.dumps([])])
-                                out_file.flush()
-                        else:
-                            print(f"{label(h)}            CAPTCHA hit -- skipping for now, will retry at the end\n")
-                            captcha_rows.append(job.row)
-                        done += 1
-                        cooldown[h] = time.time() + random.uniform(DELAY_MIN, DELAY_MAX)
-                        jobs[h] = None
-                        continue
-                    if time.time() > job.deadline and not job.retried:
-                        accept_consent(driver)  # results may be stuck behind a consent screen
-                        job.retried = True
-                        job.deadline = time.time() + TAB_TIMEOUT
-                    elif time.time() > job.deadline:
-                        print(f"{label(h)}            Timed out waiting for results\n")
-                        stop_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        if on_result:
-                            on_result(job.row, [], job.start_time, stop_time)
-                        if writer:
-                            writer.writerow([job.row["keyword"], job.start_time, stop_time, json.dumps([])])
-                            out_file.flush()
-                        done += 1
-                        cooldown[h] = time.time() + random.uniform(DELAY_MIN, DELAY_MAX)
-                        jobs[h] = None
-                    continue
-
-                results = extract_results(driver)[:5]
-                print(f"{label(h)}            Top 3 URLs:")
-                for idx, r in enumerate(results, 1):
-                    print(f"{label(h)}              {idx}. {r['title']} — {r['url']}")
-
-                stop_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                if on_result:
-                    on_result(job.row, results, job.start_time, stop_time)
-                if writer:
-                    writer.writerow([job.row["keyword"], job.start_time, stop_time, json.dumps(results, ensure_ascii=False)])
-                    out_file.flush()
-
-                done += 1
-                print(f"{label(h)} [{done}/{total}] Done\n")
-
-                cooldown[h] = time.time() + random.uniform(DELAY_MIN, DELAY_MAX)
-                jobs[h] = None
-
-            time.sleep(0.5)
-    finally:
-        if out_file:
-            out_file.close()
-
-    return captcha_rows
 
 
 def fetch_top3_batch(keywords, num_tabs: int = NUM_TABS, on_result=None):

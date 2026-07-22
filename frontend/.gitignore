@@ -219,7 +219,6 @@ __marimo__/
 
 # Node
 node_modules/
-.vercel
 .env*
 
 # Don't let the Python `lib/` rule above swallow the frontend's src/lib

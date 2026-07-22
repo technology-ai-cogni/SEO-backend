@@ -477,37 +477,11 @@ def derive_category_name(titles, keyword=None):
     system_prompt = (
         "You create SEO category names from webpage titles. Follow these "
         "rules exactly:\n\n"
-        f"1. You may ONLY use words from this allowed list (case doesn't "
-        f"matter): {allowed_block}\n"
-        "Never add, invent, or substitute a word that isn't in that list -- "
-        "not even a small connector word like 'is', 'an', 'the', 'of', or "
-        "'and'. Only use real, meaningful topic words from the list.\n\n"
-        "2. Use AS MANY of the allowed words as you sensibly can while "
-        "still reading as one natural, coherent phrase describing the "
-        "shared topic across the titles -- this should be the fullest "
-        "phrase the allowed words support, not an artificially shortened "
-        "one. Only drop a word if including it would make the phrase read "
-        "like a random word list rather than a real category name.\n\n"
-        "3. Do NOT include any city, state, country, or region name, even "
-        "if one is in the allowed list -- the category should describe "
-        "the TOPIC, not the location.\n\n"
-        "4. Do NOT include any number or digit (e.g. '10', '100'), even if "
-        "one is in the allowed list.\n\n"
-        "5. Do NOT include ranking words like 'best' or 'top' -- that is "
-        "handled separately.\n\n"
-        "6. Understand INTENT, not just word matching: words like "
-        "'company', 'agency', 'service', 'firm', and 'provider' (singular "
-        "or plural) all describe the SAME thing -- what TYPE of business "
-        "this is. A business is only one of those at a time, so even if "
-        "more than one is in the allowed list, use ONLY the single one "
-        "that best fits, never two or more together (e.g. never 'agency "
-        "company' or 'agencies companies'). This is different from words "
-        "like 'digital' and 'marketing', which are separate real topic "
-        "words that belong together, not interchangeable labels for the "
-        "same thing.\n\n"
-        "7. Output ONLY plain words separated by single spaces -- no "
-        "punctuation, no pipes, no colons, no quotation marks.\n\n"
-        "Respond with ONLY the category name, nothing else."
+        "1. Analyze all the provided titles and identify the TOP 3 words that occur most frequently.\n"
+        "2. Ensure these 3 words are the CORE PRODUCT OR TOPIC only. Strictly drop any subjective, attribute, or filler words like 'recommended', 'best', 'top', 'safe', 'healthy', etc.\n"
+        "3. Arrange these 3 words into a meaningful, natural-sounding English phrase using correct grammar (e.g. adjectives before nouns: 'lasting dog chews' instead of 'dog chews lasting' or 'lasting chews dog'). Treat this like solving a jumbled word puzzle to form the most natural category name.\n"
+        "4. Your final category MUST NOT contain more than 3 to 4 words total.\n"
+        "5. Output ONLY the resulting category name, with no quotes, extra text, or punctuation."
     )
     user_prompt = f"Titles:\n{titles_block}"
 
@@ -522,14 +496,8 @@ def derive_category_name(titles, keyword=None):
     )
     candidate = resp.choices[0].message.content.strip().strip('"')
 
-    candidate_words = re.findall(r"[A-Za-z0-9]+", candidate)
-    allowed_lower = {w.lower() for w in qualifying_words}
-    invalid_words = [w for w in candidate_words if w.lower() not in allowed_lower]
-
-    if invalid_words or not candidate_words:
+    if not candidate:
         fallback = " ".join(w.capitalize() for w in qualifying_words)
-        print(f"  [WARNING] Model used word(s) not in the allowed list: {invalid_words} "
-              f"-- discarding \"{candidate}\", using safe fallback: \"{fallback}\"")
         return _enforce_single_entity_type(_clean_category_text(fallback), count_documents)
 
     return _enforce_single_entity_type(_clean_category_text(candidate), count_documents)
@@ -764,6 +732,13 @@ def categorize_keyword(keyword, domain, country_code=None):
         name for name in db.list_category_names(domain)
         if name.lower().startswith("best/top") == has_best_top
     ]
+
+    # Case-insensitive exact match check: if words match exactly, reuse existing category
+    for existing in existing_category_names:
+        if existing.strip().lower() == candidate_name.strip().lower():
+            meta["matched_existing_category"] = True
+            meta["candidate_before_match"] = candidate_name
+            return existing, meta
 
     # Deterministic singular/plural dedup, tried BEFORE the LLM-based
     # intent match below -- if this candidate is purely a singular/plural

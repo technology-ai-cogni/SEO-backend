@@ -46,11 +46,12 @@ import shutil
 from core import db
 from services import category_checker
 
-CSV_PATH = "datasets/social media category test 8 july - Sheet1_top3.csv"
+import sys
+CSV_PATH = sys.argv[1] if len(sys.argv) > 1 else "datasets/21_test_1.csv"
 PROJECT_DISPLAY_NAME = "social media category test 8 july"
-KEYWORD_COL = "Keyword"
+KEYWORD_COL = "keyword"
 LANDING_PAGE_COL = "Landing Page"
-TOP3_COL = "Top 3 URLs (JSON)"
+TOP3_COL = "meta"
 CATEGORY_COL = "Category"
 
 
@@ -75,44 +76,12 @@ def find_matching_category_generalized(candidate_name, candidate_titles, existin
     category_list = "\n".join(f"{i + 1}. {name}" for i, name in enumerate(existing_category_names))
     titles_block = "\n".join(f"- {t}" for t in candidate_titles)
     system_prompt = (
-        "You are doing a SECOND, more lenient pass at grouping SEO keyword "
-        "topics into categories -- a stricter first pass already checked "
-        "this candidate against the same list of existing categories and "
-        "found no exact match, because the specific topics didn't line up "
-        "word-for-word.\n\n"
-        "Your job now: look past minor differences and decide if this "
-        "candidate is still, at its core, the SAME general subject and the "
-        "SAME searcher intent as one of the existing categories -- just "
-        "phrased with a different modifier, qualifier, audience, or "
-        "format. If so, reuse that existing category instead of treating "
-        "this as a new topic.\n\n"
-        "Examples of differences you SHOULD now treat as the same category: "
-        "a narrower audience or sub-group of the same subject (e.g. "
-        "\"international schools\" and \"international private schools\"), "
-        "a synonym or near-synonym qualifier (e.g. \"fees\" and \"tuition "
-        "fees\", \"admissions\" and \"enrollment\"), or a different surface "
-        "wording of the same underlying question or goal.\n\n"
-        "Still keep them SEPARATE if the searcher's actual goal is "
-        "genuinely different -- e.g. comparing/ranking options vs. "
-        "researching one specific aspect like fees or curriculum vs. "
-        "general informational content are different goals, even under "
-        "this more lenient pass.\n\n"
-        "IMPORTANT -- never merge just to swap the business/entity-type "
-        "word: 'company', 'agency', 'service', 'firm', and 'provider' "
-        "(singular or plural) are NOT interchangeable for this pass, even "
-        "though they're the same general kind of subject. The candidate's "
-        "entity-type word was chosen because it's the one that actually "
-        "occurs most often (majority) across ITS OWN page titles -- an "
-        "existing category built around a DIFFERENT entity-type word "
-        "(e.g. 'services') is NOT a match for this candidate (e.g. "
-        "'companies') just because the rest of the topic lines up. Only "
-        "treat them as the same category if the existing category uses "
-        "the SAME entity-type word as the candidate, or has no "
-        "entity-type word at all.\n\n"
-        "If this candidate is really the same general subject and intent "
-        "as one of the existing categories, respond with ONLY that exact "
-        "existing category name, copied exactly as written. Otherwise "
-        "respond with exactly: NONE"
+                "You are an expert at categorizing search queries based on search result metadata. "
+        "Follow these two rules strictly:\n"
+        "1. Look at the metadata from all 5 provided URLs and identify the top 3 words that occur most frequently.\n"
+        "2. Make a meaningful category out of those top 3 words. The final category MUST NOT be more than 3-4 words long.\n\n"
+        "Respond ONLY with the final category name and nothing else."
+
     )
     user_prompt = (
         f"Existing categories:\n{category_list}\n\n"
@@ -356,6 +325,11 @@ def categorize_from_top3(keyword, top3, domain):
         if name.lower().startswith("best/top") == has_best_top
     ]
 
+    # Case-insensitive exact match check: if words match exactly, reuse existing category
+    for existing in existing_category_names:
+        if existing.strip().lower() == candidate_name.strip().lower():
+            return existing
+
     plural_variant = resolve_plural_or_existing_category(candidate_name, existing_category_names)
     if plural_variant:
         db.add_category(domain, plural_variant)
@@ -376,7 +350,7 @@ def categorize_from_top3(keyword, top3, domain):
 def main():
     # encoding="utf-8-sig" so a leading BOM (present in this CSV) doesn't
     # get glued onto the first column name and break the Keyword lookup.
-    with open(CSV_PATH, newline="", encoding="utf-8-sig") as f:
+    with open(CSV_PATH, newline="", encoding="latin-1") as f:
         reader = csv.DictReader(f)
         fieldnames = list(reader.fieldnames)
         rows = list(reader)
@@ -401,7 +375,8 @@ def main():
         raw_json = (row.get(TOP3_COL) or "").strip()
 
         try:
-            top3 = json.loads(raw_json) if raw_json else []
+            parsed = json.loads(raw_json) if raw_json else []
+            top3 = parsed.get("top3", parsed) if isinstance(parsed, dict) else parsed
         except json.JSONDecodeError:
             top3 = []
 

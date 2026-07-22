@@ -150,3 +150,67 @@ def cluster_project(domain):
     assignment = cluster_categories(categories)
     db.replace_domain_clusters(domain, assignment)
     return assignment
+
+import sys
+import csv
+import shutil
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python3 scripts/cluster_assigner.py <path_to_csv>")
+        sys.exit(1)
+        
+    csv_path = sys.argv[1]
+    
+    with open(csv_path, newline="", encoding="latin-1") as f:
+        reader = csv.DictReader(f)
+        fieldnames = list(reader.fieldnames)
+        rows = list(reader)
+        
+    if not rows:
+        print("No rows found in CSV.")
+        return
+
+    # Extract all unique categories from the Category column
+    categories = []
+    for row in rows:
+        cat = row.get("Category", "").strip()
+        if cat and cat not in categories:
+            categories.append(cat)
+            
+    if not categories:
+        print("No categories found in the 'Category' column.")
+        return
+        
+    print(f"Found {len(categories)} unique categories. Assigning clusters...")
+    
+    assignment = cluster_categories(categories)
+    
+    if "cluster" not in fieldnames:
+        fieldnames.append("cluster")
+        
+    for i, row in enumerate(rows, start=1):
+        cat = row.get("Category", "").strip()
+        kw = row.get("keyword", "").strip()
+        if cat:
+            cluster_name = assignment.get(cat, "")
+            row["cluster"] = cluster_name
+        else:
+            cluster_name = ""
+            row["cluster"] = ""
+            
+        print(f"[{i}/{len(rows)}] '{kw}' (Category: '{cat}') -> Cluster: '{cluster_name}'")
+            
+    backup_path = csv_path + ".bak"
+    shutil.copyfile(csv_path, backup_path)
+    print(f"Backed up original CSV to {backup_path}")
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+        
+    print(f"Done -- wrote 'cluster' column for {len(rows)} rows into {csv_path}")
+
+if __name__ == "__main__":
+    main()

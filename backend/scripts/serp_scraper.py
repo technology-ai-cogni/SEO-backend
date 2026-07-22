@@ -28,9 +28,12 @@ import json
 import os
 import time
 import random
+import zipfile
+import tempfile
 from urllib.parse import quote_plus
 from datetime import datetime
 from typing import Optional
+from openpyxl import load_workbook
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -42,11 +45,80 @@ from selenium.common.exceptions import (
 )
 from selenium.webdriver.chrome.service import Service
 
-EXCEL_FILE = "backend/datasets/social media category test 8 july - Sheet1.csv"
+EXCEL_FILE = "backend/datasets/"
 DELAY_MIN     = 5
 DELAY_MAX     = 12
 NUM_TABS      = 10
 TAB_TIMEOUT   = 50
+
+
+def create_proxy_auth_extension(proxy_url: str) -> str:
+    """Helper to dynamically generate a Chrome extension zip that handles proxy authentication."""
+    from urllib.parse import urlparse
+    parsed = urlparse(proxy_url)
+    host = parsed.hostname
+    port = parsed.port or 80
+    username = parsed.username
+    password = parsed.password
+    
+    manifest_json = """
+    {
+        "version": "1.0.0",
+        "manifest_version": 2,
+        "name": "Chrome Proxy",
+        "permissions": [
+            "proxy",
+            "tabs",
+            "unlimitedStorage",
+            "storage",
+            "<all_urls>",
+            "webRequest",
+            "webRequestBlocking"
+        ],
+        "background": {
+            "scripts": ["background.js"]
+        },
+        "minimum_chrome_version":"22.0.0"
+    }
+    """
+
+    background_js = f"""
+    var config = {{
+        mode: "fixed_servers",
+        rules: {{
+          singleProxy: {{
+            scheme: "http",
+            host: "{host}",
+            port: parseInt({port})
+          }},
+          bypassList: []
+        }}
+      }};
+
+    chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{}});
+
+    chrome.webRequest.onAuthRequired.addListener(
+        function callback(details) {{
+            return {{
+                authCredentials: {{
+                    username: "{username}",
+                    password: "{password}"
+                }}
+            }};
+        }},
+        {{urls: ["<all_urls>"]}},
+        ['blocking']
+    );
+    """
+    
+    temp_dir = tempfile.gettempdir()
+    plugin_file = os.path.join(temp_dir, f"proxy_auth_plugin_{port}.zip")
+    
+    with zipfile.ZipFile(plugin_file, 'w') as zp:
+        zp.writestr("manifest.json", manifest_json)
+        zp.writestr("background.js", background_js)
+        
+    return plugin_file
 
 
 _KEYWORD_COLUMN_NAMES = ("keywords", "keyword", "kw")
@@ -124,6 +196,17 @@ def load_data(path: str) -> list[dict]:
 
 def get_driver() -> webdriver.Chrome:
     options = Options()
+    
+    # Configure proxy if SCRAPING_PROXY is defined
+    proxy_url = os.environ.get("SCRAPING_PROXY")
+    if proxy_url:
+        try:
+            plugin_file = create_proxy_auth_extension(proxy_url)
+            options.add_extension(plugin_file)
+            print(f"[serp_scraper] Configured proxy extension via {proxy_url.split('@')[-1]}")
+        except Exception as e:
+            print(f"[serp_scraper] Warning: failed to configure proxy extension: {e}")
+
     options.page_load_strategy = "eager"
     options.add_argument("--start-maximized")
     options.add_argument("--disable-notifications")
@@ -285,12 +368,21 @@ def run_search_pool(driver, rows: list, output_path: Optional[str] = None, on_re
                         job.retried = True
                         job.deadline = time.time() + TAB_TIMEOUT
                     elif time.time() > job.deadline:
-                        print(f"{label(h)}            Timed out waiting for results\n")
+                        print(f"{label(h)}            Timed out waiting for results. Triggering Firecrawl search fallback...")
                         stop_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        
+                        results = []
+                        try:
+                            from scripts.firecrawl_scraper import fetch_top_results_via_firecrawl
+                            fc_data = fetch_top_results_via_firecrawl(job.row["keyword"])
+                            results = [{"url": r["url"], "title": r["title"]} for r in fc_data.get("top_3", [])]
+                        except Exception as fe:
+                            print(f"{label(h)}            Firecrawl fallback failed: {fe}")
+                            
                         if on_result:
-                            on_result(job.row, [], job.start_time, stop_time)
+                            on_result(job.row, results, job.start_time, stop_time)
                         if writer:
-                            writer.writerow([job.row["keyword"], job.start_time, stop_time, json.dumps([])])
+                            writer.writerow([job.row["keyword"], job.start_time, stop_time, json.dumps(results, ensure_ascii=False)])
                             out_file.flush()
                         done += 1
                         cooldown[h] = time.time() + random.uniform(DELAY_MIN, DELAY_MAX)
@@ -298,8 +390,17 @@ def run_search_pool(driver, rows: list, output_path: Optional[str] = None, on_re
                     continue
 
                 results = extract_results(driver)[:5]
+                if not results:
+                    print(f"{label(h)}            No results found. Triggering Firecrawl search fallback...")
+                    try:
+                        from scripts.firecrawl_scraper import fetch_top_results_via_firecrawl
+                        fc_data = fetch_top_results_via_firecrawl(job.row["keyword"])
+                        results = [{"url": r["url"], "title": r["title"]} for r in fc_data.get("top_3", [])]
+                    except Exception as fe:
+                        print(f"{label(h)}            Firecrawl fallback failed: {fe}")
+
                 print(f"{label(h)}            Top 3 URLs:")
-                for idx, r in enumerate(results, 1):
+                for idx, r in enumerate(results[:3], 1):
                     print(f"{label(h)}              {idx}. {r['title']} — {r['url']}")
 
                 stop_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

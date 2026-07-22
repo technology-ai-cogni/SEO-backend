@@ -50,7 +50,7 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from anthropic import Anthropic
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode, ProxyConfig
 
 load_dotenv()
 
@@ -235,10 +235,29 @@ def fetch_serp_brightdata(keyword: str, start: int = 0, country_code: str = None
 
 
 async def _crawl_google_with_crawl4ai(search_url: str) -> str:
+    proxy_url = os.environ.get("SCRAPING_PROXY")
+    proxy_config = None
+    if proxy_url:
+        from urllib.parse import urlparse
+        try:
+            parsed = urlparse(proxy_url)
+            server_url = f"{parsed.scheme}://{parsed.hostname}"
+            if parsed.port:
+                server_url += f":{parsed.port}"
+            
+            proxy_config = ProxyConfig(
+                server=server_url,
+                username=parsed.username,
+                password=parsed.password
+            )
+        except Exception as e:
+            print(f"[agentic_rank_checker] Warning: Failed to parse SCRAPING_PROXY: {e}")
+
     browser_config = BrowserConfig(
         headless=True,
         viewport_width=1280,
-        viewport_height=800
+        viewport_height=800,
+        proxy_config=proxy_config
     )
     run_config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS
@@ -265,6 +284,7 @@ def fetch_serp_crawl4ai(keyword: str, start: int = 0, country_code: str = None) 
 
         if "captcha" in html.lower() or "recaptcha" in html.lower() or "unusual traffic" in html.lower():
             print(f"[Captcha Warning] Crawl4AI encountered a CAPTCHA challenge.")
+            raise ValueError("Crawl4AI hit a CAPTCHA challenge.")
 
         # Verify if search results exist in page html
         if "class=\"g\"" not in html and "id=\"search\"" not in html and "id=\"rso\"" not in html:

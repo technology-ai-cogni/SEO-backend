@@ -197,24 +197,27 @@ def _run_categorize_job_selenium(job_id, domain, rows):
 # =====================================================================
 
 def _classify_intent(top3_results):
-    results = []
-    for r in (top3_results or [])[:5]:
+    from concurrent.futures import ThreadPoolExecutor
+    def classify(r):
         url = (r or {}).get("url")
         title = (r or {}).get("title")
         if not url:
-            continue
+            return None
         try:
-            results.append(classify_single_result_via_requests(url, title))
+            return classify_single_result_via_requests(url, title)
         except Exception as e:
-            results.append({"classification": "Unknown", "confidence": 0, "reason": f"Error: {e}", "url": url})
+            return {"classification": "Unknown", "confidence": 0, "reason": f"Error: {e}", "url": url}
+
+    valid_results = (top3_results or [])[:5]
+    with ThreadPoolExecutor(max_workers=len(valid_results) or 1) as executor:
+        futures = [executor.submit(classify, r) for r in valid_results]
+        results = [f.result() for f in futures if f.result() is not None]
     return majority_subtype(results)
 
 
-def _process_one_keyword_bright_data(job_id, domain, row, country_code, intent_pool):
+def _process_one_keyword_bright_data(job_id, domain, row, top3, intent_pool):
     row_id, keyword = row["id"], row["keyword"]
     try:
-        top3 = category_checker.get_top3_for_category(keyword, country_code)
-
         if not top3:
             db.update_keyword_result(domain, row_id, None, None, "no_data")
             return
@@ -237,9 +240,71 @@ def _process_one_keyword_bright_data(job_id, domain, row, country_code, intent_p
 
 
 def _run_categorize_job_bright_data(job_id, domain, rows, country_code):
-    with ThreadPoolExecutor(max_workers=INTENT_WORKERS) as intent_pool:
-        for row in rows:
-            _process_one_keyword_bright_data(job_id, domain, row, country_code, intent_pool)
+    # Phase 1: Parallel Search Fetches and Intent Classifications using 10 workers
+    preprocessed_data = {}
+    import time
+    
+    def preprocess_one(row):
+        keyword = row["keyword"]
+        top3 = []
+        for attempt in range(1, 4):
+            try:
+                top3 = category_checker.get_top3_for_category(keyword, country_code)
+                if top3:
+                    break
+                print(f"[hosted_categorize/bright_data] Attempt {attempt} for '{keyword}' returned empty. Retrying...")
+            except Exception as e:
+                print(f"[hosted_categorize/bright_data] Attempt {attempt} for '{keyword}' failed: {e}")
+                if attempt == 3:
+                    break
+            time.sleep(2)
+
+        if not top3:
+            preprocessed_data[keyword] = {"top3": [], "subtype": None}
+            return
+
+        try:
+            subtype = _classify_intent(top3)
+        except Exception as e:
+            print(f"[hosted_categorize/bright_data] Intent classification failed for '{keyword}': {e}")
+            subtype = "Unknown"
+
+        preprocessed_data[keyword] = {"top3": top3, "subtype": subtype}
+
+    # Parallel preprocessing of network fetches and classifications
+    with ThreadPoolExecutor(max_workers=10) as preprocess_pool:
+        futures = {preprocess_pool.submit(preprocess_one, row): row for row in rows}
+        for future in futures:
+            try:
+                future.result()
+            except Exception as e:
+                print(f"[hosted_categorize/bright_data] Preprocess exception: {e}")
+
+    # Phase 2: Sequential Database Category Assignment and Updates
+    for row in rows:
+        row_id, keyword = row["id"], row["keyword"]
+        data = preprocessed_data.get(keyword, {"top3": [], "subtype": None})
+        top3, subtype = data["top3"], data["subtype"]
+
+        try:
+            if not top3:
+                db.update_keyword_result(domain, row_id, None, None, "no_data")
+                continue
+
+            category = categorize_from_top3(keyword, top3, domain)
+            target_type = classify_landing_or_blog(top3)
+            # HARD override: a Best/Top category is always a Blog Page, no
+            # matter what the classifier above decided.
+            target_type = force_blog_if_best_top(category, target_type)
+
+            db.update_keyword_result(
+                domain, row_id, category, None, "processed" if category else "no_data",
+                meta={"top3": top3}, computed_target_type=target_type, computed_subtype=subtype,
+            )
+        except Exception as e:
+            db.update_keyword_result(domain, row_id, None, None, "error", error=str(e))
+        finally:
+            db.increment_job_progress(job_id)
 
     job = db.get_job(job_id)
     if job and job["status"] == "completed":
