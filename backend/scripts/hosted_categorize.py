@@ -215,23 +215,9 @@ def _classify_intent(top3_results):
     return majority_subtype(results)
 
 
-def _process_one_keyword_bright_data(job_id, domain, row, country_code, intent_pool):
+def _process_one_keyword_bright_data(job_id, domain, row, top3, intent_pool):
     row_id, keyword = row["id"], row["keyword"]
     try:
-        import time
-        top3 = []
-        for attempt in range(1, 4):
-            try:
-                top3 = category_checker.get_top3_for_category(keyword, country_code)
-                if top3:
-                    break
-                print(f"[hosted_categorize/bright_data] Attempt {attempt} for '{keyword}' returned empty. Retrying...")
-            except Exception as e:
-                print(f"[hosted_categorize/bright_data] Attempt {attempt} for '{keyword}' failed: {e}")
-                if attempt == 3:
-                    raise e
-            time.sleep(2)
-
         if not top3:
             db.update_keyword_result(domain, row_id, None, None, "no_data")
             return
@@ -254,9 +240,41 @@ def _process_one_keyword_bright_data(job_id, domain, row, country_code, intent_p
 
 
 def _run_categorize_job_bright_data(job_id, domain, rows, country_code):
+    # Phase 1: Fetch top-3 search results for all keywords in parallel using 5 workers
+    top3_results = {}
+    import time
+    
+    def fetch_one(row):
+        keyword = row["keyword"]
+        top3 = []
+        for attempt in range(1, 4):
+            try:
+                top3 = category_checker.get_top3_for_category(keyword, country_code)
+                if top3:
+                    break
+                print(f"[hosted_categorize/bright_data] Attempt {attempt} for '{keyword}' returned empty. Retrying...")
+            except Exception as e:
+                print(f"[hosted_categorize/bright_data] Attempt {attempt} for '{keyword}' failed: {e}")
+                if attempt == 3:
+                    break
+            time.sleep(2)
+        top3_results[keyword] = top3
+
+    # Use 5 parallel scraping workers
+    with ThreadPoolExecutor(max_workers=5) as fetch_pool:
+        futures = {fetch_pool.submit(fetch_one, row): row for row in rows}
+        for future in futures:
+            try:
+                future.result()
+            except Exception as e:
+                print(f"[hosted_categorize/bright_data] Thread fetch exception: {e}")
+
+    # Phase 2: Process database category assignment and intent classification sequentially
     with ThreadPoolExecutor(max_workers=INTENT_WORKERS) as intent_pool:
         for row in rows:
-            _process_one_keyword_bright_data(job_id, domain, row, country_code, intent_pool)
+            keyword = row["keyword"]
+            top3 = top3_results.get(keyword, [])
+            _process_one_keyword_bright_data(job_id, domain, row, top3, intent_pool)
 
     job = db.get_job(job_id)
     if job and job["status"] == "completed":
