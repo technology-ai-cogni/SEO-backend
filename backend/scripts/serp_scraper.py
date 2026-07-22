@@ -45,7 +45,7 @@ from selenium.common.exceptions import (
 )
 from selenium.webdriver.chrome.service import Service
 
-EXCEL_FILE = "backend/datasets/social media category test 8 july - Sheet1.csv"
+EXCEL_FILE = "backend/datasets/"
 DELAY_MIN     = 5
 DELAY_MAX     = 12
 NUM_TABS      = 10
@@ -373,7 +373,7 @@ def run_search_pool(driver, rows: list, output_path: Optional[str] = None, on_re
                         
                         results = []
                         try:
-                            from backend.scripts.firecrawl_scraper import fetch_top_results_via_firecrawl
+                            from scripts.firecrawl_scraper import fetch_top_results_via_firecrawl
                             fc_data = fetch_top_results_via_firecrawl(job.row["keyword"])
                             results = [{"url": r["url"], "title": r["title"]} for r in fc_data.get("top_3", [])]
                         except Exception as fe:
@@ -393,7 +393,7 @@ def run_search_pool(driver, rows: list, output_path: Optional[str] = None, on_re
                 if not results:
                     print(f"{label(h)}            No results found. Triggering Firecrawl search fallback...")
                     try:
-                        from backend.scripts.firecrawl_scraper import fetch_top_results_via_firecrawl
+                        from scripts.firecrawl_scraper import fetch_top_results_via_firecrawl
                         fc_data = fetch_top_results_via_firecrawl(job.row["keyword"])
                         results = [{"url": r["url"], "title": r["title"]} for r in fc_data.get("top_3", [])]
                     except Exception as fe:
