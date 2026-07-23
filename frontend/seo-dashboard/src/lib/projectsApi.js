@@ -506,7 +506,7 @@ export async function bulkDeleteKeywordRows(ids) {
   if (error) throw error;
 }
 
-const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://54.196.75.9:8080';
+const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://54.196.75.9:8000';
 
 // Removes a project entirely, everywhere -- its domain registration(s),
 // the shared `projects` row, every keyword row filed under its slug, its
