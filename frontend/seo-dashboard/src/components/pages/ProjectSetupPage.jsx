@@ -4058,6 +4058,27 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
   const [typesMap, setTypesMap] = useState({});
   const [classifying, setClassifying] = useState(false);
 
+  const handleClassify = async () => {
+    const urls = rows.map(r => r.fullUrl).filter(Boolean);
+    if (!urls || urls.length === 0) return;
+
+    setClassifying(true);
+    try {
+      const res = await classifyCompetitorUrls(urls, keyword);
+      const map = { ...typesMap };
+      (res || []).forEach(r => {
+        if (r.url && r.website_type) {
+          map[r.url] = r.website_type;
+        }
+      });
+      setTypesMap(map);
+    } catch (err) {
+      console.error('Failed to classify competitor URLs:', err);
+    } finally {
+      setClassifying(false);
+    }
+  };
+
   useEffect(() => {
     const urls = rows.map(r => r.fullUrl).filter(Boolean);
     if (!urls || urls.length === 0) return;
@@ -4105,6 +4126,29 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
             Project: {scopedProject.name || scopedProject.domain}
           </span>
         )}
+        <button
+          onClick={handleClassify}
+          disabled={classifying || rows.length === 0}
+          style={{
+            marginLeft: 'auto',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 14px',
+            borderRadius: 6,
+            border: 'none',
+            background: 'var(--accent, #3b82f6)',
+            color: '#fff',
+            fontSize: 12.5,
+            fontWeight: 600,
+            cursor: classifying || rows.length === 0 ? 'not-allowed' : 'pointer',
+            opacity: classifying || rows.length === 0 ? 0.7 : 1,
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <RefreshCw size={14} style={{ animation: classifying ? 'spin 1s linear infinite' : 'none' }} />
+          {classifying ? 'Classifying…' : 'Classify Competitors'}
+        </button>
       </div>
 
       <div style={{ overflowX: 'auto' }}>
