@@ -4058,52 +4058,41 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
   const [typesMap, setTypesMap] = useState({});
   const [classifying, setClassifying] = useState(false);
 
-  const handleClassify = async () => {
-    const urls = rows.map(r => r.fullUrl).filter(Boolean);
+  const processClassifications = async (urls) => {
     if (!urls || urls.length === 0) return;
-
     setClassifying(true);
+
     try {
-      const res = await classifyCompetitorUrls(urls, keyword);
-      const map = { ...typesMap };
-      (res || []).forEach(r => {
-        if (r.url && r.website_type) {
-          map[r.url] = r.website_type;
-        }
-      });
-      setTypesMap(map);
-    } catch (err) {
-      console.error('Failed to classify competitor URLs:', err);
+      await Promise.all(
+        urls.map(async (url) => {
+          try {
+            const res = await classifyCompetitorUrls([url], keyword);
+            if (res && res.length > 0 && res[0].website_type) {
+              const wtype = res[0].website_type;
+              setTypesMap(prev => ({
+                ...prev,
+                [url]: wtype
+              }));
+            }
+          } catch (err) {
+            console.error(`Failed to classify URL ${url}:`, err);
+          }
+        })
+      );
     } finally {
       setClassifying(false);
     }
   };
 
+  const handleClassify = () => {
+    const urls = rows.map(r => r.fullUrl).filter(Boolean);
+    processClassifications(urls);
+  };
+
   useEffect(() => {
     const urls = rows.map(r => r.fullUrl).filter(Boolean);
     if (!urls || urls.length === 0) return;
-
-    let cancelled = false;
-    setClassifying(true);
-    classifyCompetitorUrls(urls, keyword)
-      .then(res => {
-        if (cancelled) return;
-        const map = {};
-        (res || []).forEach(r => {
-          if (r.url && r.website_type) {
-            map[r.url] = r.website_type;
-          }
-        });
-        setTypesMap(map);
-      })
-      .catch(err => {
-        console.error('Failed to classify competitor URLs:', err);
-      })
-      .finally(() => {
-        if (!cancelled) setClassifying(false);
-      });
-
-    return () => { cancelled = true; };
+    processClassifications(urls);
   }, [keyword, kwObj]);
 
   return (
