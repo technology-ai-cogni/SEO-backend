@@ -122,7 +122,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core import db
-from services import category_checker
+from services import category_checker, competitor_classifier
 from scripts.hosted_categorize import run_categorize_job_in_background
 from scripts.hosted_rank_check import run_rank_check_job_in_background
 from scripts.comp_analysis import find_competitors_for_rows
@@ -629,6 +629,22 @@ class CompetitorUpdateRequest(BaseModel):
     projectSlug: Optional[str] = None
 
 
+class CompetitorClassifierRequest(BaseModel):
+    keyword: str
+    urls: List[str]
+
+
+class CompetitorResultItem(BaseModel):
+    url: str
+    website_type: str
+    is_competitor: str
+
+
+class CompetitorClassifierResponse(BaseModel):
+    keyword: str
+    results: List[CompetitorResultItem]
+
+
 def _competitor_to_json(row):
     return {
         "id": row["id"],
@@ -686,6 +702,23 @@ def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequ
 def delete_competitor_endpoint(competitor_id: int):
     db.delete_competitor(competitor_id)
     return {"deleted": competitor_id}
+
+
+@app.post("/competitors/classify", response_model=CompetitorClassifierResponse)
+def classify_competitors(payload: CompetitorClassifierRequest):
+    """
+    Classifies top URLs for a given keyword into website types (Official Entity / Platform)
+    and determines whether each URL is a competitor (YES / NO) using Gemini API.
+    """
+    if not payload.urls:
+        raise HTTPException(400, "urls array cannot be empty.")
+    try:
+        results = competitor_classifier.classify_urls(payload.keyword, payload.urls)
+        return results
+    except ValueError as ve:
+        raise HTTPException(400, str(ve))
+    except Exception as e:
+        raise HTTPException(500, f"Competitor classification failed: {str(e)}")
 
 
 class FindCompetitorsRequest(BaseModel):

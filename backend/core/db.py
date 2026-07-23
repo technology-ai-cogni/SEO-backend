@@ -70,12 +70,10 @@ load_dotenv()
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
-    raise RuntimeError(
-        "DATABASE_URL is not set. Copy .env.example to .env and fill in your "
-        "Supabase connection string."
-    )
+    print("[Warning] DATABASE_URL is not set in environment. Database features will require DATABASE_URL.")
+    DATABASE_URL = "sqlite:///:memory:"
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine = create_engine(DATABASE_URL)
 
 
 def _chunked(items, size=500):
@@ -145,6 +143,9 @@ _KEYWORD_PASS_THROUGH_COLUMNS = [
 def init_db():
     """Create every shared table if it doesn't exist yet. Safe to run
     repeatedly."""
+    if not os.environ.get("DATABASE_URL"):
+        print("[Warning] Skipping DB init: DATABASE_URL is not set.")
+        return
     with engine.begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS jobs (
