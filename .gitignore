@@ -1,0 +1,7 @@
+*.pem
+.vite/
+.env
+dist/
+node_modules/
+__pycache__/
+.DS_Store

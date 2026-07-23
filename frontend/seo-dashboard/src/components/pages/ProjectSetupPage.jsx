@@ -546,7 +546,8 @@ function TableFilterDropdown({ filters, rows, activeFilters, onFiltersChange }) 
               );
             })}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -4592,18 +4593,18 @@ export default function ProjectSetupPage({ tab }) {
       </div>
 
       {/* Page title */}
-      <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 20 }}>
+      <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 12 }}>
         Project Setup
       </h1>
 
       {/* Horizontal tabs */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--border)', marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--border)', marginBottom: 12 }}>
         {TABS.map(t => (
           <button
             key={t}
             onClick={() => { setActiveTab(t); setSelectedPageProject(null); setSelectedCompetitor(null); setSelectedCompetitorProject(null); setSelectedKwProject(null); setSearch(''); }}
             style={{
-              padding: '10px 20px',
+              padding: '8px 16px',
               fontSize: 14,
               fontWeight: activeTab === t ? 600 : 500,
               color: activeTab === t ? 'var(--text-primary)' : 'var(--text-muted)',
@@ -4627,7 +4628,7 @@ export default function ProjectSetupPage({ tab }) {
       <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)', minHeight: 420 }}>
 
         {/* Toolbar */}
-        <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 12, borderBottom: '1px solid var(--border)' }}>
+        <div style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 12, borderBottom: '1px solid var(--border)' }}>
           {/* Search */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 14px', flex: '0 0 260px' }}>
             <Search size={13} color="var(--text-muted)" />

@@ -56,7 +56,7 @@ function renderPage(path, onNavigate) {
     case 'home': return <HomePage onNavigate={onNavigate} />;
     case 'dashboard': return <DashboardPage />;
     case 'project-setup': return <ProjectSetupPage />;
-    case 'search-visibility/position-analysis': return <PositionAnalysisPage />;
+    case 'search-visibility/position-analysis': return <PositionAnalysisPage onNavigate={onNavigate} />;
     case 'search-visibility/keywords': return <KeywordsPage />;
     case 'search-visibility/top-pages': return <TopPagesPage />;
     case 'search-visibility/competitors': return <CompetitorsPage />;
