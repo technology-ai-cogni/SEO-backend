@@ -893,3 +893,36 @@ export async function fetchCompetitorSnapshots(competitorId) {
   const data = await res.json();
   return (data.snapshots || []).map(snapshotRowToUi);
 }
+
+export async function runAiAnalysis(projectSlug, keyword, aiMode, domain) {
+  if (isLocalMode) {
+    // Return a mock result for local development without backend
+    return {
+      project: projectSlug,
+      keyword,
+      ai_mode: aiMode,
+      result: {
+        top_10_results: "1. mock.com\n2. example.com",
+        competitors: "mock.com, example.com",
+        total_found: 10,
+        confidence_score: 85,
+        ai_answer: "This is a mocked AI response from local mode.",
+        seo_summary: "CURRENT STANDING: Client is ranking at #1.\n\nCOMPETITOR ANALYSIS: Competitors are mostly informational.\n\nWHAT TO DO: Improve content.\n\nRESOURCES NEEDED: Low effort.",
+        status: "ok"
+      }
+    };
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${projectSlug}/ai-analysis`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keyword, ai_mode: aiMode, domain }),
+  });
+  
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to run AI analysis.');
+  }
+  
+  return await res.json();
+}

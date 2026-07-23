@@ -44,12 +44,16 @@ SYSTEM_PROMPT = """You classify search result pages by INTENT into exactly one o
 
 BLOG PAGE -- the page's purpose is to LIST, RANK, or COMPARE multiple businesses/options, not represent one business itself. This includes:
 - Listing/directory pages of multiple businesses or options
-- Any "best X" or "top X" page about companies, services, agencies, providers, firms, businesses, vendors, or similar collective/plural business-type words (e.g. "Best Digital Marketing Companies in Delhi", "Top 10 SEO Agencies", "List of Social Media Marketing Providers")
+- Any "best X" or "top X" page about companies, services, agencies, providers, firms, businesses, vendors, or similar collective/plural business-type words
 - Roundup, comparison, or buying-guide style content covering multiple options
 
 LANDING PAGE -- everything else. A page representing ONE specific business, product, or service directly -- e.g. a company's own homepage, service page, product page, or "about us" page.
 
-Judge by INTENT, using the title (and URL if it helps) -- not just literal keyword matching. Decide BLOG PAGE or LANDING PAGE for EACH result given, in the same order they're given.
+Judge by INTENT, using the Title, URL, Meta Description, and H1 tags provided.
+- If the Meta Description or H1 implies a list of top/best providers, it's a BLOG PAGE.
+- If the Meta Description or H1 describes a single company's own services, it's a LANDING PAGE.
+
+Decide BLOG PAGE or LANDING PAGE for EACH result given, in the same order they're given.
 
 Respond with ONLY valid JSON, in this exact shape:
 {"classifications": ["BLOG", "LANDING", ...]}
@@ -66,15 +70,24 @@ def get_openai_client():
 
 
 def _classify_titles(items):
-    """items: list of {"url":..., "title":...}. Returns a list of
-    LANDING_PAGE/BLOG_PAGE labels, same order/length as items. Falls
+    """items: list of rich signals (url, title, meta_description, h1, etc.). 
+    Returns a list of LANDING_PAGE/BLOG_PAGE labels, same order/length as items. Falls
     back to LANDING_PAGE for any entry the model doesn't return a clean
     BLOG/LANDING answer for, rather than dropping it."""
     client = get_openai_client()
-    listing = "\n".join(
-        f'{i + 1}. Title: "{it.get("title", "")}" | URL: {it.get("url", "")}'
-        for i, it in enumerate(items)
-    )
+    
+    listing_parts = []
+    for i, it in enumerate(items):
+        part = f'{i + 1}. Title: "{it.get("title", "")}" | URL: {it.get("url", "")}'
+        if it.get("meta_description"):
+            part += f'\n   Meta: "{it.get("meta_description", "")}"'
+        if it.get("h1"):
+            # h1 is typically a list in the extracted signals
+            h1_val = it["h1"][0] if isinstance(it["h1"], list) and len(it["h1"]) > 0 else it["h1"]
+            part += f'\n   H1: "{h1_val}"'
+        listing_parts.append(part)
+        
+    listing = "\n\n".join(listing_parts)
 
     resp = client.chat.completions.create(
         model=OPENAI_CHAT_MODEL,

@@ -167,7 +167,12 @@ class GeminiAgent(BaseAgent):
     def search_keyword(self, keyword: str) -> dict:
         """Gemini grounded search with automatic retry on 503/429/504/499 and key rotation."""
         prompt = (
-            f"Search the web for: {keyword} and list the top 10 ranking websites with their titles and URLs."
+            f"You are an expert SEO auditor. Search the web for the query: '{keyword}'.\n\n"
+            "Identify the top 10 ranking organic search results. "
+            "For each result provide:\n"
+            "1. **Title:** [exact page title]\n"
+            "2. **URL:** [full website URL]\n"
+            "Do not include sponsored ads. Be extremely precise and use only real, live search data."
         )
 
         try:
@@ -310,12 +315,12 @@ class GeminiAgent(BaseAgent):
 
     # ── SEO summary fallback ──────────────────────────────────────────────────
 
-    def generate_seo_summary(self, keyword: str, results: list) -> str:
+    def generate_seo_summary(self, keyword: str, results: list, client_domain: str = None) -> str:
         """Fallback SEO summary if single-call extraction was empty."""
         if not results:
             return "Insufficient SERP data."
 
-        system_prompt, user_prompt = self._build_seo_prompt(keyword, results)
+        system_prompt, user_prompt = self._build_seo_prompt(keyword, results, client_domain=client_domain)
 
         try:
             resp = generate_content_with_retry(

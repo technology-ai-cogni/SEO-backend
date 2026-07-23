@@ -11,7 +11,14 @@ import ContentEnginePage from './components/pages/ContentEnginePage';
 import ProjectSetupPage from './components/pages/ProjectSetupPage';
 import CompetitorsPage from './components/pages/CompetitorsPage';
 import PlaceholderPage from './components/pages/PlaceholderPage';
-import { totalKeywordCount } from './data/mockData';
+import { totalKeywordCount, topKeywords } from './data/mockData';
+
+const mockProject = {
+  domain: "owis.org",
+  name: "OWIS",
+  location: "Singapore",
+  slug: "owis"
+};
 
 const PAGE_TITLES = {
   'home': { title: 'Home', subtitle: 'Your SEO workspace overview' },
@@ -53,8 +60,16 @@ const PAGE_TITLES = {
 
 function renderPage(path, onNavigate) {
   switch (path) {
-    case 'home': return <HomePage onNavigate={onNavigate} />;
-    case 'dashboard': return <DashboardPage />;
+    case 'home': return <HomePage 
+      onNavigate={onNavigate} 
+      projects={[mockProject]}
+      activeProject={mockProject}
+      onStartAudit={(domain) => onNavigate('dashboard')}
+    />;
+    case 'dashboard': return <DashboardPage 
+      activeProject={mockProject}
+      keywords={topKeywords}
+    />;
     case 'project-setup': return <ProjectSetupPage />;
     case 'search-visibility/position-analysis': return <PositionAnalysisPage onNavigate={onNavigate} />;
     case 'search-visibility/keywords': return <KeywordsPage />;

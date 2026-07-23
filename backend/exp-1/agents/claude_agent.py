@@ -85,11 +85,12 @@ class ClaudeAgent(BaseAgent):
             self._client = anthropic.Anthropic(api_key=key)
 
         prompt = (
-            f"Target Search Query: \"{keyword}\"\n\n"
-            "List the top 10 websites (aggregators, review platforms, lifestyle guides, and top directories) "
-            "that rank for this keyword. For each result provide:\n"
+            f"You are an expert SEO auditor. Search the web for the query: '{keyword}'.\n\n"
+            "Identify the top 10 ranking organic search results. "
+            "For each result provide:\n"
             "1. **Title:** [exact page title]\n"
-            "2. **URL:** [full website URL e.g. https://www.zomato.com/bangalore/indiranagar-restaurants]"
+            "2. **URL:** [full website URL]\n"
+            "Do not include sponsored ads. Be extremely precise and use only real, live search data."
         )
 
         try:
@@ -119,7 +120,7 @@ class ClaudeAgent(BaseAgent):
 
     # ── SEO summary ───────────────────────────────────────────────────────────
 
-    def generate_seo_summary(self, keyword: str, results: list) -> str:
+    def generate_seo_summary(self, keyword: str, results: list, client_domain: str = None) -> str:
         """Claude acting as SEO specialist."""
         key = os.environ.get("ANTHROPIC_API_KEY")
         if not key:
@@ -131,7 +132,7 @@ class ClaudeAgent(BaseAgent):
         if not results:
             return "Insufficient SERP data."
 
-        system_prompt, user_prompt = self._build_seo_prompt(keyword, results)
+        system_prompt, user_prompt = self._build_seo_prompt(keyword, results, client_domain=client_domain)
 
         try:
             resp = self._client.messages.create(
