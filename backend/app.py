@@ -169,6 +169,13 @@ class AiAnalysisRequest(BaseModel):
     domain: Optional[str] = None
 
 
+class ClassifyUrlsRequest(BaseModel):
+    urls: List[str]
+    keyword: Optional[str] = ""
+
+
+
+
 
 
 def _find_column(columns, candidates):
@@ -641,6 +648,8 @@ def _competitor_to_json(row):
         "domain": row.get("domain"),
         "name": row.get("name"),
         "da": row.get("da"),
+        "websiteType": row.get("website_type") or row.get("type") or "Official Entity",
+        "type": row.get("type") or row.get("website_type") or "Official Entity",
         "targetRegions": row.get("target_regions") or [],
         "projectSlug": row.get("project_slug"),
         "device": row.get("device"),
@@ -967,3 +976,26 @@ def run_ai_analysis(project: str, req: AiAnalysisRequest):
         return {"project": project, "keyword": req.keyword, "ai_mode": mode, "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/competitors/classify-urls")
+def classify_competitor_urls_endpoint(req: ClassifyUrlsRequest):
+    """
+    Classify competitor URLs into Official Entity vs Platform using Gemini AI via scripts.competitors_classifier.
+    Saves classified website_type directly into database competitors table.
+    """
+    try:
+        from scripts.competitors_classifier import classify_urls
+        results = classify_urls(req.keyword or "", req.urls)
+
+        # Persist classifications directly into DB
+        for item in results.get("results", []):
+            url = item.get("url")
+            wtype = item.get("website_type")
+            if url and wtype:
+                db.update_competitor_website_type(url, wtype)
+
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

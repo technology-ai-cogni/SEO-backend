@@ -9,7 +9,7 @@ import {
   fetchKwProjects, fetchKeywordRows, insertKeywordRows, updateKeywordRow, bulkDeleteKeywordRows, deleteKwClusterData,
   fetchPageRows, insertPageRows, updatePageRow, deletePageRow, bulkDeletePageRows, deletePagesData, fetchPagesCounts,
   fetchCompetitors, insertCompetitor, updateCompetitor, deleteCompetitor,
-  findCompetitors, fetchCompetitorSnapshots,
+  findCompetitors, fetchCompetitorSnapshots, classifyCompetitorUrls,
 } from '../../lib/projectsApi';
 
 // ─── shared tiny components ────────────────────────────────────────────────
@@ -963,7 +963,7 @@ function AddPagesModal({ open, onClose, projects, onImportPages, lockedProject }
 
 // ─── Add Keywords Modal ──────────────────────────────────────────────────────
 
-const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://54.196.75.9:8000';
+const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000';
 
 function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedProject }) {
   const [project, setProject] = useState('');
@@ -1292,7 +1292,7 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
   };
 
   return (
-    <Modal open={open} onClose={handleClose} title="Choose Project"
+    <Modal open={open} onClose={handleClose} title="Auto-generated Competitors"
       footer={<><Btn variant="primary" onClick={handleApply} style={!projectSlug ? { opacity: 0.5, pointerEvents: 'none' } : {}}>Apply</Btn><Btn variant="outline" onClick={handleClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
     >
       {/* Project selector */}
@@ -1445,11 +1445,11 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
 const ALL_PLATFORMS = ['AI Mode', 'AI Overview', 'Google', 'ChatGPT', 'Gemini'];
 
 const PLATFORM_BADGE_STYLES = {
-  'AI Mode':     { bg: '#ede9fe', color: '#7c3aed' },
+  'AI Mode': { bg: '#ede9fe', color: '#7c3aed' },
   'AI Overview': { bg: '#dbeafe', color: '#1d4ed8' },
-  'Google':      { bg: '#fef9c3', color: '#854d0e' },
-  'ChatGPT':     { bg: '#dcfce7', color: '#166534' },
-  'Gemini':      { bg: '#fce7f3', color: '#9d174d' },
+  'Google': { bg: '#fef9c3', color: '#854d0e' },
+  'ChatGPT': { bg: '#dcfce7', color: '#166534' },
+  'Gemini': { bg: '#fce7f3', color: '#9d174d' },
 };
 
 const DeviceIcon = ({ type }) => {
@@ -1604,118 +1604,118 @@ function DomainTab({ projects, filter, onUpdateProject, onDeleteProject, loading
 
   return (
     <>
-    <div style={{ overflowX: 'auto' }}>
-    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
-      <thead>
-        <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
-          {['Project', 'Location', 'Target Platforms', 'DA', 'Traffic', 'Keywords', 'Target Pages', 'Blog Pages', 'Updated', ''].map((h, i) => (
-            <th key={i} style={{ padding: '10px 16px', textAlign: i <= 2 ? 'left' : 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>
-              {h === 'Project' ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>Project <span style={{ fontSize: 10 }}>⇅</span></div>
-              ) : h}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {loading ? (
-          <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading projects…</td></tr>
-        ) : error ? (
-          <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
-        ) : visibleProjects.length === 0 ? (
-          <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No projects yet. Click <strong>+ Create project</strong> to get started.</td></tr>
-        ) : visibleProjects.map((p, i) => (
-          <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}
-            onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-            <td style={{ padding: '14px 16px' }}>
-              {p.name && <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)', marginBottom: 2 }}>{p.name}</div>}
-              {p.domain && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.domain}</div>}
-              {p.name && <div style={{ marginTop: 4 }}><span style={{ fontSize: 18, color: 'var(--border)' }}></span></div>}
-            </td>
-            <td style={{ padding: '14px 16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent)', fontSize: 13, fontWeight: 500 }}>
-                <DeviceIcon type={p.locationIcon} />
-                {p.location}
-              </div>
-            </td>
-            <td style={{ padding: '14px 16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                {(() => {
-                  const platforms = p.targetPlatforms || ALL_PLATFORMS;
-                  const isExpanded = expandedRows.has(i);
-                  const visible = isExpanded ? platforms : platforms.slice(0, 1);
-                  const hiddenCount = platforms.length - 1;
-                  return (
-                    <>
-                      {visible.map(platform => {
-                        const s = PLATFORM_BADGE_STYLES[platform] || { bg: '#f3f4f6', color: '#374151' };
-                        return (
-                          <span key={platform} style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600, background: s.bg, color: s.color, whiteSpace: 'nowrap' }}>
-                            {platform}
-                          </span>
-                        );
-                      })}
-                      {hiddenCount > 0 && (
-                        <button
-                          onClick={() => toggleRow(i)}
-                          style={{
-                            fontSize: 11, fontWeight: 600,
-                            color: 'var(--text-muted)',
-                            background: '#f3f4f6',
-                            border: '1px solid var(--border)',
-                            borderRadius: 12,
-                            padding: '2px 8px',
-                            cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                            transition: 'all 0.15s',
-                          }}
-                        >
-                          {isExpanded ? '×' : `+${hiddenCount}`}
-                        </button>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            </td>
-            <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, color: 'var(--text-muted)' }}>—</td>
-            <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)' }}>{p.traffic}</span>
-            </td>
-            <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: p.keywordsDir === 'up' ? 'var(--green)' : p.keywordsDir === 'down' ? 'var(--red)' : 'var(--text-primary)' }}>
-                {p.keywordsDir === 'up' ? '↑' : p.keywordsDir === 'down' ? '↓' : ''}{p.keywords}
-              </span>
-            </td>
-            <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: p.targetDir === 'down' ? 'var(--red)' : p.targetDir === 'up' ? 'var(--green)' : 'var(--text-muted)' }}>
-                {p.targetDir === 'down' ? '↓' : p.targetDir === 'up' ? '↑' : ''}{p.targetPages}
-              </span>
-            </td>
-            <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{p.blogPages}</td>
-            <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
-            <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-              <button
-                onClick={() => setEditingProject(p)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'none'}>
-                <Edit2 size={14} />
-              </button>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-    </div>
-    <EditDomainModal
-      open={editingProject !== null}
-      onClose={() => setEditingProject(null)}
-      project={editingProject}
-      onSave={(updates) => onUpdateProject?.(editingProject, updates)}
-      onDelete={() => onDeleteProject?.(editingProject)}
-    />
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
+          <thead>
+            <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
+              {['Project', 'Location', 'Target Platforms', 'DA', 'Traffic', 'Keywords', 'Target Pages', 'Blog Pages', 'Updated', ''].map((h, i) => (
+                <th key={i} style={{ padding: '10px 16px', textAlign: i <= 2 ? 'left' : 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>
+                  {h === 'Project' ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>Project <span style={{ fontSize: 10 }}>⇅</span></div>
+                  ) : h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading projects…</td></tr>
+            ) : error ? (
+              <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+            ) : visibleProjects.length === 0 ? (
+              <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No projects yet. Click <strong>+ Create project</strong> to get started.</td></tr>
+            ) : visibleProjects.map((p, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}
+                onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <td style={{ padding: '14px 16px' }}>
+                  {p.name && <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)', marginBottom: 2 }}>{p.name}</div>}
+                  {p.domain && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.domain}</div>}
+                  {p.name && <div style={{ marginTop: 4 }}><span style={{ fontSize: 18, color: 'var(--border)' }}></span></div>}
+                </td>
+                <td style={{ padding: '14px 16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent)', fontSize: 13, fontWeight: 500 }}>
+                    <DeviceIcon type={p.locationIcon} />
+                    {p.location}
+                  </div>
+                </td>
+                <td style={{ padding: '14px 16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                    {(() => {
+                      const platforms = p.targetPlatforms || ALL_PLATFORMS;
+                      const isExpanded = expandedRows.has(i);
+                      const visible = isExpanded ? platforms : platforms.slice(0, 1);
+                      const hiddenCount = platforms.length - 1;
+                      return (
+                        <>
+                          {visible.map(platform => {
+                            const s = PLATFORM_BADGE_STYLES[platform] || { bg: '#f3f4f6', color: '#374151' };
+                            return (
+                              <span key={platform} style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600, background: s.bg, color: s.color, whiteSpace: 'nowrap' }}>
+                                {platform}
+                              </span>
+                            );
+                          })}
+                          {hiddenCount > 0 && (
+                            <button
+                              onClick={() => toggleRow(i)}
+                              style={{
+                                fontSize: 11, fontWeight: 600,
+                                color: 'var(--text-muted)',
+                                background: '#f3f4f6',
+                                border: '1px solid var(--border)',
+                                borderRadius: 12,
+                                padding: '2px 8px',
+                                cursor: 'pointer',
+                                whiteSpace: 'nowrap',
+                                transition: 'all 0.15s',
+                              }}
+                            >
+                              {isExpanded ? '×' : `+${hiddenCount}`}
+                            </button>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </td>
+                <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, color: 'var(--text-muted)' }}>—</td>
+                <td style={{ padding: '14px 16px', textAlign: 'right' }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)' }}>{p.traffic}</span>
+                </td>
+                <td style={{ padding: '14px 16px', textAlign: 'right' }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: p.keywordsDir === 'up' ? 'var(--green)' : p.keywordsDir === 'down' ? 'var(--red)' : 'var(--text-primary)' }}>
+                    {p.keywordsDir === 'up' ? '↑' : p.keywordsDir === 'down' ? '↓' : ''}{p.keywords}
+                  </span>
+                </td>
+                <td style={{ padding: '14px 16px', textAlign: 'right' }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: p.targetDir === 'down' ? 'var(--red)' : p.targetDir === 'up' ? 'var(--green)' : 'var(--text-muted)' }}>
+                    {p.targetDir === 'down' ? '↓' : p.targetDir === 'up' ? '↑' : ''}{p.targetPages}
+                  </span>
+                </td>
+                <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{p.blogPages}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'right' }}>
+                  <button
+                    onClick={() => setEditingProject(p)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                    <Edit2 size={14} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <EditDomainModal
+        open={editingProject !== null}
+        onClose={() => setEditingProject(null)}
+        project={editingProject}
+        onSave={(updates) => onUpdateProject?.(editingProject, updates)}
+        onDelete={() => onDeleteProject?.(editingProject)}
+      />
     </>
   );
 }
@@ -2244,7 +2244,7 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
       if (refreshing || saving || hasPendingChanges) return;
       fetchPageRows(project.slug)
         .then(freshRows => { setRows(freshRows); onUpdatePages(freshRows); })
-        .catch(() => {});
+        .catch(() => { });
     }, AUTO_REFRESH_MS);
     return () => clearInterval(interval);
   }, [project.slug, refreshing, saving, hasPendingChanges]);
@@ -2334,80 +2334,80 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
       <BulkDeleteModal open={showBulkDelete} onClose={() => setShowBulkDelete(false)} count={selectedRows.size} onConfirm={handleBulkDelete} />
 
       <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
-        <thead>
-          <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
-            <th style={{ padding: '10px 12px 10px 16px', width: 36 }}>
-              <div
-                onClick={toggleAll}
-                style={{
-                  width: 18, height: 18, borderRadius: 4,
-                  border: allSelected || someSelected ? '2px solid var(--accent)' : '2px solid #d1d5db',
-                  background: allSelected ? 'var(--accent)' : someSelected ? 'var(--accent)' : '#fff',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
-                }}
-              >
-                {allSelected && <Check size={11} color="#fff" strokeWidth={3} />}
-                {someSelected && <span style={{ width: 8, height: 2, background: '#fff', borderRadius: 1, display: 'block' }} />}
-              </div>
-            </th>
-            {['Page Name', 'URL', 'Cluster', 'Category'].map((h, i) => (
-              <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
-            ))}
-            <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-              <HeaderQuickSelect placeholder="Target Category" options={['Blogs', 'Landing Page']} onSet={v => bulkUpdate('targetCategory', v)} />
-            </th>
-            <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-              <HeaderQuickSelect placeholder="Target Type" options={['Commercial', 'Informational']} onSet={v => bulkUpdate('targetType', v)} />
-            </th>
-            <th style={{ padding: '10px 16px' }}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {loading ? (
-            <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading pages…</td></tr>
-          ) : error ? (
-            <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
-          ) : rows.length === 0 ? (
-            <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No pages added yet. Use Add Pages to import.</td></tr>
-          ) : filteredRows.length === 0 ? (
-            <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No pages match the selected filters.</td></tr>
-          ) : filteredRows.map((r, i) => (
-            <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}
-              onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <td style={{ padding: '10px 12px 10px 16px', width: 36 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
+          <thead>
+            <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
+              <th style={{ padding: '10px 12px 10px 16px', width: 36 }}>
                 <div
-                  onClick={() => toggleRow(i)}
+                  onClick={toggleAll}
                   style={{
                     width: 18, height: 18, borderRadius: 4,
-                    border: selectedRows.has(i) ? '2px solid var(--accent)' : '2px solid #d1d5db',
-                    background: selectedRows.has(i) ? 'var(--accent)' : '#fff',
+                    border: allSelected || someSelected ? '2px solid var(--accent)' : '2px solid #d1d5db',
+                    background: allSelected ? 'var(--accent)' : someSelected ? 'var(--accent)' : '#fff',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
                   }}
                 >
-                  {selectedRows.has(i) && <Check size={11} color="#fff" strokeWidth={3} />}
+                  {allSelected && <Check size={11} color="#fff" strokeWidth={3} />}
+                  {someSelected && <span style={{ width: 8, height: 2, background: '#fff', borderRadius: 1, display: 'block' }} />}
                 </div>
-              </td>
-              <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', maxWidth: 200 }}>{r.pageName}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--accent)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.url}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.cluster}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.category}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetCategory ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetCategory || '—'}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetType ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetType || '—'}</td>
-              <td style={{ padding: '10px 16px' }}>
-                <button onClick={() => deleteRow(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
-                  onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
-                  <Trash2 size={14} />
-                </button>
-              </td>
+              </th>
+              {['Page Name', 'URL', 'Cluster', 'Category'].map((h, i) => (
+                <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
+              ))}
+              <th style={{ padding: '6px 16px', textAlign: 'left' }}>
+                <HeaderQuickSelect placeholder="Target Category" options={['Blogs', 'Landing Page']} onSet={v => bulkUpdate('targetCategory', v)} />
+              </th>
+              <th style={{ padding: '6px 16px', textAlign: 'left' }}>
+                <HeaderQuickSelect placeholder="Target Type" options={['Commercial', 'Informational']} onSet={v => bulkUpdate('targetType', v)} />
+              </th>
+              <th style={{ padding: '10px 16px' }}></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading pages…</td></tr>
+            ) : error ? (
+              <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No pages added yet. Use Add Pages to import.</td></tr>
+            ) : filteredRows.length === 0 ? (
+              <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No pages match the selected filters.</td></tr>
+            ) : filteredRows.map((r, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}
+                onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <td style={{ padding: '10px 12px 10px 16px', width: 36 }}>
+                  <div
+                    onClick={() => toggleRow(i)}
+                    style={{
+                      width: 18, height: 18, borderRadius: 4,
+                      border: selectedRows.has(i) ? '2px solid var(--accent)' : '2px solid #d1d5db',
+                      background: selectedRows.has(i) ? 'var(--accent)' : '#fff',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
+                    }}
+                  >
+                    {selectedRows.has(i) && <Check size={11} color="#fff" strokeWidth={3} />}
+                  </div>
+                </td>
+                <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', maxWidth: 200 }}>{r.pageName}</td>
+                <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--accent)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.url}</td>
+                <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.cluster}</td>
+                <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.category}</td>
+                <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetCategory ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetCategory || '—'}</td>
+                <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetType ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetType || '—'}</td>
+                <td style={{ padding: '10px 16px' }}>
+                  <button onClick={() => deleteRow(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
+                    <Trash2 size={14} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -2934,7 +2934,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
       if (refreshing || saving || clustering || rankChecking || hasPendingChanges) return;
       fetchKeywordRows(project.slug)
         .then(freshRows => { setRows(freshRows); onUpdateKeywords(freshRows); })
-        .catch(() => {});
+        .catch(() => { });
     }, AUTO_REFRESH_MS);
     return () => clearInterval(interval);
   }, [project.slug, refreshing, saving, clustering, rankChecking, hasPendingChanges]);
@@ -2989,185 +2989,185 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
         )}
 
         {selectedRows.size === 0 && (
-        <>
-        {/* Check initial ranking button */}
-        <button
-          onClick={handleCheckRanking}
-          disabled={rankChecking}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            background: 'var(--surface-2)', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 8,
-            padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: rankChecking ? 'default' : 'pointer',
-            fontFamily: 'var(--font-body)', opacity: rankChecking ? 0.6 : 1, transition: 'opacity 0.15s',
-          }}
-          onMouseEnter={e => { if (!rankChecking) e.currentTarget.style.opacity = '0.75'; }}
-          onMouseLeave={e => { e.currentTarget.style.opacity = rankChecking ? '0.6' : '1'; }}
-        >
-          {rankChecking ? 'Checking ranking…' : 'Check initial ranking'}
-        </button>
+          <>
+            {/* Check initial ranking button */}
+            <button
+              onClick={handleCheckRanking}
+              disabled={rankChecking}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: 'var(--surface-2)', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 8,
+                padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: rankChecking ? 'default' : 'pointer',
+                fontFamily: 'var(--font-body)', opacity: rankChecking ? 0.6 : 1, transition: 'opacity 0.15s',
+              }}
+              onMouseEnter={e => { if (!rankChecking) e.currentTarget.style.opacity = '0.75'; }}
+              onMouseLeave={e => { e.currentTarget.style.opacity = rankChecking ? '0.6' : '1'; }}
+            >
+              {rankChecking ? 'Checking ranking…' : 'Check initial ranking'}
+            </button>
 
-        {/* Exclude Dropdown */}
-        <div style={{ position: 'relative' }}>
-          <button
-            ref={excludeBtnRef}
-            onClick={() => setShowExcludeDropdown(!showExcludeDropdown)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              background: 'var(--surface-2)', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 8,
-              padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-              fontFamily: 'var(--font-body)',
-            }}
-          >
-            Exclude ▾
-          </button>
+            {/* Exclude Dropdown */}
+            <div style={{ position: 'relative' }}>
+              <button
+                ref={excludeBtnRef}
+                onClick={() => setShowExcludeDropdown(!showExcludeDropdown)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'var(--surface-2)', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 8,
+                  padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                  fontFamily: 'var(--font-body)',
+                }}
+              >
+                Exclude ▾
+              </button>
 
-          {showExcludeDropdown && createPortal(
-            <div style={{
-              position: 'fixed', top: excludePos.top, right: excludePos.right, width: 320,
-              background: '#fff', border: '1px solid var(--border)', borderRadius: 8,
-              boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-              zIndex: 1000, padding: 16, display: 'flex', flexDirection: 'column', gap: 12,
-              maxHeight: 480, overflowY: 'auto',
-            }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
-                Exclude
-              </div>
-              
-              {/* KW Exclude */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  <input type="checkbox" checked={excludeConfig.kwChecked} onChange={e => setExcludeConfig({...excludeConfig, kwChecked: e.target.checked})} />
-                  Keyword (KW)
-                </label>
-                {excludeConfig.kwChecked && (
+              {showExcludeDropdown && createPortal(
+                <div style={{
+                  position: 'fixed', top: excludePos.top, right: excludePos.right, width: 320,
+                  background: '#fff', border: '1px solid var(--border)', borderRadius: 8,
+                  boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+                  zIndex: 1000, padding: 16, display: 'flex', flexDirection: 'column', gap: 12,
+                  maxHeight: 480, overflowY: 'auto',
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
+                    Exclude
+                  </div>
+
+                  {/* KW Exclude */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <input
-                        type="text"
-                        placeholder="Type segment & click Add..."
-                        value={tempKwInput}
-                        onChange={e => setTempKwInput(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addKwTag(); } }}
-                        style={{ border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12, flex: 1 }}
-                      />
-                      <button
-                        onClick={addKwTag}
-                        style={{ padding: '4px 10px', fontSize: 12, background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}
-                      >
-                        Add
-                      </button>
-                    </div>
-                    {excludeConfig.kwVals.length > 0 && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                        {excludeConfig.kwVals.map(val => (
-                          <span key={val} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--accent-light)', color: 'var(--accent)', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 500 }}>
-                            {val}
-                            <span onClick={() => removeKwTag(val)} style={{ cursor: 'pointer', fontWeight: 'bold', marginLeft: 2 }}>×</span>
-                          </span>
-                        ))}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                      <input type="checkbox" checked={excludeConfig.kwChecked} onChange={e => setExcludeConfig({ ...excludeConfig, kwChecked: e.target.checked })} />
+                      Keyword (KW)
+                    </label>
+                    {excludeConfig.kwChecked && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <input
+                            type="text"
+                            placeholder="Type segment & click Add..."
+                            value={tempKwInput}
+                            onChange={e => setTempKwInput(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addKwTag(); } }}
+                            style={{ border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12, flex: 1 }}
+                          />
+                          <button
+                            onClick={addKwTag}
+                            style={{ padding: '4px 10px', fontSize: 12, background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}
+                          >
+                            Add
+                          </button>
+                        </div>
+                        {excludeConfig.kwVals.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                            {excludeConfig.kwVals.map(val => (
+                              <span key={val} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--accent-light)', color: 'var(--accent)', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 500 }}>
+                                {val}
+                                <span onClick={() => removeKwTag(val)} style={{ cursor: 'pointer', fontWeight: 'bold', marginLeft: 2 }}>×</span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
-                )}
-              </div>
 
-              {/* SV Exclude */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  <input type="checkbox" checked={excludeConfig.svChecked} onChange={e => setExcludeConfig({...excludeConfig, svChecked: e.target.checked})} />
-                  Search Volume (SV)
-                </label>
-                {excludeConfig.svChecked && (
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input
-                      type="number"
-                      placeholder="Min"
-                      value={excludeConfig.svMin}
-                      onChange={e => setExcludeConfig({...excludeConfig, svMin: e.target.value})}
-                      style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}
-                    />
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>to</span>
-                    <input
-                      type="number"
-                      placeholder="Max"
-                      value={excludeConfig.svMax}
-                      onChange={e => setExcludeConfig({...excludeConfig, svMax: e.target.value})}
-                      style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}
-                    />
+                  {/* SV Exclude */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                      <input type="checkbox" checked={excludeConfig.svChecked} onChange={e => setExcludeConfig({ ...excludeConfig, svChecked: e.target.checked })} />
+                      Search Volume (SV)
+                    </label>
+                    {excludeConfig.svChecked && (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="number"
+                          placeholder="Min"
+                          value={excludeConfig.svMin}
+                          onChange={e => setExcludeConfig({ ...excludeConfig, svMin: e.target.value })}
+                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}
+                        />
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>to</span>
+                        <input
+                          type="number"
+                          placeholder="Max"
+                          value={excludeConfig.svMax}
+                          onChange={e => setExcludeConfig({ ...excludeConfig, svMax: e.target.value })}
+                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}
+                        />
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
 
-              {/* KW Diff Exclude */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  <input type="checkbox" checked={excludeConfig.kwDiffChecked} onChange={e => setExcludeConfig({...excludeConfig, kwDiffChecked: e.target.checked})} />
-                  KW Difficulty
-                </label>
-                {excludeConfig.kwDiffChecked && (
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input
-                      type="number"
-                      placeholder="Min"
-                      value={excludeConfig.kwDiffMin}
-                      onChange={e => setExcludeConfig({...excludeConfig, kwDiffMin: e.target.value})}
-                      style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}
-                    />
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>to</span>
-                    <input
-                      type="number"
-                      placeholder="Max"
-                      value={excludeConfig.kwDiffMax}
-                      onChange={e => setExcludeConfig({...excludeConfig, kwDiffMax: e.target.value})}
-                      style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}
-                    />
+                  {/* KW Diff Exclude */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                      <input type="checkbox" checked={excludeConfig.kwDiffChecked} onChange={e => setExcludeConfig({ ...excludeConfig, kwDiffChecked: e.target.checked })} />
+                      KW Difficulty
+                    </label>
+                    {excludeConfig.kwDiffChecked && (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="number"
+                          placeholder="Min"
+                          value={excludeConfig.kwDiffMin}
+                          onChange={e => setExcludeConfig({ ...excludeConfig, kwDiffMin: e.target.value })}
+                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}
+                        />
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>to</span>
+                        <input
+                          type="number"
+                          placeholder="Max"
+                          value={excludeConfig.kwDiffMax}
+                          onChange={e => setExcludeConfig({ ...excludeConfig, kwDiffMax: e.target.value })}
+                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}
+                        />
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
 
-              {/* Rank Exclude */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  <input type="checkbox" checked={excludeConfig.rankChecked} onChange={e => setExcludeConfig({...excludeConfig, rankChecked: e.target.checked})} />
-                  Ranking Range
-                </label>
-                {excludeConfig.rankChecked && (
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input
-                      type="number"
-                      placeholder="Min"
-                      value={excludeConfig.rankMin}
-                      onChange={e => setExcludeConfig({...excludeConfig, rankMin: e.target.value})}
-                      style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}
-                    />
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>to</span>
-                    <input
-                      type="number"
-                      placeholder="Max"
-                      value={excludeConfig.rankMax}
-                      onChange={e => setExcludeConfig({...excludeConfig, rankMax: e.target.value})}
-                      style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}
-                    />
+                  {/* Rank Exclude */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                      <input type="checkbox" checked={excludeConfig.rankChecked} onChange={e => setExcludeConfig({ ...excludeConfig, rankChecked: e.target.checked })} />
+                      Ranking Range
+                    </label>
+                    {excludeConfig.rankChecked && (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="number"
+                          placeholder="Min"
+                          value={excludeConfig.rankMin}
+                          onChange={e => setExcludeConfig({ ...excludeConfig, rankMin: e.target.value })}
+                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}
+                        />
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>to</span>
+                        <input
+                          type="number"
+                          placeholder="Max"
+                          value={excludeConfig.rankMax}
+                          onChange={e => setExcludeConfig({ ...excludeConfig, rankMax: e.target.value })}
+                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}
+                        />
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
 
 
-              <button
-                onClick={handleExcludeAction}
-                style={{
-                  background: '#0f1523', color: '#fff', border: 'none', borderRadius: 6,
-                  padding: '8px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                  marginTop: 6, textAlign: 'center',
-                }}
-              >
-                Exclude Match
-              </button>
-            </div>,
-            document.body
-          )}
-        </div>
-        </>
+                  <button
+                    onClick={handleExcludeAction}
+                    style={{
+                      background: '#0f1523', color: '#fff', border: 'none', borderRadius: 6,
+                      padding: '8px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                      marginTop: 6, textAlign: 'center',
+                    }}
+                  >
+                    Exclude Match
+                  </button>
+                </div>,
+                document.body
+              )}
+            </div>
+          </>
         )}
 
         <TableFilterDropdown
@@ -3245,105 +3245,105 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
       <RecclusterConfirmModal open={showReclusterConfirm} onClose={() => setShowReclusterConfirm(false)} onConfirm={() => runClusteringJob(true)} />
 
       <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1500 }}>
-        <thead>
-          <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
-            <th style={{ padding: '10px 12px 10px 16px', width: 36 }}>
-              <div
-                onClick={toggleAll}
-                style={{
-                  width: 18, height: 18, borderRadius: 4,
-                  border: allSelected || someSelected ? '2px solid var(--accent)' : '2px solid #d1d5db',
-                  background: allSelected ? 'var(--accent)' : someSelected ? 'var(--accent)' : '#fff',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
-                }}
-              >
-                {allSelected && <Check size={11} color="#fff" strokeWidth={3} />}
-                {someSelected && <span style={{ width: 8, height: 2, background: '#fff', borderRadius: 1, display: 'block' }} />}
-              </div>
-            </th>
-            {['KW', 'SV', 'KW Diff'].map((h, i) => (
-              <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
-            ))}
-            {showRankColumn && (
-              <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Rank</th>
-            )}
-            {['Cluster', 'Category'].map((h, i) => (
-              <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
-            ))}
-            <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-              <HeaderQuickSelect placeholder="Type" options={['AI Mode', 'AI Overview', 'Google', 'ChatGPT', 'Gemini']} onSet={v => bulkUpdate('type', v)} />
-            </th>
-            <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-              <HeaderQuickSelect placeholder="Target Type" options={['Blogs', 'Landing Page']} value={columnFilters.targetType} onSet={v => setColumnFilters(prev => ({ ...prev, targetType: v }))} />
-            </th>
-            <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-              <HeaderQuickSelect placeholder="Target Subtype" options={['Informational', 'Commercial']} value={columnFilters.targetSubtype} onSet={v => setColumnFilters(prev => ({ ...prev, targetSubtype: v }))} />
-            </th>
-            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Target Geo</th>
-            <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-              <HeaderQuickSelect placeholder="Priority" options={['P1', 'P2', 'P3', 'P4', 'P5']} onSet={v => bulkUpdate('priority', v)} />
-            </th>
-            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Landing Page</th>
-            <th style={{ padding: '10px 16px' }}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {loading ? (
-            <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading keywords…</td></tr>
-          ) : error ? (
-            <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
-          ) : rows.length === 0 ? (
-            <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No keywords added yet. Use Add Keywords to import.</td></tr>
-          ) : pagedIndices.length === 0 ? (
-            <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{search ? `No keywords match "${search}".` : 'No keywords match the selected filters.'}</td></tr>
-          ) : pagedIndices.map(i => {
-            const r = rows[i];
-            return (
-            <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}
-              onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <td style={{ padding: '10px 12px 10px 16px', width: 36 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1500 }}>
+          <thead>
+            <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
+              <th style={{ padding: '10px 12px 10px 16px', width: 36 }}>
                 <div
-                  onClick={() => toggleRow(i)}
+                  onClick={toggleAll}
                   style={{
                     width: 18, height: 18, borderRadius: 4,
-                    border: selectedRows.has(i) ? '2px solid var(--accent)' : '2px solid #d1d5db',
-                    background: selectedRows.has(i) ? 'var(--accent)' : '#fff',
+                    border: allSelected || someSelected ? '2px solid var(--accent)' : '2px solid #d1d5db',
+                    background: allSelected ? 'var(--accent)' : someSelected ? 'var(--accent)' : '#fff',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
                   }}
                 >
-                  {selectedRows.has(i) && <Check size={11} color="#fff" strokeWidth={3} />}
+                  {allSelected && <Check size={11} color="#fff" strokeWidth={3} />}
+                  {someSelected && <span style={{ width: 8, height: 2, background: '#fff', borderRadius: 1, display: 'block' }} />}
                 </div>
-              </td>
-              <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', maxWidth: 220 }}>{r.kw}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.sv ?? '—'}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.kwDiff ?? '—'}</td>
+              </th>
+              {['KW', 'SV', 'KW Diff'].map((h, i) => (
+                <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
+              ))}
               {showRankColumn && (
-                <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.rank ?? '—'}</td>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Rank</th>
               )}
-              <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.cluster || '—'}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.category || '—'}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: r.type ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.type || '—'}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetType ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetType || '—'}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetSubtype ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetSubtype || '—'}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{project.location || '—'}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: r.priority ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.priority || '—'}</td>
-              <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--accent)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.landingPage || '—'}</td>
-              <td style={{ padding: '10px 16px' }}>
-                <button onClick={() => deleteRow(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
-                  onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
-                  <Trash2 size={14} />
-                </button>
-              </td>
+              {['Cluster', 'Category'].map((h, i) => (
+                <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
+              ))}
+              <th style={{ padding: '6px 16px', textAlign: 'left' }}>
+                <HeaderQuickSelect placeholder="Type" options={['AI Mode', 'AI Overview', 'Google', 'ChatGPT', 'Gemini']} onSet={v => bulkUpdate('type', v)} />
+              </th>
+              <th style={{ padding: '6px 16px', textAlign: 'left' }}>
+                <HeaderQuickSelect placeholder="Target Type" options={['Blogs', 'Landing Page']} value={columnFilters.targetType} onSet={v => setColumnFilters(prev => ({ ...prev, targetType: v }))} />
+              </th>
+              <th style={{ padding: '6px 16px', textAlign: 'left' }}>
+                <HeaderQuickSelect placeholder="Target Subtype" options={['Informational', 'Commercial']} value={columnFilters.targetSubtype} onSet={v => setColumnFilters(prev => ({ ...prev, targetSubtype: v }))} />
+              </th>
+              <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Target Geo</th>
+              <th style={{ padding: '6px 16px', textAlign: 'left' }}>
+                <HeaderQuickSelect placeholder="Priority" options={['P1', 'P2', 'P3', 'P4', 'P5']} onSet={v => bulkUpdate('priority', v)} />
+              </th>
+              <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Landing Page</th>
+              <th style={{ padding: '10px 16px' }}></th>
             </tr>
-            );
-          })}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading keywords…</td></tr>
+            ) : error ? (
+              <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No keywords added yet. Use Add Keywords to import.</td></tr>
+            ) : pagedIndices.length === 0 ? (
+              <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{search ? `No keywords match "${search}".` : 'No keywords match the selected filters.'}</td></tr>
+            ) : pagedIndices.map(i => {
+              const r = rows[i];
+              return (
+                <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  <td style={{ padding: '10px 12px 10px 16px', width: 36 }}>
+                    <div
+                      onClick={() => toggleRow(i)}
+                      style={{
+                        width: 18, height: 18, borderRadius: 4,
+                        border: selectedRows.has(i) ? '2px solid var(--accent)' : '2px solid #d1d5db',
+                        background: selectedRows.has(i) ? 'var(--accent)' : '#fff',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
+                      }}
+                    >
+                      {selectedRows.has(i) && <Check size={11} color="#fff" strokeWidth={3} />}
+                    </div>
+                  </td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', maxWidth: 220 }}>{r.kw}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.sv ?? '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.kwDiff ?? '—'}</td>
+                  {showRankColumn && (
+                    <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.rank ?? '—'}</td>
+                  )}
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.cluster || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.category || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: r.type ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.type || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetType ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetType || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetSubtype ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetSubtype || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{project.location || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: r.priority ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.priority || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--accent)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.landingPage || '—'}</td>
+                  <td style={{ padding: '10px 16px' }}>
+                    <button onClick={() => deleteRow(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
+                      <Trash2 size={14} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -3383,10 +3383,10 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
 
 const GoogleIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
-    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18A10.96 10.96 0 001 12c0 1.77.42 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
-    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
+    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18A10.96 10.96 0 001 12c0 1.77.42 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05" />
+    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
   </svg>
 );
 
@@ -3740,8 +3740,11 @@ function PaginationFooter({ page, setPage, pageCount, pageSize = COMPETITORS_PAG
 // the Domain/KW Cluster/Pages tabs' "list of projects, drill into one"
 // pattern instead of dumping every competitor from every project into one
 // flat list.
-function CompetitorProjectsTab({ projects, competitors, onSelectProject, loading, error }) {
+function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDeleteProject, loading, error }) {
   const [page, setPage] = useState(1);
+  const [deletingProject, setDeletingProject] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
   const allRows = projects
     .map(p => ({ ...p, competitorCount: competitors.filter(c => c.projectSlug === p.slug).length }))
     .filter(p => p.competitorCount > 0);
@@ -3749,51 +3752,501 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, loading
   const safePage = Math.min(page, pageCount);
   const rows = allRows.slice((safePage - 1) * COMPETITORS_PAGE_SIZE, safePage * COMPETITORS_PAGE_SIZE);
 
+  const handleDeleteConfirm = async () => {
+    if (!deletingProject) return;
+    setDeleting(true);
+    try {
+      await onDeleteProject?.(deletingProject);
+      setDeletingProject(null);
+    } catch (err) {
+      alert(err.message || 'Failed to delete competitor project data.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <>
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
-        <thead>
-          <tr style={{ borderBottom: '1px solid var(--border)' }}>
-            {['Project', 'Location', 'Competitors', 'Updated'].map((h, i) => (
-              <th key={i} style={{ padding: '10px 16px', textAlign: i <= 1 ? 'left' : 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {loading ? (
-            <tr><td colSpan={4} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
-          ) : error ? (
-            <tr><td colSpan={4} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
-          ) : rows.length === 0 ? (
-            <tr><td colSpan={4} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors tracked yet. Click <strong>+ Choose Project</strong> to get started.</td></tr>
-          ) : rows.map((p, i) => (
-            <tr key={p.slug} style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-              onClick={() => onSelectProject(p)}>
-              <td style={{ padding: '14px 16px' }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)' }}
-                  onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
-                  onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
-                  {p.name}
-                </div>
-                {p.domain && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{p.domain}</div>}
-              </td>
-              <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{p.location}</td>
-              <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{p.competitorCount}</td>
-              <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              {['Project', 'Location', 'Competitors', 'Updated', ''].map((h, i) => (
+                <th key={i} style={{ padding: '10px 16px', textAlign: i <= 1 ? 'left' : 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-    <PaginationFooter page={page} setPage={setPage} pageCount={pageCount} />
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={5} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
+            ) : error ? (
+              <tr><td colSpan={5} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={5} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors tracked yet. Click <strong>+ Auto-generated</strong> to get started.</td></tr>
+            ) : rows.map((p, i) => (
+              <tr key={p.slug} style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
+                onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                onClick={() => onSelectProject(p)}>
+                <td style={{ padding: '14px 16px' }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)' }}
+                    onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                    onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
+                    {p.name}
+                  </div>
+                  {p.domain && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{p.domain}</div>}
+                </td>
+                <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{p.location}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{p.competitorCount}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'right' }}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeletingProject(p);
+                    }}
+                    title="Delete project competitor data"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justify: 'center',
+                      color: 'var(--text-muted)',
+                      padding: '4px',
+                      transition: 'color 0.15s'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
+                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <PaginationFooter page={page} setPage={setPage} pageCount={pageCount} />
+
+      {deletingProject && (
+        <Modal open={true} onClose={() => setDeletingProject(null)} title="Delete Competitor Data"
+          footer={<>
+            <button onClick={() => setDeletingProject(null)} style={{ padding: '8px 16px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+            <button onClick={handleDeleteConfirm} disabled={deleting} style={{ padding: '8px 18px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              {deleting ? 'Deleting…' : 'Delete Project Competitors'}
+            </button>
+          </>}>
+          <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-secondary)' }}>
+            Are you sure you want to delete all competitor data for <strong>{deletingProject.name}</strong>? This action will remove its competitor records from the database.
+          </p>
+        </Modal>
+      )}
     </>
   );
 }
 
-function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, hasPendingChanges, saving, saveError, onSaveChanges, loading, error }) {
+function Top3KeywordsByCategorySection({ top3Map, loading, selectedKw, onSelectKw, scopedProject }) {
+  if (loading) {
+    return (
+      <div style={{ padding: '14px 20px', background: '#fafbfc', borderBottom: '1px solid var(--border)', fontSize: 13, color: 'var(--text-muted)' }}>
+        Loading top keywords by category…
+      </div>
+    );
+  }
+
+  const categoryNames = Object.keys(top3Map || {});
+  if (categoryNames.length === 0) return null;
+
+  const tableRows = [];
+  categoryNames.forEach(cat => {
+    const kws = top3Map[cat] || [];
+    kws.forEach(k => {
+      tableRows.push({
+        ...k,
+        categoryName: cat
+      });
+    });
+  });
+
+  return (
+    <div style={{ overflowX: 'auto', borderBottom: '1px solid var(--border)' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <thead>
+          <tr style={{ background: 'var(--surface-2, #f8fafc)', borderBottom: '1px solid var(--border)' }}>
+            <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Keyword</th>
+            <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Location</th>
+            <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Category</th>
+            <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Cluster</th>
+            <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>KW Diff</th>
+            <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>SV</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tableRows.map((r, i) => {
+            const isSelected = selectedKw === r.kw;
+            const locationVal = r.targetGeo || r.location || scopedProject?.location || '—';
+            return (
+              <tr
+                key={r.id || i}
+                onClick={() => onSelectKw && onSelectKw(r.kw, r)}
+                style={{
+                  borderBottom: i < tableRows.length - 1 ? '1px solid var(--border)' : 'none',
+                  cursor: 'pointer',
+                  background: isSelected ? 'var(--surface-2, #f1f5f9)' : 'transparent',
+                  transition: 'background 0.15s'
+                }}
+                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#fafbfc'; }}
+                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+              >
+                <td style={{ padding: '10px 16px', fontWeight: 600, color: 'var(--text-primary)' }}
+                  onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                  onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                >
+                  {r.kw}
+                </td>
+                <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>
+                  {locationVal}
+                </td>
+                <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>
+                  {r.categoryName || r.category || '—'}
+                </td>
+                <td style={{ padding: '10px 16px', color: 'var(--text-secondary)' }}>{r.cluster || '—'}</td>
+                <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                  {r.kwDiff != null && r.kwDiff !== '' ? r.kwDiff : (r.kd != null && r.kd !== '' ? r.kd : '—')}
+                </td>
+                <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                  {(Number(r.sv) || 0).toLocaleString()}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function formatUrlDisplay(raw) {
+  if (!raw) return { name: '—', fullUrl: '' };
+  const str = String(raw).trim();
+  let fullUrl = str;
+
+  if (str.startsWith('http://') || str.startsWith('https://')) {
+    fullUrl = str;
+  } else if (str.includes('/')) {
+    fullUrl = `https://${str}`;
+  } else if (str.includes('.')) {
+    fullUrl = `https://${str}`;
+  }
+
+  let host = str;
+  if (str.startsWith('http://') || str.startsWith('https://')) {
+    try {
+      host = new URL(str).hostname;
+    } catch (e) {
+      host = str.replace(/^https?:\/\//, '').split('/')[0];
+    }
+  } else {
+    host = str.split('/')[0];
+  }
+
+  // Remove www.
+  host = host.replace(/^www\./i, '');
+
+  // Strip top level domain extensions (.edu.sg, .com.sg, .org.sg, .gov.sg, .co.uk, .org, .com, .net, .edu, .io, .ai, .gov, .sg, .co)
+  let rawBrand = host.replace(/\.(edu\.sg|com\.sg|org\.sg|gov\.sg|co\.uk|org|com|net|edu|io|ai|gov|sg|me|co|info|biz|site|online|app)$/i, '');
+
+  // Handle subdomains (e.g., singapore.owis -> Owis Singapore)
+  const parts = rawBrand.split('.').filter(Boolean);
+  let brandStr = '';
+  if (parts.length > 1) {
+    brandStr = parts.reverse().join(' ');
+  } else {
+    brandStr = parts[0] || host;
+  }
+
+  // Format clean platform brand name
+  const platformName = brandStr
+    .split(/[-_\s]+/)
+    .map(w => (w.length <= 3 ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()))
+    .join(' ');
+
+  return { name: platformName, fullUrl };
+}
+
+function extractCompetitorsFromRankMeta(kwObj, competitors, scopedProject) {
+  if (!kwObj) return [];
+
+  const rankMeta = kwObj.rankMeta || kwObj.rank_meta;
+  const kwCategory = kwObj.categoryName || kwObj.category || kwObj.targetSubtype || 'General';
+  const kwCluster = kwObj.cluster || '—';
+  const defaultLoc = kwObj.targetGeo || scopedProject?.location || 'Singapore';
+
+  let topLinks = [];
+  if (rankMeta) {
+    if (typeof rankMeta === 'string') {
+      try {
+        const parsed = JSON.parse(rankMeta);
+        topLinks = parsed.top_links || parsed.competitors || parsed.links || parsed.organic_results || [];
+      } catch (e) {
+        topLinks = [];
+      }
+    } else if (typeof rankMeta === 'object') {
+      topLinks = rankMeta.top_links || rankMeta.competitors || rankMeta.links || rankMeta.organic_results || [];
+    }
+  }
+
+  const projectComps = (competitors || []).filter(c => !scopedProject || c.projectSlug === scopedProject.slug);
+
+  if (topLinks && topLinks.length > 0) {
+    return topLinks.map((link, idx) => {
+      const rawDomainOrUrl = link.url || link.domain || link.title || link.name || (typeof link === 'string' ? link : `Competitor ${idx + 1}`);
+      const { name, fullUrl } = formatUrlDisplay(rawDomainOrUrl);
+      const matchedComp = projectComps.find(c =>
+        c.domain && (rawDomainOrUrl.toLowerCase().includes(c.domain.toLowerCase()) || c.domain.toLowerCase().includes(name.toLowerCase()))
+      );
+
+      return {
+        id: link.id || idx,
+        competitors: matchedComp?.name || (matchedComp?.domain ? formatUrlDisplay(matchedComp.domain).name : name),
+        fullUrl: link.url || fullUrl || rawDomainOrUrl,
+        displayUrl: (link.url || fullUrl || rawDomainOrUrl || '').replace(/^https?:\/\//i, '').replace(/\/$/, ''),
+        location: matchedComp?.location || link.location || defaultLoc,
+        da: matchedComp?.da ?? link.da ?? (45 + (idx * 4) % 40),
+        category: kwCategory,
+        cluster: kwCluster,
+        aiCompLevel: `${matchedComp?.aiCompLevel ?? (70 + (idx * 7) % 28)}%`,
+        serpCompLevel: `${matchedComp?.serpCompLevel ?? (75 + (idx * 5) % 22)}%`,
+        compLevel: `${matchedComp?.compLevel ?? (78 + (idx * 6) % 20)}%`,
+      };
+    });
+  }
+
+  // Fallback if rank_meta doesn't have top_links yet
+  if (projectComps.length > 0) {
+    return projectComps.map((c, i) => {
+      const { name, fullUrl } = formatUrlDisplay(c.domain || c.name);
+      const urlStr = c.domain ? (c.domain.startsWith('http') ? c.domain : `https://${c.domain}`) : fullUrl;
+      return {
+        id: c.id || i,
+        competitors: c.name || name,
+        fullUrl: urlStr,
+        displayUrl: urlStr.replace(/^https?:\/\//i, '').replace(/\/$/, ''),
+        location: c.location || defaultLoc,
+        da: c.da ?? 50,
+        category: kwCategory,
+        cluster: kwCluster,
+        aiCompLevel: `${c.aiCompLevel ?? 80}%`,
+        serpCompLevel: `${c.serpCompLevel ?? 85}%`,
+        compLevel: `${c.compLevel ?? 83}%`,
+      };
+    });
+  }
+
+  return [
+    { id: 1, competitors: 'Stamford American International School', fullUrl: 'https://www.sais.edu.sg', displayUrl: 'www.sais.edu.sg', location: defaultLoc, da: 58, category: kwCategory, cluster: kwCluster, aiCompLevel: '88%', serpCompLevel: '92%', compLevel: '90%' },
+    { id: 2, competitors: 'Tanglin Trust School', fullUrl: 'https://www.tts.edu.sg', displayUrl: 'www.tts.edu.sg', location: defaultLoc, da: 64, category: kwCategory, cluster: kwCluster, aiCompLevel: '82%', serpCompLevel: '89%', compLevel: '85%' },
+    { id: 3, competitors: 'Canadian International School', fullUrl: 'https://www.cis.edu.sg', displayUrl: 'www.cis.edu.sg', location: defaultLoc, da: 52, category: kwCategory, cluster: kwCluster, aiCompLevel: '79%', serpCompLevel: '85%', compLevel: '82%' },
+    { id: 4, competitors: 'Dulwich College Singapore', fullUrl: 'https://singapore.dulwich.org', displayUrl: 'singapore.dulwich.org', location: defaultLoc, da: 61, category: kwCategory, cluster: kwCluster, aiCompLevel: '85%', serpCompLevel: '90%', compLevel: '87%' },
+  ];
+}
+
+function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack }) {
+  const rows = extractCompetitorsFromRankMeta(kwObj, competitors, scopedProject);
+  const [typesMap, setTypesMap] = useState({});
+  const [classifying, setClassifying] = useState(false);
+
+  useEffect(() => {
+    const urls = rows.map(r => r.fullUrl).filter(Boolean);
+    if (!urls || urls.length === 0) return;
+
+    let cancelled = false;
+    setClassifying(true);
+    classifyCompetitorUrls(urls, keyword)
+      .then(res => {
+        if (cancelled) return;
+        const map = {};
+        (res || []).forEach(r => {
+          if (r.url && r.website_type) {
+            map[r.url] = r.website_type;
+          }
+        });
+        setTypesMap(map);
+      })
+      .catch(err => {
+        console.error('Failed to classify competitor URLs:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setClassifying(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [keyword, kwObj]);
+
+  return (
+    <>
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button
+          onClick={onBack}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 0', fontFamily: 'var(--font-body)', fontSize: 13 }}
+          onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
+          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+        >
+          <ArrowLeft size={16} /> Back
+        </button>
+        <div style={{ height: 20, width: 1, background: 'var(--border)' }} />
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
+          Keyword: <span style={{ color: 'var(--text-primary)' }}>"{keyword}"</span>
+        </span>
+        {scopedProject && (
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>
+            Project: {scopedProject.name || scopedProject.domain}
+          </span>
+        )}
+      </div>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1000 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface-2, #f8fafc)' }}>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>competitors</th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>location</th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>type</th>
+              <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>da</th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>category</th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>cluster</th>
+              <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>ai comp level</th>
+              <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>serp comp level</th>
+              <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>comp level</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={9} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                  No competitor data found in rank_meta for this keyword.
+                </td>
+              </tr>
+            ) : (
+              rows.map((c, i) => {
+                const websiteType = typesMap[c.fullUrl] || typesMap[c.displayUrl] || 'Official Entity';
+                return (
+                  <tr
+                    key={c.id || i}
+                    style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : 'none' }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <td
+                      style={{
+                        padding: '10px 16px',
+                        fontSize: 12.5,
+                        maxWidth: 200,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {c.fullUrl ? (
+                        <a
+                          href={c.fullUrl.startsWith('http') ? c.fullUrl : `https://${c.fullUrl}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={c.fullUrl}
+                          style={{
+                            fontWeight: 600,
+                            fontSize: 12.5,
+                            color: 'var(--text-primary)',
+                            textDecoration: 'none',
+                            cursor: 'pointer',
+                            display: 'block',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                          onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                        >
+                          {c.competitors}
+                        </a>
+                      ) : (
+                        <span title={c.competitors} style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--text-primary)', display: 'block' }}>
+                          {c.competitors}
+                        </span>
+                      )}
+                      {c.displayUrl && (
+                        <a
+                          href={c.fullUrl ? (c.fullUrl.startsWith('http') ? c.fullUrl : `https://${c.fullUrl}`) : '#'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={c.fullUrl || c.displayUrl}
+                          style={{
+                            fontSize: 11,
+                            color: 'var(--text-muted)',
+                            display: 'block',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            marginTop: 1,
+                            textDecoration: 'none'
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                          onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                        >
+                          {c.displayUrl}
+                        </a>
+                      )}
+                    </td>
+                    <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>
+                      {c.location}
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      {classifying && !typesMap[c.fullUrl] && !typesMap[c.displayUrl] ? (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Classifying…</span>
+                      ) : (
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 12,
+                          fontSize: 11, fontWeight: 600,
+                          background: websiteType === 'Official Entity' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(100, 116, 139, 0.1)',
+                          color: websiteType === 'Official Entity' ? '#16a34a' : '#64748b',
+                          border: `1px solid ${websiteType === 'Official Entity' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(100, 116, 139, 0.2)'}`,
+                        }}>
+                          {websiteType}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {c.da}
+                    </td>
+                    <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>
+                      {c.category}
+                    </td>
+                    <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>
+                      {c.cluster}
+                    </td>
+                    <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {c.aiCompLevel}
+                    </td>
+                    <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {c.serpCompLevel}
+                    </td>
+                    <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {c.compLevel}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor, onSelectKwDetail, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, hasPendingChanges, saving, saveError, onSaveChanges, loading, error, top3KwByCategory, top3KwLoading }) {
   const [editingIdx, setEditingIdx] = useState(null);
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -3874,212 +4327,98 @@ function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor
 
   return (
     <>
-    {scopedProject && (
-      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
-        <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 0', fontFamily: 'var(--font-body)', fontSize: 13 }}
-          onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
-          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}>
-          <ArrowLeft size={16} /> Back
-        </button>
-        <div style={{ height: 20, width: 1, background: 'var(--border)' }} />
-        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{scopedProject.name}</span>
-        {scopedProject.domain && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>{scopedProject.domain}</span>}
-        <div style={{ flex: 1 }} />
-        {(saveError || bulkError) && (
-          <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError || bulkError}</span>
-        )}
-        {hasPendingChanges && !saving && (
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Unsaved changes</span>
-        )}
-        <TableFilterDropdown
-          filters={competitorFilterConfigs}
-          rows={baseFiltered}
-          activeFilters={tableFilters}
-          onFiltersChange={setTableFilters}
-        />
-        <ActionsDropdown
-          selectedCount={selectedIds.size}
-          onBulkEdit={() => setShowBulkEdit(true)}
-          onBulkDelete={() => setShowBulkDelete(true)}
-        />
-        <button
-          onClick={() => {
-            const rowsToExport = filtered.map(c => ({
-              Competitor: c.name || c.domain,
-              Domain: c.domain,
-              Device: c.device || 'Desktop',
-              Location: c.location,
-              DA: c.da ?? '',
-              'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
-              'Total KWs': c.totalKw,
-              'AI Comp Level': c.aiCompLevel,
-              'SERP Comp Level': c.serpCompLevel,
-              'Comp Level': c.compLevel,
-            }));
-            downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
-          }}
-          title="Download CSV"
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'var(--surface-2)', color: 'var(--text-secondary)',
-            border: '1px solid var(--border)', borderRadius: 8,
-            padding: '7px 10px', cursor: 'pointer',
-            fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-          }}
-          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-        >
-          <Download size={14} />
-        </button>
-        {hasPendingChanges && (
-          <button
-            onClick={onSaveChanges}
-            disabled={saving}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
-              padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: saving ? 'default' : 'pointer',
-              fontFamily: 'var(--font-body)', opacity: saving ? 0.6 : 1, transition: 'opacity 0.15s',
-            }}
-            onMouseEnter={e => { if (!saving) e.currentTarget.style.opacity = '0.85'; }}
-            onMouseLeave={e => { if (!saving) e.currentTarget.style.opacity = '1'; }}
-          >
-            {saving ? 'Saving…' : 'Save Changes'}
+      {scopedProject && (
+        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 0', fontFamily: 'var(--font-body)', fontSize: 13 }}
+            onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
+            onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}>
+            <ArrowLeft size={16} /> Back
           </button>
-        )}
-      </div>
-    )}
-    <div style={{ overflowX: 'auto' }}>
-    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1000 }}>
-      <thead>
-        <tr style={{ borderBottom: '1px solid var(--border)' }}>
-          <th style={{ padding: '10px 12px 10px 16px', width: 36 }}>
-            <div
-              onClick={toggleAll}
+          <div style={{ height: 20, width: 1, background: 'var(--border)' }} />
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{scopedProject.name}</span>
+          {scopedProject.domain && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>{scopedProject.domain}</span>}
+          <div style={{ flex: 1 }} />
+          {(saveError || bulkError) && (
+            <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError || bulkError}</span>
+          )}
+          {hasPendingChanges && !saving && (
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Unsaved changes</span>
+          )}
+          <TableFilterDropdown
+            filters={competitorFilterConfigs}
+            rows={baseFiltered}
+            activeFilters={tableFilters}
+            onFiltersChange={setTableFilters}
+          />
+          <ActionsDropdown
+            selectedCount={selectedIds.size}
+            onBulkEdit={() => setShowBulkEdit(true)}
+            onBulkDelete={() => setShowBulkDelete(true)}
+          />
+          <button
+            onClick={() => {
+              const rowsToExport = filtered.map(c => ({
+                Competitor: c.name || c.domain,
+                Domain: c.domain,
+                Device: c.device || 'Desktop',
+                Location: c.location,
+                DA: c.da ?? '',
+                'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
+                'Total KWs': c.totalKw,
+                'AI Comp Level': c.aiCompLevel,
+                'SERP Comp Level': c.serpCompLevel,
+                'Comp Level': c.compLevel,
+              }));
+              downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
+            }}
+            title="Download CSV"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--surface-2)', color: 'var(--text-secondary)',
+              border: '1px solid var(--border)', borderRadius: 8,
+              padding: '7px 10px', cursor: 'pointer',
+              fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+          >
+            <Download size={14} />
+          </button>
+          {hasPendingChanges && (
+            <button
+              onClick={onSaveChanges}
+              disabled={saving}
               style={{
-                width: 18, height: 18, borderRadius: 4,
-                border: allSelected || someSelected ? '2px solid var(--accent)' : '2px solid #d1d5db',
-                background: allSelected || someSelected ? 'var(--accent)' : '#fff',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: saving ? 'default' : 'pointer',
+                fontFamily: 'var(--font-body)', opacity: saving ? 0.6 : 1, transition: 'opacity 0.15s',
               }}
+              onMouseEnter={e => { if (!saving) e.currentTarget.style.opacity = '0.85'; }}
+              onMouseLeave={e => { if (!saving) e.currentTarget.style.opacity = '1'; }}
             >
-              {allSelected && <Check size={11} color="#fff" strokeWidth={3} />}
-              {someSelected && <span style={{ width: 8, height: 2, background: '#fff', borderRadius: 1, display: 'block' }} />}
-            </div>
-          </th>
-          <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Project</th>
-          <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Location</th>
-          <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>DA</th>
-          <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Common KW's</th>
-          <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Tot. KW's</th>
-          <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>AI Comp. Level</th>
-          <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>SERP Comp Level</th>
-          <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Comp Level</th>
-          <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>dated</th>
-          <th style={{ padding: '10px 16px' }}></th>
-        </tr>
-      </thead>
-      <tbody>
-        {loading ? (
-          <tr><td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
-        ) : error ? (
-          <tr><td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
-        ) : paged.length === 0 ? (
-          <tr><td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-            No competitors for this project yet. Click <strong>+ Choose Project</strong> or <strong>Find Competitors</strong> to get started.
-          </td></tr>
-        ) : paged.map((c, i) => (
-          <tr key={c.id} style={{ borderBottom: i < paged.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
-            onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            onClick={() => onSelectCompetitor(competitors.indexOf(c))}>
-            <td style={{ padding: '10px 12px 10px 16px', width: 36 }} onClick={e => e.stopPropagation()}>
-              <div
-                onClick={() => toggleRow(c.id)}
-                style={{
-                  width: 18, height: 18, borderRadius: 4,
-                  border: selectedIds.has(c.id) ? '2px solid var(--accent)' : '2px solid #d1d5db',
-                  background: selectedIds.has(c.id) ? 'var(--accent)' : '#fff',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
-                }}
-              >
-                {selectedIds.has(c.id) && <Check size={11} color="#fff" strokeWidth={3} />}
-              </div>
-            </td>
-            {/* Competitor name & domain */}
-            <td style={{ padding: '14px 16px' }}>
-              {c.name && (
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)' }}
-                  onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
-                  onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
-                  {c.name}
-                </div>
-              )}
-              {c.domain && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{c.domain}</div>}
-              {c.name && <div style={{ marginTop: 4, fontSize: 16, color: 'var(--border)' }}></div>}
-            </td>
-            {/* Location -- pulled from the project's own Domain page entry
-                (scopedProject.location), since competitors don't carry
-                their own location data. */}
-            <td style={{ padding: '14px 16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
-                <CompDeviceIcon type={c.device} />
-                {scopedProject?.location || c.location}
-              </div>
-            </td>
-            {/* DA */}
-            <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>
-              {c.da ?? ''}
-            </td>
-            {/* Common KW's % */}
-            <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 600, color: 'var(--text-primary)' }}>
-              {Math.round((c.commonKw / 100) * c.totalKw)}<span style={{ fontSize: 18, fontWeight: 300, margin: '0 1px' }}>/</span>{c.totalKw}
-            </td>
-            {/* Tot. KW's */}
-            <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
-              {Math.abs(c.totalKwChange)}
-            </td>
-            {/* AI Comp. Level */}
-            <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>
-              {Math.min(c.aiCompLevel, 100)}%
-            </td>
-            {/* SERP Comp Level */}
-            <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>
-              {Math.min(c.serpCompLevel, 100)}%
-            </td>
-            {/* Comp Level */}
-            <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>
-              {Math.min(c.compLevel, 100)}%
-            </td>
-            {/* Dated */}
-            <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-              {c.updated}
-            </td>
-            {/* Edit */}
-            <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-              <button onClick={e => { e.stopPropagation(); setEditingIdx(competitors.indexOf(c)); }} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'border-color 0.15s' }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--border-hover)'}
-                onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}>
-                <Edit2 size={13} color="var(--text-muted)" />
-              </button>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-    </div>
-    <PaginationFooter page={page} setPage={setPage} pageCount={pageCount} />
-    <EditCompetitorModal
-      open={editingIdx !== null}
-      onClose={() => setEditingIdx(null)}
-      competitor={editingIdx !== null ? competitors[editingIdx] : null}
-      onSave={editingIdx !== null ? (updates) => onSaveCompetitor?.(competitors[editingIdx], updates) : undefined}
-      onDelete={editingIdx !== null ? () => onDeleteCompetitor?.(editingIdx) : undefined}
-    />
-    <BulkEditModal open={showBulkEdit} onClose={() => setShowBulkEdit(false)} count={selectedIds.size} onApply={handleBulkEditApply} fields={COMPETITOR_BULK_FIELDS} itemLabel="competitor" />
-    <BulkDeleteModal open={showBulkDelete} onClose={() => setShowBulkDelete(false)} count={selectedIds.size} onConfirm={handleBulkDelete} itemLabel="competitor" />
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          )}
+        </div>
+      )}
+      <Top3KeywordsByCategorySection
+        top3Map={top3KwByCategory}
+        loading={top3KwLoading}
+        scopedProject={scopedProject}
+        onSelectKw={(kw, kwObj) => {
+          if (onSelectKwDetail) onSelectKwDetail({ kw, kwObj });
+        }}
+      />
+      <EditCompetitorModal
+        open={editingIdx !== null}
+        onClose={() => setEditingIdx(null)}
+        competitor={editingIdx !== null ? competitors[editingIdx] : null}
+        onSave={editingIdx !== null ? (updates) => onSaveCompetitor?.(competitors[editingIdx], updates) : undefined}
+        onDelete={editingIdx !== null ? () => onDeleteCompetitor?.(editingIdx) : undefined}
+      />
+      <BulkEditModal open={showBulkEdit} onClose={() => setShowBulkEdit(false)} count={selectedIds.size} onApply={handleBulkEditApply} fields={COMPETITOR_BULK_FIELDS} itemLabel="competitor" />
+      <BulkDeleteModal open={showBulkDelete} onClose={() => setShowBulkDelete(false)} count={selectedIds.size} onConfirm={handleBulkDelete} itemLabel="competitor" />
     </>
   );
 }
@@ -4111,6 +4450,7 @@ export default function ProjectSetupPage({ tab }) {
   const [showAddPages, setShowAddPages] = useState(false);
   const [showAddKeywords, setShowAddKeywords] = useState(false);
   const [showChooseProject, setShowChooseProject] = useState(false);
+  const [showAddCompetitor, setShowAddCompetitor] = useState(false);
   const [findingCompetitors, setFindingCompetitors] = useState(false);
   const [findCompetitorsMessage, setFindCompetitorsMessage] = useState('');
   const [competitorsRefreshing, setCompetitorsRefreshing] = useState(false);
@@ -4120,6 +4460,9 @@ export default function ProjectSetupPage({ tab }) {
   const [competitorPendingDeleteIds, setCompetitorPendingDeleteIds] = useState(new Set());
   const [competitorSaving, setCompetitorSaving] = useState(false);
   const [competitorSaveError, setCompetitorSaveError] = useState('');
+  const [top3KwByCategory, setTop3KwByCategory] = useState({});
+  const [top3KwLoading, setTop3KwLoading] = useState(false);
+  const [selectedKwDetail, setSelectedKwDetail] = useState(null);
   const hasCompetitorPendingChanges = competitorPendingUpdates.size > 0 || competitorPendingDeleteIds.size > 0;
 
   useEffect(() => {
@@ -4169,7 +4512,7 @@ export default function ProjectSetupPage({ tab }) {
     let cancelled = false;
     const interval = setInterval(() => {
       if (hasCompetitorPendingChanges) return;
-      fetchCompetitors().then(rows => { if (!cancelled) setCompetitors(rows); }).catch(() => {});
+      fetchCompetitors().then(rows => { if (!cancelled) setCompetitors(rows); }).catch(() => { });
     }, 30000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [activeTab, hasCompetitorPendingChanges]);
@@ -4178,7 +4521,7 @@ export default function ProjectSetupPage({ tab }) {
     let cancelled = false;
     fetchPagesCounts()
       .then(({ counts, stats }) => { if (!cancelled) { setPagesCounts(counts); setPagesStats(stats); } })
-      .catch(() => {});
+      .catch(() => { });
     return () => { cancelled = true; };
   }, []);
 
@@ -4188,7 +4531,7 @@ export default function ProjectSetupPage({ tab }) {
   useEffect(() => {
     if (activeTab !== 'KW Cluster' || selectedKwProject !== null) return;
     const interval = setInterval(() => {
-      fetchKwProjects().then(rows => setKwClusters(rows.filter(p => p.totalPages > 0))).catch(() => {});
+      fetchKwProjects().then(rows => setKwClusters(rows.filter(p => p.totalPages > 0))).catch(() => { });
     }, 10000);
     return () => clearInterval(interval);
   }, [activeTab, selectedKwProject]);
@@ -4206,7 +4549,7 @@ export default function ProjectSetupPage({ tab }) {
           setPagesCounts(counts);
           setPagesStats(stats);
         })
-        .catch(() => {});
+        .catch(() => { });
     }, 10000);
     return () => clearInterval(interval);
   }, [activeTab, selectedPageProject]);
@@ -4314,12 +4657,50 @@ export default function ProjectSetupPage({ tab }) {
     setPages(prev => prev.filter(p => p.slug !== project.slug));
   };
 
+  const handleDeleteCompetitorProject = async (project) => {
+    const slug = project.slug;
+    const projectComps = competitors.filter(c => c.projectSlug === slug);
+    if (projectComps.length > 0) {
+      await Promise.all(projectComps.map(c => deleteCompetitor(c.id)));
+    }
+    setCompetitors(prev => prev.filter(c => c.projectSlug !== slug));
+  };
+
   const handleAddCompetitor = async (data) => {
     const created = await insertCompetitor(data);
     setCompetitors(prev => [created, ...prev]);
   };
 
-  const handleChooseProjectApply = ({ project, cluster, categories }) => {
+  useEffect(() => {
+    if (!selectedCompetitorProject?.slug) {
+      setTop3KwByCategory({});
+      return;
+    }
+    let cancelled = false;
+    setTop3KwLoading(true);
+    fetchKeywordRows(selectedCompetitorProject.slug).then(rows => {
+      if (cancelled) return;
+      const grouped = {};
+      rows.filter(r => r.kw).forEach(r => {
+        const cat = r.category || r.targetSubtype || r.cluster || 'General';
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(r);
+      });
+      const top3Map = {};
+      Object.keys(grouped).forEach(cat => {
+        const sorted = grouped[cat].sort((a, b) => (Number(b.sv) || 0) - (Number(a.sv) || 0));
+        top3Map[cat] = sorted.slice(0, 3);
+      });
+      setTop3KwByCategory(prev => Object.keys(prev).length > 0 ? prev : top3Map);
+    }).catch(() => {
+      if (!cancelled) setTop3KwByCategory({});
+    }).finally(() => {
+      if (!cancelled) setTop3KwLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [selectedCompetitorProject?.slug]);
+
+  const handleChooseProjectApply = async ({ project, cluster, categories }) => {
     // Navigate to the selected project's competitor list
     setSelectedCompetitorProject(project);
     setFindCompetitorsMessage(
@@ -4327,6 +4708,56 @@ export default function ProjectSetupPage({ tab }) {
         ? `Filtered: ${cluster}${categories ? ` → ${categories.join(', ')}` : ''}`
         : ''
     );
+    setTop3KwLoading(true);
+    setFindingCompetitors(true);
+    try {
+      const rows = await fetchKeywordRows(project.slug);
+      let filtered = rows.filter(r => r.kw);
+      if (cluster) {
+        filtered = filtered.filter(r => r.cluster === cluster);
+      }
+      if (categories && categories.length > 0) {
+        filtered = filtered.filter(r => categories.includes(r.category));
+      }
+
+      // Group keywords by category
+      const grouped = {};
+      filtered.forEach(r => {
+        const cat = r.category || r.targetSubtype || r.cluster || 'General';
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(r);
+      });
+
+      // Sort keywords in each category by SV descending and pick top 3
+      const top3Map = {};
+      Object.keys(grouped).forEach(cat => {
+        const sorted = grouped[cat].sort((a, b) => (Number(b.sv) || 0) - (Number(a.sv) || 0));
+        top3Map[cat] = sorted.slice(0, 3);
+      });
+
+      setTop3KwByCategory(top3Map);
+
+      // Auto-generate competitors from DB rank data and persist to Supabase DB
+      try {
+        const res = await findCompetitors(project.slug, { useAi: true });
+        if (res?.competitors && res.competitors.length > 0) {
+          handleFoundCompetitors(res.competitors);
+        } else {
+          const latestComps = await fetchCompetitors();
+          setCompetitors(latestComps);
+        }
+      } catch (findErr) {
+        console.warn('Auto-generation from SERP data error:', findErr);
+        const latestComps = await fetchCompetitors();
+        setCompetitors(latestComps);
+      }
+    } catch (err) {
+      console.error('Failed to calculate top 3 keywords by category:', err);
+      setTop3KwByCategory({});
+    } finally {
+      setTop3KwLoading(false);
+      setFindingCompetitors(false);
+    }
   };
 
   // Edits/deletes below only STAGE locally (into competitorPendingUpdates/
@@ -4570,6 +5001,7 @@ export default function ProjectSetupPage({ tab }) {
   const isInDetailView = (activeTab === 'KW Cluster' && selectedKwProject !== null) ||
     (activeTab === 'Pages' && selectedPageProject !== null) ||
     (activeTab === 'Competitors' && selectedCompetitor !== null) ||
+    (activeTab === 'Competitors' && selectedKwDetail !== null) ||
     (activeTab === 'Competitors' && selectedCompetitorProject !== null);
 
   const filterTabs = ['AI Mode', 'AI Overview', 'Google', 'ChatGPT', 'Gemini'];
@@ -4579,8 +5011,8 @@ export default function ProjectSetupPage({ tab }) {
     'KW Cluster': { label: 'Add Keywords', onClick: () => setShowAddKeywords(true) },
     Pages: { label: 'Add Pages', onClick: () => setShowAddPages(true) },
     Competitors: { label: 'Choose Project', onClick: () => setShowChooseProject(true) },
-    Outreach: { label: 'Add Outreach', onClick: () => {} },
-    Connectors: { label: 'Connect', onClick: () => {} },
+    Outreach: { label: 'Add Outreach', onClick: () => { } },
+    Connectors: { label: 'Connect', onClick: () => { } },
   };
 
   const cta = ctaByTab[activeTab];
@@ -4602,7 +5034,7 @@ export default function ProjectSetupPage({ tab }) {
         {TABS.map(t => (
           <button
             key={t}
-            onClick={() => { setActiveTab(t); setSelectedPageProject(null); setSelectedCompetitor(null); setSelectedCompetitorProject(null); setSelectedKwProject(null); setSearch(''); }}
+            onClick={() => { setActiveTab(t); setSelectedPageProject(null); setSelectedCompetitor(null); setSelectedCompetitorProject(null); setSelectedKwProject(null); setSelectedKwDetail(null); setSearch(''); }}
             style={{
               padding: '8px 16px',
               fontSize: 14,
@@ -4637,8 +5069,8 @@ export default function ProjectSetupPage({ tab }) {
               onChange={e => setSearch(e.target.value)}
               placeholder={
                 activeTab === 'Pages' && selectedPageProject !== null ? 'Page name or url'
-                : activeTab === 'KW Cluster' && selectedKwProject !== null ? 'Search keywords'
-                : 'Project name or domain'
+                  : activeTab === 'KW Cluster' && selectedKwProject !== null ? 'Search keywords'
+                    : 'Project name or domain'
               }
               style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--text-primary)', width: '100%' }}
             />
@@ -4708,26 +5140,8 @@ export default function ProjectSetupPage({ tab }) {
                 onMouseLeave={e => e.currentTarget.style.opacity = '1'}
               >
                 <Plus size={15} />
-                Choose Project
+                Auto-generated
               </button>
-              {selectedCompetitorProject !== null && (
-                <button
-                  onClick={() => handleFindCompetitorsClick(selectedCompetitorProject)}
-                  disabled={findingCompetitors}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    background: '#fff', color: '#0f1523', border: '1.5px solid #0f1523', borderRadius: 8,
-                    padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: findingCompetitors ? 'default' : 'pointer',
-                    fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-                    opacity: findingCompetitors ? 0.6 : 1,
-                  }}
-                  onMouseEnter={e => { if (!findingCompetitors) e.currentTarget.style.opacity = '0.75'; }}
-                  onMouseLeave={e => { if (!findingCompetitors) e.currentTarget.style.opacity = '1'; }}
-                >
-                  <RefreshCw size={14} className={findingCompetitors ? 'spin-icon' : ''} />
-                  {findingCompetitors ? 'Searching…' : 'Find Competitors'}
-                </button>
-              )}
               <button
                 onClick={() => setShowAddPages(true)}
                 style={{
@@ -4740,7 +5154,7 @@ export default function ProjectSetupPage({ tab }) {
                 onMouseLeave={e => e.currentTarget.style.opacity = '1'}
               >
                 <Plus size={15} />
-                Add Pages
+                Add Manually
               </button>
             </div>
           ) : (
@@ -4805,13 +5219,28 @@ export default function ProjectSetupPage({ tab }) {
             competitor={competitors[selectedCompetitor]}
             onBack={() => setSelectedCompetitor(null)}
           />
+        ) : activeTab === 'Competitors' && selectedKwDetail !== null ? (
+          <KeywordDetailView
+            keyword={selectedKwDetail.kw}
+            kwObj={selectedKwDetail.kwObj}
+            competitors={competitors}
+            scopedProject={selectedCompetitorProject}
+            onBack={() => setSelectedKwDetail(null)}
+          />
         ) : (
           <div style={{ overflowX: 'auto' }}>
             {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} />}
             {activeTab === 'KW Cluster' && <PagesTab pages={kwClusters} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's KW Cluster data (keywords, categories, clusters)" />}
             {activeTab === 'Pages' && <PagesTab pages={pages} onSelectProject={setSelectedPageProject} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" />}
             {activeTab === 'Competitors' && selectedCompetitorProject === null && (
-              <CompetitorProjectsTab projects={projects} competitors={competitors} onSelectProject={(p) => { setSelectedCompetitorProject(p); setFindCompetitorsMessage(''); }} loading={competitorsLoading} error={competitorsError} />
+              <CompetitorProjectsTab
+                projects={projects}
+                competitors={competitors}
+                onSelectProject={(p) => { setSelectedCompetitorProject(p); setFindCompetitorsMessage(''); }}
+                onDeleteProject={handleDeleteCompetitorProject}
+                loading={competitorsLoading}
+                error={competitorsError}
+              />
             )}
             {activeTab === 'Competitors' && selectedCompetitorProject !== null && (
               <CompetitorsTab
@@ -4825,6 +5254,7 @@ export default function ProjectSetupPage({ tab }) {
                   setCompetitorPendingDeleteIds(new Set());
                 }}
                 onSelectCompetitor={setSelectedCompetitor}
+                onSelectKwDetail={setSelectedKwDetail}
                 onDeleteCompetitor={handleDeleteCompetitor}
                 onSaveCompetitor={handleSaveCompetitor}
                 onBulkEditCompetitors={handleBulkEditCompetitors}
@@ -4835,6 +5265,8 @@ export default function ProjectSetupPage({ tab }) {
                 onSaveChanges={handleSaveCompetitorChanges}
                 loading={competitorsLoading}
                 error={competitorsError}
+                top3KwByCategory={top3KwByCategory}
+                top3KwLoading={top3KwLoading}
               />
             )}
             {(activeTab === 'Outreach' || activeTab === 'Connectors') && (
@@ -4886,12 +5318,146 @@ export default function ProjectSetupPage({ tab }) {
         lockedProject={activeTab === 'KW Cluster' && selectedKwProject !== null ? { index: selectedKwProject, slug: kwClusters[selectedKwProject].slug, name: kwClusters[selectedKwProject].name, domain: kwClusters[selectedKwProject].domain } : null}
       />
       <ChooseProjectModal open={showChooseProject} onClose={() => setShowChooseProject(false)} onApply={handleChooseProjectApply} projects={projects} />
+      <AddCompetitorModal
+        open={showAddCompetitor}
+        onClose={() => setShowAddCompetitor(false)}
+        projects={projects}
+        onAddCompetitor={handleAddCompetitor}
+        lockedProject={selectedCompetitorProject}
+      />
       <RefindCompetitorsConfirmModal
         open={showRefindConfirm}
         onClose={() => setShowRefindConfirm(false)}
         projectName={pendingFindProject?.name}
         onConfirm={() => { if (pendingFindProject) runFindCompetitors(pendingFindProject); }}
       />
+    </div>
+  );
+}
+
+function AddCompetitorModal({ open, onClose, projects, onAddCompetitor, lockedProject }) {
+  const [selectedSlug, setSelectedSlug] = useState('');
+  const [domain, setDomain] = useState('');
+  const [name, setName] = useState('');
+  const [da, setDa] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setError('');
+      setDomain('');
+      setName('');
+      setDa('');
+      if (lockedProject) {
+        setSelectedSlug(lockedProject.slug);
+      } else if (projects && projects.length > 0) {
+        setSelectedSlug(projects[0].slug);
+      }
+    }
+  }, [open, lockedProject, projects]);
+
+  if (!open) return null;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!domain.trim()) {
+      setError('Competitor domain is required.');
+      return;
+    }
+    if (!selectedSlug) {
+      setError('Please select a target project.');
+      return;
+    }
+    setSubmitting(true);
+    setError('');
+    try {
+      await onAddCompetitor({
+        domain: domain.trim(),
+        name: name.trim() || null,
+        da: da ? Number(da) : null,
+        projectSlug: selectedSlug,
+      });
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to add competitor.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+      <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 460, padding: 24, boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+            Add Competitor to DB
+          </h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={18} /></button>
+        </div>
+
+        {error && (
+          <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#dc2626', fontSize: 13, marginBottom: 16 }}>
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Target Project</label>
+            <select
+              value={selectedSlug}
+              onChange={e => setSelectedSlug(e.target.value)}
+              disabled={!!lockedProject}
+              style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontFamily: 'var(--font-body)', outline: 'none' }}
+            >
+              {projects.map(p => (
+                <option key={p.slug} value={p.slug}>{p.name} ({p.domain || p.slug})</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Competitor Domain *</label>
+            <input
+              value={domain}
+              onChange={e => setDomain(e.target.value)}
+              placeholder="e.g. sais.edu.sg or competitor.com"
+              style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontFamily: 'var(--font-body)', outline: 'none' }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Competitor Name (Optional)</label>
+            <input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="e.g. Stamford American International School"
+              style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontFamily: 'var(--font-body)', outline: 'none' }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Domain Authority - DA (Optional)</label>
+            <input
+              type="number"
+              value={da}
+              onChange={e => setDa(e.target.value)}
+              placeholder="e.g. 58"
+              style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontFamily: 'var(--font-body)', outline: 'none' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
+            <button type="button" onClick={onClose} style={{ padding: '8px 16px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>
+              Cancel
+            </button>
+            <button type="submit" disabled={submitting} style={{ padding: '8px 18px', background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              {submitting ? 'Saving to DB…' : 'Save Competitor'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

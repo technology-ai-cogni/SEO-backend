@@ -311,7 +311,18 @@ def init_db():
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_competitors_created ON competitors (created_at DESC)"))
         conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS project_slug TEXT"))
+        conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS website_type TEXT"))
+        conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS type TEXT"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_competitors_project ON competitors (project_slug)"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS url_classifications (
+                url TEXT PRIMARY KEY,
+                domain TEXT,
+                website_type TEXT,
+                is_competitor TEXT,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
 
         # --- Competitor snapshots -------------------------------------------
         # One row per "Find Competitors" run for a given competitor -- lets
@@ -927,6 +938,105 @@ def update_competitor(competitor_id, updates):
     set_sql = ", ".join(f"{k} = :{k}" for k in fields) + ", updated_at = now()"
     with engine.begin() as conn:
         conn.execute(text(f"UPDATE competitors SET {set_sql} WHERE id = :id"), {**fields, "id": competitor_id})
+
+
+def update_competitor_website_type(domain_or_url, website_type):
+    if not domain_or_url or not website_type:
+        return
+    clean_domain = str(domain_or_url).strip().lower()
+    if clean_domain.startswith("http://") or clean_domain.startswith("https://"):
+        try:
+            from urllib.parse import urlparse
+            clean_domain = urlparse(clean_domain).netloc.lower()
+        except Exception:
+            pass
+    clean_domain = clean_domain.replace("www.", "")
+    if not clean_domain:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE competitors SET website_type = :wtype, type = :wtype, updated_at = now() WHERE LOWER(domain) LIKE :dom"),
+            {"wtype": website_type, "dom": f"%{clean_domain}%"}
+        )
+
+
+def get_url_classification(url_or_domain: str):
+    if not url_or_domain:
+        return None
+    raw = str(url_or_domain).strip().lower()
+    clean_domain = raw
+    if clean_domain.startswith("http://") or clean_domain.startswith("https://"):
+        try:
+            from urllib.parse import urlparse
+            clean_domain = urlparse(clean_domain).netloc.lower()
+        except Exception:
+            pass
+    clean_domain = clean_domain.replace("www.", "")
+
+    with engine.begin() as conn:
+        # 1. Check url_classifications table
+        row = conn.execute(
+            text("SELECT * FROM url_classifications WHERE LOWER(url) = :url OR LOWER(domain) = :dom OR LOWER(domain) LIKE :dom_like LIMIT 1"),
+            {"url": raw, "dom": clean_domain, "dom_like": f"%{clean_domain}%"}
+        ).mappings().fetchone()
+
+        if row and row.get("website_type"):
+            return {
+                "url": url_or_domain,
+                "website_type": row["website_type"],
+                "is_competitor": row.get("is_competitor") or ("YES" if "Official" in row["website_type"] else "NO")
+            }
+
+        # 2. Check competitors table
+        comp_row = conn.execute(
+            text("SELECT website_type, type FROM competitors WHERE (website_type IS NOT NULL OR type IS NOT NULL) AND LOWER(domain) LIKE :dom LIMIT 1"),
+            {"dom": f"%{clean_domain}%"}
+        ).mappings().fetchone()
+
+        if comp_row:
+            wtype = comp_row.get("website_type") or comp_row.get("type")
+            if wtype:
+                return {
+                    "url": url_or_domain,
+                    "website_type": wtype,
+                    "is_competitor": "YES" if "Official" in wtype else "NO"
+                }
+
+    return None
+
+
+def save_url_classification(url: str, website_type: str, is_competitor: str = "NO"):
+    if not url or not website_type:
+        return
+    raw_url = str(url).strip()
+    clean_domain = raw_url.lower()
+    if clean_domain.startswith("http://") or clean_domain.startswith("https://"):
+        try:
+            from urllib.parse import urlparse
+            clean_domain = urlparse(clean_domain).netloc.lower()
+        except Exception:
+            pass
+    clean_domain = clean_domain.replace("www.", "")
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO url_classifications (url, domain, website_type, is_competitor, updated_at)
+                VALUES (:url, :domain, :wtype, :is_comp, now())
+                ON CONFLICT (url) DO UPDATE SET
+                    website_type = EXCLUDED.website_type,
+                    is_competitor = EXCLUDED.is_competitor,
+                    updated_at = now()
+            """),
+            {"url": raw_url, "domain": clean_domain, "wtype": website_type, "is_comp": is_competitor}
+        )
+
+        if clean_domain:
+            conn.execute(
+                text("UPDATE competitors SET website_type = :wtype, type = :wtype, updated_at = now() WHERE LOWER(domain) LIKE :dom"),
+                {"wtype": website_type, "dom": f"%{clean_domain}%"}
+            )
 
 
 def delete_competitor(competitor_id):

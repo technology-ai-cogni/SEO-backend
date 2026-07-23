@@ -86,7 +86,7 @@ function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
 }
 
 // ─── Local Mode Detection & Setup ───────────────────────────────────────────
-const isLocalMode = !supabase;
+const isLocalMode = false;
 
 function initializeLocalStorage() {
   if (!isLocalMode) return;
@@ -374,6 +374,7 @@ function kwRowToUi(row) {
     landingPage: row.landing_page_url,
     rank: row.rank,
     rankCheckedAt: row.rank_checked_at,
+    rankMeta: row.rank_meta,
   };
 }
 
@@ -506,7 +507,7 @@ export async function bulkDeleteKeywordRows(ids) {
   if (error) throw error;
 }
 
-const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://54.196.75.9:8000';
+const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000';
 
 // Removes a project entirely, everywhere -- its domain registration(s),
 // the shared `projects` row, every keyword row filed under its slug, its
@@ -926,3 +927,19 @@ export async function runAiAnalysis(projectSlug, keyword, aiMode, domain) {
   
   return await res.json();
 }
+
+export async function classifyCompetitorUrls(urls, keyword = '') {
+  if (!urls || urls.length === 0) return [];
+  const res = await fetch(`${CATEGORY_API_BASE}/competitors/classify-urls`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ urls, keyword }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to classify competitor URLs.');
+  }
+  const data = await res.json();
+  return data.results || [];
+}
+
