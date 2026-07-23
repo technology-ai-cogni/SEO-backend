@@ -199,33 +199,43 @@ def get_top3_for_category(keyword, country_code=None):
     gl = country_code or COUNTRY_CODE
     search_url = f"https://{GOOGLE_DOMAIN}/search?q={quote(keyword)}&gl={gl}&hl={LANGUAGE_CODE}"
     html = _brightdata_fetch(search_url)
-    if not html:
-        return []
+    results = []
+    
+    if html:
+        soup = BeautifulSoup(html, "html.parser")
+        container = soup.find("div", id="rso") or soup.find("div", id="search")
+        if container is not None:
+            seen = set()
+            for a in container.find_all("a", href=True):
+                h3 = a.find("h3")
+                if h3 is None:
+                    continue
+                href = a["href"]
+                if not href.startswith("http"):
+                    continue
+                if "google." in href or "gstatic." in href or "googleapis." in href:
+                    continue
+                if href in seen:
+                    continue
+                title = h3.get_text(strip=True)
+                if not title:
+                    continue
+                seen.add(href)
+                results.append({"url": href, "title": title})
+                if len(results) >= 5:
+                    break
 
-    soup = BeautifulSoup(html, "html.parser")
-    container = soup.find("div", id="rso") or soup.find("div", id="search")
-    if container is None:
-        return []
-
-    results, seen = [], set()
-    for a in container.find_all("a", href=True):
-        h3 = a.find("h3")
-        if h3 is None:
-            continue
-        href = a["href"]
-        if not href.startswith("http"):
-            continue
-        if "google." in href or "gstatic." in href or "googleapis." in href:
-            continue
-        if href in seen:
-            continue
-        title = h3.get_text(strip=True)
-        if not title:
-            continue
-        seen.add(href)
-        results.append({"url": href, "title": title})
-        if len(results) >= 5:
-            break
+    if not results:
+        # Fallback to Firecrawl
+        try:
+            print(f"Bright Data failed or returned 0 results for '{keyword}'. Falling back to Firecrawl.")
+            from scripts.firecrawl_scraper import fetch_top_results_via_firecrawl
+            fc_data = fetch_top_results_via_firecrawl(keyword, country_code=gl)
+            # Combine top_3 and other to get up to 5
+            combined = fc_data.get("top_3", []) + fc_data.get("other", [])
+            results = combined[:5]
+        except Exception as e:
+            print(f"Firecrawl fallback failed for '{keyword}': {e}")
 
     return results
 
@@ -323,8 +333,8 @@ def _titles_contain_best_or_top(titles):
         return False
     if _title_has_best_or_top(titles[0]):
         return True
-    rest = titles[1:]
-    return bool(rest) and all(_title_has_best_or_top(t) for t in rest)
+    count = sum(1 for t in titles if _title_has_best_or_top(t))
+    return count >= 2
 
 
 def _apply_best_top_rule(candidate_name, titles):
@@ -702,6 +712,32 @@ def region_display_name(search_region_code):
     return code.upper()
 
 
+def _refine_category_name_with_llm(raw_candidate: str, keyword: str) -> str:
+    """Use OpenAI to refine awkward combinations (e.g. 'agency company services') into a clean, meaningful SEO category."""
+    if not OPENAI_API_KEY:
+        return raw_candidate
+    try:
+        client = get_openai_client()
+        prompt = (
+            f"You are an expert SEO categorizer. The raw category extracted for the keyword '{keyword}' is '{raw_candidate}'.\n"
+            "This raw category might have an awkward or redundant combination of words (e.g., 'agency company services').\n"
+            "Refine it into a single, clean, meaningful, and professional SEO category name.\n"
+            "Keep it concise. Do not add 'Best' or 'Top'.\n"
+            "Output ONLY the refined category name, nothing else."
+        )
+        resp = client.chat.completions.create(
+            model=OPENAI_CHAT_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0
+        )
+        refined = resp.choices[0].message.content.strip()
+        refined = refined.strip("\"'")
+        return refined if refined else raw_candidate
+    except Exception as e:
+        print(f"[_refine_category_name_with_llm] Error refining '{raw_candidate}': {e}")
+        return raw_candidate
+
+
 def categorize_keyword(keyword, domain, country_code=None):
     """
     Category-only pipeline for one keyword, scoped to `domain`: fetch
@@ -752,9 +788,13 @@ def categorize_keyword(keyword, domain, country_code=None):
     meta["computed_region_name"] = region_display_name(search_region)
 
     raw_candidate = derive_category_name(titles, keyword)
-    candidate_name = _apply_best_top_rule(raw_candidate, titles)
-    meta["raw_candidate_before_best_top_rule"] = raw_candidate
-    meta["best_top_applied"] = candidate_name != raw_candidate
+    
+    refined_candidate = _refine_category_name_with_llm(raw_candidate, keyword)
+    meta["raw_candidate_before_llm"] = raw_candidate
+    meta["refined_candidate_after_llm"] = refined_candidate
+    
+    candidate_name = _apply_best_top_rule(refined_candidate, titles)
+    meta["best_top_applied"] = candidate_name != refined_candidate
 
     # Only compare against existing categories that have the SAME Best/Top
     # status -- otherwise a "Best/Top ..." candidate could get silently

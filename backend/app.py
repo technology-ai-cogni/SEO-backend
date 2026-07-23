@@ -163,6 +163,12 @@ class CreateDomainRequest(BaseModel):
     users: Optional[List[DomainUser]] = None
 
 
+class AiAnalysisRequest(BaseModel):
+    keyword: str
+    ai_mode: str
+    domain: Optional[str] = None
+
+
 
 
 def _find_column(columns, candidates):
@@ -930,3 +936,34 @@ def download_job(job_id: str):
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="category_results_{job_id}.csv"'},
     )
+
+import sys
+from pathlib import Path
+
+@app.post("/projects/{project}/ai-analysis")
+def run_ai_analysis(project: str, req: AiAnalysisRequest):
+    """
+    Run the requested AI agent (claude, chatgpt, gemini) against a single keyword.
+    Uses the agent modules located in `exp-1/agents`.
+    """
+    exp1_path = str(Path(__file__).parent / "exp-1")
+    if exp1_path not in sys.path:
+        sys.path.append(exp1_path)
+    
+    try:
+        from agents import AGENTS
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load agents module: {e}")
+
+    mode = req.ai_mode.lower()
+    agent_class = AGENTS.get(mode)
+    if not agent_class:
+        raise HTTPException(status_code=400, detail=f"Unsupported AI mode: {mode}")
+    
+    try:
+        agent = agent_class()
+        client_domain = req.domain or "socialoffline.in"
+        result = agent.run_keyword(req.keyword, client_domain=client_domain)
+        return {"project": project, "keyword": req.keyword, "ai_mode": mode, "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

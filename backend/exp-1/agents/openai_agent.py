@@ -71,10 +71,10 @@ class OpenAIAgent(BaseAgent):
     def search_keyword(self, keyword: str) -> dict:
         """OpenAI search-preview with annotation-based citation extraction."""
         prompt = (
-            f"Search the web for: {keyword}\n\n"
-            "List the top 10 websites that appear in search results for this query. "
-            "For each result, include the exact page title (in bold) and its URL. "
-            "Be factual, use only real live search results."
+            f"You are an expert SEO auditor. Search the web for the query: '{keyword}'.\n\n"
+            "Identify the top 10 ranking organic search results. "
+            "For each result, output the exact page title (in bold) and its URL on a new line. "
+            "Do not include sponsored ads. Be extremely precise and use only real, live search data."
         )
 
         try:
@@ -137,12 +137,12 @@ class OpenAIAgent(BaseAgent):
 
     # ── SEO summary ───────────────────────────────────────────────────────────
 
-    def generate_seo_summary(self, keyword: str, results: list) -> str:
+    def generate_seo_summary(self, keyword: str, results: list, client_domain: str = None) -> str:
         """GPT-4o-mini acting as SEO specialist."""
         if not results:
             return "Insufficient SERP data."
 
-        system_prompt, user_prompt = self._build_seo_prompt(keyword, results)
+        system_prompt, user_prompt = self._build_seo_prompt(keyword, results, client_domain=client_domain)
 
         try:
             resp = _client.chat.completions.create(

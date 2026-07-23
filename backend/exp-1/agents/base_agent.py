@@ -117,7 +117,7 @@ class BaseAgent(ABC):
                 domains.append(d)
         return ", ".join(domains)
 
-    def _build_seo_prompt(self, keyword: str, results: list):
+    def _build_seo_prompt(self, keyword: str, results: list, client_domain: str = CLIENT_DOMAIN):
         """
         Build the (system_prompt, user_prompt) pair for the SEO summary.
         Shared by both agents — only the LLM call differs.
@@ -125,15 +125,15 @@ class BaseAgent(ABC):
         client_position = None
         client_url      = ""
         for i, r in enumerate(results):
-            if CLIENT_DOMAIN in self.extract_domain(r.get("url",""), r.get("title","")):
+            if client_domain in self.extract_domain(r.get("url",""), r.get("title","")):
                 client_position = i + 1
                 client_url      = r["url"]
                 break
 
         client_status = (
-            f"{CLIENT_DOMAIN} IS visible at position #{client_position}. URL: {client_url}"
+            f"{client_domain} IS visible at position #{client_position}. URL: {client_url}"
             if client_position else
-            f"{CLIENT_DOMAIN} is NOT currently visible in the top results for this keyword."
+            f"{client_domain} is NOT currently visible in the top results for this keyword."
         )
 
         results_block = "\n".join(
@@ -143,17 +143,15 @@ class BaseAgent(ABC):
         )
 
         system_prompt = (
-            "You are a senior SEO specialist hired to analyse how a client's website "
-            "stands against competitors ranking for a specific keyword. "
-            "Give a clear, brutally honest, actionable report in exactly these 4 sections:\n\n"
-            "CURRENT STANDING: (1-2 sentences — is the client ranking? at what position?)\n\n"
-            "COMPETITOR ANALYSIS: (2-3 sentences — who dominates, type of sites, why they rank)\n\n"
-            "WHAT TO DO: (3-5 specific bullet points — based on actual competitor patterns)\n\n"
-            "RESOURCES NEEDED: (1-2 sentences — effort level, timeline)\n\n"
-            "Be brutally honest. Be specific. No generic advice."
+            "You are a fast, sharp SEO agent analyzing a keyword's top results against a client domain. "
+            "Keep the summary extremely concise and impactful. Use bullet points where possible. "
+            "Output EXACTLY these 3 short sections:\n\n"
+            "STANDING: (1 brief sentence on client rank)\n\n"
+            "COMPETITORS: (1-2 short sentences on who ranks and why)\n\n"
+            "ACTION PLAN: (Max 3 brief bullet points of what to do)"
         )
         user_prompt = (
-            f"Client website: {CLIENT_DOMAIN}\n"
+            f"Client website: {client_domain}\n"
             f"Target keyword: \"{keyword}\"\n"
             f"Client current status: {client_status}\n\n"
             f"Current top-ranking competitors:\n{results_block}"
@@ -162,7 +160,7 @@ class BaseAgent(ABC):
 
     # ── main pipeline ─────────────────────────────────────────────────────────
 
-    def run_keyword(self, keyword: str) -> dict:
+    def run_keyword(self, keyword: str, client_domain: str = CLIENT_DOMAIN) -> dict:
         """
         Full pipeline for one keyword. Called by the orchestrator.
         Returns a dict with all CSV output columns.
@@ -175,11 +173,12 @@ class BaseAgent(ABC):
 
         confidence  = self.calculate_confidence_score(total_found, has_grounding, results)
         seo_summary = data.get("seo_summary") or (
-            self.generate_seo_summary(keyword, results) if status == "ok" else ""
+            self.generate_seo_summary(keyword, results, client_domain=client_domain) if status == "ok" and hasattr(self, 'generate_seo_summary') else ""
         )
 
         return {
             "top_10_results":   self.format_results_cell(results),
+            "results":          results,
             "competitors":      self.format_competitors_cell(results),
             "total_found":      total_found,
             "confidence_score": confidence,

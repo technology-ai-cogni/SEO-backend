@@ -236,12 +236,53 @@ def _process_one_keyword_bright_data(job_id, domain, row, country_code, intent_p
             db.update_keyword_result(domain, row_id, None, None, "no_data")
             return
 
+        # 1. Fetch metadata (signals) for the top results first
+        def get_signals(r):
+            url = (r or {}).get("url")
+            title = (r or {}).get("title")
+            if not url:
+                return None
+            from scripts.intent_classifier import fetch_page_via_requests, extract_page_signals
+            html, err = fetch_page_via_requests(url)
+            if html:
+                sig = extract_page_signals(url, html)
+                if not sig.get("title"):
+                    sig["title"] = title
+                return sig
+            else:
+                return {"url": url, "title": title, "fetch_error": err}
+
+        valid_results = top3[:5]
+        with ThreadPoolExecutor(max_workers=len(valid_results) or 1) as executor:
+            futures = [executor.submit(get_signals, r) for r in valid_results]
+            signals_list = [f.result() for f in futures if f.result() is not None]
+        print(f"DEBUG: signals_list length = {len(signals_list)}")
+        if signals_list:
+            print(f"DEBUG: signals_list[0] keys = {signals_list[0].keys()}")
+
+        # 2. Classify intent (Informational vs Commercial) using the fetched signals
+        def classify_intent_with_signals(sig):
+            from scripts.intent_classifier import classify_page_intent
+            res = classify_page_intent(sig)
+            res["url"] = sig["url"]
+            return res
+        
+        with ThreadPoolExecutor(max_workers=len(signals_list) or 1) as executor:
+            futures2 = [executor.submit(classify_intent_with_signals, sig) for sig in signals_list]
+            per_url_results = [f.result() for f in futures2]
+        
+        from scripts.intent_classifier import majority_subtype
+        subtype = majority_subtype(per_url_results)
+
+        # 3. Classify landing vs blog using the fetched signals
         category = categorize_from_top3(keyword, top3, domain)
-        target_type = classify_landing_or_blog(top3)
+        from scripts.landing_blog_classifier import classify_landing_or_blog
+        target_type = classify_landing_or_blog(signals_list)
+        
         # HARD override: a Best/Top category is always a Blog Page, no
         # matter what the classifier above decided.
         target_type = force_blog_if_best_top(category, target_type)
-        subtype = intent_pool.submit(_classify_intent, top3).result()
+        print(f"DEBUG: target_type={target_type}, subtype={subtype}, category={category}")
 
         db.update_keyword_result(
             domain, row_id, category, None, "processed" if category else "no_data",

@@ -1,132 +1,216 @@
-import { Card } from '../ui/Card';
-import { Search, Sparkles, FileText, TrendingUp, ArrowRight } from 'lucide-react';
-import { totalKeywordCount, brandMentionKeywords, brandMentions, clusterDistribution } from '../../data/mockData';
+import { useState } from 'react';
+import { Search, ArrowRight, Activity, FolderOpen } from 'lucide-react';
 
-const modules = [
-  {
-    id: 'search-visibility',
-    icon: Search,
-    label: 'Search Visibility',
-    desc: 'Track keyword positions, analyze competitors, and manage link building campaigns.',
-    color: '#e74c6f',
-    bg: '#fdeef2',
-    stats: [
-      { label: 'Keywords', value: totalKeywordCount.toLocaleString() },
-      { label: 'Clusters', value: String(clusterDistribution.length) },
-      { label: 'Geo', value: 'Singapore' },
-    ],
-  },
-  {
-    id: 'ai-visibility',
-    icon: Sparkles,
-    label: 'AI Visibility',
-    desc: 'Monitor how your brand appears across AI-powered search engines and chatbots.',
-    color: '#d4a017',
-    bg: '#fef9e4',
-    stats: [
-      { label: 'Tracked KWs', value: String(brandMentionKeywords.length) },
-      { label: 'Citations', value: String(brandMentions.length) },
-      { label: 'Sources', value: '3' },
-    ],
-  },
-  {
-    id: 'content-engine',
-    icon: FileText,
-    label: 'Content Engine',
-    desc: 'Discover trending topics, build content calendars, and track blog performance.',
-    color: '#3b82f6',
-    bg: '#dbeafe',
-    stats: [{ label: 'Top Blogs', value: '47' }, { label: 'Traffic', value: '2.3K' }, { label: 'Trending', value: '4 topics' }],
-  },
-];
+export default function HomePage({ onNavigate, projects = [], activeProject, setActiveProject, onStartAudit, loadingProjects = false }) {
+  const [urlInput, setUrlInput] = useState('');
+  const [errorText, setErrorText] = useState('');
+  const [loading, setLoading] = useState(false);
 
-export default function HomePage({ onNavigate }) {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErrorText('');
+    const cleanUrl = urlInput.trim();
+    if (!cleanUrl) {
+      setErrorText('Please enter a valid website domain.');
+      return;
+    }
+
+    // Basic domain validation
+    const domainRegex = /^(https?:\/\/)?([a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,5})(:[0-9]{1,5})?(\/.*)?$/i;
+    if (!domainRegex.test(cleanUrl)) {
+      setErrorText('Please enter a valid domain (e.g. example.com).');
+      return;
+    }
+
+    // Extract domain name (host name)
+    let domainName = cleanUrl.replace(/^(https?:\/\/)?(www\.)?/i, '').split('/')[0];
+    
+    setLoading(true);
+    try {
+      if (onStartAudit) {
+        await onStartAudit(domainName);
+      }
+    } catch (err) {
+      setErrorText(err.message || 'Failed to start audit.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelectSaved = async (slug) => {
+    if (!slug) return;
+    const project = projects.find(p => p.slug === slug);
+    if (project) {
+      setActiveProject(project);
+      setLoading(true);
+      try {
+        if (onStartAudit) {
+          await onStartAudit(project.domain);
+        }
+      } catch (err) {
+        setErrorText(err.message || 'Failed to load project audit.');
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
   return (
-    <div style={{ padding: 32, maxWidth: 1100 }}>
-      {/* Hero */}
-      <div style={{ marginBottom: 32 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 8 }}>Your SEO Workspace</div>
-        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.2, marginBottom: 12, letterSpacing: '-0.5px' }}>
-          Welcome back.<br />Here's what's happening.
-        </h1>
-        <p style={{ fontSize: 14, color: 'var(--text-muted)', maxWidth: 500, lineHeight: 1.6 }}>
-          Tracking <strong style={{ color: 'var(--accent)' }}>{totalKeywordCount.toLocaleString()} keywords</strong> across {clusterDistribution.length} clusters for Singapore · Google, with {brandMentions.length} brand mention citations monitored.
-        </p>
-      </div>
+    <div style={{
+      minHeight: '80vh',
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: '40px 24px',
+      maxWidth: 900,
+      margin: '0 auto',
+      textAlign: 'center'
+    }}>
+      {/* Title */}
+      <h1 style={{
+        fontFamily: 'var(--font-display)',
+        fontSize: '2.5rem',
+        fontWeight: 800,
+        color: 'var(--text-primary)',
+        lineHeight: 1.2,
+        marginBottom: '32px',
+        letterSpacing: '-0.8px',
+        maxWidth: 700
+      }}>
+        Start optimizing your online presence
+      </h1>
 
-      {/* Alert banner */}
-      <div style={{ background: '#fff3cd', border: '1px solid #f59e0b44', borderRadius: 'var(--radius)', padding: '12px 16px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <TrendingUp size={16} color="#d97706" />
-        <span style={{ fontSize: 13, color: '#92400e', fontWeight: 500 }}>
-          {brandMentionKeywords.length} keywords tracked for brand mentions — <button onClick={() => onNavigate('ai-visibility/overview')} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)', fontSize: 13, textDecoration: 'underline', padding: 0 }}>view AI Visibility →</button>
-        </span>
-      </div>
+      {/* Form Container */}
+      <form onSubmit={handleSubmit} style={{
+        display: 'flex',
+        gap: 12,
+        width: '100%',
+        maxWidth: 600,
+        marginBottom: 16
+      }}>
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          background: 'var(--surface)',
+          border: errorText ? '1px solid var(--red)' : '1px solid var(--border)',
+          borderRadius: 'var(--radius)',
+          padding: '6px 16px',
+          boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)',
+          transition: 'border-color 0.2s'
+        }}
+        onFocusCapture={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+        onBlurCapture={e => e.currentTarget.style.borderColor = 'var(--border)'}>
+          <Search size={18} color="var(--text-muted)" />
+          <input
+            value={urlInput}
+            onChange={e => {
+              setUrlInput(e.target.value);
+              setErrorText('');
+            }}
+            placeholder="Enter a website"
+            disabled={loading}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              outline: 'none',
+              fontSize: 15,
+              fontFamily: 'var(--font-body)',
+              color: 'var(--text-primary)',
+              flex: 1,
+              padding: '8px 0'
+            }}
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            fontSize: 15,
+            fontWeight: 700,
+            color: '#000000',
+            background: 'var(--accent)',
+            border: 'none',
+            borderRadius: 'var(--radius)',
+            padding: '0 28px',
+            cursor: 'pointer',
+            transition: 'background 0.2s, transform 0.1s',
+            fontFamily: 'var(--font-body)',
+            boxShadow: '0 4px 12px rgba(250, 204, 21, 0.2)'
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-hover)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'var(--accent)'}
+          onMouseDown={e => e.currentTarget.style.transform = 'scale(0.98)'}
+          onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}>
+          {loading ? (
+            <>
+              <Activity size={16} className="animate-spin" />
+              Auditing...
+            </>
+          ) : (
+            <>
+              Start now
+              <ArrowRight size={16} />
+            </>
+          )}
+        </button>
+      </form>
 
-      {/* Module cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18, marginBottom: 28 }}>
-        {modules.map(m => (
-          <div
-            key={m.id}
-            onClick={() => onNavigate(m.id)}
-            style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '20px', cursor: 'pointer', transition: 'box-shadow 0.2s, transform 0.2s', position: 'relative', overflow: 'hidden' }}
-            onMouseEnter={e => { e.currentTarget.style.boxShadow = 'var(--shadow-md)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-            onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'none'; }}
+      {/* Error Text */}
+      {errorText && (
+        <div style={{ color: 'var(--red)', fontSize: 13.5, fontWeight: 500, marginBottom: 16 }}>
+          {errorText}
+        </div>
+      )}
+
+      {/* Saved Projects Dropdown Selector */}
+      {projects.length > 0 && (
+        <div style={{
+          marginTop: 24,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '12px 20px',
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)'
+        }}>
+          <FolderOpen size={14} color="var(--text-muted)" />
+          <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>
+            Or load a saved project:
+          </span>
+          <select
+            onChange={(e) => handleSelectSaved(e.target.value)}
+            defaultValue=""
+            disabled={loading}
+            style={{
+              background: 'var(--surface-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '4px 10px',
+              fontSize: 13,
+              fontFamily: 'var(--font-body)',
+              color: 'var(--accent)',
+              fontWeight: 600,
+              cursor: 'pointer',
+              outline: 'none'
+            }}
           >
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: m.color }} />
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: m.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
-              <m.icon size={18} color={m.color} />
-            </div>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 700, marginBottom: 6 }}>{m.label}</div>
-            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 16 }}>{m.desc}</p>
-            <div style={{ display: 'flex', gap: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-              {m.stats.map(s => (
-                <div key={s.label} style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>{s.label}</div>
-                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15 }}>{s.value}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{ position: 'absolute', bottom: 16, right: 16 }}>
-              <ArrowRight size={14} color={m.color} />
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Quick actions */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 }}>
-        <Card style={{ padding: '16px 20px' }}>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Quick Actions</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {[
-              ['View all keywords', 'search-visibility/keywords'],
-              ['Run keyword research', 'search-visibility/keyword-research'],
-              ['Schedule content', 'content-engine/search/calendar-builder'],
-              ['Check AI mentions', 'ai-visibility/overview'],
-            ].map(([label, path]) => (
-              <button key={label} onClick={() => onNavigate(path)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'var(--font-body)', fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-light)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-2)'}>
-                {label}
-                <ArrowRight size={12} color="var(--text-muted)" />
-              </button>
+            <option value="" disabled style={{ color: 'var(--text-muted)' }}>Select project...</option>
+            {projects.map(p => (
+              <option key={p.slug} value={p.slug} style={{ color: 'var(--text-primary)' }}>
+                {p.domain || p.name}
+              </option>
             ))}
-          </div>
-        </Card>
-        <Card style={{ padding: '16px 20px' }}>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Top Clusters</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>Keyword clusters by volume of keywords</div>
-          {clusterDistribution.slice(0, 5).map((d, i) => (
-            <div key={d.cluster} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: i < 4 ? '1px solid var(--border)' : 'none' }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>{d.cluster}</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>{d.count} keywords</span>
-            </div>
-          ))}
-          <button onClick={() => onNavigate('search-visibility/keywords-clustering')} style={{ marginTop: 12, width: '100%', fontSize: 12.5, fontWeight: 600, color: 'var(--accent)', background: 'var(--accent-light)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '7px', cursor: 'pointer', fontFamily: 'var(--font-body)' }}>
-            View All Clusters
-          </button>
-        </Card>
-      </div>
+          </select>
+        </div>
+      )}
     </div>
   );
 }

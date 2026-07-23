@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ExternalLink, Plus, Share2, Settings, Info, X, CheckCircle, Globe, Monitor } from 'lucide-react';
-import { fetchDomainRows, fetchKeywordRows, fetchPageRows } from '../../lib/projectsApi';
+import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiAnalysis } from '../../lib/projectsApi';
 
 export default function PositionAnalysisPage({ onNavigate }) {
   const [projects, setProjects] = useState([]);
@@ -11,6 +11,12 @@ export default function PositionAnalysisPage({ onNavigate }) {
   const [aiTab, setAiTab] = useState('Overview');
   const [loading, setLoading] = useState(true);
   const [showReport, setShowReport] = useState(false);
+  const [analysisKeyword, setAnalysisKeyword] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [analysisError, setAnalysisError] = useState('');
+  const [topKeywords, setTopKeywords] = useState([]);
+  const [multiResults, setMultiResults] = useState([]);
 
   // Hidden cards state
   const [closedCards, setClosedCards] = useState({});
@@ -32,6 +38,8 @@ export default function PositionAnalysisPage({ onNavigate }) {
             const kws = await fetchKeywordRows(first.slug);
             if (kws && kws.length > 0 && isMounted) {
               setKwCount(kws.length);
+              const sortedKws = [...kws].sort((a,b) => (b.sv || 0) - (a.sv || 0));
+              setTopKeywords(sortedKws.slice(0, 2).map(k => k.kw));
             }
             const pgs = await fetchPageRows(first.slug);
             if (pgs && pgs.length > 0 && isMounted) {
@@ -58,8 +66,14 @@ export default function PositionAnalysisPage({ onNavigate }) {
       setActiveProject(p);
       try {
         const kws = await fetchKeywordRows(p.slug);
-        if (kws && kws.length > 0) setKwCount(kws.length);
-        else setKwCount(650);
+        if (kws && kws.length > 0) {
+          setKwCount(kws.length);
+          const sortedKws = [...kws].sort((a,b) => (b.sv || 0) - (a.sv || 0));
+          setTopKeywords(sortedKws.slice(0, 2).map(k => k.kw));
+        } else {
+          setKwCount(650);
+          setTopKeywords([]);
+        }
 
         const pgs = await fetchPageRows(p.slug);
         if (pgs && pgs.length > 0) setPageCount(pgs.length);
@@ -72,6 +86,27 @@ export default function PositionAnalysisPage({ onNavigate }) {
 
   const toggleClose = (cardId) => {
     setClosedCards(prev => ({ ...prev, [cardId]: true }));
+  };
+
+  const handleAiAnalysis = async (e) => {
+    e.preventDefault();
+    if (!topKeywords.length || !activeProject) return;
+    setIsAnalyzing(true);
+    setAnalysisError('');
+    setMultiResults([]);
+    try {
+      const results = [];
+      const domain = activeProject.domain || activeProject.name || 'socialoffline.in';
+      for (const kw of topKeywords) {
+        const data = await runAiAnalysis(activeProject.slug, kw, aiTab.toLowerCase(), domain);
+        results.push({ keyword: kw, ...data.result });
+      }
+      setMultiResults(results);
+    } catch (err) {
+      setAnalysisError(err.message);
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const domainDisplay = activeProject?.domain || activeProject?.name || 'ittisa.org';
@@ -244,7 +279,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
 
             {/* Sub-nav tabs */}
             <div style={{ display: 'flex', gap: 6, borderBottom: '1px solid #f1f5f9', pb: 10 }}>
-              {['Overview', 'ChatGPT', 'Gemini', 'AI Mode', 'AI Overview'].map(tab => (
+              {['Overview', 'ChatGPT', 'Gemini', 'Claude', 'AI Overview'].map(tab => (
                 <button
                   key={tab}
                   onClick={() => setAiTab(tab)}
@@ -266,6 +301,61 @@ export default function PositionAnalysisPage({ onNavigate }) {
             </div>
 
             {/* Content Body */}
+            {['ChatGPT', 'Gemini', 'Claude', 'AI Overview'].includes(aiTab) ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <button onClick={handleAiAnalysis} disabled={isAnalyzing || !topKeywords.length} style={{
+                    background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, cursor: isAnalyzing || !topKeywords.length ? 'not-allowed' : 'pointer', opacity: isAnalyzing || !topKeywords.length ? 0.7 : 1
+                  }}>
+                    {isAnalyzing ? 'Analyzing...' : `Analyze Top ${topKeywords.length} Keywords`}
+                  </button>
+                  {topKeywords.length > 0 && (
+                    <span style={{ fontSize: 13, color: '#64748b' }}>
+                      Keywords: {topKeywords.map(k => `"${k}"`).join(', ')}
+                    </span>
+                  )}
+                </div>
+                {analysisError && <div style={{ color: '#ef4444', fontSize: 13 }}>{analysisError}</div>}
+                
+                {multiResults.map((res, idx) => (
+                  <div key={idx} style={{ background: '#f8fafc', padding: 16, borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13, color: '#334155' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, borderBottom: '1px solid #e2e8f0', paddingBottom: 8 }}>
+                      <span style={{ fontWeight: 800, color: '#7c3aed', fontSize: 15 }}>Keyword: {res.keyword}</span>
+                      <div style={{ display: 'flex', gap: 16 }}>
+                        <span style={{ fontWeight: 700, color: '#0f172a' }}>Confidence: {res.confidence_score}/100</span>
+                        <span style={{ fontWeight: 600, color: res.status === 'ok' ? '#10b981' : '#ef4444' }}>Status: {res.status}</span>
+                      </div>
+                    </div>
+                    
+                    <div style={{ fontWeight: 700, marginBottom: 8, color: '#0f172a' }}>Top 5 Ranking URLs:</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {(res.results || []).slice(0, 5).map((urlData, i) => {
+                         const isOurDomain = activeProject?.domain && urlData.url.toLowerCase().includes(activeProject.domain.toLowerCase());
+                         return (
+                           <div key={i} style={{ 
+                             padding: 8, 
+                             borderRadius: 4, 
+                             background: isOurDomain ? '#dcfce3' : '#fff',
+                             border: isOurDomain ? '1px solid #22c55e' : '1px solid #e2e8f0',
+                             display: 'flex',
+                             flexDirection: 'column',
+                             gap: 2
+                           }}>
+                             <span style={{ fontWeight: isOurDomain ? 700 : 600, color: isOurDomain ? '#166534' : '#0f172a' }}>
+                               {i + 1}. {urlData.title || '(No Title)'} {isOurDomain && '⭐ (Our Domain)'}
+                             </span>
+                             <span style={{ color: '#64748b', fontSize: 12, wordBreak: 'break-all' }}>{urlData.url}</span>
+                           </div>
+                         );
+                      })}
+                      {(!res.results || res.results.length === 0) && (
+                        <div style={{ color: '#94a3b8', fontStyle: 'italic' }}>No ranking URLs found.</div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
             <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 24, alignItems: 'center' }}>
               {/* Left Meter */}
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
@@ -333,6 +423,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                 ))}
               </div>
             </div>
+            )}
           </div>
         )}
 
@@ -768,6 +859,25 @@ export default function PositionAnalysisPage({ onNavigate }) {
                 </div>
               </div>
             </div>
+
+            {multiResults && multiResults.length > 0 && (
+              <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 16, maxHeight: '40vh', overflowY: 'auto' }}>
+                <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#0f172a' }}>AI SEO Summaries</h4>
+                {multiResults.map((res, idx) => (
+                  <div key={idx} style={{ background: '#f8fafc', padding: 16, borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13, color: '#334155' }}>
+                    <div style={{ fontWeight: 800, color: '#7c3aed', fontSize: 14, marginBottom: 8 }}>Keyword: {res.keyword}</div>
+                    <div style={{ fontWeight: 700, marginBottom: 4, color: '#0f172a' }}>SEO Summary:</div>
+                    <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5, marginBottom: 12 }}>{res.seo_summary}</div>
+                    <div style={{ fontWeight: 700, marginBottom: 4, color: '#0f172a' }}>Top URLs:</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {(res.results || []).slice(0, 5).map((u, i) => (
+                        <div key={i} style={{ color: '#64748b', fontSize: 12, wordBreak: 'break-all' }}>{i + 1}. {u.url}</div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
               <button
