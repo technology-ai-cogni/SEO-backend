@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Plus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2, RefreshCw } from 'lucide-react';
+import { Search, Plus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2, RefreshCw, Filter, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { Badge } from '../ui/Card';
@@ -13,6 +13,45 @@ import {
 } from '../../lib/projectsApi';
 
 // ─── shared tiny components ────────────────────────────────────────────────
+
+function downloadCSV(filename, rows) {
+  if (!rows || !rows.length) return;
+  const sample = rows[0];
+  const keys = Object.keys(sample).filter(k => {
+    const v = sample[k];
+    return typeof v !== 'function' && typeof v !== 'symbol' && (!v || typeof v !== 'object' || Array.isArray(v));
+  });
+
+  if (!keys.length) return;
+
+  const headerRow = keys.map(k => {
+    let name = k.replace(/([A-Z])/g, ' $1').trim();
+    name = name.charAt(0).toUpperCase() + name.slice(1);
+    return `"${name.replace(/"/g, '""')}"`;
+  }).join(',');
+
+  const bodyRows = rows.map(row =>
+    keys.map(k => {
+      let val = row[k];
+      if (Array.isArray(val)) val = val.join('; ');
+      else if (val === null || val === undefined) val = '';
+      else val = String(val);
+      val = val.replace(/"/g, '""');
+      return `"${val}"`;
+    }).join(',')
+  );
+
+  const csvString = [headerRow, ...bodyRows].join('\n');
+  const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${(filename || 'export').replace(/[^a-z0-9_-]/gi, '_')}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 function Input({ label, hint, placeholder, required, value, onChange, type = 'text' }) {
   return (
@@ -224,6 +263,292 @@ function Checkbox({ label, checked, onChange }) {
       </div>
       <span style={{ fontSize: 13.5, color: 'var(--text-primary)' }}>{label}</span>
     </label>
+  );
+}
+
+// ─── Filter Sub-Dropdown for each field ─────────────────────────────────────
+function FilterFieldDropdown({ label, options, selectedValues, onToggle }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const selectedCount = selectedValues.length;
+  const buttonText = selectedCount === 0
+    ? `All ${label}s`
+    : selectedCount === 1
+      ? selectedValues[0]
+      : `${selectedCount} selected`;
+
+  return (
+    <div ref={ref} style={{ position: 'relative', width: '100%' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(p => !p)}
+        style={{
+          width: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          border: selectedCount > 0 ? '1.5px solid #7c3aed' : '1.5px solid #d1d5db',
+          borderRadius: 8, padding: '7px 12px', fontSize: 13,
+          fontFamily: 'var(--font-body)',
+          background: selectedCount > 0 ? '#f5f3ff' : '#fff',
+          color: selectedCount > 0 ? '#7c3aed' : 'var(--text-primary)',
+          cursor: 'pointer', outline: 'none', transition: 'all 0.15s',
+          fontWeight: selectedCount > 0 ? 600 : 400,
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {buttonText}
+        </span>
+        <ChevronDown size={14} color={selectedCount > 0 ? '#7c3aed' : 'var(--text-muted)'} style={{ flexShrink: 0, marginLeft: 6 }} />
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 60,
+            marginTop: 4, background: '#fff',
+            border: '1.5px solid #d1d5db', borderRadius: 8,
+            boxShadow: '0 6px 20px rgba(0,0,0,0.12)',
+            maxHeight: 180, overflowY: 'auto', padding: '4px 0',
+          }}
+        >
+          {options.map(val => {
+            const selected = selectedValues.includes(val);
+            return (
+              <div
+                key={val}
+                onClick={() => onToggle(val)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 12px', fontSize: 12.5, cursor: 'pointer',
+                  background: selected ? '#f5f3ff' : 'transparent',
+                  color: 'var(--text-primary)',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = selected ? '#ede9fe' : '#f9fafb'}
+                onMouseLeave={e => e.currentTarget.style.background = selected ? '#f5f3ff' : 'transparent'}
+              >
+                <div style={{
+                  width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                  border: selected ? '2px solid #7c3aed' : '1.5px solid #d1d5db',
+                  background: selected ? '#7c3aed' : '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  {selected && <Check size={9} color="#fff" strokeWidth={3} />}
+                </div>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{val}</span>
+              </div>
+            );
+          })}
+          {options.length === 0 && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '6px 12px' }}>No options available</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Shared Table Filter Dropdown ──────────────────────────────────────────
+function TableFilterDropdown({ filters, rows, activeFilters, onFiltersChange }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, right: 0 });
+  const btnRef = useRef(null);
+  const panelRef = useRef(null);
+
+  const updatePos = () => {
+    if (btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setPos({
+        top: rect.bottom + 6,
+        right: window.innerWidth - rect.right,
+      });
+    }
+  };
+
+  const toggleOpen = () => {
+    if (!open) updatePos();
+    setOpen(p => !p);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    updatePos();
+    const handler = (e) => {
+      if (panelRef.current && !panelRef.current.contains(e.target) && btnRef.current && !btnRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener('scroll', updatePos, true);
+    window.addEventListener('resize', updatePos);
+    document.addEventListener('mousedown', handler);
+    return () => {
+      window.removeEventListener('scroll', updatePos, true);
+      window.removeEventListener('resize', updatePos);
+      document.removeEventListener('mousedown', handler);
+    };
+  }, [open]);
+
+  const activeCount = filters.reduce((acc, f) => {
+    const val = activeFilters[f.key];
+    if (f.type === 'select' && val && val.length > 0) return acc + 1;
+    if (f.type === 'range' && val && (val.min !== '' || val.max !== '')) return acc + 1;
+    return acc;
+  }, 0);
+
+  const clearAll = () => {
+    const cleared = {};
+    filters.forEach(f => {
+      cleared[f.key] = f.type === 'range' ? { min: '', max: '' } : [];
+    });
+    onFiltersChange(cleared);
+  };
+
+  const toggleSelectValue = (key, val) => {
+    const current = activeFilters[key] || [];
+    const updated = current.includes(val) ? current.filter(v => v !== val) : [...current, val];
+    onFiltersChange({ ...activeFilters, [key]: updated });
+  };
+
+  const updateRange = (key, field, value) => {
+    const current = activeFilters[key] || { min: '', max: '' };
+    onFiltersChange({ ...activeFilters, [key]: { ...current, [field]: value } });
+  };
+
+  const uniqueVals = {};
+  filters.forEach(f => {
+    if (f.type === 'select') {
+      if (f.options) {
+        uniqueVals[f.key] = f.options;
+      } else {
+        const set = new Set();
+        (rows || []).forEach(r => { const v = r[f.key]; if (v != null && v !== '') set.add(String(v)); });
+        uniqueVals[f.key] = [...set].sort();
+      }
+    }
+  });
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        ref={btnRef}
+        onClick={toggleOpen}
+        title="Filter"
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+          background: activeCount > 0 ? '#f5f3ff' : 'none',
+          border: activeCount > 0 ? '1.5px solid #7c3aed' : '1.5px solid var(--border)',
+          borderRadius: 8, padding: 8,
+          cursor: 'pointer', color: activeCount > 0 ? '#7c3aed' : 'var(--text-muted)',
+          transition: 'all 0.15s',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.borderColor = activeCount > 0 ? '#7c3aed' : 'var(--border-hover)'; e.currentTarget.style.color = activeCount > 0 ? '#7c3aed' : 'var(--text-primary)'; }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = activeCount > 0 ? '#7c3aed' : 'var(--border)'; e.currentTarget.style.color = activeCount > 0 ? '#7c3aed' : 'var(--text-muted)'; }}
+      >
+        <Filter size={14} />
+        {activeCount > 0 && (
+          <span style={{
+            position: 'absolute', top: -6, right: -6,
+            background: '#7c3aed', color: '#fff', fontSize: 10, fontWeight: 700,
+            width: 16, height: 16, borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>{activeCount}</span>
+        )}
+      </button>
+
+      {open && createPortal(
+        <div
+          ref={panelRef}
+          style={{
+            position: 'fixed', top: pos.top, right: pos.right, zIndex: 99999,
+            width: 310,
+            background: '#fff', border: '1px solid var(--border)', borderRadius: 10,
+            boxShadow: '0 12px 36px rgba(0,0,0,0.18)',
+            maxHeight: 460, overflowY: 'auto',
+          }}
+        >
+          <div style={{
+            padding: '12px 16px', borderBottom: '1px solid var(--border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            background: '#fff', position: 'sticky', top: 0, zIndex: 2,
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>Filters</span>
+            {activeCount > 0 && (
+              <button
+                onClick={clearAll}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: 12, fontWeight: 600, color: '#7c3aed',
+                  fontFamily: 'var(--font-body)',
+                }}
+              >Clear all</button>
+            )}
+          </div>
+
+          <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {filters.map(f => {
+              const isActive = f.type === 'select'
+                ? (activeFilters[f.key] || []).length > 0
+                : activeFilters[f.key] && (activeFilters[f.key].min !== '' || activeFilters[f.key].max !== '');
+
+              return (
+                <div key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{
+                    fontSize: 12, fontWeight: 600, color: isActive ? '#7c3aed' : 'var(--text-primary)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  }}>
+                    <span>{f.label}</span>
+                  </div>
+
+                  {f.type === 'select' && (
+                    <FilterFieldDropdown
+                      label={f.label}
+                      options={uniqueVals[f.key] || []}
+                      selectedValues={activeFilters[f.key] || []}
+                      onToggle={val => toggleSelectValue(f.key, val)}
+                    />
+                  )}
+
+                  {f.type === 'range' && (
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <input
+                        type="number"
+                        placeholder="Min"
+                        value={activeFilters[f.key]?.min || ''}
+                        onChange={e => updateRange(f.key, 'min', e.target.value)}
+                        style={{
+                          flex: 1, padding: '6px 10px', fontSize: 12, borderRadius: 6,
+                          border: '1px solid var(--border)', outline: 'none',
+                          fontFamily: 'var(--font-body)',
+                        }}
+                      />
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>to</span>
+                      <input
+                        type="number"
+                        placeholder="Max"
+                        value={activeFilters[f.key]?.max || ''}
+                        onChange={e => updateRange(f.key, 'max', e.target.value)}
+                        style={{
+                          padding: '7px 10px', fontSize: 12.5, fontFamily: 'var(--font-body)',
+                          outline: 'none', width: '100%', background: '#fff',
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -850,60 +1175,266 @@ function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedPro
 
 // ─── Add Competitors Modal ───────────────────────────────────────────────────
 
-function AddCompetitorsModal({ open, onClose, onAdd, projects }) {
+function ChooseProjectModal({ open, onClose, onApply, projects }) {
   const [projectSlug, setProjectSlug] = useState('');
-  const [regions, setRegions] = useState([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [apiError, setApiError] = useState('');
+  const [selectedCluster, setSelectedCluster] = useState('');
+  const [selectedCategories, setSelectedCategories] = useState([]);
+  const [clusters, setClusters] = useState([]);
+  const [categoryMap, setCategoryMap] = useState({}); // cluster → [categories]
+  const [loadingKw, setLoadingKw] = useState(false);
+  const [catDropdownOpen, setCatDropdownOpen] = useState(false);
+  const catDropdownRef = useRef(null);
 
   const resetForm = () => {
-    setProjectSlug(''); setRegions([]); setApiError('');
+    setProjectSlug(''); setSelectedCluster(''); setSelectedCategories([]);
+    setClusters([]); setCategoryMap({});
   };
 
   const handleClose = () => { resetForm(); onClose(); };
 
-  const handleAdd = async () => {
-    const project = projects.find(p => p.slug === projectSlug);
-    if (!project) {
-      setApiError('Project is required.');
-      return;
-    }
-    setApiError('');
-    setSubmitting(true);
-    try {
-      await onAdd({ domain: project.domain, name: project.name, da: project.da ?? null, targetRegions: regions, projectSlug });
-      handleClose();
-    } catch (err) {
-      setApiError(err.message || 'Failed to add competitor.');
-    } finally {
-      setSubmitting(false);
+  // Fetch keyword rows when project changes → derive clusters & categories
+  useEffect(() => {
+    if (!projectSlug) { setClusters([]); setCategoryMap({}); setSelectedCluster(''); setSelectedCategories([]); return; }
+    let cancelled = false;
+    setLoadingKw(true);
+    fetchKeywordRows(projectSlug).then(rows => {
+      if (cancelled) return;
+      const clusterSet = new Set();
+      const cMap = {};
+      rows.forEach(r => {
+        if (r.cluster) {
+          clusterSet.add(r.cluster);
+          if (!cMap[r.cluster]) cMap[r.cluster] = new Set();
+          if (r.category) cMap[r.cluster].add(r.category);
+        }
+      });
+      const clusterList = [...clusterSet].sort();
+      const catMapArr = {};
+      Object.keys(cMap).forEach(k => { catMapArr[k] = [...cMap[k]].sort(); });
+      setClusters(clusterList);
+      setCategoryMap(catMapArr);
+      setSelectedCluster('');
+      setSelectedCategories([]);
+    }).finally(() => { if (!cancelled) setLoadingKw(false); });
+    return () => { cancelled = true; };
+  }, [projectSlug]);
+
+  // Reset categories when cluster changes
+  useEffect(() => { setSelectedCategories([]); }, [selectedCluster]);
+
+  const portalRef = useRef(null);
+
+  // Close category dropdown on outside click
+  useEffect(() => {
+    if (!catDropdownOpen) return;
+    const handler = (e) => {
+      if (
+        catDropdownRef.current && !catDropdownRef.current.contains(e.target) &&
+        portalRef.current && !portalRef.current.contains(e.target)
+      ) {
+        setCatDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [catDropdownOpen]);
+
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+
+  const updateDropdownPos = () => {
+    if (catDropdownRef.current) {
+      const rect = catDropdownRef.current.getBoundingClientRect();
+      setDropdownPos({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+      });
     }
   };
 
+  const toggleDropdown = () => {
+    if (!catDropdownOpen) {
+      updateDropdownPos();
+    }
+    setCatDropdownOpen(prev => !prev);
+  };
+
+  useEffect(() => {
+    if (catDropdownOpen) {
+      updateDropdownPos();
+      window.addEventListener('scroll', updateDropdownPos, true);
+      window.addEventListener('resize', updateDropdownPos);
+      return () => {
+        window.removeEventListener('scroll', updateDropdownPos, true);
+        window.removeEventListener('resize', updateDropdownPos);
+      };
+    }
+  }, [catDropdownOpen]);
+
+  const availableCategories = selectedCluster ? (categoryMap[selectedCluster] || []) : [];
+
+  const toggleCategory = (cat) => {
+    setSelectedCategories(prev =>
+      prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+    );
+  };
+
+  const handleApply = () => {
+    const project = projects.find(p => p.slug === projectSlug);
+    if (!project) return;
+    onApply({
+      project,
+      cluster: selectedCluster || null,
+      categories: selectedCategories.length > 0 ? selectedCategories : null,
+    });
+    handleClose();
+  };
+
   return (
-    <Modal open={open} onClose={handleClose} title="Add Competitors"
-      footer={<><Btn variant="primary" onClick={handleAdd} style={submitting ? { opacity: 0.6, pointerEvents: 'none' } : {}}>{submitting ? 'Adding…' : 'Add Competitor'}</Btn><Btn variant="outline" onClick={handleClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
+    <Modal open={open} onClose={handleClose} title="Choose Project"
+      footer={<><Btn variant="primary" onClick={handleApply} style={!projectSlug ? { opacity: 0.5, pointerEvents: 'none' } : {}}>Apply</Btn><Btn variant="outline" onClick={handleClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
     >
-      {apiError && (
-        <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{apiError}</span>
-      )}
+      {/* Project selector */}
       <Select
-        label="Project"
+        label="Choose Project"
         placeholder={projects.length ? 'Select a project' : 'No projects yet — add one in the Domain tab'}
         value={projectSlug}
         onChange={setProjectSlug}
         options={projects.map(p => ({ value: p.slug, label: p.name }))}
       />
 
-      <div style={{ height: 1, background: 'var(--border)' }} />
+      {loadingKw && (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 0' }}>Loading clusters…</div>
+      )}
 
-      <CountryTagInput
-        label="Regions to Track"
-        tags={regions}
-        onAdd={r => setRegions(p => [...p, r])}
-        onRemove={r => setRegions(p => p.filter(x => x !== r))}
-        placeholder="e.g. India, Singapore"
-      />
+      {/* Cluster selector */}
+      {projectSlug && clusters.length > 0 && (
+        <Select
+          label="Choose Cluster"
+          placeholder="Select a cluster"
+          value={selectedCluster}
+          onChange={setSelectedCluster}
+          options={clusters.map(c => ({ value: c, label: c }))}
+        />
+      )}
+      {projectSlug && !loadingKw && clusters.length === 0 && (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 0' }}>No clusters found for this project.</div>
+      )}
+
+      {/* Multi-select Category dropdown */}
+      {selectedCluster && availableCategories.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Choose Category</span>
+          <div ref={catDropdownRef} style={{ position: 'relative' }}>
+            <div
+              onClick={toggleDropdown}
+              style={{
+                width: '100%', border: '1.5px solid #d1d5db', borderRadius: 8,
+                padding: '8px 36px 8px 14px', fontSize: 13, fontFamily: 'var(--font-body)',
+                background: '#fff', cursor: 'pointer', minHeight: 40,
+                display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center',
+                boxSizing: 'border-box',
+              }}
+            >
+              {selectedCategories.length === 0 ? (
+                <span style={{ color: 'var(--text-muted)' }}>Select categories</span>
+              ) : selectedCategories.map(cat => (
+                <span key={cat} style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  background: '#ede9fe', color: '#7c3aed', borderRadius: 12,
+                  padding: '2px 10px', fontSize: 12, fontWeight: 600,
+                }}>
+                  {cat}
+                  <X size={12} style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); toggleCategory(cat); }} />
+                </span>
+              ))}
+            </div>
+            <ChevronDown size={14} color="var(--text-muted)" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+
+            {catDropdownOpen && createPortal(
+              <>
+                <div
+                  style={{ position: 'fixed', inset: 0, zIndex: 99998 }}
+                  onClick={() => setCatDropdownOpen(false)}
+                />
+                <div
+                  ref={portalRef}
+                  style={{
+                    position: 'fixed',
+                    top: dropdownPos.top,
+                    left: dropdownPos.left,
+                    width: dropdownPos.width,
+                    zIndex: 99999,
+                    background: '#fff',
+                    border: '1.5px solid #d1d5db',
+                    borderRadius: 8,
+                    boxShadow: '0 8px 30px rgba(0,0,0,0.18)',
+                    maxHeight: 280,
+                    overflowY: 'auto',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <div style={{
+                    padding: '8px 12px', borderBottom: '1px solid #e5e7eb',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    background: '#f9fafb', sticky: 'top', position: 'sticky', top: 0, zIndex: 2,
+                  }}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCategories(availableCategories)}
+                      style={{ background: 'none', border: 'none', color: '#7c3aed', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}
+                    >
+                      Select All ({availableCategories.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCategories([])}
+                      style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+
+                  {availableCategories.map(cat => {
+                    const isSelected = selectedCategories.includes(cat);
+                    return (
+                      <div
+                        key={cat}
+                        onClick={() => toggleCategory(cat)}
+                        style={{
+                          padding: '9px 14px', fontSize: 13, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          background: isSelected ? '#f5f3ff' : 'transparent',
+                          borderBottom: '1px solid #f9fafb',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = isSelected ? '#ede9fe' : '#f9fafb'}
+                        onMouseLeave={e => e.currentTarget.style.background = isSelected ? '#f5f3ff' : 'transparent'}
+                      >
+                        <div style={{
+                          width: 16, height: 16, borderRadius: 3,
+                          border: isSelected ? '2px solid #7c3aed' : '2px solid #d1d5db',
+                          background: isSelected ? '#7c3aed' : '#fff',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          flexShrink: 0,
+                        }}>
+                          {isSelected && <Check size={11} color="#fff" strokeWidth={3} />}
+                        </div>
+                        <span style={{ color: 'var(--text-primary)', fontWeight: isSelected ? 600 : 400 }}>{cat}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>,
+              document.body
+            )}
+          </div>
+        </div>
+      )}
+      {selectedCluster && availableCategories.length === 0 && (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 0' }}>No categories found under this cluster.</div>
+      )}
     </Modal>
   );
 }
@@ -1462,13 +1993,50 @@ function BulkDeleteModal({ open, onClose, count, onConfirm, itemLabel = 'page' }
 
 function ActionsDropdown({ selectedCount, onBulkEdit, onBulkDelete }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, right: 0 });
+  const btnRef = useRef(null);
+  const panelRef = useRef(null);
+
+  const updatePos = () => {
+    if (btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setPos({
+        top: rect.bottom + 4,
+        right: window.innerWidth - rect.right,
+      });
+    }
+  };
+
+  const toggleOpen = () => {
+    if (!open) updatePos();
+    setOpen(p => !p);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    updatePos();
+    const handler = (e) => {
+      if (panelRef.current && !panelRef.current.contains(e.target) && btnRef.current && !btnRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener('scroll', updatePos, true);
+    window.addEventListener('resize', updatePos);
+    document.addEventListener('mousedown', handler);
+    return () => {
+      window.removeEventListener('scroll', updatePos, true);
+      window.removeEventListener('resize', updatePos);
+      document.removeEventListener('mousedown', handler);
+    };
+  }, [open]);
 
   if (selectedCount === 0) return null;
 
   return (
     <div style={{ position: 'relative' }}>
       <button
-        onClick={() => setOpen(p => !p)}
+        ref={btnRef}
+        onClick={toggleOpen}
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
           background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
@@ -1481,33 +2049,34 @@ function ActionsDropdown({ selectedCount, onBulkEdit, onBulkDelete }) {
         Actions ({selectedCount})
         <ChevronDown size={13} />
       </button>
-      {open && (
-        <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 49 }} onClick={() => setOpen(false)} />
-          <div style={{
-            position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 50,
+      {open && createPortal(
+        <div
+          ref={panelRef}
+          style={{
+            position: 'fixed', top: pos.top, right: pos.right, zIndex: 99999,
             background: '#fff', border: '1px solid var(--border)', borderRadius: 8,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.12)', minWidth: 160, overflow: 'hidden',
-          }}>
-            <button
-              onClick={() => { setOpen(false); onBulkEdit(); }}
-              style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--text-primary)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            >
-              <Edit2 size={14} color="var(--text-muted)" /> Bulk Edit
-            </button>
-            <div style={{ height: 1, background: 'var(--border)' }} />
-            <button
-              onClick={() => { setOpen(false); onBulkDelete(); }}
-              style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--red)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
-              onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            >
-              <Trash2 size={14} /> Bulk Delete
-            </button>
-          </div>
-        </>
+            boxShadow: '0 8px 24px rgba(0,0,0,0.18)', minWidth: 160, overflow: 'hidden',
+          }}
+        >
+          <button
+            onClick={() => { setOpen(false); onBulkEdit(); }}
+            style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--text-primary)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <Edit2 size={14} color="var(--text-muted)" /> Bulk Edit
+          </button>
+          <div style={{ height: 1, background: 'var(--border)' }} />
+          <button
+            onClick={() => { setOpen(false); onBulkDelete(); }}
+            style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--red)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
+            onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <Trash2 size={14} /> Bulk Delete
+          </button>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -1538,6 +2107,28 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
   const [saveError, setSaveError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const hasPendingChanges = pendingUpdates.size > 0 || pendingDeleteIds.size > 0;
+
+  const [tableFilters, setTableFilters] = useState({
+    cluster: [],
+    category: [],
+    targetCategory: [],
+    targetType: [],
+  });
+
+  const filterConfigs = [
+    { key: 'cluster', label: 'Cluster', type: 'select' },
+    { key: 'category', label: 'Category', type: 'select' },
+    { key: 'targetCategory', label: 'Target Category', type: 'select', options: ['Blogs', 'Landing Page'] },
+    { key: 'targetType', label: 'Target Type', type: 'select', options: ['Commercial', 'Informational'] },
+  ];
+
+  const filteredRows = rows.filter(r => {
+    if (tableFilters.cluster?.length && !tableFilters.cluster.includes(r.cluster)) return false;
+    if (tableFilters.category?.length && !tableFilters.category.includes(r.category)) return false;
+    if (tableFilters.targetCategory?.length && !tableFilters.targetCategory.includes(r.targetCategory)) return false;
+    if (tableFilters.targetType?.length && !tableFilters.targetType.includes(r.targetType)) return false;
+    return true;
+  });
 
   useEffect(() => {
     setRows(project.detailPages || []);
@@ -1693,12 +2284,33 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
         {saveError && (
           <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError}</span>
         )}
+        <TableFilterDropdown
+          filters={filterConfigs}
+          rows={rows}
+          activeFilters={tableFilters}
+          onFiltersChange={setTableFilters}
+        />
         <ActionsDropdown
           selectedCount={selectedRows.size}
           onBulkEdit={() => setShowBulkEdit(true)}
           onBulkDelete={() => setShowBulkDelete(true)}
         />
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{rows.length} page{rows.length !== 1 ? 's' : ''}</span>
+        <button
+          onClick={() => downloadCSV(`${project?.name || 'pages'}_detail`, filteredRows)}
+          title="Download CSV"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--surface-2)', color: 'var(--text-secondary)',
+            border: '1px solid var(--border)', borderRadius: 8,
+            padding: '7px 10px', cursor: 'pointer',
+            fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+        >
+          <Download size={14} />
+        </button>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{filteredRows.length} page{filteredRows.length !== 1 ? 's' : ''}</span>
         {(hasPendingChanges || saving) && (
           <button
             onClick={handleSave}
@@ -1758,7 +2370,9 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
             <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
           ) : rows.length === 0 ? (
             <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No pages added yet. Use Add Pages to import.</td></tr>
-          ) : rows.map((r, i) => (
+          ) : filteredRows.length === 0 ? (
+            <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No pages match the selected filters.</td></tr>
+          ) : filteredRows.map((r, i) => (
             <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}
               onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
@@ -1846,6 +2460,24 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
     targetGeoChecked: false, targetGeoVals: [],
     priorityChecked: false, priorityVals: []
   });
+
+  const [tableFilters, setTableFilters] = useState({
+    cluster: [],
+    category: [],
+    type: [],
+    targetType: [],
+    targetSubtype: [],
+    priority: [],
+  });
+
+  const kwFilterConfigs = [
+    { key: 'cluster', label: 'Cluster', type: 'select' },
+    { key: 'category', label: 'Category', type: 'select' },
+    { key: 'type', label: 'Type', type: 'select', options: ['AI Mode', 'AI Overview', 'Google', 'ChatGPT', 'Gemini'] },
+    { key: 'targetType', label: 'Target Type', type: 'select', options: ['Blogs', 'Landing Page'] },
+    { key: 'targetSubtype', label: 'Target Subtype', type: 'select', options: ['Informational', 'Commercial'] },
+    { key: 'priority', label: 'Priority', type: 'select', options: ['P1', 'P2', 'P3', 'P4', 'P5'] },
+  ];
 
   const [tempKwInput, setTempKwInput] = useState('');
   const [tempGeoInput, setTempGeoInput] = useState('');
@@ -2158,14 +2790,38 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
       if (search && !r.kw?.toLowerCase().includes(search.toLowerCase())) return false;
       if (columnFilters.targetType && r.targetType !== columnFilters.targetType) return false;
       if (columnFilters.targetSubtype && r.targetSubtype !== columnFilters.targetSubtype) return false;
+      if (tableFilters.cluster?.length && !tableFilters.cluster.includes(r.cluster)) return false;
+      if (tableFilters.category?.length && !tableFilters.category.includes(r.category)) return false;
+      if (tableFilters.type?.length && !tableFilters.type.includes(r.type)) return false;
+      if (tableFilters.targetType?.length && !tableFilters.targetType.includes(r.targetType)) return false;
+      if (tableFilters.targetSubtype?.length && !tableFilters.targetSubtype.includes(r.targetSubtype)) return false;
+      if (tableFilters.priority?.length && !tableFilters.priority.includes(r.priority)) return false;
       return true;
     });
+
+  const visibleRows = filteredIndices.map(i => {
+    const r = rows[i] || {};
+    return {
+      Keyword: r.kw || r.keyword || '',
+      'Search Volume': r.sv ?? r.searchVolume ?? '',
+      'KW Difficulty': r.kwDiff ?? r.kd ?? '',
+      Type: r.type || '',
+      Cluster: r.cluster || '',
+      Category: r.category || '',
+      'Target Type': r.targetType || '',
+      'Target Subtype': r.targetSubtype || '',
+      'Target Geo': r.targetGeo || '',
+      Priority: r.priority || '',
+      'Landing Page': r.landingPage || '',
+      Rank: r.rank ?? '',
+    };
+  });
 
   const pageCount = Math.max(1, Math.ceil(filteredIndices.length / KW_PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const pagedIndices = filteredIndices.slice((safePage - 1) * KW_PAGE_SIZE, safePage * KW_PAGE_SIZE);
 
-  useEffect(() => { setPage(1); }, [search, columnFilters, project]);
+  useEffect(() => { setPage(1); }, [search, columnFilters, tableFilters, project]);
 
   useEffect(() => {
     setRows(project.detailKeywords || []);
@@ -2513,11 +3169,34 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
         </>
         )}
 
+        <TableFilterDropdown
+          filters={kwFilterConfigs}
+          rows={rows}
+          activeFilters={tableFilters}
+          onFiltersChange={setTableFilters}
+        />
+
         <ActionsDropdown
           selectedCount={selectedRows.size}
           onBulkEdit={() => setShowBulkEdit(true)}
           onBulkDelete={() => setShowBulkDelete(true)}
         />
+
+        <button
+          onClick={() => downloadCSV(`${project?.name || 'keywords'}_clusters`, visibleRows)}
+          title="Download CSV"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--surface-2)', color: 'var(--text-secondary)',
+            border: '1px solid var(--border)', borderRadius: 8,
+            padding: '7px 10px', cursor: 'pointer',
+            fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+        >
+          <Download size={14} />
+        </button>
 
         {/* Robot Face AI Cluster Button */}
         <button
@@ -2790,6 +3469,36 @@ function CompetitorDetailView({ competitor, onBack }) {
           {competitor.domain && competitor.name && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>{competitor.domain}</span>}
         </div>
         <div style={{ flex: 1 }} />
+        <button
+          onClick={() => {
+            const rowsToExport = details.map(d => ({
+              Domain: d.domain,
+              Name: d.name,
+              Regions: (d.regions || []).join('; '),
+              DA: d.da ?? '',
+              'Ranking Keywords': d.rankingKeywords,
+              Location: d.location,
+              'Common KWs': Math.round(((d.commonKw ?? 0) / 100) * d.totalKw),
+              'Total KWs': d.totalKw,
+              'AI Comp Level': d.aiCompLevel,
+              'SERP Comp Level': d.serpCompLevel,
+              'Comp Level': d.compLevel,
+            }));
+            downloadCSV(`${title}_competitor_detail`, rowsToExport);
+          }}
+          title="Download CSV"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--surface-2)', color: 'var(--text-secondary)',
+            border: '1px solid var(--border)', borderRadius: 8,
+            padding: '7px 10px', cursor: 'pointer',
+            fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+        >
+          <Download size={14} />
+        </button>
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{details.length} entr{details.length !== 1 ? 'ies' : 'y'}</span>
       </div>
 
@@ -3056,7 +3765,7 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, loading
           ) : error ? (
             <tr><td colSpan={4} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
           ) : rows.length === 0 ? (
-            <tr><td colSpan={4} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors tracked yet. Click <strong>+ Add Competitors</strong> to get started.</td></tr>
+            <tr><td colSpan={4} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors tracked yet. Click <strong>+ Choose Project</strong> to get started.</td></tr>
           ) : rows.map((p, i) => (
             <tr key={p.slug} style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
@@ -3091,13 +3800,28 @@ function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [bulkError, setBulkError] = useState('');
 
-  // `competitors` is always the FULL list (never pre-filtered) so that
-  // competitors.indexOf(c) below still resolves to the right index for
-  // onSelectCompetitor/setEditingIdx, which the parent uses to index that
-  // same full array -- only `filtered`/`paged` (what's rendered, scoped +
-  // sorted + paginated) are derived copies. Bulk selection tracks by id
-  // instead (stable across sorting/pagination, unlike position).
-  const filtered = (scopedProject ? competitors.filter(c => c.projectSlug === scopedProject.slug) : competitors)
+  const [tableFilters, setTableFilters] = useState({
+    location: [],
+    da: { min: '', max: '' },
+    commonKw: { min: '', max: '' },
+  });
+
+  const competitorFilterConfigs = [
+    { key: 'location', label: 'Location', type: 'select' },
+    { key: 'da', label: 'DA Range', type: 'range' },
+    { key: 'commonKw', label: 'Common KW Range', type: 'range' },
+  ];
+
+  const baseFiltered = scopedProject ? competitors.filter(c => c.projectSlug === scopedProject.slug) : competitors;
+  const filtered = baseFiltered
+    .filter(c => {
+      if (tableFilters.location?.length && !tableFilters.location.includes(c.location)) return false;
+      if (tableFilters.da?.min !== '' && (c.da == null || Number(c.da) < Number(tableFilters.da.min))) return false;
+      if (tableFilters.da?.max !== '' && (c.da == null || Number(c.da) > Number(tableFilters.da.max))) return false;
+      if (tableFilters.commonKw?.min !== '' && (c.commonKw == null || Number(c.commonKw) < Number(tableFilters.commonKw.min))) return false;
+      if (tableFilters.commonKw?.max !== '' && (c.commonKw == null || Number(c.commonKw) > Number(tableFilters.commonKw.max))) return false;
+      return true;
+    })
     .slice()
     .sort((a, b) => (b.commonKw ?? 0) - (a.commonKw ?? 0));
   const pageCount = Math.max(1, Math.ceil(filtered.length / COMPETITORS_PAGE_SIZE));
@@ -3166,11 +3890,46 @@ function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor
         {hasPendingChanges && !saving && (
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Unsaved changes</span>
         )}
+        <TableFilterDropdown
+          filters={competitorFilterConfigs}
+          rows={baseFiltered}
+          activeFilters={tableFilters}
+          onFiltersChange={setTableFilters}
+        />
         <ActionsDropdown
           selectedCount={selectedIds.size}
           onBulkEdit={() => setShowBulkEdit(true)}
           onBulkDelete={() => setShowBulkDelete(true)}
         />
+        <button
+          onClick={() => {
+            const rowsToExport = filtered.map(c => ({
+              Competitor: c.name || c.domain,
+              Domain: c.domain,
+              Device: c.device || 'Desktop',
+              Location: c.location,
+              DA: c.da ?? '',
+              'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
+              'Total KWs': c.totalKw,
+              'AI Comp Level': c.aiCompLevel,
+              'SERP Comp Level': c.serpCompLevel,
+              'Comp Level': c.compLevel,
+            }));
+            downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
+          }}
+          title="Download CSV"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--surface-2)', color: 'var(--text-secondary)',
+            border: '1px solid var(--border)', borderRadius: 8,
+            padding: '7px 10px', cursor: 'pointer',
+            fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+        >
+          <Download size={14} />
+        </button>
         {hasPendingChanges && (
           <button
             onClick={onSaveChanges}
@@ -3227,7 +3986,7 @@ function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor
           <tr><td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
         ) : paged.length === 0 ? (
           <tr><td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-            No competitors for this project yet. Click <strong>+ Add Competitors</strong> or <strong>Find Competitors</strong> to get started.
+            No competitors for this project yet. Click <strong>+ Choose Project</strong> or <strong>Find Competitors</strong> to get started.
           </td></tr>
         ) : paged.map((c, i) => (
           <tr key={c.id} style={{ borderBottom: i < paged.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
@@ -3350,7 +4109,7 @@ export default function ProjectSetupPage({ tab }) {
   const [showCreate, setShowCreate] = useState(false);
   const [showAddPages, setShowAddPages] = useState(false);
   const [showAddKeywords, setShowAddKeywords] = useState(false);
-  const [showAddCompetitors, setShowAddCompetitors] = useState(false);
+  const [showChooseProject, setShowChooseProject] = useState(false);
   const [findingCompetitors, setFindingCompetitors] = useState(false);
   const [findCompetitorsMessage, setFindCompetitorsMessage] = useState('');
   const [competitorsRefreshing, setCompetitorsRefreshing] = useState(false);
@@ -3559,6 +4318,16 @@ export default function ProjectSetupPage({ tab }) {
     setCompetitors(prev => [created, ...prev]);
   };
 
+  const handleChooseProjectApply = ({ project, cluster, categories }) => {
+    // Navigate to the selected project's competitor list
+    setSelectedCompetitorProject(project);
+    setFindCompetitorsMessage(
+      cluster
+        ? `Filtered: ${cluster}${categories ? ` → ${categories.join(', ')}` : ''}`
+        : ''
+    );
+  };
+
   // Edits/deletes below only STAGE locally (into competitorPendingUpdates/
   // competitorPendingDeleteIds) -- nothing hits the backend until the
   // Competitors tab's "Save Changes" button calls
@@ -3744,13 +4513,71 @@ export default function ProjectSetupPage({ tab }) {
     });
   };
 
+  const handleDownloadMainTab = () => {
+    if (activeTab === 'Domain') {
+      const rows = projects.map(p => ({
+        Project: p.name,
+        Domain: p.domain,
+        Location: p.location,
+        Platforms: (p.targetPlatforms || ALL_PLATFORMS).join('; '),
+        Traffic: p.traffic,
+        Keywords: p.keywords,
+        TargetPages: p.targetPages,
+        BlogPages: p.blogPages,
+        Updated: p.updated,
+      }));
+      downloadCSV('domain_projects', rows);
+    } else if (activeTab === 'KW Cluster') {
+      const rows = kwClusters.map(p => ({
+        Project: p.name,
+        Domain: p.domain,
+        Location: p.location,
+        TotalKW: p.totalPages,
+        LandingPages: p.keywords,
+        Updated: p.updated,
+      }));
+      downloadCSV('kw_clusters_summary', rows);
+    } else if (activeTab === 'Pages') {
+      const rows = pages.map(p => ({
+        Project: p.name,
+        Domain: p.domain,
+        Location: p.location,
+        TotalPages: p.totalPages,
+        CommercialVsOthers: p.commercialPct,
+        BlogPages: p.blogPages,
+        Keywords: p.keywords,
+        Updated: p.updated,
+      }));
+      downloadCSV('pages_summary', rows);
+    } else if (activeTab === 'Competitors') {
+      const rows = competitors.map(c => ({
+        Competitor: c.name || c.domain,
+        Domain: c.domain,
+        Device: c.device || 'Desktop',
+        Location: c.location,
+        DA: c.da ?? '',
+        CommonKWs: Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
+        TotalKWs: c.totalKw,
+        AICompLevel: c.aiCompLevel,
+        SERPCompLevel: c.serpCompLevel,
+        CompLevel: c.compLevel,
+      }));
+      downloadCSV('competitors_summary', rows);
+    }
+  };
+
+  const isInDetailView = (activeTab === 'KW Cluster' && selectedKwProject !== null) ||
+    (activeTab === 'Pages' && selectedPageProject !== null) ||
+    (activeTab === 'Competitors' && selectedCompetitor !== null) ||
+    (activeTab === 'Competitors' && selectedCompetitorProject !== null);
+
   const filterTabs = ['AI Mode', 'AI Overview', 'Google', 'ChatGPT', 'Gemini'];
 
   const ctaByTab = {
     Domain: { label: 'Create project', onClick: () => setShowCreate(true) },
     'KW Cluster': { label: 'Add Keywords', onClick: () => setShowAddKeywords(true) },
     Pages: { label: 'Add Pages', onClick: () => setShowAddPages(true) },
-    Competitors: { label: 'Add Competitors', onClick: () => setShowAddCompetitors(true) },
+    Competitors: { label: 'Choose Project', onClick: () => setShowChooseProject(true) },
     Outreach: { label: 'Add Outreach', onClick: () => {} },
     Connectors: { label: 'Connect', onClick: () => {} },
   };
@@ -3797,7 +4624,7 @@ export default function ProjectSetupPage({ tab }) {
       </div>
 
       {/* Main card */}
-      <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
+      <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)', minHeight: 420 }}>
 
         {/* Toolbar */}
         <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 12, borderBottom: '1px solid var(--border)' }}>
@@ -3831,6 +4658,24 @@ export default function ProjectSetupPage({ tab }) {
             </div>
           )}
 
+          {!isInDetailView && (
+            <button
+              onClick={handleDownloadMainTab}
+              title="Download CSV"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--surface-2)', color: 'var(--text-secondary)',
+                border: '1px solid var(--border)', borderRadius: 8,
+                padding: '7px 10px', cursor: 'pointer',
+                fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+            >
+              <Download size={14} />
+            </button>
+          )}
+
           <div style={{ flex: 1 }} />
 
           {/* CTA */}
@@ -3851,7 +4696,7 @@ export default function ProjectSetupPage({ tab }) {
                 <RefreshCw size={14} className={competitorsRefreshing ? 'spin-icon' : ''} />
               </button>
               <button
-                onClick={() => setShowAddCompetitors(true)}
+                onClick={() => setShowChooseProject(true)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
@@ -3862,7 +4707,7 @@ export default function ProjectSetupPage({ tab }) {
                 onMouseLeave={e => e.currentTarget.style.opacity = '1'}
               >
                 <Plus size={15} />
-                Add Competitors
+                Choose Project
               </button>
               {selectedCompetitorProject !== null && (
                 <button
@@ -4039,7 +4884,7 @@ export default function ProjectSetupPage({ tab }) {
         onImportKeywords={handleImportKeywords}
         lockedProject={activeTab === 'KW Cluster' && selectedKwProject !== null ? { index: selectedKwProject, slug: kwClusters[selectedKwProject].slug, name: kwClusters[selectedKwProject].name, domain: kwClusters[selectedKwProject].domain } : null}
       />
-      <AddCompetitorsModal open={showAddCompetitors} onClose={() => setShowAddCompetitors(false)} onAdd={handleAddCompetitor} projects={projects} />
+      <ChooseProjectModal open={showChooseProject} onClose={() => setShowChooseProject(false)} onApply={handleChooseProjectApply} projects={projects} />
       <RefindCompetitorsConfirmModal
         open={showRefindConfirm}
         onClose={() => setShowRefindConfirm(false)}

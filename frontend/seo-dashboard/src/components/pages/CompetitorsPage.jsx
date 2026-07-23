@@ -223,7 +223,7 @@ export default function CompetitorsPage() {
             onMouseLeave={e => e.currentTarget.style.background = 'var(--accent)'}
           >
             <Plus size={14} />
-            Add Competitors
+            Choose Project
           </button>
         </div>
 
