@@ -4528,7 +4528,7 @@ export default function ProjectSetupPage({ tab }) {
     // be targeted via "+ Add Keywords"; it just doesn't clutter this list
     // until it actually has keyword data.
     fetchKwProjects()
-      .then(rows => { if (!cancelled) { setKwClusters(rows.filter(p => p.totalPages > 0)); setKwClustersError(''); } })
+      .then(rows => { if (!cancelled) { setKwClusters(rows); setKwClustersError(''); } })
       .catch(err => { if (!cancelled) setKwClustersError(err.message || 'Failed to load projects.'); })
       .finally(() => { if (!cancelled) setKwClustersLoading(false); });
     return () => { cancelled = true; };
@@ -4575,7 +4575,7 @@ export default function ProjectSetupPage({ tab }) {
   useEffect(() => {
     if (activeTab !== 'Intent' || selectedKwProject !== null) return;
     const interval = setInterval(() => {
-      fetchKwProjects().then(rows => setKwClusters(rows.filter(p => p.totalPages > 0))).catch(() => { });
+      fetchKwProjects().then(rows => setKwClusters(rows)).catch(() => { });
     }, 10000);
     return () => clearInterval(interval);
   }, [activeTab, selectedKwProject]);
@@ -4589,7 +4589,7 @@ export default function ProjectSetupPage({ tab }) {
       Promise.all([fetchDomainRows(), fetchKwProjects(), fetchPagesCounts()])
         .then(([domainRows, kwRows, { counts, stats }]) => {
           setProjects(domainRows);
-          setKwClusters(kwRows.filter(p => p.totalPages > 0));
+          setKwClusters(kwRows);
           setPagesCounts(counts);
           setPagesStats(stats);
         })
