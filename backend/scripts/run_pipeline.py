@@ -126,9 +126,12 @@ def _classify_intent(top3_results):
     return majority_subtype(results)
 
 
+CATEGORY_WORKERS = 15
+
+
 class PipelineRun:
     """Holds the shared, lock-guarded state for one run of the pipeline
-    -- the `partial` dict is how the category thread and the info/comm
+    -- the `partial` dict is how the category thread pool and the info/comm
     thread pool converge on a single output row per keyword without
     stepping on each other."""
 
@@ -137,46 +140,30 @@ class PipelineRun:
         self.output_path = output_path
         self.lock = threading.Lock()
         self.partial = {}
-        self.category_queue = queue.Queue()
+        self.category_pool = ThreadPoolExecutor(max_workers=CATEGORY_WORKERS)
         self.intent_pool = ThreadPoolExecutor(max_workers=DEFAULT_WORKERS)
         self.out_file = open(output_path, "w", newline="", encoding="utf-8-sig")
         self.writer = csv.writer(self.out_file)
         self.writer.writerow(OUTPUT_HEADER)
         self._next_id = 0
-        self._category_thread = threading.Thread(target=self._category_worker, daemon=False)
-        self._category_thread.start()
 
     def _next_row_id(self):
         row_id = self._next_id
         self._next_id += 1
         return row_id
 
-    def _category_worker(self):
-        """The ONE dedicated category thread -- strictly sequential,
-        matching category_checker.py's documented single-worker
-        requirement. Landing/blog is computed right alongside category
-        here since it's deterministic/instant, not because it needs to
-        be sequential itself."""
-        while True:
-            item = self.category_queue.get()
-            if item is _CATEGORY_SENTINEL:
-                self.category_queue.task_done()
-                break
+    def _category_job(self, row_id, keyword, top3_results):
+        """Runs in parallel across category_pool workers."""
+        try:
+            category = categorize_from_top3(keyword, top3_results, self.domain)
+        except Exception as e:
+            print(f"  [CATEGORY ERROR] '{keyword}': {e}")
+            category = ""
 
-            row_id, keyword, top3_results = item
-            try:
-                category = categorize_from_top3(keyword, top3_results, self.domain)
-            except Exception as e:
-                print(f"  [CATEGORY ERROR] '{keyword}': {e}")
-                category = ""
+        target_type = classify_landing_or_blog(top3_results) or ""
+        target_type = force_blog_if_best_top(category, target_type)
 
-            target_type = classify_landing_or_blog(top3_results) or ""
-            # HARD override: a Best/Top category is always a Blog Page,
-            # no matter what the classifier above decided.
-            target_type = force_blog_if_best_top(category, target_type)
-
-            self._report(row_id, category=category, target_type=target_type)
-            self.category_queue.task_done()
+        self._report(row_id, category=category, target_type=target_type)
 
     def _report(self, row_id, **fields):
         with self.lock:
@@ -202,9 +189,6 @@ class PipelineRun:
                 ])
                 self.out_file.flush()
 
-                # Same row, also persisted straight to Supabase (no queue/
-                # worker involved) -- cluster gets backfilled in bulk by
-                # cluster_project() once every keyword here has a category.
                 try:
                     db.insert_pipeline_result(
                         self.domain, entry["keyword"], entry["category"],
@@ -226,7 +210,7 @@ class PipelineRun:
                 "category": None, "target_type": None, "subtype": None,
                 "category_done": False, "subtype_done": False,
             }
-        self.category_queue.put((row_id, keyword, top3_results))
+        self.category_pool.submit(self._category_job, row_id, keyword, top3_results)
         self.intent_pool.submit(self._intent_job, row_id, top3_results)
 
     def _intent_job(self, row_id, top3_results):
@@ -238,9 +222,7 @@ class PipelineRun:
         self._report(row_id, subtype=subtype)
 
     def finish(self):
-        self.category_queue.put(_CATEGORY_SENTINEL)
-        self._category_thread.join()
-
+        self.category_pool.shutdown(wait=True)
         self.intent_pool.shutdown(wait=True)
         close_all_drivers()
 
@@ -374,7 +356,7 @@ def _retry_failed_keywords(failed_rows, domain, output_path, num_tabs):
         _merge_retry_results_into_csv(output_path, updated_rows)
 
 
-def run_pipeline(input_path, project_display_name=None, num_tabs=serp_scraper.NUM_TABS):
+def run_pipeline(input_path, project_display_name=None, num_tabs=serp_scraper.NUM_TABS, fresh=False):
     rows = serp_scraper.load_data(input_path)
     if not rows:
         print("No rows found. Exiting.")
@@ -387,22 +369,16 @@ def run_pipeline(input_path, project_display_name=None, num_tabs=serp_scraper.NU
     domain = db.get_or_create_project(project_display_name)
     print(f"Using project '{project_display_name}' (slug: {domain})\n")
 
-    # Resume behavior: skip any keyword that a PREVIOUS run of this
-    # pipeline already crawled+categorized successfully for this project
-    # (i.e. already has a non-empty top-3 result sitting in Supabase) --
-    # only keywords still missing, or that came back empty last time, get
-    # scraped/categorized/clustered/landing-blog/info-comm'd again.
-    #
-    # NOTE: this is why the categories table is no longer wiped
-    # (reset_categories_for_project) at the start of every run anymore --
-    # doing so would erase the very categories a resumed run needs to
-    # match new keywords against. reset_categories_for_project() is still
-    # available (below) for when you deliberately want a fully fresh run.
-    already_crawled = db.get_crawled_keywords(domain)
-    rows_to_process = [r for r in rows if r["keyword"] not in already_crawled]
-    skipped = len(rows) - len(rows_to_process)
-    print(f"{skipped} of {len(rows)} keyword(s) already crawled -- skipping those; "
-          f"{len(rows_to_process)} left to process.\n")
+    if fresh:
+        reset_categories_for_project(domain)
+        rows_to_process = rows
+        print("Fresh run requested (--fresh) -- processing ALL keywords from scratch.\n")
+    else:
+        already_crawled = db.get_crawled_keywords(domain)
+        rows_to_process = [r for r in rows if r["keyword"] not in already_crawled]
+        skipped = len(rows) - len(rows_to_process)
+        print(f"{skipped} of {len(rows)} keyword(s) already crawled -- skipping those; "
+              f"{len(rows_to_process)} left to process.\n")
 
     if not rows_to_process:
         print("Nothing new to process.")
@@ -436,9 +412,13 @@ def run_pipeline(input_path, project_display_name=None, num_tabs=serp_scraper.NU
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python -m scripts.run_pipeline <input_file.csv|.xlsx> [project name]")
+        print("Usage: python -m scripts.run_pipeline <input_file.csv|.xlsx> [project name] [--fresh]")
         sys.exit(1)
 
-    input_arg = sys.argv[1]
-    project_arg = sys.argv[2] if len(sys.argv) > 2 else None
-    run_pipeline(input_arg, project_arg)
+    args = sys.argv[1:]
+    fresh = "--fresh" in args or "-f" in args
+    clean_args = [a for a in args if a not in ("--fresh", "-f")]
+
+    input_arg = clean_args[0]
+    project_arg = clean_args[1] if len(clean_args) > 1 else None
+    run_pipeline(input_arg, project_arg, fresh=fresh)

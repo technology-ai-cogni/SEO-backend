@@ -94,7 +94,8 @@ _MAJOR_CITY_WORDS = {
     "boston", "seattle",
 }
 
-_LOCATION_WORDS = _build_location_word_blocklist() | _MAJOR_CITY_WORDS
+_ALLOWED_TOPIC_EXCEPTIONS = {"cbse", "icse", "ib", "igcse", "board", "international"}
+_LOCATION_WORDS = (_build_location_word_blocklist() | _MAJOR_CITY_WORDS) - _ALLOWED_TOPIC_EXCEPTIONS
 
 
 def resolve_country_code(country_input):
@@ -271,24 +272,16 @@ def _title_word_set(title):
     return {w.lower() for w in re.findall(r"[A-Za-z0-9]+", title) if not w.isdigit()}
 
 
-def _common_words_across_titles(titles, min_titles=2):
+def _common_words_across_titles(titles, min_titles=2, max_words=3):
     """Words appearing in at least `min_titles` of the given titles
     (case-insensitive -- 'Companies' and 'companies' count as the same
     word). Singular and plural forms of the same word (school/schools,
-    company/companies) are also merged into ONE word for this purpose --
-    counted together when deciding if it's common enough, and represented
-    by only ONE surface form in the result (whichever form actually
-    occurred more often), so a derived category can never end up using
-    both "school" and "schools" side by side. A word that only shows up
-    in a single title never qualifies, no matter how salient it looks in
-    isolation. Country/region/state/city words are never eligible, even
-    if common to every title -- a category/cluster should describe the
-    TOPIC, not a location. Returned in the order each word first appears
-    when reading through the titles in order, so joining them reads
-    naturally rather than as a random word list."""
+    company/companies) are also merged into ONE word for this purpose.
+    Restricted to at most `max_words` (top 3 by frequency of occurrence across titles)."""
     required = min(min_titles, len(titles)) if titles else min_titles
 
     doc_presence = Counter()
+    total_occurrences = Counter()
     surface_counts = {}
     for title in titles:
         normalized_in_title = set()
@@ -296,32 +289,47 @@ def _common_words_across_titles(titles, min_titles=2):
             norm = _singularize_word(w)
             normalized_in_title.add(norm)
             surface_counts.setdefault(norm, Counter())[w] += 1
+            total_occurrences[norm] += 1
         for norm in normalized_in_title:
             doc_presence[norm] += 1
 
-    qualifying_norms = {
+    qualifying_norms = [
         norm for norm, c in doc_presence.items()
         if c >= required and norm not in _LOCATION_WORDS
         and norm not in _STOPWORDS and norm not in _RANKING_WORDS
-    }
-    canonical_form = {norm: surface_counts[norm].most_common(1)[0][0] for norm in qualifying_norms}
+    ]
+
+    if len(qualifying_norms) < max_words:
+        extra_norms = [
+            norm for norm in doc_presence.keys()
+            if norm not in qualifying_norms and norm not in _LOCATION_WORDS
+            and norm not in _STOPWORDS and norm not in _RANKING_WORDS
+        ]
+        extra_norms.sort(key=lambda n: (doc_presence[n], total_occurrences[n]), reverse=True)
+        qualifying_norms.extend(extra_norms[: max_words - len(qualifying_norms)])
+
+    sorted_norms = sorted(
+        qualifying_norms,
+        key=lambda n: (doc_presence[n], total_occurrences[n]),
+        reverse=True
+    )[:max_words]
+
+    top_norms_set = set(sorted_norms)
+    canonical_form = {norm: surface_counts[norm].most_common(1)[0][0] for norm in top_norms_set if norm in surface_counts}
 
     order, seen = [], set()
     for title in titles:
         for w in re.findall(r"[A-Za-z0-9]+", title.lower()):
             norm = _singularize_word(w)
-            if norm in qualifying_norms and norm not in seen:
+            if norm in top_norms_set and norm not in seen:
                 seen.add(norm)
                 order.append(canonical_form[norm])
     return order
 
 
 # --- Hardcoded Best/Top rule ------------------------------------------
-# Deliberately deterministic, not LLM-judged. Rule: the FIRST title
-# deciding it alone if it contains "best"/"top"; if the first title
-# doesn't, then EVERY one of the other titles must contain "best"/"top"
-# for the tag to apply (a single stray mention in one of the other two
-# isn't enough).
+# Deliberately deterministic, not LLM-judged. Rule: prefix 'Best/Top'
+# ONLY if the word 'best' or 'top' exists at least two times across the titles.
 
 def _title_has_best_or_top(title):
     words = set(re.findall(r"[a-z]+", title.lower()))
@@ -331,20 +339,13 @@ def _title_has_best_or_top(title):
 def _titles_contain_best_or_top(titles):
     if not titles:
         return False
-    if _title_has_best_or_top(titles[0]):
-        return True
     count = sum(1 for t in titles if _title_has_best_or_top(t))
     return count >= 2
 
 
 def _apply_best_top_rule(candidate_name, titles):
     """When Best/Top applies, just prefix the category with 'Best/Top ' --
-    singular vs. plural is NEVER forced here. Whatever plurality the
-    common words naturally had in the source titles (e.g. titles actually
-    saying "Companies" vs "Company") is what derive_category_name already
-    picked up, and that form is preserved exactly as found -- no blind
-    grammar-rule pluralization that could mangle a mass noun like
-    "marketing" into "marketings"."""
+    singular vs. plural is NEVER forced here."""
     if not _titles_contain_best_or_top(titles):
         return candidate_name
     words = candidate_name.split()
@@ -492,12 +493,13 @@ def derive_category_name(titles, keyword=None):
         "Never add, invent, or substitute a word that isn't in that list -- "
         "not even a small connector word like 'is', 'an', 'the', 'of', or "
         "'and'. Only use real, meaningful topic words from the list.\n\n"
-        "2. Use AS MANY of the allowed words as you sensibly can while "
-        "still reading as one natural, coherent phrase describing the "
-        "shared topic across the titles -- this should be the fullest "
-        "phrase the allowed words support, not an artificially shortened "
-        "one. Only drop a word if including it would make the phrase read "
-        "like a random word list rather than a real category name.\n\n"
+        "2. UNDERSTAND INTENT & SYNTAX ORDER: Treat the allowed words as a set of "
+        "key topic concepts / jumbled words. Arrange and phrase them into a natural, "
+        "coherent, grammatically meaningful SEO category name that best reflects the "
+        "underlying search intent of the page titles. Retain ALL specific topic modifiers "
+        "(such as 'icse', 'cbse', 'international', 'digital', 'marketing', 'board') alongside the "
+        "main subject noun. Do NOT drop essential topic descriptors or reduce multi-word topics "
+        "into a single generic word.\n\n"
         "3. Do NOT include any city, state, country, or region name, even "
         "if one is in the allowed list -- the category should describe "
         "the TOPIC, not the location.\n\n"
@@ -505,19 +507,14 @@ def derive_category_name(titles, keyword=None):
         "one is in the allowed list.\n\n"
         "5. Do NOT include ranking words like 'best' or 'top' -- that is "
         "handled separately.\n\n"
-        "6. Understand INTENT, not just word matching: words like "
-        "'company', 'agency', 'service', 'firm', and 'provider' (singular "
-        "or plural) all describe the SAME thing -- what TYPE of business "
-        "this is. A business is only one of those at a time, so even if "
-        "more than one is in the allowed list, use ONLY the single one "
-        "that best fits, never two or more together (e.g. never 'agency "
-        "company' or 'agencies companies'). This is different from words "
-        "like 'digital' and 'marketing', which are separate real topic "
-        "words that belong together, not interchangeable labels for the "
-        "same thing.\n\n"
+        "6. Understand ENTITY TYPE intent: words like 'company', 'agency', "
+        "'service', 'firm', and 'provider' (singular or plural) all describe "
+        "what TYPE of business this is. A business is only one of those at a time, "
+        "so even if more than one is in the allowed list, use ONLY the single one "
+        "that best fits, never two or more together (e.g. never 'agency company').\n\n"
         "7. Output ONLY plain words separated by single spaces -- no "
         "punctuation, no pipes, no colons, no quotation marks.\n\n"
-        "Respond with ONLY the category name, nothing else."
+        "Respond with ONLY the arranged category name, nothing else."
     )
     user_prompt = f"Titles:\n{titles_block}"
 
@@ -719,10 +716,10 @@ def _refine_category_name_with_llm(raw_candidate: str, keyword: str) -> str:
     try:
         client = get_openai_client()
         prompt = (
-            f"You are an expert SEO categorizer. The raw category extracted for the keyword '{keyword}' is '{raw_candidate}'.\n"
-            "This raw category might have an awkward or redundant combination of words (e.g., 'agency company services').\n"
-            "Refine it into a single, clean, meaningful, and professional SEO category name.\n"
-            "Keep it concise. Do not add 'Best' or 'Top'.\n"
+            f"You are an expert SEO categorizer. The candidate words extracted for the keyword '{keyword}' are '{raw_candidate}'.\n"
+            "Treat these words as jumbled key concepts. Understand the search intent and arrange/phrase them into a single, clean, grammatically meaningful, and professional SEO category name.\n"
+            "CRITICAL: Retain all specific topic modifiers (e.g. 'icse', 'cbse', 'international', 'digital', 'marketing', 'board'). NEVER drop essential topic modifiers or reduce a multi-word topic to a single generic word like 'schools'.\n"
+            "Keep it concise (maximum 3-4 words). Do not add 'Best' or 'Top'.\n"
             "Output ONLY the refined category name, nothing else."
         )
         resp = client.chat.completions.create(
@@ -796,34 +793,7 @@ def categorize_keyword(keyword, domain, country_code=None):
     candidate_name = _apply_best_top_rule(refined_candidate, titles)
     meta["best_top_applied"] = candidate_name != refined_candidate
 
-    # Only compare against existing categories that have the SAME Best/Top
-    # status -- otherwise a "Best/Top ..." candidate could get silently
-    # merged into a plain existing category (or vice versa), losing the
-    # Best/Top tag that this specific keyword's titles actually signaled.
-    existing_category_names = [
-        name for name in db.list_category_names(domain)
-        if name.lower().startswith("best/top") == has_best_top
-    ]
-
-    # Deterministic singular/plural dedup, tried BEFORE the LLM-based
-    # intent match below -- if this candidate is purely a singular/plural
-    # variant of an already-existing category, use that pairing directly
-    # (standardized on whichever form is plural) instead of letting a
-    # near-duplicate category get created.
-    plural_variant = _find_plural_variant(candidate_name, existing_category_names)
-    if plural_variant:
-        meta["matched_existing_category"] = True
-        meta["candidate_before_match"] = candidate_name
-        db.add_category(domain, plural_variant)
-        return plural_variant, meta
-
-    matched_category = find_matching_category(candidate_name, titles, existing_category_names)
-
-    if matched_category:
-        meta["matched_existing_category"] = True
-        meta["candidate_before_match"] = candidate_name
-        return matched_category, meta
-
+    # Direct category assignment without referring to or merging into previous categories
     meta["matched_existing_category"] = False
     db.add_category(domain, candidate_name)
     return candidate_name, meta

@@ -351,24 +351,6 @@ def categorize_from_top3(keyword, top3, domain):
     candidate_name = strip_filler_words_from_category(candidate_name)
     candidate_name = dedupe_related_words_in_category(candidate_name)
 
-    existing_category_names = [
-        name for name in db.list_category_names(domain)
-        if name.lower().startswith("best/top") == has_best_top
-    ]
-
-    plural_variant = resolve_plural_or_existing_category(candidate_name, existing_category_names)
-    if plural_variant:
-        db.add_category(domain, plural_variant)
-        return plural_variant
-
-    matched_category = category_checker.find_matching_category(candidate_name, titles, existing_category_names)
-    if matched_category:
-        return matched_category
-
-    generalized_match = find_matching_category_generalized(candidate_name, titles, existing_category_names)
-    if generalized_match:
-        return generalized_match
-
     db.add_category(domain, candidate_name)
     return candidate_name
 
