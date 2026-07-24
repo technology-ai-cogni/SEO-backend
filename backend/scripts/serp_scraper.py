@@ -207,6 +207,8 @@ def get_driver() -> webdriver.Chrome:
         except Exception as e:
             print(f"[serp_scraper] Warning: failed to configure proxy extension: {e}")
 
+    options.add_argument("--headless=new")
+    options.add_argument("--window-size=1920,1080")
     options.page_load_strategy = "eager"
     options.add_argument("--start-maximized")
     options.add_argument("--disable-notifications")

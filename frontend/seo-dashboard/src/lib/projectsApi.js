@@ -86,7 +86,7 @@ function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
 }
 
 // ─── Local Mode Detection & Setup ───────────────────────────────────────────
-const isLocalMode = !supabase;
+const isLocalMode = false;
 
 function initializeLocalStorage() {
   if (!isLocalMode) return;
@@ -374,6 +374,7 @@ function kwRowToUi(row) {
     landingPage: row.landing_page_url,
     rank: row.rank,
     rankCheckedAt: row.rank_checked_at,
+    rankMeta: row.rank_meta,
   };
 }
 
@@ -926,3 +927,19 @@ export async function runAiAnalysis(projectSlug, keyword, aiMode, domain) {
   
   return await res.json();
 }
+
+export async function classifyCompetitorUrls(urls, keyword = '') {
+  if (!urls || urls.length === 0) return [];
+  const res = await fetch(`${CATEGORY_API_BASE}/competitors/classify-urls`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ urls, keyword }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to classify competitor URLs.');
+  }
+  const data = await res.json();
+  return data.results || [];
+}
+
