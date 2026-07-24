@@ -1759,11 +1759,11 @@ function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, tot
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
+              <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
             ) : error ? (
-              <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+              <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
             ) : pages.length === 0 ? (
-              <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No projects yet.</td></tr>
+              <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No projects yet.</td></tr>
             ) : pages.map((p, i) => (
               <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}
                 onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
@@ -2366,13 +2366,13 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading pages…</td></tr>
+              <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading pages…</td></tr>
             ) : error ? (
-              <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+              <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No pages added yet. Use Add Pages to import.</td></tr>
+              <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No pages added yet. Use Add Pages to import.</td></tr>
             ) : filteredRows.length === 0 ? (
-              <tr><td colSpan={8} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No pages match the selected filters.</td></tr>
+              <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No pages match the selected filters.</td></tr>
             ) : filteredRows.map((r, i) => (
               <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}
                 onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
@@ -3291,13 +3291,13 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading keywords…</td></tr>
+              <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading keywords…</td></tr>
             ) : error ? (
-              <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+              <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No keywords added yet. Use Add Keywords to import.</td></tr>
+              <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No keywords added yet. Use Add Keywords to import.</td></tr>
             ) : pagedIndices.length === 0 ? (
-              <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{search ? `No keywords match "${search}".` : 'No keywords match the selected filters.'}</td></tr>
+              <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{search ? `No keywords match "${search}".` : 'No keywords match the selected filters.'}</td></tr>
             ) : pagedIndices.map(i => {
               const r = rows[i];
               return (
@@ -3527,9 +3527,9 @@ function CompetitorDetailView({ competitor, onBack }) {
           </thead>
           <tbody>
             {detailsLoading ? (
-              <tr><td colSpan={12} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
+              <tr><td colSpan={12} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
             ) : details.length === 0 ? (
-              <tr><td colSpan={12} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No detail entries yet. Click <strong>Find Competitors</strong> to run an analysis.</td></tr>
+              <tr><td colSpan={12} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No detail entries yet. Click <strong>Find Competitors</strong> to run an analysis.</td></tr>
             ) : details.map((d, i) => (
               <tr key={i} style={{ borderBottom: i < details.length - 1 ? '1px solid var(--border)' : 'none' }}
                 onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
@@ -3778,11 +3778,11 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={5} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
+              <tr><td colSpan={5} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
             ) : error ? (
-              <tr><td colSpan={5} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+              <tr><td colSpan={5} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={5} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors tracked yet. Click <strong>+ Auto-generated</strong> to get started.</td></tr>
+              <tr><td colSpan={5} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors tracked yet. Click <strong>+ Auto-generated</strong> to get started.</td></tr>
             ) : rows.map((p, i) => (
               <tr key={p.slug} style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
                 onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
@@ -4020,6 +4020,7 @@ function extractCompetitorsFromRankMeta(kwObj, competitors, scopedProject) {
         aiCompLevel: `${matchedComp?.aiCompLevel ?? (70 + (idx * 7) % 28)}%`,
         serpCompLevel: `${matchedComp?.serpCompLevel ?? (75 + (idx * 5) % 22)}%`,
         compLevel: `${matchedComp?.compLevel ?? (78 + (idx * 6) % 20)}%`,
+        websiteType: matchedComp?.websiteType || matchedComp?.type || link.website_type || link.type || null,
       };
     });
   }
@@ -4041,6 +4042,7 @@ function extractCompetitorsFromRankMeta(kwObj, competitors, scopedProject) {
         aiCompLevel: `${c.aiCompLevel ?? 80}%`,
         serpCompLevel: `${c.serpCompLevel ?? 85}%`,
         compLevel: `${c.compLevel ?? 83}%`,
+        websiteType: c.websiteType || c.type || null,
       };
     });
   }
@@ -4085,14 +4087,20 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
   };
 
   const handleClassify = () => {
-    const urls = rows.map(r => r.fullUrl).filter(Boolean);
+    const urls = rows.map(r => r.fullUrl).filter(Boolean).filter(u => !typesMap[u]);
+    if (urls.length === 0) return;
     processClassifications(urls);
   };
 
   useEffect(() => {
-    const urls = rows.map(r => r.fullUrl).filter(Boolean);
-    if (!urls || urls.length === 0) return;
-    processClassifications(urls);
+    const map = {};
+    rows.forEach(r => {
+      if (r.websiteType) {
+        if (r.fullUrl) map[r.fullUrl] = r.websiteType;
+        if (r.displayUrl) map[r.displayUrl] = r.websiteType;
+      }
+    });
+    setTypesMap(map);
   }, [keyword, kwObj]);
 
   return (
@@ -4158,13 +4166,14 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={9} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                <td colSpan={9} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
                   No competitor data found in rank_meta for this keyword.
                 </td>
               </tr>
             ) : (
               rows.map((c, i) => {
-                const websiteType = typesMap[c.fullUrl] || typesMap[c.displayUrl] || 'Official Entity';
+                const rawType = typesMap[c.fullUrl] || typesMap[c.displayUrl] || c.websiteType;
+                const websiteType = rawType === 'Platform' ? 'Listing' : rawType;
                 return (
                   <tr
                     key={c.id || i}
@@ -4236,9 +4245,7 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
                       {c.location}
                     </td>
                     <td style={{ padding: '14px 16px' }}>
-                      {classifying && !typesMap[c.fullUrl] && !typesMap[c.displayUrl] ? (
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Classifying…</span>
-                      ) : (
+                      {websiteType ? (
                         <span style={{
                           display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 12,
                           fontSize: 11, fontWeight: 600,
@@ -4248,6 +4255,10 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
                         }}>
                           {websiteType}
                         </span>
+                      ) : classifying ? (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Classifying…</span>
+                      ) : (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>—</span>
                       )}
                     </td>
                     <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -5090,7 +5101,7 @@ export default function ProjectSetupPage({ tab }) {
       </div>
 
       {/* Main card */}
-      <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)', minHeight: 420 }}>
+      <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)' }}>
 
         {/* Toolbar */}
         <div style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 12, borderBottom: '1px solid var(--border)' }}>
