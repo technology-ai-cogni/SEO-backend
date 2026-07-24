@@ -17,8 +17,9 @@ load_dotenv(BACKEND_DIR / ".env")
 try:
     from google import genai
     from google.genai import types as gtypes
-except ImportError:
-    sys.exit("ERROR: google-genai not installed.\nRun: pip3 install google-genai --break-system-packages")
+except Exception:
+    genai = None
+    gtypes = None
 
 
 def get_gemini_api_keys() -> list:
@@ -50,19 +51,14 @@ class GeminiClientPool:
     """Manages a pool of Gemini API clients and cycles through them on rate limits/quotas."""
     def __init__(self):
         self.keys = get_gemini_api_keys()
-        if not self.keys:
-            sys.exit("ERROR: GEMINI_API_KEY or GEMINI_API_KEY_1 not found in .env")
-        
         self.current_index = 0
         self.clients = []
-        for key in self.keys:
-            try:
-                self.clients.append(genai.Client(api_key=key))
-            except Exception as e:
-                print(f"[GeminiAgent] Warning: failed to initialize client for key {key[:6]}...: {e}", file=sys.stderr, flush=True)
-        
-        if not self.clients:
-            sys.exit("ERROR: No valid Gemini clients could be initialized.")
+        if genai and self.keys:
+            for key in self.keys:
+                try:
+                    self.clients.append(genai.Client(api_key=key))
+                except Exception as e:
+                    print(f"[GeminiAgent] Warning: failed to initialize client for key {key[:6]}...: {e}", file=sys.stderr, flush=True)
 
     def get_client(self):
         if not self.clients:
