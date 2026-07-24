@@ -302,14 +302,14 @@ def _retry_failed_keywords(failed_rows, domain, output_path, num_tabs):
 
     retried = {}
 
-    def on_retry_result(row, results, start_time, stop_time):
-        retried[row["keyword"]] = (results, start_time, stop_time)
-
-    driver = serp_scraper.get_driver()
-    try:
-        serp_scraper.run_search_pool(driver, failed_rows, output_path=None, on_result=on_retry_result, num_tabs=num_tabs)
-    finally:
-        driver.quit()
+    for row in failed_rows:
+        start_time = time.strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            results = category_checker.get_top3_for_category(row["keyword"])
+        except Exception as e:
+            results = []
+        stop_time = time.strftime("%Y-%m-%d %H:%M:%S")
+        on_retry_result(row, results, start_time, stop_time)
 
     updated_rows = {}
     for keyword, (results, start_time, stop_time) in retried.items():
@@ -393,11 +393,33 @@ def run_pipeline(input_path, project_display_name=None, num_tabs=serp_scraper.NU
             empty_top3_rows.append(row)
         run.submit(row["keyword"], results, start_time, stop_time)
 
-    driver = serp_scraper.get_driver()
-    try:
-        serp_scraper.run_search_pool(driver, rows, output_path=None, on_result=on_result, num_tabs=num_tabs)
-    finally:
-        driver.quit()
+    USE_SELENIUM = False  # Set to False to use Bright Data API directly without Selenium
+
+    if USE_SELENIUM:
+        driver = serp_scraper.get_driver()
+        try:
+            serp_scraper.run_search_pool(driver, rows, output_path=None, on_result=on_result, num_tabs=num_tabs)
+        finally:
+            driver.quit()
+    else:
+        print("[run_pipeline] Fetching SERP data via Bright Data API (Selenium disabled)...\n")
+        import time
+        from services import category_checker
+
+        def _fetch_one_brightdata(row):
+            start_time = time.strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                top3 = category_checker.get_top3_for_category(row["keyword"])
+            except Exception as e:
+                print(f"  [BRIGHTDATA ERROR] '{row['keyword']}': {e}")
+                top3 = []
+            stop_time = time.strftime("%Y-%m-%d %H:%M:%S")
+            on_result(row, top3, start_time, stop_time)
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(_fetch_one_brightdata, r) for r in rows]
+            for f in futures:
+                f.result()
 
     print("\nAll keywords fetched -- waiting for category + info/comm stages to finish draining...\n")
     run.finish()

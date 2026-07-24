@@ -960,6 +960,7 @@ def run_ai_analysis(project: str, req: AiAnalysisRequest):
         sys.path.append(exp1_path)
     
     try:
+        # pyrefly: ignore [missing-import]
         from agents import AGENTS
     except ImportError as e:
         raise HTTPException(status_code=500, detail=f"Failed to load agents module: {e}")
