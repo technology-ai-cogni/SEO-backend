@@ -97,6 +97,21 @@ _MAJOR_CITY_WORDS = {
 _ALLOWED_TOPIC_EXCEPTIONS = {"cbse", "icse", "ib", "igcse", "board", "international"}
 _LOCATION_WORDS = (_build_location_word_blocklist() | _MAJOR_CITY_WORDS) - _ALLOWED_TOPIC_EXCEPTIONS
 
+_STOPWORDS = {
+    # Grammar / Function words
+    "a", "an", "the", "in", "of", "on", "at", "to", "for", "and", "or",
+    "with", "by", "is", "are", "vs", "your", "you", "list", "lists", "from",
+    "be", "been", "being", "it", "its", "this", "that", "these", "those",
+    # Question / Interrogative words
+    "which", "what", "where", "how", "who", "why", "when", "whose", "whom",
+    # Generic filler / non-topic metadata words
+    "child", "children", "kid", "kids", "parent", "parents", "insight", "insights",
+    "guide", "guides", "review", "reviews", "ranking", "rankings", "number", "numbers",
+    "total", "overall", "day", "co", "ed", "find", "choose", "get", "about", "more",
+    "year", "years", "new", "2024", "2025", "2026", "2027"
+}
+_RANKING_WORDS = {"best", "top"}
+
 
 def resolve_country_code(country_input):
     """
@@ -395,6 +410,8 @@ def canonicalize_category_name(category_name: str) -> str:
 
     for w in words:
         w_lower = w.lower()
+        if w_lower in _STOPWORDS or w_lower in _LOCATION_WORDS:
+            continue
         if w_lower in _MODIFIER_WORDS or w_lower in _ACRONYMS:
             if w_lower not in [m.lower() for m in modifiers]:
                 modifiers.append(w)
@@ -532,10 +549,18 @@ def derive_category_name(titles, keyword=None):
 
     count_documents = titles + [keyword] if keyword else titles
     qualifying_words = _common_words_across_titles(count_documents, min_titles=2)
+
+    # Always allow explicit topic terms (cbse, icse, ib, igcse, board, international) if present in input
+    topic_terms_in_input = []
+    for doc in count_documents:
+        for w in re.findall(r"[A-Za-z0-9]+", doc.lower()):
+            if w in _ALLOWED_TOPIC_EXCEPTIONS and w not in topic_terms_in_input:
+                topic_terms_in_input.append(w)
+    for term in topic_terms_in_input:
+        if term not in [qw.lower() for qw in qualifying_words]:
+            qualifying_words.append(term)
+
     if not qualifying_words:
-        # Nothing is shared by 2+ titles -- fall back to the single most
-        # representative title's own words rather than refusing outright.
-        # Still deduped by singular/plural (normalized) form, same as above.
         seen_norms = set()
         qualifying_words = []
         for w in re.findall(r"[A-Za-z0-9]+", titles[0].lower()):
@@ -579,7 +604,8 @@ def derive_category_name(titles, keyword=None):
         "what TYPE of business this is. A business is only one of those at a time, "
         "so even if more than one is in the allowed list, use ONLY the single one "
         "that best fits, never two or more together (e.g. never 'agency company').\n\n"
-        "7. Output ONLY plain words separated by single spaces -- no "
+        "7. NEVER include question words (e.g. 'which', 'what', 'how', 'where') or filler metadata words (e.g. 'child', 'parents', 'insights', 'guide', 'reviews', 'rankings', 'number'). Only use real topic/subject words.\n\n"
+        "8. Output ONLY plain words separated by single spaces -- no "
         "punctuation, no pipes, no colons, no quotation marks.\n\n"
         "Respond with ONLY the arranged category name, nothing else."
     )
@@ -785,7 +811,7 @@ def _refine_category_name_with_llm(raw_candidate: str, keyword: str) -> str:
         prompt = (
             f"You are an expert SEO categorizer. The candidate words extracted for the keyword '{keyword}' are '{raw_candidate}'.\n"
             "Treat these words as jumbled key concepts. Understand the search intent and arrange/phrase them into a single, clean, grammatically meaningful, and professional SEO category name.\n"
-            "CRITICAL: Retain all specific topic modifiers (e.g. 'icse', 'cbse', 'international', 'digital', 'marketing', 'board'). NEVER drop essential topic modifiers or reduce a multi-word topic to a single generic word like 'schools'.\n"
+            "CRITICAL: NEVER include question words (e.g. 'which', 'what', 'how', 'where') or filler metadata words (e.g. 'child', 'parents', 'insights', 'guide', 'reviews', 'rankings', 'number'). Retain all specific topic modifiers (e.g. 'icse', 'cbse', 'international', 'digital', 'marketing', 'board'). NEVER drop essential topic modifiers or reduce a multi-word topic to a single generic word like 'schools'.\n"
             "Keep it concise (maximum 3-4 words). Do not add 'Best' or 'Top'.\n"
             "Output ONLY the refined category name, nothing else."
         )

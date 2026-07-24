@@ -1461,7 +1461,7 @@ const DeviceIcon = ({ type }) => {
 
 // ─── Tab configurations ───────────────────────────────────────────────────────
 
-const TABS = ['Domain', 'KW Cluster', 'Pages', 'Competitors', 'Outreach', 'Connectors'];
+const TABS = ['Domain', 'Intent', 'Pages', 'Competitors', 'Outreach', 'Connectors'];
 
 const platformOptionsList = [
   { value: 'AI Mode', label: 'AI Mode' },
@@ -4573,7 +4573,7 @@ export default function ProjectSetupPage({ tab }) {
   // actually on screen -- i.e. that tab is active and no project is open,
   // since a detail view has its own separate auto-refresh for its rows).
   useEffect(() => {
-    if (activeTab !== 'KW Cluster' || selectedKwProject !== null) return;
+    if (activeTab !== 'Intent' || selectedKwProject !== null) return;
     const interval = setInterval(() => {
       fetchKwProjects().then(rows => setKwClusters(rows.filter(p => p.totalPages > 0))).catch(() => { });
     }, 10000);
@@ -5003,7 +5003,7 @@ export default function ProjectSetupPage({ tab }) {
         Updated: p.updated,
       }));
       downloadCSV('domain_projects', rows);
-    } else if (activeTab === 'KW Cluster') {
+    } else if (activeTab === 'Intent') {
       const rows = kwClusters.map(p => ({
         Project: p.name,
         Domain: p.domain,
@@ -5042,7 +5042,7 @@ export default function ProjectSetupPage({ tab }) {
     }
   };
 
-  const isInDetailView = (activeTab === 'KW Cluster' && selectedKwProject !== null) ||
+  const isInDetailView = (activeTab === 'Intent' && selectedKwProject !== null) ||
     (activeTab === 'Pages' && selectedPageProject !== null) ||
     (activeTab === 'Competitors' && selectedCompetitor !== null) ||
     (activeTab === 'Competitors' && selectedKwDetail !== null) ||
@@ -5052,7 +5052,7 @@ export default function ProjectSetupPage({ tab }) {
 
   const ctaByTab = {
     Domain: { label: 'Create project', onClick: () => setShowCreate(true) },
-    'KW Cluster': { label: 'Add Keywords', onClick: () => setShowAddKeywords(true) },
+    'Intent': { label: 'Add Keywords', onClick: () => setShowAddKeywords(true) },
     Pages: { label: 'Add Pages', onClick: () => setShowAddPages(true) },
     Competitors: { label: 'Choose Project', onClick: () => setShowChooseProject(true) },
     Outreach: { label: 'Add Outreach', onClick: () => { } },
@@ -5113,7 +5113,7 @@ export default function ProjectSetupPage({ tab }) {
               onChange={e => setSearch(e.target.value)}
               placeholder={
                 activeTab === 'Pages' && selectedPageProject !== null ? 'Page name or url'
-                  : activeTab === 'KW Cluster' && selectedKwProject !== null ? 'Search keywords'
+                  : activeTab === 'Intent' && selectedKwProject !== null ? 'Search keywords'
                     : 'Project name or domain'
               }
               style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--text-primary)', width: '100%' }}
@@ -5226,7 +5226,7 @@ export default function ProjectSetupPage({ tab }) {
         )}
 
         {/* Table */}
-        {activeTab === 'KW Cluster' && selectedKwProject !== null ? (
+        {activeTab === 'Intent' && selectedKwProject !== null ? (
           <KwClusterDetailView
             project={kwClusters[selectedKwProject]}
             search={search}
@@ -5274,7 +5274,7 @@ export default function ProjectSetupPage({ tab }) {
         ) : (
           <div style={{ overflowX: 'auto' }}>
             {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} />}
-            {activeTab === 'KW Cluster' && <PagesTab pages={kwClusters} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's KW Cluster data (keywords, categories, clusters)" />}
+            {activeTab === 'Intent' && <PagesTab pages={kwClusters} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's Intent data (keywords, categories, clusters)" />}
             {activeTab === 'Pages' && <PagesTab pages={pages} onSelectProject={setSelectedPageProject} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" />}
             {activeTab === 'Competitors' && selectedCompetitorProject === null && (
               <CompetitorProjectsTab
@@ -5321,10 +5321,10 @@ export default function ProjectSetupPage({ tab }) {
           </div>
         )}
 
-        {/* Pagination — the KW Cluster detail view and the Competitors tab's
+        {/* Pagination — the Intent detail view and the Competitors tab's
             own views (project list / competitors list / ranking keywords)
             each render their own real paginated footer */}
-        {!(activeTab === 'KW Cluster' && selectedKwProject !== null) && activeTab !== 'Competitors' && (
+        {!(activeTab === 'Intent' && selectedKwProject !== null) && activeTab !== 'Competitors' && (
           <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-muted)' }}>
               Page:
@@ -5359,7 +5359,7 @@ export default function ProjectSetupPage({ tab }) {
         onClose={() => setShowAddKeywords(false)}
         projects={projects}
         onImportKeywords={handleImportKeywords}
-        lockedProject={activeTab === 'KW Cluster' && selectedKwProject !== null ? { index: selectedKwProject, slug: kwClusters[selectedKwProject].slug, name: kwClusters[selectedKwProject].name, domain: kwClusters[selectedKwProject].domain } : null}
+        lockedProject={activeTab === 'Intent' && selectedKwProject !== null ? { index: selectedKwProject, slug: kwClusters[selectedKwProject].slug, name: kwClusters[selectedKwProject].name, domain: kwClusters[selectedKwProject].domain } : null}
       />
       <ChooseProjectModal open={showChooseProject} onClose={() => setShowChooseProject(false)} onApply={handleChooseProjectApply} projects={projects} />
       <AddCompetitorModal
