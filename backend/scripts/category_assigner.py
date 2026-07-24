@@ -350,6 +350,7 @@ def categorize_from_top3(keyword, top3, domain):
     candidate_name = strip_location_from_category(candidate_name, titles)
     candidate_name = strip_filler_words_from_category(candidate_name)
     candidate_name = dedupe_related_words_in_category(candidate_name)
+    candidate_name = category_checker.canonicalize_category_name(candidate_name)
 
     db.add_category(domain, candidate_name)
     return candidate_name

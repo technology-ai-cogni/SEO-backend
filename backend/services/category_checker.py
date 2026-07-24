@@ -355,6 +355,73 @@ def _apply_best_top_rule(candidate_name, titles):
     return f"Best/Top {rest}".strip() if rest else "Best/Top"
 
 
+_MODIFIER_WORDS = {
+    "cbse", "icse", "ib", "igcse", "board", "international", "private", "public",
+    "government", "primary", "secondary", "higher", "play", "pre", "nursery",
+    "digital", "online", "b2b", "b2c", "local"
+}
+
+_NOUN_WORDS = {
+    "schools", "school", "colleges", "college", "fees", "fee", "admission", "admissions",
+    "list", "system", "services", "service", "agency", "agencies", "company", "companies",
+    "firm", "firms", "provider", "providers"
+}
+
+_ACRONYMS = {"cbse": "CBSE", "icse": "ICSE", "ib": "IB", "igcse": "IGCSE", "b2b": "B2B", "b2c": "B2C"}
+
+
+def canonicalize_category_name(category_name: str) -> str:
+    """
+    Standardize category phrasing and capitalization:
+    1. Reorders jumbled words into canonical order:
+       Modifiers (e.g. 'cbse', 'icse', 'international') come BEFORE main nouns (e.g. 'schools', 'fees').
+       e.g., 'Best/Top schools cbse' -> 'Best/Top CBSE Schools'
+    2. Capitalizes words consistently (Title Case & proper uppercase for acronyms like CBSE, ICSE).
+       e.g. 'schools' vs 'Schools' -> 'Schools'
+    """
+    if not category_name:
+        return category_name
+
+    has_best_top = category_name.strip().startswith("Best/Top ")
+    rest = category_name.strip()[len("Best/Top "):] if has_best_top else category_name.strip()
+    words = rest.split()
+
+    if not words:
+        return category_name
+
+    modifiers = []
+    nouns = []
+    others = []
+
+    for w in words:
+        w_lower = w.lower()
+        if w_lower in _MODIFIER_WORDS or w_lower in _ACRONYMS:
+            if w_lower not in [m.lower() for m in modifiers]:
+                modifiers.append(w)
+        elif w_lower in _NOUN_WORDS:
+            if w_lower not in [n.lower() for n in nouns]:
+                nouns.append(w)
+        else:
+            if w_lower not in [o.lower() for o in others]:
+                others.append(w)
+
+    ordered_words = modifiers + nouns + others
+
+    formatted_words = []
+    for w in ordered_words:
+        w_lower = w.lower()
+        if w_lower in _ACRONYMS:
+            formatted_words.append(_ACRONYMS[w_lower])
+        else:
+            formatted_words.append(w.capitalize())
+
+    result = " ".join(formatted_words)
+    if has_best_top:
+        result = f"Best/Top {result}"
+
+    return result
+
+
 def _clean_category_text(text):
     """Strip any leftover punctuation/delimiters (e.g. a stray '|' from a
     title like 'Page Title | Site Name') and collapse whitespace. Applied
@@ -791,6 +858,7 @@ def categorize_keyword(keyword, domain, country_code=None):
     meta["refined_candidate_after_llm"] = refined_candidate
     
     candidate_name = _apply_best_top_rule(refined_candidate, titles)
+    candidate_name = canonicalize_category_name(candidate_name)
     meta["best_top_applied"] = candidate_name != refined_candidate
 
     # Direct category assignment without referring to or merging into previous categories
