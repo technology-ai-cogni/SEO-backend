@@ -2822,14 +2822,14 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
   const safePage = Math.min(page, pageCount);
   const pagedIndices = filteredIndices.slice((safePage - 1) * KW_PAGE_SIZE, safePage * KW_PAGE_SIZE);
 
-  useEffect(() => { setPage(1); }, [search, columnFilters, tableFilters, project]);
+  useEffect(() => { setPage(1); }, [search, columnFilters, tableFilters, project?.slug]);
 
   useEffect(() => {
     setRows(project.detailKeywords || []);
     setPendingUpdates(new Map());
     setPendingDeleteIds(new Set());
     setSaveError('');
-  }, [project]);
+  }, [project?.slug]);
 
   const allSelected = pagedIndices.length > 0 && pagedIndices.every(i => selectedRows.has(i));
   const someSelected = !allSelected && pagedIndices.some(i => selectedRows.has(i));
@@ -5068,7 +5068,7 @@ export default function ProjectSetupPage({ tab }) {
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 0 }}>
       {/* Breadcrumb */}
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span>Home</span><span>›</span><span>SEO</span><span>›</span><span style={{ color: 'var(--text-primary)' }}>Position Tracking</span>
+        <span>Home</span><span>›</span><span>SEO</span><span>›</span><span style={{ color: 'var(--text-primary)' }}>Brand Discovery</span>
       </div>
 
       {/* Page title */}

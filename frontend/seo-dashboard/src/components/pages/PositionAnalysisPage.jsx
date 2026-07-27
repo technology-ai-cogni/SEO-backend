@@ -1576,7 +1576,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13.5, color: '#334155' }}>
               <p style={{ margin: 0 }}>
-                Position tracking analysis was successfully generated for <strong>{domainDisplay}</strong> ({locationDisplay}).
+                Brand discovery analysis was successfully generated for <strong>{domainDisplay}</strong> ({locationDisplay}).
               </p>
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>

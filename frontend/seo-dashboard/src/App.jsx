@@ -28,7 +28,7 @@ const PAGE_TITLES = {
   'project-setup/competitors': { title: 'Project Setup · Competitors', subtitle: 'Track competitor domains' },
   'project-setup/outreach': { title: 'Project Setup · Outreach', subtitle: 'Manage link outreach' },
   'project-setup/connectors': { title: 'Project Setup · Connectors', subtitle: 'Connect data sources' },
-  'search-visibility/position-analysis': { title: 'Position Tracking', subtitle: `OWIS · Singapore · Google · ${totalKeywordCount.toLocaleString()} keywords` },
+  'search-visibility/position-analysis': { title: 'Brand Discovery', subtitle: '' },
   'search-visibility/keywords': { title: 'Keywords', subtitle: `${totalKeywordCount.toLocaleString()} tracked keywords` },
   'search-visibility/top-pages': { title: 'Pages', subtitle: 'Best performing pages by organic traffic' },
   'search-visibility/link-outreach': { title: 'Link Outreach', subtitle: 'Manage backlink acquisition campaigns' },
