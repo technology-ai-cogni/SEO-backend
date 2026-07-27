@@ -60,7 +60,7 @@ export default function KeywordsPage() {
       <Card>
         <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', gap: 12 }}>
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 700 }}>All Keywords</div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flex: 1, maxWidth: 500 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flex: 1, maxWidth: 540 }}>
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 12px' }}>
               <Search size={13} color="var(--text-muted)" />
               <input
@@ -78,13 +78,13 @@ export default function KeywordsPage() {
               <option value="">All Clusters</option>
               {clusters.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
+            <button style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 500, color: 'var(--text-secondary)', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 12px', cursor: 'pointer', fontFamily: 'var(--font-body)' }} title="Download CSV">
+              <Download size={12} />
+            </button>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: '#fff', background: 'var(--accent)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '6px 14px', cursor: 'pointer', fontFamily: 'var(--font-body)' }}>
               <Plus size={13} /> Add Keywords
-            </button>
-            <button style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 500, color: 'var(--text-secondary)', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 12px', cursor: 'pointer', fontFamily: 'var(--font-body)' }}>
-              <Download size={12} />
             </button>
           </div>
         </div>

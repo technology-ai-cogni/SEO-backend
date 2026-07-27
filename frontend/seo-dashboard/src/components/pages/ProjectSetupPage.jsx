@@ -2281,10 +2281,6 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
         >
           <RefreshCw size={14} className={refreshing ? 'spin-icon' : ''} />
         </button>
-        <div style={{ flex: 1 }} />
-        {saveError && (
-          <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError}</span>
-        )}
         <TableFilterDropdown
           filters={filterConfigs}
           rows={rows}
@@ -2311,6 +2307,10 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
         >
           <Download size={14} />
         </button>
+        <div style={{ flex: 1 }} />
+        {saveError && (
+          <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError}</span>
+        )}
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{filteredRows.length} page{filteredRows.length !== 1 ? 's' : ''}</span>
         {(hasPendingChanges || saving) && (
           <button
@@ -2977,6 +2977,30 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
         >
           <RefreshCw size={14} className={refreshing ? 'spin-icon' : ''} />
         </button>
+
+        <TableFilterDropdown
+          filters={kwFilterConfigs}
+          rows={rows}
+          activeFilters={tableFilters}
+          onFiltersChange={setTableFilters}
+        />
+
+        <button
+          onClick={() => downloadCSV(`${project?.name || 'keywords'}_clusters`, visibleRows)}
+          title="Download CSV"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--surface-2)', color: 'var(--text-secondary)',
+            border: '1px solid var(--border)', borderRadius: 8,
+            padding: '7px 10px', cursor: 'pointer',
+            fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+        >
+          <Download size={14} />
+        </button>
+
         <div style={{ flex: 1 }} />
         {saveError && (
           <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError}</span>
@@ -2990,21 +3014,23 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
 
         {selectedRows.size === 0 && (
           <>
-            {/* Check initial ranking button */}
-            <button
-              onClick={handleCheckRanking}
-              disabled={rankChecking}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                background: 'var(--surface-2)', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 8,
-                padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: rankChecking ? 'default' : 'pointer',
-                fontFamily: 'var(--font-body)', opacity: rankChecking ? 0.6 : 1, transition: 'opacity 0.15s',
-              }}
-              onMouseEnter={e => { if (!rankChecking) e.currentTarget.style.opacity = '0.75'; }}
-              onMouseLeave={e => { e.currentTarget.style.opacity = rankChecking ? '0.6' : '1'; }}
-            >
-              {rankChecking ? 'Checking ranking…' : 'Check initial ranking'}
-            </button>
+            {/* Check initial ranking button -- visible ONLY when ALL keywords have both cluster and category */}
+            {rows.length > 0 && rows.every(r => Boolean(r.cluster && String(r.cluster).trim()) && Boolean(r.category && String(r.category).trim())) && (
+              <button
+                onClick={handleCheckRanking}
+                disabled={rankChecking}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'var(--surface-2)', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 8,
+                  padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: rankChecking ? 'default' : 'pointer',
+                  fontFamily: 'var(--font-body)', opacity: rankChecking ? 0.6 : 1, transition: 'opacity 0.15s',
+                }}
+                onMouseEnter={e => { if (!rankChecking) e.currentTarget.style.opacity = '0.75'; }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = rankChecking ? '0.6' : '1'; }}
+              >
+                {rankChecking ? 'Checking ranking…' : 'Check initial ranking'}
+              </button>
+            )}
 
             {/* Exclude Dropdown */}
             <div style={{ position: 'relative' }}>
@@ -3170,34 +3196,11 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
           </>
         )}
 
-        <TableFilterDropdown
-          filters={kwFilterConfigs}
-          rows={rows}
-          activeFilters={tableFilters}
-          onFiltersChange={setTableFilters}
-        />
-
         <ActionsDropdown
           selectedCount={selectedRows.size}
           onBulkEdit={() => setShowBulkEdit(true)}
           onBulkDelete={() => setShowBulkDelete(true)}
         />
-
-        <button
-          onClick={() => downloadCSV(`${project?.name || 'keywords'}_clusters`, visibleRows)}
-          title="Download CSV"
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'var(--surface-2)', color: 'var(--text-secondary)',
-            border: '1px solid var(--border)', borderRadius: 8,
-            padding: '7px 10px', cursor: 'pointer',
-            fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-          }}
-          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-        >
-          <Download size={14} />
-        </button>
 
         {/* Robot Face AI Cluster Button */}
         <button
@@ -3469,7 +3472,6 @@ function CompetitorDetailView({ competitor, onBack }) {
           <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
           {competitor.domain && competitor.name && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>{competitor.domain}</span>}
         </div>
-        <div style={{ flex: 1 }} />
         <button
           onClick={() => {
             const rowsToExport = details.map(d => ({
@@ -3500,6 +3502,7 @@ function CompetitorDetailView({ competitor, onBack }) {
         >
           <Download size={14} />
         </button>
+        <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{details.length} entr{details.length !== 1 ? 'ies' : 'y'}</span>
       </div>
 
@@ -4381,13 +4384,6 @@ function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor
           <div style={{ height: 20, width: 1, background: 'var(--border)' }} />
           <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{scopedProject.name}</span>
           {scopedProject.domain && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>{scopedProject.domain}</span>}
-          <div style={{ flex: 1 }} />
-          {(saveError || bulkError) && (
-            <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError || bulkError}</span>
-          )}
-          {hasPendingChanges && !saving && (
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Unsaved changes</span>
-          )}
           <TableFilterDropdown
             filters={competitorFilterConfigs}
             rows={baseFiltered}
@@ -4428,6 +4424,13 @@ function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor
           >
             <Download size={14} />
           </button>
+          <div style={{ flex: 1 }} />
+          {(saveError || bulkError) && (
+            <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError || bulkError}</span>
+          )}
+          {hasPendingChanges && !saving && (
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Unsaved changes</span>
+          )}
           {hasPendingChanges && (
             <button
               onClick={onSaveChanges}

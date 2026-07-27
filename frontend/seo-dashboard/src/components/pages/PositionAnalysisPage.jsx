@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ExternalLink, Plus, Share2, Settings, Info, X, CheckCircle, Globe, Monitor } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiAnalysis } from '../../lib/projectsApi';
 
 export default function PositionAnalysisPage({ onNavigate }) {
@@ -20,6 +21,65 @@ export default function PositionAnalysisPage({ onNavigate }) {
 
   // Hidden cards state
   const [closedCards, setClosedCards] = useState({});
+  const [selectedRegion, setSelectedRegion] = useState('US');
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [activeTooltip, setActiveTooltip] = useState(null);
+  const [hoveredChartLine, setHoveredChartLine] = useState(null);
+
+  const COUNTRY_OPTIONS = [
+    { code: 'AF', flag: '🇦🇫', name: 'Afghanistan' },
+    { code: 'AL', flag: '🇦🇱', name: 'Albania' },
+    { code: 'DZ', flag: '🇩🇿', name: 'Algeria' },
+    { code: 'AR', flag: '🇦🇷', name: 'Argentina' },
+    { code: 'AU', flag: '🇦🇺', name: 'Australia' },
+    { code: 'AT', flag: '🇦🇹', name: 'Austria' },
+    { code: 'BD', flag: '🇧🇩', name: 'Bangladesh' },
+    { code: 'BE', flag: '🇧🇪', name: 'Belgium' },
+    { code: 'BR', flag: '🇧🇷', name: 'Brazil' },
+    { code: 'CA', flag: '🇨🇦', name: 'Canada' },
+    { code: 'CL', flag: '🇨🇱', name: 'Chile' },
+    { code: 'CN', flag: '🇨🇳', name: 'China' },
+    { code: 'CO', flag: '🇨🇴', name: 'Colombia' },
+    { code: 'CZ', flag: '🇨🇿', name: 'Czech Republic' },
+    { code: 'DK', flag: '🇩🇰', name: 'Denmark' },
+    { code: 'EG', flag: '🇪🇬', name: 'Egypt' },
+    { code: 'FI', flag: '🇫🇮', name: 'Finland' },
+    { code: 'FR', flag: '🇫🇷', name: 'France' },
+    { code: 'DE', flag: '🇩🇪', name: 'Germany' },
+    { code: 'GR', flag: '🇬🇷', name: 'Greece' },
+    { code: 'HU', flag: '🇭🇺', name: 'Hungary' },
+    { code: 'IN', flag: '🇮🇳', name: 'India' },
+    { code: 'ID', flag: '🇮🇩', name: 'Indonesia' },
+    { code: 'IE', flag: '🇮🇪', name: 'Ireland' },
+    { code: 'IL', flag: '🇮🇱', name: 'Israel' },
+    { code: 'IT', flag: '🇮🇹', name: 'Italy' },
+    { code: 'JP', flag: '🇯🇵', name: 'Japan' },
+    { code: 'KE', flag: '🇰🇪', name: 'Kenya' },
+    { code: 'MY', flag: '🇲🇾', name: 'Malaysia' },
+    { code: 'MX', flag: '🇲🇽', name: 'Mexico' },
+    { code: 'NL', flag: '🇳🇱', name: 'Netherlands' },
+    { code: 'NZ', flag: '🇳🇿', name: 'New Zealand' },
+    { code: 'NG', flag: '🇳🇬', name: 'Nigeria' },
+    { code: 'NO', flag: '🇳🇴', name: 'Norway' },
+    { code: 'PK', flag: '🇵🇰', name: 'Pakistan' },
+    { code: 'PH', flag: '🇵🇭', name: 'Philippines' },
+    { code: 'PL', flag: '🇵🇱', name: 'Poland' },
+    { code: 'PT', flag: '🇵🇹', name: 'Portugal' },
+    { code: 'RO', flag: '🇷🇴', name: 'Romania' },
+    { code: 'SA', flag: '🇸🇦', name: 'Saudi Arabia' },
+    { code: 'SG', flag: '🇸🇬', name: 'Singapore' },
+    { code: 'ZA', flag: '🇿🇦', name: 'South Africa' },
+    { code: 'KR', flag: '🇰🇷', name: 'South Korea' },
+    { code: 'ES', flag: '🇪🇸', name: 'Spain' },
+    { code: 'SE', flag: '🇸🇪', name: 'Sweden' },
+    { code: 'CH', flag: '🇨🇭', name: 'Switzerland' },
+    { code: 'TH', flag: '🇹🇭', name: 'Thailand' },
+    { code: 'TR', flag: '🇹🇷', name: 'Turkey' },
+    { code: 'AE', flag: '🇦🇪', name: 'United Arab Emirates' },
+    { code: 'GB', flag: '🇬🇧', name: 'United Kingdom' },
+    { code: 'US', flag: '🇺🇸', name: 'United States' },
+    { code: 'VN', flag: '🇻🇳', name: 'Vietnam' }
+  ];
 
   useEffect(() => {
     let isMounted = true;
@@ -38,7 +98,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
             const kws = await fetchKeywordRows(first.slug);
             if (kws && kws.length > 0 && isMounted) {
               setKwCount(kws.length);
-              const sortedKws = [...kws].sort((a,b) => (b.sv || 0) - (a.sv || 0));
+              const sortedKws = [...kws].sort((a, b) => (b.sv || 0) - (a.sv || 0));
               setTopKeywords(sortedKws.slice(0, 2).map(k => k.kw));
             }
             const pgs = await fetchPageRows(first.slug);
@@ -68,7 +128,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
         const kws = await fetchKeywordRows(p.slug);
         if (kws && kws.length > 0) {
           setKwCount(kws.length);
-          const sortedKws = [...kws].sort((a,b) => (b.sv || 0) - (a.sv || 0));
+          const sortedKws = [...kws].sort((a, b) => (b.sv || 0) - (a.sv || 0));
           setTopKeywords(sortedKws.slice(0, 2).map(k => k.kw));
         } else {
           setKwCount(650);
@@ -112,6 +172,45 @@ export default function PositionAnalysisPage({ onNavigate }) {
   const domainDisplay = activeProject?.domain || activeProject?.name || 'ittisa.org';
   const locationDisplay = activeProject?.location || 'India (Google)';
 
+  const getRegionBadgeInfo = (project, dateVal) => {
+    const loc = (project?.target_regions || project?.location || project?.country || 'US').toLowerCase();
+
+    let flag = '🇺🇸';
+    let code = 'US';
+    if (loc.includes('in') || loc.includes('india')) {
+      flag = '🇮🇳';
+      code = 'IN';
+    } else if (loc.includes('sg') || loc.includes('singapore')) {
+      flag = '🇸🇬';
+      code = 'SG';
+    } else if (loc.includes('uk') || loc.includes('gb') || loc.includes('united kingdom')) {
+      flag = '🇬🇧';
+      code = 'UK';
+    } else if (loc.includes('ca') || loc.includes('canada')) {
+      flag = '🇨🇦';
+      code = 'CA';
+    } else if (loc.includes('au') || loc.includes('australia')) {
+      flag = '🇦🇺';
+      code = 'AU';
+    }
+
+    let dateStr = '';
+    try {
+      if (dateVal && typeof dateVal === 'string' && dateVal.includes('-')) {
+        const [y, m, d] = dateVal.split('-').map(Number);
+        dateStr = new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      } else {
+        dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+    } catch (e) {
+      dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    return { flag, code, dateStr };
+  };
+
+  const badgeInfo = getRegionBadgeInfo(activeProject, selectedDate);
+
   return (
     <div style={{
       padding: '24px 32px',
@@ -122,15 +221,19 @@ export default function PositionAnalysisPage({ onNavigate }) {
     }}>
       {/* ─── HEADER BAR ────────────────────────────────────────────────────────── */}
       <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))',
+        gap: 20,
         marginBottom: 24,
-        flexWrap: 'wrap',
-        gap: 16
+        alignItems: 'center'
       }}>
-        {/* Left: Domain selector / title */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {/* Left Column (directly above First Box / AI SEARCH Card): Title on left, Region pill aligned with end of first box */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-start',
+          gap: 16
+        }}>
           <h1 style={{
             fontFamily: 'var(--font-display, inherit)',
             fontSize: 22,
@@ -141,7 +244,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
             alignItems: 'center',
             gap: 6
           }}>
-            SEO Dashboard:
+            Dashboard:
             {projects.length > 1 ? (
               <select
                 value={selectedSlug}
@@ -173,10 +276,80 @@ export default function PositionAnalysisPage({ onNavigate }) {
               <ExternalLink size={16} />
             </a>
           </h1>
+
+          {/* Interactive Country Dropdown & Metadata aligned with the end of the first box (removed if AI Search card is closed) */}
+          {!closedCards.aiSearch && (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: 12,
+              color: '#64748b',
+              fontWeight: 500
+            }}>
+              <select
+                value={selectedRegion}
+                onChange={(e) => setSelectedRegion(e.target.value)}
+                style={{
+                  background: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 6,
+                  padding: '2px 6px',
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  color: '#0f172a',
+                  outline: 'none',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  maxWidth: 125,
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                  transition: 'border-color 0.15s ease'
+                }}
+                onMouseEnter={e => e.currentTarget.style.borderColor = '#7c3aed'}
+                onMouseLeave={e => e.currentTarget.style.borderColor = '#cbd5e1'}
+              >
+                {COUNTRY_OPTIONS.map(c => (
+                  <option key={c.code} value={c.code}>
+                    {c.name} ({c.code})
+                  </option>
+                ))}
+              </select>
+
+              {/* Interactive Date Picker */}
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                style={{
+                  background: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 5,
+                  padding: '1px 3px',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: '#0f172a',
+                  outline: 'none',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  maxWidth: 96,
+                  height: 20,
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                  transition: 'border-color 0.15s ease'
+                }}
+                onMouseEnter={e => e.currentTarget.style.borderColor = '#7c3aed'}
+                onMouseLeave={e => e.currentTarget.style.borderColor = '#cbd5e1'}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Right: Actions */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/* Right Column (directly above Second Box / SEO Card): Actions */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          gap: 10
+        }}>
           <button
             onClick={() => onNavigate ? onNavigate('project-setup') : (window.location.hash = '#project-setup')}
             style={{
@@ -200,7 +373,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
             <Plus size={16} />
             Create SEO Project
           </button>
-          
+
           <button
             onClick={() => navigator.clipboard.writeText(window.location.href)}
             style={{
@@ -239,6 +412,36 @@ export default function PositionAnalysisPage({ onNavigate }) {
         </div>
       </div>
 
+      {/* ─── QUICK METRICS (Between Header Bar and Cards) ─────────────────── */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexWrap: 'wrap',
+        gap: '16px 48px',
+        marginBottom: 16,
+        fontFamily: 'var(--font-body, system-ui, sans-serif)'
+      }}>
+        {[
+          'Authority Score',
+          'Organic Traffic',
+          'Keywords',
+          'Total Pages',
+          'Total Blogs',
+          'Total Clusters',
+          'Net Potential'
+        ].map((item) => (
+          <span key={item} style={{
+            color: '#000000',
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.2px'
+          }}>
+            {item}
+          </span>
+        ))}
+      </div>
+
       {/* ─── TOP ROW: AI SEARCH & SEO CARDS ────────────────────────────────────── */}
       <div style={{
         display: 'grid',
@@ -271,15 +474,12 @@ export default function PositionAnalysisPage({ onNavigate }) {
               }}>
                 AI SEARCH
               </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#64748b' }}>
-                <span>🇺🇸 United States</span>
-                <X size={14} style={{ cursor: 'pointer' }} onClick={() => toggleClose('aiSearch')} />
-              </div>
+              <X size={14} style={{ cursor: 'pointer', color: '#64748b' }} onClick={() => toggleClose('aiSearch')} />
             </div>
 
             {/* Sub-nav tabs */}
             <div style={{ display: 'flex', gap: 6, borderBottom: '1px solid #f1f5f9', pb: 10 }}>
-              {['Overview', 'ChatGPT', 'Gemini', 'Claude', 'AI Overview'].map(tab => (
+              {['Overview', 'ChatGPT', 'Gemini', 'AI Overview'].map(tab => (
                 <button
                   key={tab}
                   onClick={() => setAiTab(tab)}
@@ -301,7 +501,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
             </div>
 
             {/* Content Body */}
-            {['ChatGPT', 'Gemini', 'Claude', 'AI Overview'].includes(aiTab) ? (
+            {['ChatGPT', 'Gemini', 'AI Overview'].includes(aiTab) ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                   <button onClick={handleAiAnalysis} disabled={isAnalyzing || !topKeywords.length} style={{
@@ -316,7 +516,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                   )}
                 </div>
                 {analysisError && <div style={{ color: '#ef4444', fontSize: 13 }}>{analysisError}</div>}
-                
+
                 {multiResults.map((res, idx) => (
                   <div key={idx} style={{ background: '#f8fafc', padding: 16, borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13, color: '#334155' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, borderBottom: '1px solid #e2e8f0', paddingBottom: 8 }}>
@@ -326,27 +526,27 @@ export default function PositionAnalysisPage({ onNavigate }) {
                         <span style={{ fontWeight: 600, color: res.status === 'ok' ? '#10b981' : '#ef4444' }}>Status: {res.status}</span>
                       </div>
                     </div>
-                    
+
                     <div style={{ fontWeight: 700, marginBottom: 8, color: '#0f172a' }}>Top 5 Ranking URLs:</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {(res.results || []).slice(0, 5).map((urlData, i) => {
-                         const isOurDomain = activeProject?.domain && urlData.url.toLowerCase().includes(activeProject.domain.toLowerCase());
-                         return (
-                           <div key={i} style={{ 
-                             padding: 8, 
-                             borderRadius: 4, 
-                             background: isOurDomain ? '#dcfce3' : '#fff',
-                             border: isOurDomain ? '1px solid #22c55e' : '1px solid #e2e8f0',
-                             display: 'flex',
-                             flexDirection: 'column',
-                             gap: 2
-                           }}>
-                             <span style={{ fontWeight: isOurDomain ? 700 : 600, color: isOurDomain ? '#166534' : '#0f172a' }}>
-                               {i + 1}. {urlData.title || '(No Title)'} {isOurDomain && '⭐ (Our Domain)'}
-                             </span>
-                             <span style={{ color: '#64748b', fontSize: 12, wordBreak: 'break-all' }}>{urlData.url}</span>
-                           </div>
-                         );
+                        const isOurDomain = activeProject?.domain && urlData.url.toLowerCase().includes(activeProject.domain.toLowerCase());
+                        return (
+                          <div key={i} style={{
+                            padding: 8,
+                            borderRadius: 4,
+                            background: isOurDomain ? '#dcfce3' : '#fff',
+                            border: isOurDomain ? '1px solid #22c55e' : '1px solid #e2e8f0',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 2
+                          }}>
+                            <span style={{ fontWeight: isOurDomain ? 700 : 600, color: isOurDomain ? '#166534' : '#0f172a' }}>
+                              {i + 1}. {urlData.title || '(No Title)'} {isOurDomain && '⭐ (Our Domain)'}
+                            </span>
+                            <span style={{ color: '#64748b', fontSize: 12, wordBreak: 'break-all' }}>{urlData.url}</span>
+                          </div>
+                        );
                       })}
                       {(!res.results || res.results.length === 0) && (
                         <div style={{ color: '#94a3b8', fontStyle: 'italic' }}>No ranking URLs found.</div>
@@ -356,73 +556,139 @@ export default function PositionAnalysisPage({ onNavigate }) {
                 ))}
               </div>
             ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 24, alignItems: 'center' }}>
-              {/* Left Meter */}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-                <div style={{ position: 'relative', width: 110, height: 60, display: 'flex', justifyContent: 'center' }}>
-                  <svg width="110" height="60" viewBox="0 0 110 60">
-                    <path
-                      d="M 10 55 A 45 45 0 0 1 100 55"
-                      fill="none"
-                      stroke="#e2e8f0"
-                      strokeWidth="10"
-                      strokeLinecap="round"
-                    />
-                    <path
-                      d="M 10 55 A 45 45 0 0 1 75 20"
-                      fill="none"
-                      stroke="#7c3aed"
-                      strokeWidth="10"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  <div style={{ position: 'absolute', bottom: 0, textAlign: 'center' }}>
-                    <span style={{ fontSize: 22, fontWeight: 800, color: '#0f172a' }}>18</span>
-                  </div>
-                </div>
-                <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600, marginTop: 4 }}>AI Visibility</div>
-
-                <div style={{ display: 'flex', gap: 16, marginTop: 14 }}>
-                  <div>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: '#7c3aed' }}>7</div>
-                    <div style={{ fontSize: 11, color: '#94a3b8' }}>Mentions</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: '#7c3aed' }}>38</div>
-                    <div style={{ fontSize: 11, color: '#94a3b8' }}>Cited pages</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right Table List */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {[
-                  { name: 'ChatGPT', val1: 0, val2: 17 },
-                  { name: 'AI Overview', val1: 1, val2: 15 },
-                  { name: 'AI Mode', val1: 2, val2: 20 },
-                  { name: 'Gemini', val1: 4, val2: 9 },
-                ].map(row => (
-                  <div
-                    key={row.name}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      fontSize: 13,
-                      color: '#334155',
-                      fontWeight: 500,
-                      padding: '4px 0'
-                    }}
-                  >
-                    <span>{row.name}</span>
-                    <div style={{ display: 'flex', gap: 24 }}>
-                      <span style={{ fontWeight: 700, color: '#0f172a', width: 14, textAlign: 'right' }}>{row.val1}</span>
-                      <span style={{ fontWeight: 700, color: '#7c3aed', width: 20, textAlign: 'right' }}>{row.val2}</span>
+              <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 24, alignItems: 'center' }}>
+                {/* Left Meter */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                  <div style={{ position: 'relative', width: 120, height: 65, display: 'flex', justifyContent: 'center', alignItems: 'flex-end' }}>
+                    <svg width="120" height="65" viewBox="0 0 120 65">
+                      <defs>
+                        <linearGradient id="aiVisibilityGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                          <stop offset="0%" stopColor="#7c3aed" />
+                          <stop offset="100%" stopColor="#a855f7" />
+                        </linearGradient>
+                      </defs>
+                      {/* Background Track */}
+                      <path
+                        d="M 12 58 A 48 48 0 0 1 108 58"
+                        fill="none"
+                        stroke="#e2e8f0"
+                        strokeWidth="9"
+                        strokeLinecap="round"
+                      />
+                      {/* Perfectly Aligned Progress Track */}
+                      <path
+                        d="M 12 58 A 48 48 0 0 1 108 58"
+                        fill="none"
+                        stroke="url(#aiVisibilityGrad)"
+                        strokeWidth="9"
+                        strokeLinecap="round"
+                        strokeDasharray="150.8"
+                        strokeDashoffset={150.8 * (1 - 90 / 100)}
+                        style={{ transition: 'stroke-dashoffset 0.5s ease-in-out' }}
+                      />
+                    </svg>
+                    <div style={{ position: 'absolute', bottom: 2, textAlign: 'center' }}>
+                      <span style={{ fontSize: 24, fontWeight: 900, color: '#0f172a', letterSpacing: '-0.5px' }}>90</span>
                     </div>
                   </div>
-                ))}
+                  <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600, marginTop: 4 }}>AI Visibility</div>
+
+                  <div style={{ display: 'flex', gap: 16, marginTop: 14 }}>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>7</div>
+                      <div style={{ fontSize: 11, color: '#94a3b8' }}>Mentions</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: '#7c3aed' }}>38</div>
+                      <div style={{ fontSize: 11, color: '#94a3b8' }}>Cited pages</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Table List */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {[
+                    { name: 'ChatGPT', val1: 0, val2: 17 },
+                    { name: 'AI Overview', val1: 1, val2: 15 },
+                    { name: 'AI Mode', val1: 2, val2: 20 },
+                    { name: 'Gemini', val1: 4, val2: 9 },
+                  ].map(row => (
+                    <div
+                      key={row.name}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontSize: 13,
+                        color: '#334155',
+                        fontWeight: 500,
+                        padding: '4px 0'
+                      }}
+                    >
+                      <span>{row.name}</span>
+                      <div style={{ display: 'flex', gap: 24 }}>
+                        <span style={{ fontWeight: 700, color: '#0f172a', width: 14, textAlign: 'right' }}>{row.val1}</span>
+                        <span style={{ fontWeight: 700, color: '#7c3aed', width: 20, textAlign: 'right' }}>{row.val2}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Rank Audit Complete Status Banner — Overview only */}
+            {aiTab === 'Overview' && (
+              <div style={{
+                background: '#f8fafc',
+                border: '1.5px dashed #c084fc',
+                borderRadius: 10,
+                padding: '12px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                marginTop: 4
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: '50%',
+                    background: '#7c3aed',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    flexShrink: 0
+                  }}>
+                    ✓
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Rank Audit Complete</div>
+                    <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 1 }}>
+                      Ranks successfully generated for all {kwCount} keywords.
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowReport(true)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#7c3aed',
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    padding: 0,
+                    flexShrink: 0
+                  }}
+                >
+                  View Report
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -453,225 +719,693 @@ export default function PositionAnalysisPage({ onNavigate }) {
                 SEO
               </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#64748b' }}>
-                <span>🇺🇸 US 💻 Desktop Jul 12, 2026</span>
                 <X size={14} style={{ cursor: 'pointer' }} onClick={() => toggleClose('seoCard')} />
               </div>
             </div>
 
-            {/* 5 Column Metrics */}
+            {/* 3 Column Metrics */}
             <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(5, 1fr)',
+              gridTemplateColumns: 'repeat(3, 1fr)',
               gap: 12,
               paddingTop: 10
             }}>
               {/* Metric 1 */}
               <div>
-                <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 6 }}>Authority Score</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{
-                    width: 20,
-                    height: 20,
-                    borderRadius: '50%',
-                    background: '#94a3b8',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#fff',
-                    fontSize: 10,
-                    fontWeight: 800
-                  }}>S</div>
-                  <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>19</span>
-                </div>
+                <div style={{ fontSize: 13, color: '#334155', fontWeight: 500, marginBottom: 6 }}>Authority Score</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>19</div>
                 <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 4 }}>Semrush: 2.4M</div>
               </div>
 
               {/* Metric 2 */}
               <div>
-                <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 6 }}>Organic Traffic</div>
+                <div style={{ fontSize: 13, color: '#334155', fontWeight: 500, marginBottom: 6 }}>Organic Traffic</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>261</div>
                 <div style={{ fontSize: 10.5, color: '#16a34a', fontWeight: 700, marginTop: 4 }}>+96.24%</div>
               </div>
 
               {/* Metric 3 */}
               <div>
-                <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 6 }}>Org. Keywords</div>
+                <div style={{ fontSize: 13, color: '#334155', fontWeight: 500, marginBottom: 6 }}>Org. Keywords</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>{kwCount}</div>
                 <div style={{ fontSize: 10.5, color: '#16a34a', fontWeight: 700, marginTop: 4 }}>+28.46%</div>
               </div>
+            </div>
 
-              {/* Metric 4 */}
-              <div>
-                <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 6 }}>Paid Keywords</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>0</div>
-                <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 4 }}>0%</div>
+            {/* Lower Section: Categories on Left | Line In Between | Top 1, Top 3 & Top 10 Columns on Right */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'stretch',
+              gap: 16,
+              paddingTop: 12,
+              borderTop: '1px solid #f1f5f9',
+              marginTop: 4
+            }}>
+              {/* Left Side: Channel Names */}
+              <div style={{ flex: 1.2, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Category</div>
+                {[
+                  'Links',
+                  'Local',
+                  'Google Shopping'
+                ].map(name => (
+                  <div
+                    key={name}
+                    style={{
+                      fontSize: 12.5,
+                      fontWeight: 700,
+                      color: '#0f172a',
+                      height: 24,
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}
+                  >
+                    {name}
+                  </div>
+                ))}
               </div>
 
-              {/* Metric 5 */}
-              <div>
-                <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 6 }}>Ref. Domains</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>426</div>
-                <div style={{ fontSize: 10.5, color: '#16a34a', fontWeight: 700, marginTop: 4 }}>+1.91%</div>
+              {/* Right Side: Top 1, Top 3 & Top 10 Columns */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* Column Headers */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  <span>Top 1</span>
+                  <span>Top 3</span>
+                  <span>Top 10</span>
+                </div>
+
+                {/* Row Values for Links, Local, Google Shopping */}
+                {[
+                  { id: 'links', top1: '5', top3: '14', top10: '58', color: '#16a34a' },
+                  { id: 'local', top1: '1', top3: '2', top10: '9', color: '#7c3aed' },
+                  { id: 'shopping', top1: '0', top3: '0', top10: '0', color: '#94a3b8' }
+                ].map(row => (
+                  <div
+                    key={row.id}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(3, 1fr)',
+                      gap: 12,
+                      alignItems: 'center',
+                      height: 24,
+                      fontSize: 13,
+                      fontWeight: 800
+                    }}
+                  >
+                    <span style={{ color: row.color }}>{row.top1}</span>
+                    <span style={{ color: row.color }}>{row.top3}</span>
+                    <span style={{ color: row.color }}>{row.top10}</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
         )}
       </div>
 
-      {/* ─── MIDDLE ROW: POSITION TRACKING & SITE AUDIT ────────────────────────── */}
+      {/* ─── FULL-WIDTH BRAND DISCOVERY GRID ───────────────── */}
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))',
-        gap: 20,
+        width: '100%',
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: 14,
+        padding: 24,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
         marginBottom: 20
       }}>
-        {/* CARD 3: Position Tracking */}
-        {!closedCards.posTracking && (
-          <div style={{
-            background: '#ffffff',
-            border: '1px solid #e2e8f0',
-            borderRadius: 14,
-            padding: 20,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 14
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>Position Tracking</span>
-                <Info size={14} color="#94a3b8" />
-              </div>
-              <X size={14} style={{ cursor: 'pointer', color: '#94a3b8' }} onClick={() => toggleClose('posTracking')} />
-            </div>
-
-            <div style={{ fontSize: 12, color: '#64748b' }}>
-              {locationDisplay} · English
-            </div>
-
-            {/* Dashed status box */}
-            <div style={{
-              background: '#f8fafc',
-              border: '1.5px dashed #c084fc',
-              borderRadius: 10,
-              padding: '16px 20px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12
+        <div style={{
+          display: 'flex',
+          alignItems: 'stretch',
+          gap: 24,
+          minHeight: 120
+        }}>
+          {/* Left Section: Top Product with Mentions & Cited sub-columns */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
+            <span style={{
+              background: '#f3e8ff',
+              color: '#7c3aed',
+              fontSize: 11,
+              fontWeight: 800,
+              padding: '4px 12px',
+              borderRadius: 6,
+              letterSpacing: '0.5px',
+              textTransform: 'uppercase'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: '50%',
-                  background: '#7c3aed',
-                  color: '#ffffff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}>
-                  ✓
+              TOP PRODUCT
+            </span>
+            {/* Vertical Line sub-container with Mentions & Cited */}
+            <div style={{ width: '100%', flex: 1, display: 'flex', alignItems: 'stretch', gap: 16 }}>
+              {/* Mentions Sub-column */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ textAlign: 'center', marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Mentions
+                  </span>
                 </div>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Rank Audit Complete</div>
-                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
-                    Ranks successfully generated for all {kwCount} keywords.
+                {[
+                  { name: 'IB Diploma Program', count: '42' },
+                  { name: 'Primary Admissions', count: '28' },
+                  { name: 'STEM Robotics Lab', count: '19' },
+                  { name: 'Bilingual Curriculum', count: '15' },
+                  { name: 'Early Childhood Edu', count: '11' }
+                ].map((item, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 10px',
+                      borderRadius: 6,
+                      background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
+                      fontSize: 12
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, color: '#334155' }}>{item.name}</span>
+                    <span style={{ fontWeight: 800, color: '#16a34a', background: '#f0fdf4', padding: '2px 7px', borderRadius: 4, fontSize: 11 }}>
+                      {item.count}
+                    </span>
                   </div>
-                </div>
+                ))}
               </div>
 
-              <button
-                onClick={() => setShowReport(true)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#7c3aed',
-                  fontSize: 13,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  padding: 0
-                }}
-              >
-                View Report
-              </button>
+              {/* Vertical Divider */}
+              <div style={{ width: '1px', background: '#e2e8f0' }} />
+
+              {/* Cited Sub-column */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ textAlign: 'center', marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Cited
+                  </span>
+                </div>
+                {[
+                  { source: 'owis.edu.sg/ib-diploma', count: '18' },
+                  { source: 'owis.edu.sg/primary', count: '12' },
+                  { source: 'owis.edu.sg/stem-lab', count: '9' },
+                  { source: 'owis.edu.sg/bilingual', count: '7' },
+                  { source: 'owis.edu.sg/admissions', count: '4' }
+                ].map((item, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 10px',
+                      borderRadius: 6,
+                      background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
+                      fontSize: 12
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 130 }}>{item.source}</span>
+                    <span style={{ fontWeight: 800, color: '#7c3aed', background: '#f5f3ff', padding: '2px 7px', borderRadius: 4, fontSize: 11 }}>
+                      {item.count}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        )}
 
-        {/* CARD 4: Site Audit */}
-        {!closedCards.siteAudit && (
-          <div style={{
-            background: '#ffffff',
-            border: '1px solid #e2e8f0',
-            borderRadius: 14,
-            padding: 20,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 14
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>Site Audit</span>
-                <Info size={14} color="#94a3b8" />
-              </div>
-              <X size={14} style={{ cursor: 'pointer', color: '#94a3b8' }} onClick={() => toggleClose('siteAudit')} />
-            </div>
+          {/* Single Vertical Separator Line in between */}
+          <div style={{ width: '1px', background: '#e2e8f0' }} />
 
-            <div style={{ fontSize: 12, color: '#64748b' }}>
-              Project Scope: Root Domain
-            </div>
-
-            {/* Score Ring & Stats */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              paddingTop: 6
+          {/* Right Section: Intent with Cluster & Category sub-columns */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
+            <span style={{
+              background: '#f3e8ff',
+              color: '#7c3aed',
+              fontSize: 11,
+              fontWeight: 800,
+              padding: '4px 12px',
+              borderRadius: 6,
+              letterSpacing: '0.5px',
+              textTransform: 'uppercase'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                {/* Circular donut indicator */}
-                <div style={{
-                  position: 'relative',
-                  width: 54,
-                  height: 54,
-                  borderRadius: '50%',
-                  background: 'conic-gradient(#7c3aed 82%, #e2e8f0 0)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}>
+              INTENT
+            </span>
+            {/* Vertical Line sub-container with Cluster & Category */}
+            <div style={{ width: '100%', flex: 1, display: 'flex', alignItems: 'stretch', gap: 16 }}>
+              {/* Cluster Sub-column */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ textAlign: 'center', marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Cluster
+                  </span>
+                </div>
+                {[
+                  { name: 'Informational', share: '48%' },
+                  { name: 'Navigational', share: '26%' },
+                  { name: 'Commercial', share: '16%' },
+                  { name: 'Transactional', share: '7%' },
+                  { name: 'Local Intent', share: '3%' }
+                ].map((item, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 10px',
+                      borderRadius: 6,
+                      background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
+                      fontSize: 12
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, color: '#334155' }}>{item.name}</span>
+                    <span style={{ fontWeight: 800, color: '#2563eb', background: '#eff6ff', padding: '2px 7px', borderRadius: 4, fontSize: 11 }}>
+                      {item.share}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Vertical Divider */}
+              <div style={{ width: '1px', background: '#e2e8f0' }} />
+
+              {/* Category Sub-column */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ textAlign: 'center', marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Category
+                  </span>
+                </div>
+                {[
+                  { name: 'School Fee & Cost', count: '34' },
+                  { name: 'Curriculum IB', count: '29' },
+                  { name: 'Campus Tour', count: '18' },
+                  { name: 'Admissions Inquiry', count: '14' },
+                  { name: 'Location & Map', count: '9' }
+                ].map((item, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 10px',
+                      borderRadius: 6,
+                      background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
+                      fontSize: 12
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 130 }}>{item.name}</span>
+                    <span style={{ fontWeight: 800, color: '#d97706', background: '#fffbeb', padding: '2px 7px', borderRadius: 4, fontSize: 11 }}>
+                      {item.count}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── FULL-WIDTH PAGE ANALYSIS GRID ───────────────── */}
+      <div style={{
+        width: '100%',
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: 14,
+        padding: 24,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+        marginBottom: 20
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'stretch',
+          gap: 24,
+          minHeight: 120
+        }}>
+          {/* Left Section: Page Analysis with 3 Sub-columns */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
+            <span style={{
+              background: '#f3e8ff',
+              color: '#7c3aed',
+              fontSize: 11,
+              fontWeight: 800,
+              padding: '4px 12px',
+              borderRadius: 6,
+              letterSpacing: '0.5px',
+              textTransform: 'uppercase'
+            }}>
+              PAGE ANALYSIS
+            </span>
+
+            {/* 3 Sub-columns Container: Page Name | Cluster | Category */}
+            <div style={{ width: '100%', flex: 1, display: 'flex', alignItems: 'stretch', gap: 16 }}>
+              {(() => {
+                const pageAnalysisData = [
+                  {
+                    name: '/ib-diploma',
+                    clusters: ['Informational (3)', 'Navigational (2)', 'Commercial (1)'],
+                    clusterTrend: { direction: 'up', change: '2' },
+                    categories: ['High Potential', 'Brand Search', 'Comparison'],
+                    categoryTrend: { direction: 'up', change: '1' }
+                  },
+                  {
+                    name: '/primary-school',
+                    clusters: ['Informational (2)', 'Navigational (1)', 'Local Intent (1)'],
+                    clusterTrend: { direction: 'down', change: '1' },
+                    categories: ['High Potential', 'Admissions Inquiry', 'Location & Map', 'Campus Tour', 'Brand Search', 'Fee Structure'],
+                    categoryTrend: { direction: 'up', change: '3' }
+                  },
+                  {
+                    name: '/stem-lab',
+                    clusters: ['Informational (2)', 'Commercial (1)'],
+                    clusterTrend: { direction: 'up', change: '1' },
+                    categories: ['Curriculum IB', 'Equipment & Tech'],
+                    categoryTrend: { direction: 'down', change: '1' }
+                  },
+                  {
+                    name: '/bilingual-learning',
+                    clusters: ['Informational (3)', 'Commercial (1)', 'Transactional (1)'],
+                    clusterTrend: { direction: 'up', change: '2' },
+                    categories: ['Curriculum IB', 'High Potential', 'Comparison', 'Direct Leads'],
+                    categoryTrend: { direction: 'up', change: '2' }
+                  },
+                  {
+                    name: '/admissions',
+                    clusters: ['Navigational (1)', 'Transactional (1)'],
+                    clusterTrend: { direction: 'down', change: '1' },
+                    categories: ['Admissions Inquiry', 'School Fee & Cost', 'Campus Tour'],
+                    categoryTrend: { direction: 'down', change: '2' }
+                  }
+                ];
+
+                return (
+                  <>
+                    {/* Sub-column 1: Page Name */}
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ textAlign: 'center', marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                          Page Name
+                        </span>
+                      </div>
+                      {pageAnalysisData.map((item, idx) => (
+                        <div key={idx} style={{ padding: '6px 10px', borderRadius: 6, background: idx % 2 === 0 ? '#f8fafc' : 'transparent', fontSize: 12, fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                          {item.name}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Vertical Divider 1 */}
+                    <div style={{ width: '1px', background: '#e2e8f0' }} />
+
+                    {/* Sub-column 2: Cluster */}
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ textAlign: 'center', marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                          Cluster
+                        </span>
+                      </div>
+                      {pageAnalysisData.map((item, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            padding: '6px 10px',
+                            borderRadius: 6,
+                            background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
+                            fontSize: 12,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 6,
+                            position: 'relative'
+                          }}
+                        >
+                          <span
+                            onMouseEnter={() => setActiveTooltip(`cluster-${idx}`)}
+                            onMouseLeave={() => setActiveTooltip(null)}
+                            style={{
+                              fontWeight: 800,
+                              color: '#0f172a',
+                              fontSize: 13,
+                              cursor: 'pointer',
+                              display: 'inline-block'
+                            }}
+                          >
+                            {item.clusters.length}
+                          </span>
+
+                          {/* Up/Down Trend Indicator */}
+                          <span style={{
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            color: item.clusterTrend.direction === 'up' ? '#16a34a' : '#dc2626'
+                          }}>
+                            {item.clusterTrend.direction === 'up' ? '▲' : '▼'} {item.clusterTrend.change}
+                          </span>
+
+                          {/* Hover Tooltip Popup */}
+                          {activeTooltip === `cluster-${idx}` && (
+                            <div style={{
+                              position: 'absolute',
+                              bottom: '100%',
+                              left: '50%',
+                              transform: 'translateX(-50%)',
+                              marginBottom: 6,
+                              background: '#0f172a',
+                              color: '#ffffff',
+                              padding: '8px 12px',
+                              borderRadius: 8,
+                              fontSize: 11,
+                              fontWeight: 500,
+                              whiteSpace: 'nowrap',
+                              boxShadow: '0 10px 15px -3px rgba(0,0,0,0.2), 0 4px 6px -4px rgba(0,0,0,0.1)',
+                              zIndex: 100,
+                              pointerEvents: 'none'
+                            }}>
+                              <div style={{ fontWeight: 800, color: '#93c5fd', marginBottom: 4, borderBottom: '1px solid #334155', paddingBottom: 2 }}>
+                                Clusters ({item.clusters.length})
+                              </div>
+                              {item.clusters.map((c, i) => (
+                                <div key={i} style={{ color: '#f8fafc', padding: '1px 0' }}>• {c}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Vertical Divider 2 */}
+                    <div style={{ width: '1px', background: '#e2e8f0' }} />
+
+                    {/* Sub-column 3: Category */}
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ textAlign: 'center', marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                          Category
+                        </span>
+                      </div>
+                      {pageAnalysisData.map((item, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            padding: '6px 10px',
+                            borderRadius: 6,
+                            background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
+                            fontSize: 12,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 6,
+                            position: 'relative'
+                          }}
+                        >
+                          <span
+                            onMouseEnter={() => setActiveTooltip(`cat-${idx}`)}
+                            onMouseLeave={() => setActiveTooltip(null)}
+                            style={{
+                              fontWeight: 800,
+                              color: '#0f172a',
+                              fontSize: 13,
+                              cursor: 'pointer',
+                              display: 'inline-block'
+                            }}
+                          >
+                            {item.categories.length}
+                          </span>
+
+                          {/* Up/Down Trend Indicator */}
+                          <span style={{
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            color: item.categoryTrend.direction === 'up' ? '#16a34a' : '#dc2626'
+                          }}>
+                            {item.categoryTrend.direction === 'up' ? '▲' : '▼'} {item.categoryTrend.change}
+                          </span>
+
+                          {/* Hover Tooltip Popup */}
+                          {activeTooltip === `cat-${idx}` && (
+                            <div style={{
+                              position: 'absolute',
+                              bottom: '100%',
+                              left: '50%',
+                              transform: 'translateX(-50%)',
+                              marginBottom: 6,
+                              background: '#0f172a',
+                              color: '#ffffff',
+                              padding: '8px 12px',
+                              borderRadius: 8,
+                              fontSize: 11,
+                              fontWeight: 500,
+                              whiteSpace: 'nowrap',
+                              boxShadow: '0 10px 15px -3px rgba(0,0,0,0.2), 0 4px 6px -4px rgba(0,0,0,0.1)',
+                              zIndex: 100,
+                              pointerEvents: 'none'
+                            }}>
+                              <div style={{ fontWeight: 800, color: '#fde047', marginBottom: 4, borderBottom: '1px solid #334155', paddingBottom: 2 }}>
+                                Categories ({item.categories.length})
+                              </div>
+                              {item.categories.map((cat, i) => (
+                                <div key={i} style={{ color: '#f8fafc', padding: '1px 0' }}>• {cat}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+
+          {/* Right Section: Cluster Tracking Line Graph */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
+            {/* Line Chart Area */}
+            {(() => {
+              const clusterTrendData = [
+                { week: 'W1', '/ib-diploma': 2, '/primary-school': 5, '/stem-lab': 1, '/bilingual-learning': 3, '/admissions': 3 },
+                { week: 'W2', '/ib-diploma': 3, '/primary-school': 4, '/stem-lab': 2, '/bilingual-learning': 4, '/admissions': 2 },
+                { week: 'W3', '/ib-diploma': 4, '/primary-school': 5, '/stem-lab': 2, '/bilingual-learning': 4, '/admissions': 3 },
+                { week: 'W4', '/ib-diploma': 5, '/primary-school': 4, '/stem-lab': 3, '/bilingual-learning': 5, '/admissions': 2 },
+                { week: 'W5', '/ib-diploma': 6, '/primary-school': 4, '/stem-lab': 3, '/bilingual-learning': 5, '/admissions': 2 }
+              ];
+
+              const legendPages = [
+                { name: '/ib-diploma', color: '#2563eb' },
+                { name: '/primary-school', color: '#16a34a' },
+                { name: '/stem-lab', color: '#d97706' },
+                { name: '/bilingual-learning', color: '#9333ea' },
+                { name: '/admissions', color: '#dc2626' }
+              ];
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+                  <div style={{ display: 'flex', gap: 16, width: '100%', height: 220, marginTop: 12 }}>
+                    {/* Page Name Legend List on Left */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, justifyContent: 'center', minWidth: 130 }}>
+                      {legendPages.map((page, idx) => {
+                        const isHovered = hoveredChartLine === page.name;
+                        return (
+                          <div
+                            key={idx}
+                            onMouseEnter={() => setHoveredChartLine(page.name)}
+                            onMouseLeave={() => setHoveredChartLine(null)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              fontSize: 11,
+                              fontWeight: isHovered ? 800 : 600,
+                              color: isHovered ? page.color : '#334155',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                              opacity: hoveredChartLine && !isHovered ? 0.4 : 1
+                            }}
+                          >
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: page.color, display: 'inline-block', flexShrink: 0 }} />
+                            <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 115 }}>{page.name}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Line Graph Tracking Cluster */}
+                    <div style={{ flex: 1, height: '100%' }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={clusterTrendData}
+                          margin={{ top: 20, right: 10, left: -25, bottom: 0 }}
+                          onMouseLeave={() => setHoveredChartLine(null)}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                          <XAxis dataKey="week" stroke="#94a3b8" fontSize={10.5} tickLine={false} />
+                          <YAxis stroke="#94a3b8" fontSize={10.5} tickLine={false} domain={[0, 8]} />
+                          <Tooltip
+                            content={({ active, payload }) => {
+                              if (active && payload && payload.length) {
+                                const targetItem = (hoveredChartLine && payload.find(p => p.dataKey === hoveredChartLine)) || payload[0];
+                                if (!targetItem) return null;
+                                return (
+                                  <div style={{
+                                    background: '#0f172a',
+                                    border: 'none',
+                                    borderRadius: 8,
+                                    color: '#fff',
+                                    fontSize: 11,
+                                    padding: '8px 12px',
+                                    boxShadow: '0 10px 15px -3px rgba(0,0,0,0.3)'
+                                  }}>
+                                    <div style={{ fontWeight: 700, color: targetItem.color, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: targetItem.color, display: 'inline-block' }} />
+                                      {targetItem.dataKey}
+                                    </div>
+                                    <div style={{ color: '#f8fafc', fontWeight: 600 }}>
+                                      Clusters: <span style={{ color: targetItem.color, fontWeight: 800 }}>{targetItem.value}</span>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                          {legendPages.map((page) => {
+                            const isHovered = hoveredChartLine === page.name;
+                            return (
+                              <Line
+                                key={page.name}
+                                type="monotone"
+                                dataKey={page.name}
+                                stroke={page.color}
+                                strokeWidth={isHovered ? 4 : (hoveredChartLine ? 1.5 : 2.5)}
+                                strokeOpacity={hoveredChartLine && !isHovered ? 0.25 : 1}
+                                dot={{ r: isHovered ? 5 : 3 }}
+                                activeDot={{
+                                  r: 6,
+                                  onMouseEnter: () => setHoveredChartLine(page.name)
+                                }}
+                                onMouseEnter={() => setHoveredChartLine(page.name)}
+                              />
+                            );
+                          })}
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Clean Black Text Below Graph - Left Aligned Starting at Red Circle (Right after W2) */}
                   <div style={{
-                    width: 42,
-                    height: 42,
-                    borderRadius: '50%',
-                    background: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
                     fontSize: 13,
                     fontWeight: 800,
-                    color: '#0f172a'
+                    color: '#0f172a',
+                    letterSpacing: '0.5px',
+                    textTransform: 'uppercase',
+                    marginTop: 6,
+                    textAlign: 'left',
+                    width: '100%',
+                    paddingLeft: 275
                   }}>
-                    82%
+                    Cluster Trend Tracking
                   </div>
                 </div>
-
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Site Health Score</div>
-                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
-                    crawled {pageCount}/{pageCount} pages.
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#16a34a' }}>
-                Healthy
-              </div>
-            </div>
+              );
+            })()}
           </div>
-        )}
+        </div>
       </div>
 
       {/* ─── BOTTOM ROW: ON-PAGE, BACKLINK & ORGANIC TRAFFIC INSIGHTS CARDS ─────── */}
