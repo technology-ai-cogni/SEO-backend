@@ -2825,10 +2825,29 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
   useEffect(() => { setPage(1); }, [search, columnFilters, tableFilters, project?.slug]);
 
   useEffect(() => {
-    setRows(project.detailKeywords || []);
+    if (project.detailKeywords) {
+      setRows(project.detailKeywords);
+    } else {
+      setRows([]);
+    }
     setPendingUpdates(new Map());
     setPendingDeleteIds(new Set());
     setSaveError('');
+  }, [project?.slug, project.detailKeywords]);
+
+  useEffect(() => {
+    if (project?.slug && (!project.detailKeywords || project.detailKeywords.length === 0)) {
+      let cancelled = false;
+      fetchKeywordRows(project.slug)
+        .then(freshRows => {
+          if (!cancelled && freshRows) {
+            setRows(freshRows);
+            onUpdateKeywords(freshRows);
+          }
+        })
+        .catch(() => {});
+      return () => { cancelled = true; };
+    }
   }, [project?.slug]);
 
   const allSelected = pagedIndices.length > 0 && pagedIndices.every(i => selectedRows.has(i));
