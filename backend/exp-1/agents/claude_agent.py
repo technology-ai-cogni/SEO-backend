@@ -18,8 +18,8 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
 try:
     import anthropic
-except ImportError:
-    sys.exit("ERROR: anthropic not installed.\nRun: pip3 install anthropic --break-system-packages")
+except Exception:
+    anthropic = None
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 

@@ -30,8 +30,7 @@ const PAGE_TITLES = {
   'project-setup/connectors': { title: 'Project Setup · Connectors', subtitle: 'Connect data sources' },
   'search-visibility/position-analysis': { title: 'Position Tracking', subtitle: `OWIS · Singapore · Google · ${totalKeywordCount.toLocaleString()} keywords` },
   'search-visibility/keywords': { title: 'Keywords', subtitle: `${totalKeywordCount.toLocaleString()} tracked keywords` },
-  'search-visibility/top-pages': { title: 'Top Pages', subtitle: 'Best performing pages by organic traffic' },
-  'search-visibility/sales-pipeline': { title: 'Sales Pipeline', subtitle: 'Track keyword-to-conversion funnel' },
+  'search-visibility/top-pages': { title: 'Pages', subtitle: 'Best performing pages by organic traffic' },
   'search-visibility/link-outreach': { title: 'Link Outreach', subtitle: 'Manage backlink acquisition campaigns' },
   'search-visibility/off-page-scheduler': { title: 'Off-Page Scheduler', subtitle: 'Schedule off-page SEO activities' },
   'search-visibility/on-page': { title: 'On-Page Optimization', subtitle: 'On-page SEO recommendations' },
@@ -60,13 +59,13 @@ const PAGE_TITLES = {
 
 function renderPage(path, onNavigate) {
   switch (path) {
-    case 'home': return <HomePage 
-      onNavigate={onNavigate} 
+    case 'home': return <HomePage
+      onNavigate={onNavigate}
       projects={[mockProject]}
       activeProject={mockProject}
       onStartAudit={(domain) => onNavigate('dashboard')}
     />;
-    case 'dashboard': return <DashboardPage 
+    case 'dashboard': return <DashboardPage
       activeProject={mockProject}
       keywords={topKeywords}
     />;

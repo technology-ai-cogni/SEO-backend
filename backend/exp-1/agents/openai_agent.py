@@ -15,15 +15,13 @@ from dotenv import load_dotenv
 load_dotenv(BACKEND_DIR / ".env")
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    sys.exit("ERROR: OPENAI_API_KEY not found in .env")
 
 try:
     from openai import OpenAI
-except ImportError:
-    sys.exit("ERROR: openai not installed.\nRun: pip3 install openai --break-system-packages")
-
-_client      = OpenAI(api_key=OPENAI_API_KEY)
+    _client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+except Exception:
+    OpenAI = None
+    _client = None
 SEARCH_MODEL  = "gpt-4o-search-preview"
 SUMMARY_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 
@@ -70,6 +68,10 @@ class OpenAIAgent(BaseAgent):
 
     def search_keyword(self, keyword: str) -> dict:
         """OpenAI search-preview with annotation-based citation extraction."""
+        if not OPENAI_API_KEY or not _client:
+            return {"results": [], "ai_answer": "OPENAI_API_KEY missing or openai library not initialized.", "has_grounding": False,
+                    "status": "error", "seo_summary": "Error: OPENAI_API_KEY missing or openai package not installed."}
+
         prompt = (
             f"You are an expert SEO auditor. Search the web for the query: '{keyword}'.\n\n"
             "Identify the top 10 ranking organic search results. "
