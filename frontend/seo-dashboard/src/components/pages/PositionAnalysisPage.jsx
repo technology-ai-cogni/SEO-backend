@@ -23,6 +23,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
   const [multiResults, setMultiResults] = useState([]);
   const [tabResults, setTabResults] = useState({});
   const [analyzingTabs, setAnalyzingTabs] = useState({});
+  const [projectKeywords, setProjectKeywords] = useState([]);
 
   // Hidden cards state
   const [closedCards, setClosedCards] = useState({});
@@ -106,6 +107,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
           try {
             const kws = await fetchKeywordRows(first.slug);
             if (kws && kws.length > 0 && isMounted) {
+              setProjectKeywords(kws);
               setKwCount(kws.length);
               const blogs = kws.filter(k => k.targetType === 'Blog Page').length;
               setBlogCount(blogs);
@@ -157,6 +159,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
       try {
         const kws = await fetchKeywordRows(p.slug);
         if (kws && kws.length > 0) {
+          setProjectKeywords(kws);
           setKwCount(kws.length);
           const blogs = kws.filter(k => k.targetType === 'Blog Page').length;
           setBlogCount(blogs);
@@ -176,6 +179,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
           setBlogCount(p.blogPages || 0);
           setClusterCount(0);
           setNetPotential(0);
+          setProjectKeywords([]);
           setTopKeywords([]);
         }
 
@@ -242,6 +246,91 @@ export default function PositionAnalysisPage({ onNavigate }) {
 
   const domainDisplay = activeProject?.domain || activeProject?.name || 'ittisa.org';
   const locationDisplay = activeProject?.location || 'India (Google)';
+
+  const computeLiveMetrics = () => {
+    const defaultMentions = [
+      { name: 'IB Diploma Program', count: 42 },
+      { name: 'Primary Admissions', count: 28 },
+      { name: 'STEM Robotics Lab', count: 19 },
+      { name: 'Bilingual Curriculum', count: 15 },
+      { name: 'Early Childhood Edu', count: 11 }
+    ];
+
+    const defaultCited = [
+      { source: `${domainDisplay}/ib-diploma`, count: 18 },
+      { source: `${domainDisplay}/primary`, count: 12 },
+      { source: `${domainDisplay}/stem-lab`, count: 9 },
+      { source: `${domainDisplay}/bilingual`, count: 7 },
+      { source: `${domainDisplay}/admissions`, count: 4 }
+    ];
+
+    if (!multiResults || multiResults.length === 0) {
+      return { mentions: defaultMentions, cited: defaultCited };
+    }
+
+    const domainLower = domainDisplay.toLowerCase();
+
+    // 1. Compute Cited pages from multiResults
+    const citedCounts = {};
+    multiResults.forEach(res => {
+      if (res.results && Array.isArray(res.results)) {
+        res.results.forEach(urlItem => {
+          const urlStr = urlItem.url || '';
+          if (urlStr.toLowerCase().includes(domainLower)) {
+            let cleanUrl = urlStr
+              .replace(/^(https?:\/\/)?(www\.)?/, '')
+              .replace(/\/$/, '')
+              .toLowerCase();
+            citedCounts[cleanUrl] = (citedCounts[cleanUrl] || 0) + 1;
+          }
+        });
+      }
+    });
+
+    let cited = Object.entries(citedCounts).map(([source, count]) => ({
+      source,
+      count
+    })).sort((a, b) => b.count - a.count);
+
+    if (cited.length === 0) {
+      cited = [
+        { source: 'No citations found', count: 0 }
+      ];
+    }
+
+    // 2. Compute Mentions by Cluster from multiResults
+    const clusterMentions = {};
+    multiResults.forEach(res => {
+      const kwName = res.keyword || '';
+      const kwObj = projectKeywords.find(k => k.kw?.toLowerCase() === kwName.toLowerCase());
+      const cluster = kwObj?.cluster || 'General';
+
+      const ranksInResults = res.results && res.results.some(urlItem => (urlItem.url || '').toLowerCase().includes(domainLower));
+      const mentionedInText = res.ai_answer && (
+        res.ai_answer.toLowerCase().includes(domainLower) ||
+        res.ai_answer.toLowerCase().includes((activeProject?.name || '').toLowerCase())
+      );
+
+      if (ranksInResults || mentionedInText) {
+        clusterMentions[cluster] = (clusterMentions[cluster] || 0) + 1;
+      }
+    });
+
+    let mentions = Object.entries(clusterMentions).map(([name, count]) => ({
+      name,
+      count
+    })).sort((a, b) => b.count - a.count);
+
+    if (mentions.length === 0) {
+      mentions = [
+        { name: 'No mentions found', count: 0 }
+      ];
+    }
+
+    return { mentions, cited };
+  };
+
+  const { mentions, cited } = computeLiveMetrics();
 
   const getRegionBadgeInfo = (project, dateVal) => {
     const loc = (project?.target_regions || project?.location || project?.country || 'US').toLowerCase();
@@ -1363,13 +1452,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                     Mentions
                   </span>
                 </div>
-                {[
-                  { name: 'IB Diploma Program', count: '42' },
-                  { name: 'Primary Admissions', count: '28' },
-                  { name: 'STEM Robotics Lab', count: '19' },
-                  { name: 'Bilingual Curriculum', count: '15' },
-                  { name: 'Early Childhood Edu', count: '11' }
-                ].map((item, idx) => (
+                {mentions.map((item, idx) => (
                   <div
                     key={idx}
                     style={{
@@ -1400,13 +1483,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                     Cited
                   </span>
                 </div>
-                {[
-                  { source: 'owis.edu.sg/ib-diploma', count: '18' },
-                  { source: 'owis.edu.sg/primary', count: '12' },
-                  { source: 'owis.edu.sg/stem-lab', count: '9' },
-                  { source: 'owis.edu.sg/bilingual', count: '7' },
-                  { source: 'owis.edu.sg/admissions', count: '4' }
-                ].map((item, idx) => (
+                {cited.map((item, idx) => (
                   <div
                     key={idx}
                     style={{
@@ -1419,7 +1496,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                       fontSize: 12
                     }}
                   >
-                    <span style={{ fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 130 }}>{item.source}</span>
+                    <span style={{ fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 180 }} title={item.source}>{item.source}</span>
                     <span style={{ fontWeight: 800, color: '#7c3aed', background: '#f5f3ff', padding: '2px 7px', borderRadius: 4, fontSize: 11 }}>
                       {item.count}
                     </span>
