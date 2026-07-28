@@ -384,16 +384,17 @@ _NOUN_WORDS = {
 
 _ACRONYMS = {"cbse": "CBSE", "icse": "ICSE", "ib": "IB", "igcse": "IGCSE", "b2b": "B2B", "b2c": "B2C"}
 
-
+def _shares_at_least_two_words(name_a, name_b):
+    """True if name_a and name_b share at least 2 significant words
+    (case-insensitive, singular/plural-normalized, stopwords/location/
+    ranking words excluded) -- reuses the same word-significance rules
+    already applied for clustering, so 'significant' means the same
+    thing everywhere in this file."""
+    words_a = _cluster_significant_words(name_a)
+    words_b = _cluster_significant_words(name_b)
+    return len(words_a & words_b) >= 2
+    
 def canonicalize_category_name(category_name: str) -> str:
-    """
-    Standardize category phrasing and capitalization:
-    1. Reorders jumbled words into canonical order:
-       Modifiers (e.g. 'cbse', 'icse', 'international') come BEFORE main nouns (e.g. 'schools', 'fees').
-       e.g., 'Best/Top schools cbse' -> 'Best/Top CBSE Schools'
-    2. Capitalizes words consistently (Title Case & proper uppercase for acronyms like CBSE, ICSE).
-       e.g. 'schools' vs 'Schools' -> 'Schools'
-    """
     if not category_name:
         return category_name
 
@@ -422,13 +423,24 @@ def canonicalize_category_name(category_name: str) -> str:
             if w_lower not in [o.lower() for o in others]:
                 others.append(w)
 
+    # Deterministic modifier order regardless of input order -- purely
+    # alphabetical on the normalized (singularized, lowercased) form, no
+    # hardcoded priority list. Whatever order the words come in, the SAME
+    # set of modifiers always sorts to the SAME sequence, so "CBSE
+    # International Schools" and "International CBSE Schools" collapse
+    # to one canonical string.
+    modifiers.sort(key=lambda w: _singularize_word(w))
+
     ordered_words = modifiers + nouns + others
+    ordered_words = ordered_words[:3]
 
     formatted_words = []
     for w in ordered_words:
         w_lower = w.lower()
         if w_lower in _ACRONYMS:
             formatted_words.append(_ACRONYMS[w_lower])
+        elif w_lower in _NOUN_WORDS:
+            formatted_words.append(_pluralize_word(w))
         else:
             formatted_words.append(w.capitalize())
 
@@ -438,6 +450,23 @@ def canonicalize_category_name(category_name: str) -> str:
 
     return result
 
+
+def _pluralize_word(word):
+    """Naive, generic singular -> plural normalization (suffix rules
+    only, mirroring _singularize_word's approach in reverse) -- no
+    hardcoded word list. Pluralizes from the SINGULAR STEM (via
+    _singularize_word) rather than the raw input word, so it produces
+    the same plural output whether the input was already singular or
+    already plural (e.g. both 'School' and 'Schools' -> 'Schools',
+    both 'Agency' and 'Agencies' -> 'Agencies')."""
+    stem = _singularize_word(word)
+    if stem.endswith(("s", "x", "z", "ch", "sh")):
+        plural = stem + "es"
+    elif stem.endswith("y") and len(stem) > 1 and stem[-2] not in "aeiou":
+        plural = stem[:-1] + "ies"
+    else:
+        plural = stem + "s"
+    return plural.capitalize()
 
 def _clean_category_text(text):
     """Strip any leftover punctuation/delimiters (e.g. a stray '|' from a
@@ -607,6 +636,10 @@ def derive_category_name(titles, keyword=None):
         "7. NEVER include question words (e.g. 'which', 'what', 'how', 'where') or filler metadata words (e.g. 'child', 'parents', 'insights', 'guide', 'reviews', 'rankings', 'number'). Only use real topic/subject words.\n\n"
         "8. Output ONLY plain words separated by single spaces -- no "
         "punctuation, no pipes, no colons, no quotation marks.\n\n"
+        "9. Use AT MOST 2 words total. If more than 2 words would qualify, "
+        "choose the 2 that are most essential to the specific topic (prefer "
+        "topic modifiers like 'icse', 'international', 'digital' over "
+        "generic words if you must cut one).\n\n"
         "Respond with ONLY the arranged category name, nothing else."
     )
     user_prompt = f"Titles:\n{titles_block}"
@@ -810,9 +843,9 @@ def _refine_category_name_with_llm(raw_candidate: str, keyword: str) -> str:
         client = get_openai_client()
         prompt = (
             f"You are an expert SEO categorizer. The candidate words extracted for the keyword '{keyword}' are '{raw_candidate}'.\n"
-            "Treat these words as jumbled key concepts. Understand the search intent and arrange/phrase them into a single, clean, grammatically meaningful, and professional SEO category name.\n"
-            "CRITICAL: NEVER include question words (e.g. 'which', 'what', 'how', 'where') or filler metadata words (e.g. 'child', 'parents', 'insights', 'guide', 'reviews', 'rankings', 'number'). Retain all specific topic modifiers (e.g. 'icse', 'cbse', 'international', 'digital', 'marketing', 'board'). NEVER drop essential topic modifiers or reduce a multi-word topic to a single generic word like 'schools'.\n"
-            "Keep it concise (maximum 3-4 words). Do not add 'Best' or 'Top'.\n"
+            "Treat these words as jumbled key concepts. Understand the search intent and arrange/phrase them into a single, clean, grammatically meaningful, and professional SEO category name using AT MOST 2 words.\n"
+            "CRITICAL: NEVER include question words (e.g. 'which', 'what', 'how', 'where') or filler metadata words (e.g. 'child', 'parents', 'insights', 'guide', 'reviews', 'rankings', 'number'). Retain the most essential topic modifier (e.g. 'icse', 'cbse', 'international', 'digital', 'marketing', 'board') if one is present -- prioritize it over a generic word if you must drop something to stay within 2 words.\n"
+            "STRICT LIMIT: maximum 2 words total. Do not add 'Best' or 'Top'.\n"
             "Output ONLY the refined category name, nothing else."
         )
         resp = client.chat.completions.create(
@@ -887,10 +920,41 @@ def categorize_keyword(keyword, domain, country_code=None):
     candidate_name = canonicalize_category_name(candidate_name)
     meta["best_top_applied"] = candidate_name != refined_candidate
 
-    # Direct category assignment without referring to or merging into previous categories
-    meta["matched_existing_category"] = False
-    db.add_category(domain, candidate_name)
-    return candidate_name, meta
+    existing_category_names = db.list_category_names(domain)
+
+    # Cheap, deterministic check first: is this candidate a pure
+    # singular/plural variant of an already-existing category? If so,
+    # skip the LLM call entirely and reuse (or standardize onto) that
+    # existing name.
+    plausible_matches = [
+        name for name in existing_category_names
+        if _shares_at_least_two_words(candidate_name, name)
+    ]
+
+    if not plausible_matches:
+        final_name = candidate_name
+        meta["matched_existing_category"] = False
+        meta["match_method"] = "new_category"
+    else:
+        plural_variant = _find_plural_variant(candidate_name, plausible_matches)
+
+        if plural_variant is not None:
+            final_name = plural_variant
+            meta["matched_existing_category"] = final_name != candidate_name
+            meta["match_method"] = "plural_variant"
+        else:
+            matched = find_matching_category(candidate_name, titles, plausible_matches)
+            if matched is not None:
+                final_name = matched
+                meta["matched_existing_category"] = True
+                meta["match_method"] = "llm_intent_match"
+            else:
+                final_name = candidate_name
+                meta["matched_existing_category"] = False
+                meta["match_method"] = "new_category"
+
+    db.add_category(domain, final_name)
+    return final_name, meta
 
 
 # --- Clustering (deterministic, batch, NO LLM) ---------------------------
@@ -955,18 +1019,108 @@ def _display_form(norm_word, matched_categories):
             if _singularize_word(raw) == norm_word:
                 forms[raw] += 1
     return forms.most_common(1)[0][0] if forms else norm_word
-
-
 def cluster_all_categories(domain):
     """
-    Deterministic greedy clustering over every category currently in this
-    domain. Returns {category_name: cluster_name} covering ALL of them.
+    Incremental clustering: reuses whatever cluster assignments already
+    exist for this domain (from a prior run) and only computes NEW
+    assignments for categories that either (a) are new since the last
+    run, or (b) were never successfully assigned before. Previously
+    assigned categories keep their existing cluster label as-is -- this
+    function never silently reshuffles or relabels a cluster a category
+    was already placed in, only extends it.
+
+    Works purely off category TEXT (db.list_category_names(domain)) --
+    never touches raw keywords, consistent with how categorize_keyword
+    only writes clean category strings via db.add_category.
     """
     from core import db
 
     categories = db.list_category_names(domain)
-    remaining = {cat: _cluster_significant_words(cat) for cat in categories}
-    assignment = {}
+    # {category_name: cluster_label} from all prior runs for this domain.
+    existing_assignments = db.get_cluster_assignments(domain) or {}
+
+    already_clustered = {
+        cat: label for cat, label in existing_assignments.items()
+        if cat in categories
+    }
+    new_categories = [cat for cat in categories if cat not in already_clustered]
+
+    if not new_categories:
+        return already_clustered
+
+    # Group existing clusters by label -> member categories, so a new
+    # category can be tested against each cluster's actual membership,
+    # not just its label text.
+    clusters_by_label = {}
+    for cat, label in already_clustered.items():
+        clusters_by_label.setdefault(label, []).append(cat)
+
+    assignment = dict(already_clustered)
+    unmatched = []
+
+    for cat in new_categories:
+        cat_words = _cluster_significant_words(cat)
+        best_label, best_overlap = None, 0
+
+        for label, members in clusters_by_label.items():
+            # Overlap against the cluster's most common words across its
+            # current members (same "majority" logic used when clusters
+            # are first formed below), not just the label string, so a
+            # new category has to genuinely fit the group, not just the
+            # label's wording.
+            shared_counts = Counter()
+            for m in members:
+                for w in _cluster_significant_words(m):
+                    shared_counts[w] += 1
+            threshold = (len(members) + 1) // 2
+            cluster_core_words = {w for w, c in shared_counts.items() if c >= threshold}
+
+            overlap = len(cat_words & cluster_core_words)
+            if overlap >= 2 and overlap > best_overlap:
+                best_label, best_overlap = label, overlap
+
+        if best_label is not None:
+            clusters_by_label[best_label].append(cat)
+            assignment[cat] = best_label  # label unchanged for now; recomputed below
+        else:
+            unmatched.append(cat)
+
+    # Recompute labels for any cluster that grew (new member joined),
+    # using the same majority-shared-word logic as fresh clustering, so
+    # the label still reflects its full membership after the addition.
+    for label, members in clusters_by_label.items():
+        if len(members) == 1:
+            continue
+        threshold = (len(members) + 1) // 2
+        shared_counts = Counter()
+        for m in members:
+            for w in _cluster_significant_words(m):
+                shared_counts[w] += 1
+        shared_words = {w for w, c in shared_counts.items() if c >= threshold}
+        if not shared_words:
+            continue
+
+        position_totals, position_counts = {}, {}
+        for m in members:
+            tokens = [_singularize_word(t) for t in re.findall(r"[A-Za-z0-9]+", m.lower())]
+            for idx, t in enumerate(tokens):
+                if t in shared_words:
+                    position_totals[t] = position_totals.get(t, 0) + idx
+                    position_counts[t] = position_counts.get(t, 0) + 1
+
+        ordered_words = sorted(
+            shared_words,
+            key=lambda w: position_totals.get(w, 0) / position_counts.get(w, 1),
+        )
+        new_label = " ".join(_display_form(w, members).title() for w in ordered_words)
+        for m in members:
+            assignment[m] = new_label
+
+    # Anything that didn't fit an existing cluster gets grouped among
+    # itself using the original greedy algorithm, scoped only to the
+    # leftovers -- this can still create brand-new clusters, but never
+    # touches categories that were already successfully assigned above.
+    remaining = {cat: _cluster_significant_words(cat) for cat in unmatched}
 
     while remaining:
         freq = {}
@@ -977,31 +1131,15 @@ def cluster_all_categories(domain):
         max_freq = max(freq.values()) if freq else 0
 
         if max_freq <= 1:
-            # Nothing left shares a word with anything else -- each
-            # remaining category becomes its own cluster.
             for cat in list(remaining.keys()):
                 assignment[cat] = cat
                 del remaining[cat]
             break
 
-        # Tie-break deterministically: alphabetically first among the
-        # most-common words.
         chosen_word = sorted(w for w, c in freq.items() if c == max_freq)[0]
         matched = [cat for cat, words in remaining.items() if chosen_word in words]
 
-        # Maximum common words label: every normalized word shared by a
-        # MAJORITY of the matched categories (chosen_word always qualifies
-        # by construction, since its count == len(matched)) -- a flat
-        # ">=2" bar was letting the label balloon into a union of many
-        # only-weakly-shared words on larger groups (e.g. one pair
-        # sharing "media", a different pair sharing "services", a
-        # different pair sharing "ncr" -- none of which is actually
-        # common across the group as a whole). Requiring majority keeps
-        # every word in the label genuinely representative of most (not
-        # just some) of the categories it's applied to. Ordered by where
-        # each word typically sits in the original category text so the
-        # phrase reads naturally.
-        threshold = (len(matched) + 1) // 2  # majority, rounded up
+        threshold = (len(matched) + 1) // 2
         shared_counts = {}
         for cat in matched:
             for w in remaining[cat]:
@@ -1026,4 +1164,5 @@ def cluster_all_categories(domain):
             assignment[cat] = cluster_label
             del remaining[cat]
 
+    db.save_cluster_assignments(domain, assignment)
     return assignment
