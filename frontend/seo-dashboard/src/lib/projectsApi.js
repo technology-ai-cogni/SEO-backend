@@ -86,7 +86,7 @@ function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
 }
 
 // ─── Local Mode Detection & Setup ───────────────────────────────────────────
-const isLocalMode = false;
+const isLocalMode = !supabase;
 
 function initializeLocalStorage() {
   if (!isLocalMode) return;

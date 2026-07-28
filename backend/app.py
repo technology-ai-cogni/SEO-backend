@@ -126,6 +126,7 @@ from services import category_checker, competitor_classifier
 from scripts.hosted_categorize import run_categorize_job_in_background
 from scripts.hosted_rank_check import run_rank_check_job_in_background
 from scripts.comp_analysis import find_competitors_for_rows
+from auth.router import router as auth_router
 
 MIN_SEARCH_VOLUME = 5
 NEAR_ME_PHRASE = "near me"
@@ -138,6 +139,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
 
 
 @app.on_event("startup")
