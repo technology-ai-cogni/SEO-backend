@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { derivedKeywordClusters } from '../data/mockData';
+import { derivedKeywordClusters, derivedPages } from '../data/mockData';
 
 export function slugify(name) {
   return String(name)
@@ -142,6 +142,20 @@ function initializeLocalStorage() {
       landing_page_url: k.landingPage
     }));
     localStorage.setItem('seo_keyword_categories', JSON.stringify(defaultKws));
+  }
+
+  if (!localStorage.getItem('seo_pages') || JSON.parse(localStorage.getItem('seo_pages')).length === 0) {
+    const defaultPages = derivedPages.map((p, idx) => ({
+      id: idx + 1,
+      project_name: 'owis',
+      pageName: p.pageName,
+      url: p.url,
+      cluster: p.cluster,
+      category: p.category,
+      targetCategory: p.targetCategory,
+      targetType: p.targetType,
+    }));
+    localStorage.setItem('seo_pages', JSON.stringify(defaultPages));
   }
 }
 
