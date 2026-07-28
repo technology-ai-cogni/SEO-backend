@@ -160,12 +160,20 @@ class BaseAgent(ABC):
 
     # ── main pipeline ─────────────────────────────────────────────────────────
 
-    def run_keyword(self, keyword: str, client_domain: str = CLIENT_DOMAIN) -> dict:
+    def run_keyword(self, keyword: str, client_domain: str = CLIENT_DOMAIN, country: str = None) -> dict:
         """
         Full pipeline for one keyword. Called by the orchestrator.
         Returns a dict with all CSV output columns.
         """
-        data          = self.search_keyword(keyword)
+        import inspect
+        sig = inspect.signature(self.search_keyword)
+        params = sig.parameters
+        kwargs = {}
+        if 'client_domain' in params:
+            kwargs['client_domain'] = client_domain
+        if 'country' in params:
+            kwargs['country'] = country
+        data = self.search_keyword(keyword, **kwargs)
         results       = data["results"]
         total_found   = len(results)
         has_grounding = data.get("has_grounding", False)

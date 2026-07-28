@@ -895,7 +895,7 @@ export async function fetchCompetitorSnapshots(competitorId) {
   return (data.snapshots || []).map(snapshotRowToUi);
 }
 
-export async function runAiAnalysis(projectSlug, keyword, aiMode, domain) {
+export async function runAiAnalysis(projectSlug, keyword, aiMode, domain, country) {
   if (isLocalMode) {
     // Return a mock result for local development without backend
     return {
@@ -917,7 +917,7 @@ export async function runAiAnalysis(projectSlug, keyword, aiMode, domain) {
   const res = await fetch(`${CATEGORY_API_BASE}/projects/${projectSlug}/ai-analysis`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keyword, ai_mode: aiMode, domain }),
+    body: JSON.stringify({ keyword, ai_mode: aiMode, domain, country }),
   });
   
   if (!res.ok) {

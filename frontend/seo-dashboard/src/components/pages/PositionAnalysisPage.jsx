@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ExternalLink, Plus, Share2, Settings, Info, X, CheckCircle, Globe, Monitor } from 'lucide-react';
+import { ExternalLink, Plus, Share2, Settings, Info, X, CheckCircle, Globe, Monitor, ChevronDown, Search } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiAnalysis } from '../../lib/projectsApi';
 
@@ -9,6 +9,9 @@ export default function PositionAnalysisPage({ onNavigate }) {
   const [activeProject, setActiveProject] = useState(null);
   const [kwCount, setKwCount] = useState(650);
   const [pageCount, setPageCount] = useState(150);
+  const [blogCount, setBlogCount] = useState(0);
+  const [clusterCount, setClusterCount] = useState(0);
+  const [netPotential, setNetPotential] = useState(0);
   const [aiTab, setAiTab] = useState('Overview');
   const [loading, setLoading] = useState(true);
   const [showReport, setShowReport] = useState(false);
@@ -18,6 +21,8 @@ export default function PositionAnalysisPage({ onNavigate }) {
   const [analysisError, setAnalysisError] = useState('');
   const [topKeywords, setTopKeywords] = useState([]);
   const [multiResults, setMultiResults] = useState([]);
+  const [tabResults, setTabResults] = useState({});
+  const [analyzingTabs, setAnalyzingTabs] = useState({});
 
   // Hidden cards state
   const [closedCards, setClosedCards] = useState({});
@@ -25,6 +30,10 @@ export default function PositionAnalysisPage({ onNavigate }) {
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [activeTooltip, setActiveTooltip] = useState(null);
   const [hoveredChartLine, setHoveredChartLine] = useState(null);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [countryMenuOpen, setCountryMenuOpen] = useState(false);
+  const [countrySearch, setCountrySearch] = useState('');
+  const [hoveredKwIndex, setHoveredKwIndex] = useState(null);
 
   const COUNTRY_OPTIONS = [
     { code: 'AF', flag: '🇦🇫', name: 'Afghanistan' },
@@ -98,12 +107,33 @@ export default function PositionAnalysisPage({ onNavigate }) {
             const kws = await fetchKeywordRows(first.slug);
             if (kws && kws.length > 0 && isMounted) {
               setKwCount(kws.length);
+              const blogs = kws.filter(k => k.targetType === 'Blog Page').length;
+              setBlogCount(blogs);
+              const clusters = new Set(kws.map(k => k.cluster).filter(Boolean)).size;
+              setClusterCount(clusters);
+
+              const svSum = kws.reduce((acc, k) => {
+                const val = Number(String(k.sv || 0).replace(/[^0-9.]/g, '')) || 0;
+                return acc + val;
+              }, 0);
+              setNetPotential(svSum);
+
               const sortedKws = [...kws].sort((a, b) => (b.sv || 0) - (a.sv || 0));
               setTopKeywords(sortedKws.slice(0, 2).map(k => k.kw));
+            } else if (isMounted) {
+              setKwCount(first.keywords || 0);
+              setBlogCount(first.blogPages || 0);
+              setClusterCount(0);
+              setNetPotential(0);
             }
             const pgs = await fetchPageRows(first.slug);
             if (pgs && pgs.length > 0 && isMounted) {
               setPageCount(pgs.length);
+            } else if (kws && kws.length > 0 && isMounted) {
+              const uniquePages = new Set(kws.map(k => k.landingPage).filter(Boolean)).size;
+              setPageCount(uniquePages || kws.length);
+            } else if (isMounted) {
+              setPageCount(first.targetPages || 0);
             }
           } catch (e) {
             // keep fallbacks
@@ -128,16 +158,35 @@ export default function PositionAnalysisPage({ onNavigate }) {
         const kws = await fetchKeywordRows(p.slug);
         if (kws && kws.length > 0) {
           setKwCount(kws.length);
+          const blogs = kws.filter(k => k.targetType === 'Blog Page').length;
+          setBlogCount(blogs);
+          const clusters = new Set(kws.map(k => k.cluster).filter(Boolean)).size;
+          setClusterCount(clusters);
+
+          const svSum = kws.reduce((acc, k) => {
+            const val = Number(String(k.sv || 0).replace(/[^0-9.]/g, '')) || 0;
+            return acc + val;
+          }, 0);
+          setNetPotential(svSum);
+
           const sortedKws = [...kws].sort((a, b) => (b.sv || 0) - (a.sv || 0));
           setTopKeywords(sortedKws.slice(0, 2).map(k => k.kw));
         } else {
-          setKwCount(650);
+          setKwCount(p.keywords || 0);
+          setBlogCount(p.blogPages || 0);
+          setClusterCount(0);
+          setNetPotential(0);
           setTopKeywords([]);
         }
 
         const pgs = await fetchPageRows(p.slug);
         if (pgs && pgs.length > 0) setPageCount(pgs.length);
-        else setPageCount(150);
+        else if (kws && kws.length > 0) {
+          const uniquePages = new Set(kws.map(k => k.landingPage).filter(Boolean)).size;
+          setPageCount(uniquePages || kws.length);
+        } else {
+          setPageCount(p.targetPages || 0);
+        }
       } catch (e) {
         // fallbacks
       }
@@ -148,24 +197,46 @@ export default function PositionAnalysisPage({ onNavigate }) {
     setClosedCards(prev => ({ ...prev, [cardId]: true }));
   };
 
+  // Load cached AI analysis results from localStorage whenever project or active tab changes
+  useEffect(() => {
+    if (!activeProject?.slug) return;
+    const tabKey = aiTab.toLowerCase();
+    const cacheKey = `ai_results_${activeProject.slug}_${tabKey}`;
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setTabResults(prev => ({ ...prev, [tabKey]: parsed }));
+        }
+      }
+    } catch (err) {
+      console.error('Error loading cached AI analysis:', err);
+    }
+  }, [activeProject?.slug, aiTab]);
+
   const handleAiAnalysis = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     if (!topKeywords.length || !activeProject) return;
-    setIsAnalyzing(true);
+    const tabKey = aiTab.toLowerCase();
+    setAnalyzingTabs(prev => ({ ...prev, [tabKey]: true }));
     setAnalysisError('');
-    setMultiResults([]);
     try {
       const results = [];
       const domain = activeProject.domain || activeProject.name || 'socialoffline.in';
+      const countryObj = COUNTRY_OPTIONS.find(c => c.code === selectedRegion);
+      const countryName = countryObj ? countryObj.name : selectedRegion || 'India';
       for (const kw of topKeywords) {
-        const data = await runAiAnalysis(activeProject.slug, kw, aiTab.toLowerCase(), domain);
+        const data = await runAiAnalysis(activeProject.slug, kw, tabKey, domain, countryName);
         results.push({ keyword: kw, ...data.result });
       }
-      setMultiResults(results);
+      setTabResults(prev => ({ ...prev, [tabKey]: results }));
+      const cacheKey = `ai_results_${activeProject.slug}_${tabKey}`;
+      localStorage.setItem(cacheKey, JSON.stringify(results));
     } catch (err) {
       setAnalysisError(err.message);
     } finally {
-      setIsAnalyzing(false);
+      setAnalyzingTabs(prev => ({ ...prev, [tabKey]: false }));
     }
   };
 
@@ -242,28 +313,84 @@ export default function PositionAnalysisPage({ onNavigate }) {
             margin: 0,
             display: 'flex',
             alignItems: 'center',
-            gap: 6
+            gap: 8
           }}>
             Dashboard:
             {projects.length > 1 ? (
-              <select
-                value={selectedSlug}
-                onChange={(e) => handleSelectProject(e.target.value)}
-                style={{
-                  fontSize: 20,
-                  fontWeight: 800,
-                  color: '#7c3aed',
-                  background: 'transparent',
-                  border: 'none',
-                  outline: 'none',
-                  cursor: 'pointer',
-                  fontFamily: 'inherit'
-                }}
-              >
-                {projects.map(p => (
-                  <option key={p.slug} value={p.slug}>{p.domain || p.name}</option>
-                ))}
-              </select>
+              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                <button
+                  onClick={() => setProjectMenuOpen(!projectMenuOpen)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontSize: 20,
+                    fontWeight: 800,
+                    color: '#7c3aed',
+                    background: 'transparent',
+                    border: 'none',
+                    outline: 'none',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    padding: 0,
+                    margin: 0
+                  }}
+                >
+                  <span>{domainDisplay}</span>
+                  <ChevronDown size={18} style={{ color: '#7c3aed', transform: projectMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+                </button>
+
+                {projectMenuOpen && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    marginTop: 6,
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 8,
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                    zIndex: 1000,
+                    minWidth: 200,
+                    padding: '4px 0',
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}>
+                    {projects.map(p => (
+                      <button
+                        key={p.slug}
+                        onClick={() => {
+                          handleSelectProject(p.slug);
+                          setProjectMenuOpen(false);
+                        }}
+                        style={{
+                          padding: '8px 14px',
+                          fontSize: 13.5,
+                          fontWeight: p.slug === selectedSlug ? 700 : 500,
+                          color: p.slug === selectedSlug ? '#7c3aed' : '#1e293b',
+                          backgroundColor: p.slug === selectedSlug ? '#f5f3ff' : 'transparent',
+                          border: 'none',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          transition: 'background 0.12s'
+                        }}
+                        onMouseEnter={e => {
+                          if (p.slug !== selectedSlug) e.currentTarget.style.backgroundColor = '#f8fafc';
+                        }}
+                        onMouseLeave={e => {
+                          if (p.slug !== selectedSlug) e.currentTarget.style.backgroundColor = 'transparent';
+                        }}
+                      >
+                        {p.domain || p.name}
+                        {p.slug === selectedSlug && <CheckCircle size={14} style={{ color: '#7c3aed' }} />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             ) : (
               <span style={{ color: '#7c3aed' }}>{domainDisplay}</span>
             )}
@@ -271,76 +398,177 @@ export default function PositionAnalysisPage({ onNavigate }) {
               href={`https://${domainDisplay}`}
               target="_blank"
               rel="noreferrer"
-              style={{ color: '#7c3aed', display: 'inline-flex', alignItems: 'center' }}
+              style={{ color: '#7c3aed', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
             >
               <ExternalLink size={16} />
             </a>
           </h1>
 
           {/* Interactive Country Dropdown & Metadata aligned with the end of the first box (removed if AI Search card is closed) */}
-          {!closedCards.aiSearch && (
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              fontSize: 12,
-              color: '#64748b',
-              fontWeight: 500
-            }}>
-              <select
-                value={selectedRegion}
-                onChange={(e) => setSelectedRegion(e.target.value)}
-                style={{
-                  background: '#ffffff',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 6,
-                  padding: '2px 6px',
-                  fontSize: 11.5,
-                  fontWeight: 600,
-                  color: '#0f172a',
-                  outline: 'none',
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  maxWidth: 125,
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
-                  transition: 'border-color 0.15s ease'
-                }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = '#7c3aed'}
-                onMouseLeave={e => e.currentTarget.style.borderColor = '#cbd5e1'}
-              >
-                {COUNTRY_OPTIONS.map(c => (
-                  <option key={c.code} value={c.code}>
-                    {c.name} ({c.code})
-                  </option>
-                ))}
-              </select>
+          {!closedCards.aiSearch && (() => {
+            const activeCountry = COUNTRY_OPTIONS.find(c => c.code === selectedRegion) || COUNTRY_OPTIONS.find(c => c.code === 'US') || COUNTRY_OPTIONS[0];
+            const filteredCountries = COUNTRY_OPTIONS.filter(c =>
+              c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
+              c.code.toLowerCase().includes(countrySearch.toLowerCase())
+            );
 
-              {/* Interactive Date Picker */}
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                style={{
-                  background: '#ffffff',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 5,
-                  padding: '1px 3px',
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: '#0f172a',
-                  outline: 'none',
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  maxWidth: 96,
-                  height: 20,
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
-                  transition: 'border-color 0.15s ease'
-                }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = '#7c3aed'}
-                onMouseLeave={e => e.currentTarget.style.borderColor = '#cbd5e1'}
-              />
-            </div>
-          )}
+            return (
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 12,
+                color: '#64748b',
+                fontWeight: 500
+              }}>
+                {/* Searchable Country Custom Dropdown */}
+                <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                  <button
+                    onClick={() => {
+                      setCountryMenuOpen(!countryMenuOpen);
+                      setCountrySearch('');
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      background: 'transparent',
+                      border: 'none',
+                      padding: 0,
+                      margin: 0,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: '#2563eb',
+                      cursor: 'pointer',
+                      outline: 'none'
+                    }}
+                  >
+                    <span style={{ fontSize: 15 }}>{activeCountry.flag}</span>
+                    <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>{activeCountry.name}</span>
+                    <ChevronDown size={14} style={{ color: '#2563eb', transform: countryMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+                  </button>
+
+                  {countryMenuOpen && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      marginTop: 6,
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 10,
+                      boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
+                      zIndex: 1000,
+                      width: 220,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      overflow: 'hidden'
+                    }}>
+                      {/* Search Input Box */}
+                      <div style={{ padding: '8px 8px 6px 8px', borderBottom: '1px solid #f1f5f9' }}>
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          background: '#ffffff',
+                          border: '1.5px solid #818cf8',
+                          borderRadius: 8,
+                          padding: '4px 8px',
+                          boxShadow: '0 0 0 2px rgba(129, 140, 248, 0.2)'
+                        }}>
+                          <Search size={14} style={{ color: '#64748b' }} />
+                          <input
+                            type="text"
+                            placeholder="Search"
+                            value={countrySearch}
+                            onChange={e => setCountrySearch(e.target.value)}
+                            autoFocus
+                            style={{
+                              border: 'none',
+                              outline: 'none',
+                              background: 'transparent',
+                              fontSize: 12.5,
+                              fontWeight: 500,
+                              color: '#0f172a',
+                              width: '100%'
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Scrollable Countries List */}
+                      <div style={{ overflowY: 'auto', maxHeight: 210, padding: '4px 0' }}>
+                        {filteredCountries.length > 0 ? (
+                          filteredCountries.map(c => (
+                            <button
+                              key={c.code}
+                              onClick={() => {
+                                setSelectedRegion(c.code);
+                                setCountryMenuOpen(false);
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '7px 12px',
+                                fontSize: 13,
+                                fontWeight: c.code === selectedRegion ? 600 : 500,
+                                color: '#0f172a',
+                                backgroundColor: c.code === selectedRegion ? '#eff6ff' : 'transparent',
+                                border: 'none',
+                                textAlign: 'left',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 10,
+                                transition: 'background 0.12s'
+                              }}
+                              onMouseEnter={e => {
+                                if (c.code !== selectedRegion) e.currentTarget.style.backgroundColor = '#f8fafc';
+                              }}
+                              onMouseLeave={e => {
+                                if (c.code !== selectedRegion) e.currentTarget.style.backgroundColor = 'transparent';
+                              }}
+                            >
+                              <span style={{ fontSize: 15 }}>{c.flag}</span>
+                              <span>{c.name}</span>
+                            </button>
+                          ))
+                        ) : (
+                          <div style={{ padding: '12px', fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>
+                            No countries found
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Interactive Date Picker */}
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 5,
+                    padding: '1px 3px',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    color: '#0f172a',
+                    outline: 'none',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    maxWidth: 96,
+                    height: 20,
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                    transition: 'border-color 0.15s ease'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = '#7c3aed'}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = '#cbd5e1'}
+                />
+              </div>
+            );
+          })()}
         </div>
 
         {/* Right Column (directly above Second Box / SEO Card): Actions */}
@@ -418,27 +646,47 @@ export default function PositionAnalysisPage({ onNavigate }) {
         alignItems: 'center',
         justifyContent: 'center',
         flexWrap: 'wrap',
-        gap: '16px 48px',
-        marginBottom: 16,
+        gap: '16px 44px',
+        marginTop: 24,
+        marginBottom: 12,
         fontFamily: 'var(--font-body, system-ui, sans-serif)'
       }}>
         {[
-          'Authority Score',
-          'Organic Traffic',
-          'Keywords',
-          'Total Pages',
-          'Total Blogs',
-          'Total Clusters',
-          'Net Potential'
+          { label: 'Authority Score', value: activeProject?.da || 'N/A' },
+          { label: 'Organic Traffic', value: activeProject?.traffic ? Number(activeProject.traffic).toLocaleString() : '0' },
+          { label: 'Keywords', value: (kwCount || activeProject?.keywords || 0).toLocaleString() },
+          { label: 'Total Pages', value: (pageCount || activeProject?.targetPages || 0).toLocaleString() },
+          { label: 'Total Blogs', value: (blogCount || activeProject?.blogPages || 0).toLocaleString() },
+          { label: 'Total Clusters', value: clusterCount.toLocaleString() },
+          { label: 'Net Potential', value: netPotential ? netPotential.toLocaleString() : '0' }
         ].map((item) => (
-          <span key={item} style={{
-            color: '#000000',
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.2px'
+          <div key={item.label} style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '2px',
+            textAlign: 'center'
           }}>
-            {item}
-          </span>
+            <span style={{
+              color: '#2828caff',
+              fontWeight: 700,
+              fontSize: 16,
+              lineHeight: 1.2,
+              fontVariantNumeric: 'tabular-nums'
+            }}>
+              {item.value}
+            </span>
+            <span style={{
+              color: '#64748b',
+              fontWeight: 600,
+              fontSize: 11,
+              letterSpacing: '0.02em',
+              textTransform: 'uppercase'
+            }}>
+              {item.label}
+            </span>
+          </div>
         ))}
       </div>
 
@@ -501,61 +749,297 @@ export default function PositionAnalysisPage({ onNavigate }) {
             </div>
 
             {/* Content Body */}
-            {['ChatGPT', 'Gemini', 'AI Overview'].includes(aiTab) ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                  <button onClick={handleAiAnalysis} disabled={isAnalyzing || !topKeywords.length} style={{
-                    background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, cursor: isAnalyzing || !topKeywords.length ? 'not-allowed' : 'pointer', opacity: isAnalyzing || !topKeywords.length ? 0.7 : 1
-                  }}>
-                    {isAnalyzing ? 'Analyzing...' : `Analyze Top ${topKeywords.length} Keywords`}
-                  </button>
-                  {topKeywords.length > 0 && (
-                    <span style={{ fontSize: 13, color: '#64748b' }}>
-                      Keywords: {topKeywords.map(k => `"${k}"`).join(', ')}
-                    </span>
-                  )}
-                </div>
-                {analysisError && <div style={{ color: '#ef4444', fontSize: 13 }}>{analysisError}</div>}
+            {['ChatGPT', 'Gemini', 'AI Overview'].includes(aiTab) ? (() => {
+              const tabKey = aiTab.toLowerCase();
+              const currentTabResults = tabResults[tabKey] || [];
+              const isCurrentTabAnalyzing = !!analyzingTabs[tabKey];
 
-                {multiResults.map((res, idx) => (
-                  <div key={idx} style={{ background: '#f8fafc', padding: 16, borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13, color: '#334155' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, borderBottom: '1px solid #e2e8f0', paddingBottom: 8 }}>
-                      <span style={{ fontWeight: 800, color: '#7c3aed', fontSize: 15 }}>Keyword: {res.keyword}</span>
-                      <div style={{ display: 'flex', gap: 16 }}>
-                        <span style={{ fontWeight: 700, color: '#0f172a' }}>Confidence: {res.confidence_score}/100</span>
-                        <span style={{ fontWeight: 600, color: res.status === 'ok' ? '#10b981' : '#ef4444' }}>Status: {res.status}</span>
-                      </div>
-                    </div>
-
-                    <div style={{ fontWeight: 700, marginBottom: 8, color: '#0f172a' }}>Top 5 Ranking URLs:</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {(res.results || []).slice(0, 5).map((urlData, i) => {
-                        const isOurDomain = activeProject?.domain && urlData.url.toLowerCase().includes(activeProject.domain.toLowerCase());
-                        return (
-                          <div key={i} style={{
-                            padding: 8,
-                            borderRadius: 4,
-                            background: isOurDomain ? '#dcfce3' : '#fff',
-                            border: isOurDomain ? '1px solid #22c55e' : '1px solid #e2e8f0',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 2
-                          }}>
-                            <span style={{ fontWeight: isOurDomain ? 700 : 600, color: isOurDomain ? '#166534' : '#0f172a' }}>
-                              {i + 1}. {urlData.title || '(No Title)'} {isOurDomain && '⭐ (Our Domain)'}
-                            </span>
-                            <span style={{ color: '#64748b', fontSize: 12, wordBreak: 'break-all' }}>{urlData.url}</span>
-                          </div>
-                        );
-                      })}
-                      {(!res.results || res.results.length === 0) && (
-                        <div style={{ color: '#94a3b8', fontStyle: 'italic' }}>No ranking URLs found.</div>
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minHeight: 180 }}>
+                  {currentTabResults.length === 0 ? (
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 12,
+                      padding: '28px 12px',
+                      textAlign: 'center'
+                    }}>
+                      <button
+                        onClick={handleAiAnalysis}
+                        disabled={isCurrentTabAnalyzing || !topKeywords.length}
+                        style={{
+                          background: '#7c3aed',
+                          color: '#ffffff',
+                          border: 'none',
+                          borderRadius: 8,
+                          padding: '10px 20px',
+                          fontSize: 13.5,
+                          fontWeight: 700,
+                          cursor: isCurrentTabAnalyzing || !topKeywords.length ? 'not-allowed' : 'pointer',
+                          opacity: isCurrentTabAnalyzing || !topKeywords.length ? 0.7 : 1,
+                          boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8
+                        }}
+                      >
+                        {isCurrentTabAnalyzing ? `Analyzing Top ${topKeywords.length} Keywords via ${aiTab}...` : `Analyze Top ${topKeywords.length} Keywords`}
+                      </button>
+                      {topKeywords.length > 0 && (
+                        <span style={{ fontSize: 12.5, color: '#64748b' }}>
+                          Keywords: {topKeywords.map(k => `"${k}"`).join(', ')}
+                        </span>
+                      )}
+                      {analysisError && (
+                        <div style={{ color: '#ef4444', fontSize: 13, fontWeight: 600 }}>{analysisError}</div>
                       )}
                     </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {/* 1. Analyzed Keywords Box */}
+                      <div style={{
+                        background: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 10,
+                        padding: 12,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 8
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 4, borderBottom: '1px solid #f1f5f9' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>Analyzed Keywords</span>
+                          <div style={{ display: 'flex', gap: 20 }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#0f172a', width: 55, textAlign: 'right' }}>Mentions</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed', width: 65, textAlign: 'right' }}>Cited pages</span>
+                          </div>
+                        </div>
+                        {currentTabResults.map((res, i) => {
+                          const kwUrls = res.results || [];
+                          const rawDomain = activeProject?.domain || activeProject?.name || '';
+                          const cleanDomain = rawDomain.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].trim().toLowerCase();
+                          const kwMentions = kwUrls.filter(u => cleanDomain && u.url?.toLowerCase().includes(cleanDomain)).length;
+                          const kwCitations = Math.min(kwUrls.length, 10);
+                          return (
+                            <div
+                              key={i}
+                              style={{
+                                position: 'relative',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                fontSize: 12.5,
+                                color: '#334155',
+                                padding: '4px 6px',
+                                borderRadius: 6,
+                                cursor: 'pointer',
+                                backgroundColor: hoveredKwIndex === i ? '#f8fafc' : 'transparent',
+                                transition: 'background 0.12s'
+                              }}
+                              onMouseEnter={() => setHoveredKwIndex(i)}
+                              onMouseLeave={() => setHoveredKwIndex(null)}
+                            >
+                              <span style={{ fontWeight: 600, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 220 }}>
+                                "{res.keyword}"
+                              </span>
+                              <div style={{ display: 'flex', gap: 20 }}>
+                                <span style={{ fontWeight: 700, color: '#0f172a', width: 55, textAlign: 'right' }}>{kwMentions}</span>
+                                <span style={{ fontWeight: 700, color: '#7c3aed', width: 65, textAlign: 'right' }}>{kwCitations}</span>
+                              </div>
+
+                              {/* Hover Competitors Popover */}
+                              {hoveredKwIndex === i && (
+                                <div
+                                  onMouseEnter={() => setHoveredKwIndex(i)}
+                                  onMouseLeave={() => setHoveredKwIndex(null)}
+                                  style={{
+                                    position: 'absolute',
+                                    bottom: '100%',
+                                    right: 0,
+                                    paddingBottom: 4,
+                                    zIndex: 1000
+                                  }}
+                                >
+                                  <div style={{
+                                    backgroundColor: '#ffffff',
+                                    border: '1px solid #cbd5e1',
+                                    borderRadius: 10,
+                                    padding: 12,
+                                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.12)',
+                                    width: 330,
+                                    maxHeight: 200,
+                                    overflowY: 'auto'
+                                  }}>
+                                    <div style={{ fontSize: 11.5, fontWeight: 800, color: '#7c3aed', marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid #f1f5f9' }}>
+                                      Competitors / Ranking URLs for "{res.keyword}"
+                                    </div>
+                                    {kwUrls.length > 0 ? (
+                                      kwUrls.map((urlObj, idx) => (
+                                        <div key={idx} style={{ fontSize: 11.5, color: '#1e293b', marginBottom: 6, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                          <span style={{ fontWeight: 700, color: '#0f172a' }}>
+                                            {idx + 1}. {(() => {
+                                              if (urlObj.title && urlObj.title !== '(No Title)' && urlObj.title.trim() !== '') {
+                                                return urlObj.title;
+                                              }
+                                              try {
+                                                const u = new URL(urlObj.url);
+                                                const dom = u.hostname.replace('www.', '').split('.')[0];
+                                                const capDom = dom.charAt(0).toUpperCase() + dom.slice(1);
+                                                const pathParts = u.pathname.split('/').filter(Boolean);
+                                                if (pathParts.length > 0) {
+                                                  const slug = pathParts[pathParts.length - 1].replace(/[-_]/g, ' ');
+                                                  if (slug.length > 3) return `${capDom} - ${slug}`;
+                                                }
+                                                return `${capDom} Page`;
+                                              } catch (err) {
+                                                return 'Web Result';
+                                              }
+                                            })()}
+                                          </span>
+                                          <a
+                                            href={urlObj.url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            style={{ color: '#2563eb', fontSize: 11, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', textDecoration: 'none' }}
+                                          >
+                                            {urlObj.url}
+                                          </a>
+                                        </div>
+                                      ))
+                                    ) : (
+                                      <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>No competitors returned.</div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* 2. Dedicated Domain Rank Tracker Feature */}
+                      <div style={{
+                        background: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 10,
+                        padding: 12,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 8
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 4, borderBottom: '1px solid #f1f5f9' }}>
+                          <span style={{ fontSize: 11.5, fontWeight: 800, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+                            Domain Rank Tracker
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {(() => {
+                            const firstRes = currentTabResults[0] || {};
+                            const kwUrls = firstRes.results || [];
+                            const rawDomain = activeProject?.domain || activeProject?.name || '';
+                            const cleanDomain = rawDomain.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].trim().toLowerCase();
+
+                            let matchIndex = cleanDomain ? kwUrls.findIndex(u => u.url?.toLowerCase().includes(cleanDomain)) : -1;
+
+                            if (matchIndex === -1 && cleanDomain && firstRes.ai_answer) {
+                              const lines = firstRes.ai_answer.split('\n');
+                              for (let l of lines) {
+                                if (l.toLowerCase().includes(cleanDomain)) {
+                                  const rankMatch = l.match(/^(?:#|\b)?(\d{1,2})[\.\)\s]/);
+                                  if (rankMatch) {
+                                    matchIndex = parseInt(rankMatch[1], 10) - 1;
+                                    break;
+                                  }
+                                }
+                              }
+                            }
+
+                            let rankText = '101';
+                            let badgeBg = 'transparent';
+                            let badgeColor = '#ef4444';
+
+                            if (matchIndex >= 0) {
+                              rankText = `#${matchIndex + 1}`;
+                              badgeBg = '#dcfce7';
+                              badgeColor = '#15803d';
+                            } else if (firstRes.ai_answer && cleanDomain && firstRes.ai_answer.toLowerCase().includes(cleanDomain)) {
+                              rankText = 'Mentioned in AI';
+                              badgeBg = '#eff6ff';
+                              badgeColor = '#2563eb';
+                            }
+
+                            const othersVal = matchIndex >= 0 ? matchIndex : -1;
+
+                            return (
+                              <>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5, color: '#1e293b' }}>
+                                  <span style={{ fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 240 }}>
+                                    "{rawDomain || 'dogseechew.in'}"
+                                  </span>
+                                  <span style={{
+                                    fontSize: 11.5,
+                                    fontWeight: 700,
+                                    color: badgeColor,
+                                    backgroundColor: badgeBg,
+                                    padding: '2px 10px',
+                                    borderRadius: 12,
+                                    minWidth: 95,
+                                    textAlign: 'center',
+                                    display: 'inline-block'
+                                  }}>
+                                    {rankText}
+                                  </span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5, color: '#1e293b' }}>
+                                  <span style={{ fontWeight: 600, color: '#334155' }}>
+                                    "Others"
+                                  </span>
+                                  <span style={{
+                                    fontSize: 11.5,
+                                    fontWeight: 700,
+                                    color: '#64748b',
+                                    backgroundColor: 'transparent',
+                                    padding: '2px 10px',
+                                    minWidth: 95,
+                                    textAlign: 'center',
+                                    display: 'inline-block'
+                                  }}>
+                                    {othersVal}
+                                  </span>
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* Re-analyze Action */}
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+                        <button
+                          onClick={handleAiAnalysis}
+                          disabled={isCurrentTabAnalyzing}
+                          style={{
+                            background: 'transparent',
+                            color: '#7c3aed',
+                            border: '1px solid #ddd6fe',
+                            borderRadius: 6,
+                            padding: '4px 12px',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: isCurrentTabAnalyzing ? 'not-allowed' : 'pointer',
+                            opacity: isCurrentTabAnalyzing ? 0.6 : 1
+                          }}
+                        >
+                          {isCurrentTabAnalyzing ? `Analyzing via ${aiTab}...` : 'Re-analyze Keywords'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })() : (
               <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 24, alignItems: 'center' }}>
                 {/* Left Meter */}
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
@@ -607,6 +1091,23 @@ export default function PositionAnalysisPage({ onNavigate }) {
 
                 {/* Right Table List */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: '#64748b',
+                    paddingBottom: 4,
+                    borderBottom: '1px solid #f1f5f9',
+                    marginBottom: 2
+                  }}>
+                    <span>Platform</span>
+                    <div style={{ display: 'flex', gap: 20 }}>
+                      <span style={{ color: '#0f172a', fontWeight: 700, width: 55, textAlign: 'right' }}>Mentions</span>
+                      <span style={{ color: '#7c3aed', fontWeight: 700, width: 65, textAlign: 'right' }}>Cited pages</span>
+                    </div>
+                  </div>
                   {[
                     { name: 'ChatGPT', val1: 0, val2: 17 },
                     { name: 'AI Overview', val1: 1, val2: 15 },
@@ -626,9 +1127,9 @@ export default function PositionAnalysisPage({ onNavigate }) {
                       }}
                     >
                       <span>{row.name}</span>
-                      <div style={{ display: 'flex', gap: 24 }}>
-                        <span style={{ fontWeight: 700, color: '#0f172a', width: 14, textAlign: 'right' }}>{row.val1}</span>
-                        <span style={{ fontWeight: 700, color: '#7c3aed', width: 20, textAlign: 'right' }}>{row.val2}</span>
+                      <div style={{ display: 'flex', gap: 20 }}>
+                        <span style={{ fontWeight: 700, color: '#0f172a', width: 55, textAlign: 'right' }}>{row.val1}</span>
+                        <span style={{ fontWeight: 700, color: '#7c3aed', width: 65, textAlign: 'right' }}>{row.val2}</span>
                       </div>
                     </div>
                   ))}

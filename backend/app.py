@@ -167,6 +167,7 @@ class AiAnalysisRequest(BaseModel):
     keyword: str
     ai_mode: str
     domain: Optional[str] = None
+    country: Optional[str] = "India"
 
 
 class ClassifyUrlsRequest(BaseModel):
@@ -1006,7 +1007,7 @@ def run_ai_analysis(project: str, req: AiAnalysisRequest):
     try:
         agent = agent_class()
         client_domain = req.domain or "socialoffline.in"
-        result = agent.run_keyword(req.keyword, client_domain=client_domain)
+        result = agent.run_keyword(req.keyword, client_domain=client_domain, country=req.country or "India")
         return {"project": project, "keyword": req.keyword, "ai_mode": mode, "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1032,4 +1033,9 @@ def classify_competitor_urls_endpoint(req: ClassifyUrlsRequest):
         return results
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app:app", host="0.0.0.0", port=5000, reload=True)
 

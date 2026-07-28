@@ -4,6 +4,7 @@ Agent registry and shared constants.
 from .base_agent   import BaseAgent, CLIENT_DOMAIN, DATASETS_DIR
 from .openai_agent import OpenAIAgent
 from .gemini_agent import GeminiAgent
+from .aio_agent    import AIOAgent
 from .serpapi_agent import SerpAPIAgent
 from .claude_agent import ClaudeAgent
 
@@ -13,8 +14,9 @@ AGENTS = {
     "gemini": GeminiAgent,
     "claude": ClaudeAgent,
     "serpapi": SerpAPIAgent,
-    "ai overview": SerpAPIAgent,
+    "ai overview": AIOAgent,
+    "aio": AIOAgent,
 }
 
-__all__ = ["BaseAgent", "OpenAIAgent", "GeminiAgent", "ClaudeAgent", "SerpAPIAgent", "AGENTS",
+__all__ = ["BaseAgent", "OpenAIAgent", "GeminiAgent", "AIOAgent", "ClaudeAgent", "SerpAPIAgent", "AGENTS",
            "CLIENT_DOMAIN", "DATASETS_DIR"]
