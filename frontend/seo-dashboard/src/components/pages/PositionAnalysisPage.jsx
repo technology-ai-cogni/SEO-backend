@@ -507,82 +507,141 @@ export default function PositionAnalysisPage({ onNavigate }) {
     setTabResults(prev => ({ ...prev, ...newResults }));
   }, [activeProject?.slug]);
 
-  const handleAiAnalysis = async (e, forcedTabKey) => {
-    if (e && e.preventDefault) e.preventDefault();
-    if (!topKeywords.length || !activeProject) return;
-    const tabKey = forcedTabKey || aiTab.toLowerCase();
-    if (forcedTabKey) {
-      let targetTab = forcedTabKey.charAt(0).toUpperCase() + forcedTabKey.slice(1);
-      if (forcedTabKey === 'ai overview') {
-        targetTab = 'AI Overview';
-      }
-      setAiTab(targetTab);
-    }
-    setAnalyzingTabs(prev => ({ ...prev, [tabKey]: true }));
-    setAnalysisError('');
-    try {
-      const results = [];
-      const domain = activeProject.domain || activeProject.name || 'socialoffline.in';
-      const countryObj = COUNTRY_OPTIONS.find(c => c.code === selectedRegion);
-      const countryName = countryObj ? countryObj.name : selectedRegion || 'India';
-      for (const kw of topKeywords) {
-        const data = await runAiAnalysis(activeProject.slug, kw, tabKey, domain, countryName);
-        results.push({ keyword: kw, ...data.result });
-      }
-      setTabResults(prev => ({ ...prev, [tabKey]: results }));
-    } catch (err) {
-      setAnalysisError(err.message);
-    } finally {
-      setAnalyzingTabs(prev => ({ ...prev, [tabKey]: false }));
-    }
-  };
-  */
-
-  const handleAiAnalysis = async (e) => {
+  const handleAiAnalysis = async (e, options = {}) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!activeProject) return;
-    const tabKey = aiTab.toLowerCase();
-    setAnalyzingTabs(prev => ({ ...prev, [tabKey]: true }));
-    setAnalysisError('');
-    try {
-      const domain = activeProject.domain || activeProject.name || 'dogseechew.in';
-      const countryObj = COUNTRY_OPTIONS.find(c => c.code === selectedRegion);
-      const countryName = countryObj ? countryObj.name : selectedRegion || 'India';
 
-      // Analyze top 100 keywords for GPT AI Visibility arc graph
-      let kwList = topKeywords;
-      if (!kwList || kwList.length === 0) {
-        const sortedKws = [...projectKeywords].sort((a, b) => {
-          const svA = Number(String(a.sv || 0).replace(/[^0-9.]/g, '')) || 0;
-          const svB = Number(String(b.sv || 0).replace(/[^0-9.]/g, '')) || 0;
-          return svB - svA;
+    const { targetEngine = null, analyzeAll = false } = options;
+    const domain = activeProject.domain || activeProject.name || 'dogseechew.in';
+    const countryObj = COUNTRY_OPTIONS.find(c => c.code === selectedRegion);
+    const countryName = countryObj ? countryObj.name : selectedRegion || 'India';
+
+    // Analyze top 100 keywords
+    let kwList = topKeywords;
+    if (!kwList || kwList.length === 0) {
+      const sortedKws = [...projectKeywords].sort((a, b) => {
+        const svA = Number(String(a.sv || 0).replace(/[^0-9.]/g, '')) || 0;
+        const svB = Number(String(b.sv || 0).replace(/[^0-9.]/g, '')) || 0;
+        return svB - svA;
+      });
+      kwList = sortedKws.slice(0, 100).map(k => k.kw);
+    }
+    if (!kwList || kwList.length === 0) {
+      kwList = ['dog dental chews', 'dental chews for dogs'];
+    }
+
+    if (analyzeAll) {
+      // HEADER BUTTON: Analyze ALL 3 models in parallel
+      setAnalyzingTabs({
+        chatgpt: true,
+        gemini: true,
+        'ai overview': true,
+        overview: true
+      });
+      setAnalysisError('');
+
+      try {
+        const engines = [
+          { key: 'chatgpt', engine: 'chatgpt' },
+          { key: 'gemini', engine: 'gemini' },
+          { key: 'ai overview', engine: 'ai overview' }
+        ];
+
+        const allResults = await Promise.all(
+          engines.map(async ({ key, engine }) => {
+            try {
+              const data = await runAiVisibilityAnalysis(activeProject.slug, domain, countryName, kwList, engine);
+              const visibilityResult = data?.result || {
+                ai_visibility: 0,
+                mentions: 0,
+                cited_pages: 0,
+                mentioned_keywords: [],
+                cited_pages_list: [],
+                total_keywords: kwList.length
+              };
+              return { key, result: [visibilityResult] };
+            } catch (err) {
+              return {
+                key,
+                result: [{
+                  ai_visibility: 0,
+                  mentions: 0,
+                  cited_pages: 0,
+                  mentioned_keywords: [],
+                  cited_pages_list: [],
+                  total_keywords: kwList.length
+                }]
+              };
+            }
+          })
+        );
+
+        const newTabResults = {};
+        allResults.forEach(({ key, result }) => {
+          newTabResults[key] = result;
+          localStorage.setItem(`ai_results_${activeProject.slug}_${key}`, JSON.stringify(result));
         });
-        kwList = sortedKws.slice(0, 100).map(k => k.kw);
+
+        // Overview aggregation
+        const valid = allResults.map(r => r.result[0]).filter(Boolean);
+        if (valid.length > 0) {
+          const avgVis = Math.round(valid.reduce((sum, r) => sum + (r.ai_visibility || 0), 0) / valid.length);
+          const totalMentions = valid.reduce((sum, r) => sum + (r.mentions || 0), 0);
+          const totalCited = valid.reduce((sum, r) => sum + (r.cited_pages || 0), 0);
+
+          const overviewRes = [{
+            ...valid[0],
+            ai_visibility: avgVis,
+            mentions: totalMentions,
+            cited_pages: totalCited
+          }];
+          newTabResults['overview'] = overviewRes;
+          localStorage.setItem(`ai_results_${activeProject.slug}_overview`, JSON.stringify(overviewRes));
+        }
+
+        setTabResults(prev => ({ ...prev, ...newTabResults }));
+      } catch (err) {
+        setAnalysisError(err.message);
+      } finally {
+        setAnalyzingTabs({
+          chatgpt: false,
+          gemini: false,
+          'ai overview': false,
+          overview: false
+        });
       }
-      if (!kwList || kwList.length === 0) {
-        kwList = ['dog dental chews', 'dental chews for dogs'];
+    } else {
+      // CARD / INSIDE MODEL BUTTON: Analyze ONLY for that specific model/tab
+      const currentTab = (targetEngine || aiTab).toLowerCase();
+      if (currentTab === 'overview') {
+        return handleAiAnalysis(e, { analyzeAll: true });
       }
 
-      const engine = tabKey.includes('gemini') ? 'gemini' : tabKey.includes('overview') ? 'ai overview' : 'chatgpt';
-      const data = await runAiVisibilityAnalysis(activeProject.slug, domain, countryName, kwList, engine);
+      const engineKey = currentTab.includes('gemini') ? 'gemini' : currentTab.includes('overview') ? 'ai overview' : 'chatgpt';
 
-      const visibilityResult = data.result || {
-        ai_visibility: 0,
-        mentions: 0,
-        cited_pages: 0,
-        mentioned_keywords: [],
-        cited_pages_list: [],
-        total_keywords: kwList.length
-      };
+      setAnalyzingTabs(prev => ({ ...prev, [engineKey]: true, [currentTab]: true }));
+      setAnalysisError('');
 
-      const results = [visibilityResult];
-      setTabResults(prev => ({ ...prev, [tabKey]: results }));
-      const cacheKey = `ai_results_${activeProject.slug}_${tabKey}`;
-      localStorage.setItem(cacheKey, JSON.stringify(results));
-    } catch (err) {
-      setAnalysisError(err.message);
-    } finally {
-      setAnalyzingTabs(prev => ({ ...prev, [tabKey]: false }));
+      try {
+        const data = await runAiVisibilityAnalysis(activeProject.slug, domain, countryName, kwList, engineKey);
+        const visibilityResult = data?.result || {
+          ai_visibility: 0,
+          mentions: 0,
+          cited_pages: 0,
+          mentioned_keywords: [],
+          cited_pages_list: [],
+          total_keywords: kwList.length
+        };
+
+        const results = [visibilityResult];
+        setTabResults(prev => ({ ...prev, [engineKey]: results, [currentTab]: results }));
+        localStorage.setItem(`ai_results_${activeProject.slug}_${engineKey}`, JSON.stringify(results));
+        localStorage.setItem(`ai_results_${activeProject.slug}_${currentTab}`, JSON.stringify(results));
+      } catch (err) {
+        setAnalysisError(err.message);
+      } finally {
+        setAnalyzingTabs(prev => ({ ...prev, [engineKey]: false, [currentTab]: false }));
+      }
     }
   };
 
@@ -1245,8 +1304,8 @@ export default function PositionAnalysisPage({ onNavigate }) {
           gap: 10
         }}>
           <button
-            onClick={(e) => handleAiAnalysis(e, 'ai overview')}
-            disabled={!!analyzingTabs[aiTab.toLowerCase()] || !topKeywords.length}
+            onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
+            disabled={Object.values(analyzingTabs).some(Boolean)}
             style={{
               background: '#7c3aed',
               color: '#ffffff',
@@ -1255,17 +1314,17 @@ export default function PositionAnalysisPage({ onNavigate }) {
               padding: '9px 16px',
               fontSize: 13.5,
               fontWeight: 700,
-              cursor: !!analyzingTabs[aiTab.toLowerCase()] || !topKeywords.length ? 'not-allowed' : 'pointer',
-              opacity: !!analyzingTabs[aiTab.toLowerCase()] || !topKeywords.length ? 0.7 : 1,
+              cursor: Object.values(analyzingTabs).some(Boolean) ? 'not-allowed' : 'pointer',
+              opacity: Object.values(analyzingTabs).some(Boolean) ? 0.7 : 1,
               boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
               transition: 'background 0.15s'
             }}
-            onMouseEnter={e => { if (!analyzingTabs[aiTab.toLowerCase()] && topKeywords.length) e.currentTarget.style.background = '#6d28d9'; }}
-            onMouseLeave={e => { if (!analyzingTabs[aiTab.toLowerCase()] && topKeywords.length) e.currentTarget.style.background = '#7c3aed'; }}
+            onMouseEnter={e => { if (!Object.values(analyzingTabs).some(Boolean)) e.currentTarget.style.background = '#6d28d9'; }}
+            onMouseLeave={e => { if (!Object.values(analyzingTabs).some(Boolean)) e.currentTarget.style.background = '#7c3aed'; }}
           >
-            {!!analyzingTabs[aiTab.toLowerCase()] 
+            {Object.values(analyzingTabs).some(Boolean)
               ? 'Analyzing...' 
-              : ((tabResults[aiTab.toLowerCase()] || []).length > 0 ? 'Re-analyze' : 'Analyze')}
+              : (Object.values(tabResults).some(r => r && r.length > 0) ? 'Re-analyze' : 'Analyze')}
           </button>
         </div>
       </div>
@@ -1569,8 +1628,8 @@ export default function PositionAnalysisPage({ onNavigate }) {
                       {/* Re-analyze Action */}
                       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
                         <button
-                          onClick={handleAiAnalysis}
-                          disabled={isCurrentTabAnalyzing}
+                          onClick={(e) => handleAiAnalysis(e, { targetEngine: aiTab.toLowerCase(), analyzeAll: aiTab === 'Overview' })}
+                          disabled={!!analyzingTabs[aiTab.toLowerCase()]}
                           style={{
                             background: 'transparent',
                             color: '#7c3aed',
@@ -1579,114 +1638,150 @@ export default function PositionAnalysisPage({ onNavigate }) {
                             padding: '4px 12px',
                             fontSize: 12,
                             fontWeight: 600,
-                            cursor: isCurrentTabAnalyzing ? 'not-allowed' : 'pointer',
-                            opacity: isCurrentTabAnalyzing ? 0.6 : 1
+                            cursor: !!analyzingTabs[aiTab.toLowerCase()] ? 'not-allowed' : 'pointer',
+                            opacity: !!analyzingTabs[aiTab.toLowerCase()] ? 0.6 : 1
                           }}
                         >
-                          {isCurrentTabAnalyzing ? `Analyzing via ${aiTab}...` : 'Re-analyze Keywords'}
+                          {!!analyzingTabs[aiTab.toLowerCase()]
+                            ? 'Analyzing...' 
+                            : ((tabResults[aiTab.toLowerCase()] || []).length > 0 ? 'Re-analyze' : 'Analyze')}
                         </button>
                       </div>
                     </div>
                   )}
                 </div>
               );
-            })() : (
-              <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 24, alignItems: 'center' }}>
-                {/* Left Meter */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-                  <div style={{ position: 'relative', width: 120, height: 65, display: 'flex', justifyContent: 'center', alignItems: 'flex-end' }}>
-                    <svg width="120" height="65" viewBox="0 0 120 65">
-                      <defs>
-                        <linearGradient id="aiVisibilityGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                          <stop offset="0%" stopColor="#7c3aed" />
-                          <stop offset="100%" stopColor="#a855f7" />
-                        </linearGradient>
-                      </defs>
-                      {/* Background Track */}
-                      <path
-                        d="M 12 58 A 48 48 0 0 1 108 58"
-                        fill="none"
-                        stroke="#e2e8f0"
-                        strokeWidth="9"
-                        strokeLinecap="round"
-                      />
-                      {/* Perfectly Aligned Progress Track */}
-                      <path
-                        d="M 12 58 A 48 48 0 0 1 108 58"
-                        fill="none"
-                        stroke="url(#aiVisibilityGrad)"
-                        strokeWidth="9"
-                        strokeLinecap="round"
-                        strokeDasharray="150.8"
-                        strokeDashoffset={150.8 * (1 - 90 / 100)}
-                        style={{ transition: 'stroke-dashoffset 0.5s ease-in-out' }}
-                      />
-                    </svg>
-                    <div style={{ position: 'absolute', bottom: 2, textAlign: 'center' }}>
-                      <span style={{ fontSize: 24, fontWeight: 900, color: '#0f172a', letterSpacing: '-0.5px' }}>90</span>
-                    </div>
-                  </div>
-                  <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600, marginTop: 4 }}>AI Visibility</div>
+            })() : (() => {
+              const overviewPlatforms = [
+                { key: 'chatgpt', name: 'ChatGPT' },
+                { key: 'ai overview', name: 'AI Overview' },
+                { key: 'gemini', name: 'Gemini' }
+              ].map(({ key, name }) => {
+                const modelResults = tabResults[key];
+                const hasData = modelResults && modelResults.length > 0 && modelResults[0] && typeof modelResults[0].mentions !== 'undefined';
+                const first = hasData ? modelResults[0] : null;
 
-                  <div style={{ display: 'flex', gap: 16, marginTop: 14 }}>
-                    <div>
-                      <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>7</div>
-                      <div style={{ fontSize: 11, color: '#94a3b8' }}>Mentions</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 15, fontWeight: 800, color: '#7c3aed' }}>38</div>
-                      <div style={{ fontSize: 11, color: '#94a3b8' }}>Cited pages</div>
-                    </div>
-                  </div>
-                </div>
+                return {
+                  name,
+                  hasData,
+                  mentions: hasData ? (first.mentions ?? 0) : 'N/A',
+                  citedPages: hasData ? (first.cited_pages ?? 0) : 'N/A',
+                  visibility: hasData ? (first.ai_visibility ?? 0) : null
+                };
+              });
 
-                {/* Right Table List */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: '#64748b',
-                    paddingBottom: 4,
-                    borderBottom: '1px solid #f1f5f9',
-                    marginBottom: 2
-                  }}>
-                    <span>Platform</span>
-                    <div style={{ display: 'flex', gap: 20 }}>
-                      <span style={{ color: '#0f172a', fontWeight: 700, width: 55, textAlign: 'right' }}>Mentions</span>
-                      <span style={{ color: '#7c3aed', fontWeight: 700, width: 65, textAlign: 'right' }}>Cited pages</span>
-                    </div>
-                  </div>
-                  {[
-                    { name: 'ChatGPT', val1: 0, val2: 17 },
-                    { name: 'AI Overview', val1: 1, val2: 15 },
-                    { name: 'AI Mode', val1: 2, val2: 20 },
-                    { name: 'Gemini', val1: 4, val2: 9 },
-                  ].map(row => (
-                    <div
-                      key={row.name}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        fontSize: 13,
-                        color: '#334155',
-                        fontWeight: 500,
-                        padding: '4px 0'
-                      }}
-                    >
-                      <span>{row.name}</span>
-                      <div style={{ display: 'flex', gap: 20 }}>
-                        <span style={{ fontWeight: 700, color: '#0f172a', width: 55, textAlign: 'right' }}>{row.val1}</span>
-                        <span style={{ fontWeight: 700, color: '#7c3aed', width: 65, textAlign: 'right' }}>{row.val2}</span>
+              const analyzedPlatforms = overviewPlatforms.filter(p => p.hasData);
+              const overallVis = analyzedPlatforms.length > 0
+                ? Math.round(analyzedPlatforms.reduce((sum, p) => sum + p.visibility, 0) / analyzedPlatforms.length)
+                : 'N/A';
+              const totalMentionsSum = analyzedPlatforms.length > 0
+                ? analyzedPlatforms.reduce((sum, p) => sum + p.mentions, 0)
+                : 'N/A';
+              const totalCitedSum = analyzedPlatforms.length > 0
+                ? analyzedPlatforms.reduce((sum, p) => sum + p.citedPages, 0)
+                : 'N/A';
+
+              const progressPercent = typeof overallVis === 'number' ? overallVis : 0;
+
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 24, alignItems: 'center' }}>
+                  {/* Left Meter */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                    <div style={{ position: 'relative', width: 120, height: 65, display: 'flex', justifyContent: 'center', alignItems: 'flex-end' }}>
+                      <svg width="120" height="65" viewBox="0 0 120 65">
+                        <defs>
+                          <linearGradient id="aiVisibilityGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stopColor="#7c3aed" />
+                            <stop offset="100%" stopColor="#a855f7" />
+                          </linearGradient>
+                        </defs>
+                        {/* Background Track */}
+                        <path
+                          d="M 12 58 A 48 48 0 0 1 108 58"
+                          fill="none"
+                          stroke="#e2e8f0"
+                          strokeWidth="9"
+                          strokeLinecap="round"
+                        />
+                        {/* Progress Track */}
+                        <path
+                          d="M 12 58 A 48 48 0 0 1 108 58"
+                          fill="none"
+                          stroke="url(#aiVisibilityGrad)"
+                          strokeWidth="9"
+                          strokeLinecap="round"
+                          strokeDasharray="150.8"
+                          strokeDashoffset={150.8 * (1 - progressPercent / 100)}
+                          style={{ transition: 'stroke-dashoffset 0.5s ease-in-out' }}
+                        />
+                      </svg>
+                      <div style={{ position: 'absolute', bottom: 2, textAlign: 'center' }}>
+                        <span style={{ fontSize: 24, fontWeight: 900, color: '#0f172a', letterSpacing: '-0.5px' }}>
+                          {overallVis}
+                        </span>
                       </div>
                     </div>
-                  ))}
+                    <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600, marginTop: 4 }}>AI Visibility</div>
+
+                    <div style={{ display: 'flex', gap: 16, marginTop: 14 }}>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>{totalMentionsSum}</div>
+                        <div style={{ fontSize: 11, color: '#94a3b8' }}>Mentions</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: '#7c3aed' }}>{totalCitedSum}</div>
+                        <div style={{ fontSize: 11, color: '#94a3b8' }}>Cited pages</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Table List */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: '#64748b',
+                      paddingBottom: 4,
+                      borderBottom: '1px solid #f1f5f9',
+                      marginBottom: 2
+                    }}>
+                      <span>Platform</span>
+                      <div style={{ display: 'flex', gap: 20 }}>
+                        <span style={{ color: '#0f172a', fontWeight: 700, width: 65, textAlign: 'right' }}>Mentions</span>
+                        <span style={{ color: '#7c3aed', fontWeight: 700, width: 75, textAlign: 'right' }}>Cited pages</span>
+                      </div>
+                    </div>
+                    {overviewPlatforms.map(row => (
+                      <div
+                        key={row.name}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          fontSize: 13,
+                          color: '#334155',
+                          fontWeight: 500,
+                          padding: '4px 0'
+                        }}
+                      >
+                        <span>{row.name}</span>
+                        <div style={{ display: 'flex', gap: 20 }}>
+                          <span style={{ fontWeight: 700, color: row.hasData ? '#0f172a' : '#94a3b8', width: 65, textAlign: 'right' }}>
+                            {row.mentions}
+                          </span>
+                          <span style={{ fontWeight: 700, color: row.hasData ? '#7c3aed' : '#94a3b8', width: 75, textAlign: 'right' }}>
+                            {row.citedPages}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Rank Audit Complete Status Banner — Overview only */}
             {aiTab === 'Overview' && (
@@ -1879,6 +1974,18 @@ export default function PositionAnalysisPage({ onNavigate }) {
 
             return (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
+                <span style={{
+                  background: '#f3e8ff',
+                  color: '#7c3aed',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  padding: '4px 12px',
+                  borderRadius: 6,
+                  letterSpacing: '0.5px',
+                  textTransform: 'uppercase'
+                }}>
+                  AI SEARCH
+                </span>
                 {/* Vertical Line sub-container with Mentions & Cited */}
                 <div style={{ width: '100%', flex: 1, display: 'flex', alignItems: 'stretch', gap: 16 }}>
                   {/* Mentions Sub-column */}
