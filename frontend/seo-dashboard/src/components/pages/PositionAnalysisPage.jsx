@@ -31,11 +31,13 @@ export default function PositionAnalysisPage({ onNavigate }) {
   const [selectedRegion, setSelectedRegion] = useState(() => localStorage.getItem('bd_selected_region') || 'US');
   const [selectedDate, setSelectedDate] = useState(() => localStorage.getItem('bd_selected_date') || new Date().toISOString().split('T')[0]);
   const dateInputRef = useRef(null);
+  const countryListRef = useRef(null);
   const [activeTooltip, setActiveTooltip] = useState(null);
   const [hoveredChartLine, setHoveredChartLine] = useState(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [countryMenuOpen, setCountryMenuOpen] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
+  const [highlightedCountryIndex, setHighlightedCountryIndex] = useState(0);
   const [hoveredKwIndex, setHoveredKwIndex] = useState(null);
 
   const COUNTRY_OPTIONS = [
@@ -177,6 +179,19 @@ export default function PositionAnalysisPage({ onNavigate }) {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  useEffect(() => {
+    setHighlightedCountryIndex(0);
+  }, [countrySearch, countryMenuOpen]);
+
+  useEffect(() => {
+    if (countryListRef.current) {
+      const activeEl = countryListRef.current.children[highlightedCountryIndex];
+      if (activeEl && activeEl.scrollIntoView) {
+        activeEl.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [highlightedCountryIndex]);
 
   const handleSelectProject = async (slug) => {
     setSelectedSlug(slug);
@@ -796,6 +811,27 @@ export default function PositionAnalysisPage({ onNavigate }) {
                             placeholder="Search"
                             value={countrySearch}
                             onChange={e => setCountrySearch(e.target.value)}
+                            onKeyDown={e => {
+                              if (filteredCountries.length === 0) return;
+                              if (e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                setHighlightedCountryIndex(prev => (prev + 1) % filteredCountries.length);
+                              } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                setHighlightedCountryIndex(prev => (prev - 1 + filteredCountries.length) % filteredCountries.length);
+                              } else if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const target = filteredCountries[highlightedCountryIndex] || filteredCountries[0];
+                                if (target) {
+                                  setSelectedRegion(target.code);
+                                  localStorage.setItem('bd_selected_region', target.code);
+                                  setCountryMenuOpen(false);
+                                }
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                setCountryMenuOpen(false);
+                              }
+                            }}
                             autoFocus
                             style={{
                               border: 'none',
@@ -811,48 +847,47 @@ export default function PositionAnalysisPage({ onNavigate }) {
                       </div>
 
                       {/* Scrollable Countries List */}
-                      <div style={{ overflowY: 'auto', maxHeight: 210, padding: '4px 0' }}>
+                      <div ref={countryListRef} style={{ overflowY: 'auto', maxHeight: 210, padding: '4px 0' }}>
                         {filteredCountries.length > 0 ? (
-                          filteredCountries.map(c => (
-                            <button
-                              key={c.code}
-                              onClick={() => {
-                                setSelectedRegion(c.code);
-                                localStorage.setItem('bd_selected_region', c.code);
-                                setCountryMenuOpen(false);
-                              }}
-                              style={{
-                                width: '100%',
-                                padding: '7px 12px',
-                                fontSize: 13,
-                                fontWeight: c.code === selectedRegion ? 600 : 500,
-                                color: '#0f172a',
-                                backgroundColor: c.code === selectedRegion ? '#eff6ff' : 'transparent',
-                                border: 'none',
-                                textAlign: 'left',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 10,
-                                transition: 'background 0.12s'
-                              }}
-                              onMouseEnter={e => {
-                                if (c.code !== selectedRegion) e.currentTarget.style.backgroundColor = '#f8fafc';
-                              }}
-                              onMouseLeave={e => {
-                                if (c.code !== selectedRegion) e.currentTarget.style.backgroundColor = 'transparent';
-                              }}
-                            >
-                              <img 
-                                src={`https://flagcdn.com/16x12/${c.code.toLowerCase()}.png`} 
-                                width="16" 
-                                height="12" 
-                                alt={c.name} 
-                                style={{ borderRadius: 1.5, objectFit: 'cover' }}
-                              />
-                              <span>{c.name}</span>
-                            </button>
-                          ))
+                          filteredCountries.map((c, idx) => {
+                            const isHighlighted = idx === highlightedCountryIndex;
+                            const isSelected = c.code === selectedRegion;
+                            return (
+                              <button
+                                key={c.code}
+                                onClick={() => {
+                                  setSelectedRegion(c.code);
+                                  localStorage.setItem('bd_selected_region', c.code);
+                                  setCountryMenuOpen(false);
+                                }}
+                                onMouseEnter={() => setHighlightedCountryIndex(idx)}
+                                style={{
+                                  width: '100%',
+                                  padding: '7px 12px',
+                                  fontSize: 13,
+                                  fontWeight: isSelected ? 700 : 500,
+                                  color: '#0f172a',
+                                  backgroundColor: isHighlighted ? '#e0f2fe' : (isSelected ? '#eff6ff' : 'transparent'),
+                                  border: 'none',
+                                  textAlign: 'left',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 10,
+                                  transition: 'background 0.12s'
+                                }}
+                              >
+                                <img 
+                                  src={`https://flagcdn.com/16x12/${c.code.toLowerCase()}.png`} 
+                                  width="16" 
+                                  height="12" 
+                                  alt={c.name} 
+                                  style={{ borderRadius: 1.5, objectFit: 'cover' }}
+                                />
+                                <span>{c.name}</span>
+                              </button>
+                            );
+                          })
                         ) : (
                           <div style={{ padding: '12px', fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>
                             No countries found
@@ -1526,43 +1561,12 @@ export default function PositionAnalysisPage({ onNavigate }) {
               </span>
             </div>
 
-            {/* 3 Column Metrics */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: 12,
-              paddingTop: 10
-            }}>
-              {/* Metric 1 */}
-              <div>
-                <div style={{ fontSize: 13, color: '#334155', fontWeight: 500, marginBottom: 6 }}>Authority Score</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>19</div>
-                <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 4 }}>Semrush: 2.4M</div>
-              </div>
-
-              {/* Metric 2 */}
-              <div>
-                <div style={{ fontSize: 13, color: '#334155', fontWeight: 500, marginBottom: 6 }}>Organic Traffic</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>261</div>
-                <div style={{ fontSize: 10.5, color: '#16a34a', fontWeight: 700, marginTop: 4 }}>+96.24%</div>
-              </div>
-
-              {/* Metric 3 */}
-              <div>
-                <div style={{ fontSize: 13, color: '#334155', fontWeight: 500, marginBottom: 6 }}>Org. Keywords</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>{kwCount}</div>
-                <div style={{ fontSize: 10.5, color: '#16a34a', fontWeight: 700, marginTop: 4 }}>+28.46%</div>
-              </div>
-            </div>
-
-            {/* Lower Section: Categories on Left | Line In Between | Top 1, Top 3 & Top 10 Columns on Right */}
+            {/* Categories on Left | Top 1, Top 3 & Top 10 Columns on Right */}
             <div style={{
               display: 'flex',
               alignItems: 'stretch',
               gap: 16,
-              paddingTop: 12,
-              borderTop: '1px solid #f1f5f9',
-              marginTop: 4
+              paddingTop: 4
             }}>
               {/* Left Side: Channel Names */}
               <div style={{ flex: 1.2, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1642,7 +1646,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
           gap: 24,
           minHeight: 120
         }}>
-          {/* Left Section: Top Product with Mentions & Cited sub-columns */}
+          {/* Left Section: AI Search with Mentions & Cited sub-columns */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
             <span style={{
               background: '#f3e8ff',
@@ -1654,7 +1658,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
               letterSpacing: '0.5px',
               textTransform: 'uppercase'
             }}>
-              TOP PRODUCT
+              AI SEARCH
             </span>
             {/* Vertical Line sub-container with Mentions & Cited */}
             <div style={{ width: '100%', flex: 1, display: 'flex', alignItems: 'stretch', gap: 16 }}>
@@ -1722,11 +1726,11 @@ export default function PositionAnalysisPage({ onNavigate }) {
           {/* Single Vertical Separator Line in between */}
           <div style={{ width: '1px', background: '#e2e8f0' }} />
 
-          {/* Right Section: Intent with Cluster & Category sub-columns */}
+          {/* Right Section: SEO with Cluster & Category sub-columns */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
             <span style={{
-              background: '#f3e8ff',
-              color: '#7c3aed',
+              background: '#e0f2fe',
+              color: '#0284c7',
               fontSize: 11,
               fontWeight: 800,
               padding: '4px 12px',
@@ -1734,7 +1738,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
               letterSpacing: '0.5px',
               textTransform: 'uppercase'
             }}>
-              INTENT
+              SEO
             </span>
             {/* Vertical Line sub-container with Cluster & Category */}
             <div style={{ width: '100%', flex: 1, display: 'flex', alignItems: 'stretch', gap: 16 }}>
@@ -2151,141 +2155,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
         </div>
       </div>
 
-      {/* ─── BOTTOM ROW: ON-PAGE, BACKLINK & ORGANIC TRAFFIC INSIGHTS CARDS ─────── */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-        gap: 20
-      }}>
-        {/* CARD 5: On Page SEO Checker */}
-        {!closedCards.onPage && (
-          <div style={{
-            background: '#ffffff',
-            border: '1px solid #e2e8f0',
-            borderRadius: 14,
-            padding: 20,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            gap: 16,
-            minHeight: 140
-          }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>On Page SEO Checker</span>
-                  <Info size={14} color="#94a3b8" />
-                </div>
-                <X size={14} style={{ cursor: 'pointer', color: '#94a3b8' }} onClick={() => toggleClose('onPage')} />
-              </div>
-              <p style={{ fontSize: 12.5, color: '#64748b', margin: 0, lineHeight: 1.4 }}>
-                Collect ideas on strategy, content, backlinks and more.
-              </p>
-            </div>
-            <div>
-              <button style={{
-                background: '#f1f5f9',
-                color: '#334155',
-                border: 'none',
-                borderRadius: 6,
-                padding: '6px 14px',
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: 'pointer'
-              }}>
-                Set up
-              </button>
-            </div>
-          </div>
-        )}
 
-        {/* CARD 6: Backlink Audit */}
-        {!closedCards.backlink && (
-          <div style={{
-            background: '#ffffff',
-            border: '1px solid #e2e8f0',
-            borderRadius: 14,
-            padding: 20,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            gap: 16,
-            minHeight: 140
-          }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Backlink Audit</span>
-                  <Info size={14} color="#94a3b8" />
-                </div>
-                <X size={14} style={{ cursor: 'pointer', color: '#94a3b8' }} onClick={() => toggleClose('backlink')} />
-              </div>
-              <p style={{ fontSize: 12.5, color: '#64748b', margin: 0, lineHeight: 1.4 }}>
-                Detoxify your backlink portfolio and strengthen your website rankings.
-              </p>
-            </div>
-            <div>
-              <button style={{
-                background: '#f1f5f9',
-                color: '#334155',
-                border: 'none',
-                borderRadius: 6,
-                padding: '6px 14px',
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: 'pointer'
-              }}>
-                Set up
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* CARD 7: Organic Traffic Insights */}
-        {!closedCards.organicTraffic && (
-          <div style={{
-            background: '#ffffff',
-            border: '1px solid #e2e8f0',
-            borderRadius: 14,
-            padding: 20,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            gap: 16,
-            minHeight: 140
-          }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Organic Traffic Insights</span>
-                  <Info size={14} color="#94a3b8" />
-                </div>
-                <X size={14} style={{ cursor: 'pointer', color: '#94a3b8' }} onClick={() => toggleClose('organicTraffic')} />
-              </div>
-              <p style={{ fontSize: 12.5, color: '#64748b', margin: 0, lineHeight: 1.4 }}>
-                Uncover "not provided" keywords combining GA, GSC and Semrush data.
-              </p>
-            </div>
-            <div>
-              <button style={{
-                background: '#f1f5f9',
-                color: '#334155',
-                border: 'none',
-                borderRadius: 6,
-                padding: '6px 14px',
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: 'pointer'
-              }}>
-                Set up
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
 
       {/* ─── MODAL REPORT VIEW (Triggered by View Report) ────────────────────────── */}
       {showReport && (
