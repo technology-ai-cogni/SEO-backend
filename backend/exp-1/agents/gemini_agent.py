@@ -4,6 +4,7 @@ GeminiAgent — Google Gemini 3.5 Flash with grounded Google Search.
 Writes to: datasets/20 july test ai overview sheet.csv
 """
 
+import json
 import os
 import re
 import sys

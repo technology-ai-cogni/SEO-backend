@@ -4,6 +4,7 @@ AIOAgent — Google AI Overview agent using Gemini model.
 Simulates Google AI Overview search results and citations up to rank 40.
 """
 
+import json
 import os
 import re
 import sys

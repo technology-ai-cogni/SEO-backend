@@ -48,7 +48,7 @@ class BaseAgent(ABC):
         Fetch search results for keyword via the agent's AI/API.
         Returns:
           {
-            "results":       list[{"url": str, "title": str}],  # up to 10
+            "results":       list[dict],  # up to 10
             "ai_answer":     str,    # raw full answer text
             "has_grounding": bool,   # structured citations vs regex fallback
             "status":        str,    # "ok" or error string
