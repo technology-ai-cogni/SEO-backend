@@ -22,8 +22,8 @@ try:
 except Exception:
     OpenAI = None
     _client = None
-SEARCH_MODEL  = "gpt-4o-search-preview"
-SUMMARY_MODEL = "gpt-4o-search-preview"
+SEARCH_MODEL  = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+SUMMARY_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 
 
 class OpenAIAgent(BaseAgent):

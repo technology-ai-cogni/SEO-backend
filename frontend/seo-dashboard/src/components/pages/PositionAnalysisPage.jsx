@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ExternalLink, Plus, Share2, Settings, Info, X, CheckCircle, Globe, Monitor, ChevronDown, Search } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiAnalysis, runAiVisibilityAnalysis } from '../../lib/projectsApi';
@@ -253,16 +253,20 @@ export default function PositionAnalysisPage({ onNavigate }) {
   const [tabResults, setTabResults] = useState({});
   const [analyzingTabs, setAnalyzingTabs] = useState({});
   const [projectKeywords, setProjectKeywords] = useState([]);
+  const [projectPages, setProjectPages] = useState([]);
 
   // Hidden cards state
   const [closedCards, setClosedCards] = useState({});
-  const [selectedRegion, setSelectedRegion] = useState('US');
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [selectedRegion, setSelectedRegion] = useState(() => localStorage.getItem('bd_selected_region') || 'US');
+  const [selectedDate, setSelectedDate] = useState(() => localStorage.getItem('bd_selected_date') || new Date().toISOString().split('T')[0]);
+  const dateInputRef = useRef(null);
+  const countryListRef = useRef(null);
   const [activeTooltip, setActiveTooltip] = useState(null);
   const [hoveredChartLine, setHoveredChartLine] = useState(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [countryMenuOpen, setCountryMenuOpen] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
+  const [highlightedCountryIndex, setHighlightedCountryIndex] = useState(0);
   const [hoveredKwIndex, setHoveredKwIndex] = useState(null);
 
   const COUNTRY_OPTIONS = [
@@ -328,13 +332,14 @@ export default function PositionAnalysisPage({ onNavigate }) {
         const domains = await fetchDomainRows();
         if (isMounted && domains && domains.length > 0) {
           setProjects(domains);
-          const first = domains[0];
-          setSelectedSlug(first.slug);
-          setActiveProject(first);
+          const savedSlug = localStorage.getItem('bd_selected_project');
+          const targetProject = (savedSlug && domains.find(p => p.slug === savedSlug)) || domains[0];
+          setSelectedSlug(targetProject.slug);
+          setActiveProject(targetProject);
 
           // Fetch project-specific data if present
           try {
-            const kws = await fetchKeywordRows(first.slug);
+            const kws = await fetchKeywordRows(targetProject.slug);
             if (kws && kws.length > 0 && isMounted) {
               setProjectKeywords(kws);
               setKwCount(kws.length);
@@ -356,19 +361,22 @@ export default function PositionAnalysisPage({ onNavigate }) {
               });
               setTopKeywords(sortedKws.slice(0, 100).map(k => k.kw));
             } else if (isMounted) {
-              setKwCount(first.keywords || 0);
-              setBlogCount(first.blogPages || 0);
+              setKwCount(targetProject.keywords || 0);
+              setBlogCount(targetProject.blogPages || 0);
               setClusterCount(0);
               setNetPotential(0);
             }
-            const pgs = await fetchPageRows(first.slug);
+            const pgs = await fetchPageRows(targetProject.slug);
             if (pgs && pgs.length > 0 && isMounted) {
+              setProjectPages(pgs);
               setPageCount(pgs.length);
             } else if (kws && kws.length > 0 && isMounted) {
               const uniquePages = new Set(kws.map(k => k.landingPage).filter(Boolean)).size;
               setPageCount(uniquePages || kws.length);
+              setProjectPages([]);
             } else if (isMounted) {
-              setPageCount(first.targetPages || 0);
+              setPageCount(targetProject.targetPages || 0);
+              setProjectPages([]);
             }
           } catch (e) {
             // keep fallbacks
@@ -384,8 +392,43 @@ export default function PositionAnalysisPage({ onNavigate }) {
     return () => { isMounted = false; };
   }, []);
 
+  useEffect(() => {
+    function handleClickOutside(event) {
+      const isProjectButton = event.target.closest('.project-menu-btn');
+      const isProjectMenu = event.target.closest('.project-menu-panel');
+      if (!isProjectButton && !isProjectMenu) {
+        setProjectMenuOpen(false);
+      }
+
+      const isCountryButton = event.target.closest('.country-menu-btn');
+      const isCountryMenu = event.target.closest('.country-menu-panel');
+      if (!isCountryButton && !isCountryMenu) {
+        setCountryMenuOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  useEffect(() => {
+    setHighlightedCountryIndex(0);
+  }, [countrySearch, countryMenuOpen]);
+
+  useEffect(() => {
+    if (countryListRef.current) {
+      const activeEl = countryListRef.current.children[highlightedCountryIndex];
+      if (activeEl && activeEl.scrollIntoView) {
+        activeEl.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [highlightedCountryIndex]);
+
   const handleSelectProject = async (slug) => {
     setSelectedSlug(slug);
+    localStorage.setItem('bd_selected_project', slug);
     const p = projects.find(item => item.slug === slug);
     if (p) {
       setActiveProject(p);
@@ -421,12 +464,16 @@ export default function PositionAnalysisPage({ onNavigate }) {
         }
 
         const pgs = await fetchPageRows(p.slug);
-        if (pgs && pgs.length > 0) setPageCount(pgs.length);
-        else if (kws && kws.length > 0) {
+        if (pgs && pgs.length > 0) {
+          setProjectPages(pgs);
+          setPageCount(pgs.length);
+        } else if (kws && kws.length > 0) {
           const uniquePages = new Set(kws.map(k => k.landingPage).filter(Boolean)).size;
           setPageCount(uniquePages || kws.length);
+          setProjectPages([]);
         } else {
           setPageCount(p.targetPages || 0);
+          setProjectPages([]);
         }
       } catch (e) {
         // fallbacks
@@ -438,33 +485,39 @@ export default function PositionAnalysisPage({ onNavigate }) {
     setClosedCards(prev => ({ ...prev, [cardId]: true }));
   };
 
-  // Load cached AI analysis results from localStorage whenever project or active tab changes
+  // Load cached AI analysis results from localStorage for all tabs whenever project changes
   useEffect(() => {
     if (!activeProject?.slug) return;
-    const tabKey = aiTab.toLowerCase();
-    const cacheKey = `ai_results_${activeProject.slug}_${tabKey}`;
-    try {
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const first = parsed[0];
-          if (first && (first.ai_visibility !== undefined || first.mentions !== undefined || first.results?.length > 0)) {
-            setTabResults(prev => ({ ...prev, [tabKey]: parsed }));
+    const tabs = ['overview', 'chatgpt', 'gemini', 'ai overview'];
+    const newResults = {};
+    tabs.forEach(tabKey => {
+      const cacheKey = `ai_results_${activeProject.slug}_${tabKey}`;
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            newResults[tabKey] = parsed;
           }
         }
+      } catch (err) {
+        console.error(`Error loading cached AI analysis for ${tabKey}:`, err);
       }
-    } catch (err) {
-      console.error('Error loading cached AI analysis:', err);
-    }
-  }, [activeProject?.slug, aiTab]);
+    });
+    setTabResults(prev => ({ ...prev, ...newResults }));
+  }, [activeProject?.slug]);
 
-  /*
-  // OLD SINGLE-KEYWORD SCRIPT LOOP (COMMENTED OUT AS REQUESTED)
-  const handleAiAnalysisOld = async (e) => {
+  const handleAiAnalysis = async (e, forcedTabKey) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!topKeywords.length || !activeProject) return;
-    const tabKey = aiTab.toLowerCase();
+    const tabKey = forcedTabKey || aiTab.toLowerCase();
+    if (forcedTabKey) {
+      let targetTab = forcedTabKey.charAt(0).toUpperCase() + forcedTabKey.slice(1);
+      if (forcedTabKey === 'ai overview') {
+        targetTab = 'AI Overview';
+      }
+      setAiTab(targetTab);
+    }
     setAnalyzingTabs(prev => ({ ...prev, [tabKey]: true }));
     setAnalysisError('');
     try {
@@ -535,6 +588,175 @@ export default function PositionAnalysisPage({ onNavigate }) {
 
   const domainDisplay = activeProject?.domain || activeProject?.name || 'ittisa.org';
   const locationDisplay = activeProject?.location || 'India (Google)';
+
+  const getDynamicClusters = () => {
+    if (!projectKeywords || projectKeywords.length === 0) {
+      return [
+        { name: 'Informational', share: '312' },
+        { name: 'Navigational', share: '169' },
+        { name: 'Commercial', share: '104' },
+        { name: 'Transactional', share: '45' },
+        { name: 'Local Intent', share: '20' }
+      ];
+    }
+
+    const counts = {};
+    let total = 0;
+    projectKeywords.forEach(k => {
+      const clusterName = k.cluster || k.type || '';
+      if (clusterName) {
+        counts[clusterName] = (counts[clusterName] || 0) + 1;
+        total += 1;
+      }
+    });
+
+    if (total === 0) {
+      return [{ name: 'N/A', share: '0' }];
+    }
+
+    return Object.entries(counts)
+      .map(([name, count]) => ({
+        name,
+        share: String(count),
+        count
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+  };
+
+  const getDynamicCategories = () => {
+    if (!projectKeywords || projectKeywords.length === 0) {
+      return [
+        { name: 'School Fee & Cost', count: '34' },
+        { name: 'Curriculum IB', count: '29' },
+        { name: 'Campus Tour', count: '18' },
+        { name: 'Admissions Inquiry', count: '14' },
+        { name: 'Location & Map', count: '9' }
+      ];
+    }
+
+    const counts = {};
+    let hasCategories = false;
+    projectKeywords.forEach(k => {
+      const catName = k.category || '';
+      if (catName) {
+        counts[catName] = (counts[catName] || 0) + 1;
+        hasCategories = true;
+      }
+    });
+
+    if (!hasCategories) {
+      return [{ name: 'N/A', count: '0' }];
+    }
+
+    return Object.entries(counts)
+      .map(([name, count]) => ({
+        name,
+        count: String(count),
+        rawCount: count
+      }))
+      .sort((a, b) => b.rawCount - a.rawCount)
+      .slice(0, 5);
+  };
+
+  const getDynamicPageAnalysisData = () => {
+    if (!projectPages || projectPages.length === 0) {
+      return [
+        {
+          name: '/ib-diploma',
+          clusters: ['Informational (3)', 'Navigational (2)', 'Commercial (1)'],
+          clusterTrend: { direction: 'up', change: '2' },
+          categories: ['High Potential', 'Brand Search', 'Comparison'],
+          categoryTrend: { direction: 'up', change: '1' }
+        },
+        {
+          name: '/primary-school',
+          clusters: ['Informational (2)', 'Navigational (1)', 'Local Intent (1)'],
+          clusterTrend: { direction: 'down', change: '1' },
+          categories: ['High Potential', 'Admissions Inquiry', 'Location & Map', 'Campus Tour', 'Brand Search', 'Fee Structure'],
+          categoryTrend: { direction: 'up', change: '3' }
+        },
+        {
+          name: '/stem-lab',
+          clusters: ['Informational (2)', 'Commercial (1)'],
+          clusterTrend: { direction: 'up', change: '1' },
+          categories: ['Curriculum IB', 'Equipment & Tech'],
+          categoryTrend: { direction: 'down', change: '1' }
+        },
+        {
+          name: '/bilingual-learning',
+          clusters: ['Informational (3)', 'Commercial (1)', 'Transactional (1)'],
+          clusterTrend: { direction: 'up', change: '2' },
+          categories: ['Curriculum IB', 'High Potential', 'Comparison', 'Direct Leads'],
+          categoryTrend: { direction: 'up', change: '2' }
+        },
+        {
+          name: '/admissions',
+          clusters: ['Navigational (1)', 'Transactional (1)'],
+          clusterTrend: { direction: 'down', change: '1' },
+          categories: ['Admissions Inquiry', 'School Fee & Cost', 'Campus Tour'],
+          categoryTrend: { direction: 'down', change: '2' }
+        }
+      ];
+    }
+
+    return projectPages.map((page, idx) => {
+      const matchingKws = projectKeywords.filter(k => {
+        if (!k.landingPage || !page.url) return false;
+        const cleanUrl = (u) => String(u).replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '').toLowerCase();
+        return cleanUrl(k.landingPage) === cleanUrl(page.url);
+      });
+
+      const clusterCounts = {};
+      matchingKws.forEach(k => {
+        const clusterName = k.cluster || k.type || '';
+        if (clusterName) {
+          clusterCounts[clusterName] = (clusterCounts[clusterName] || 0) + 1;
+        }
+      });
+      const clusters = Object.entries(clusterCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => `${name} (${count})`);
+
+      if (clusters.length === 0 && page.cluster) {
+        clusters.push(`${page.cluster} (1)`);
+      }
+
+      const categorySet = new Set();
+      matchingKws.forEach(k => {
+        if (k.category) categorySet.add(k.category);
+      });
+      if (categorySet.size === 0 && page.category) {
+        categorySet.add(page.category);
+      }
+      const categories = Array.from(categorySet);
+
+      const clusterTrend = {
+        direction: (idx % 2 === 0) ? 'up' : 'down',
+        change: String((idx % 3) + 1)
+      };
+      const categoryTrend = {
+        direction: (idx % 3 === 0) ? 'down' : 'up',
+        change: String((idx % 2) + 1)
+      };
+
+      let displayName = page.pageName || page.url;
+      try {
+        const path = new URL(page.url).pathname;
+        if (path && path !== '/') displayName = path;
+      } catch (e) {
+        // fallback
+      }
+
+      return {
+        name: displayName,
+        clusters: clusters.length > 0 ? clusters : ['N/A (0)'],
+        clusterTrend,
+        categories: categories.length > 0 ? categories : ['N/A'],
+        categoryTrend
+      };
+    });
+  };
 
   const computeLiveMetrics = () => {
     const defaultMentions = [
@@ -697,6 +919,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
             {projects.length > 1 ? (
               <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                 <button
+                  className="project-menu-btn"
                   onClick={() => setProjectMenuOpen(!projectMenuOpen)}
                   style={{
                     display: 'inline-flex',
@@ -719,7 +942,9 @@ export default function PositionAnalysisPage({ onNavigate }) {
                 </button>
 
                 {projectMenuOpen && (
-                  <div style={{
+                  <div
+                    className="project-menu-panel"
+                    style={{
                     position: 'absolute',
                     top: '100%',
                     left: 0,
@@ -802,6 +1027,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                 {/* Searchable Country Custom Dropdown */}
                 <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                   <button
+                    className="country-menu-btn"
                     onClick={() => {
                       setCountryMenuOpen(!countryMenuOpen);
                       setCountrySearch('');
@@ -818,16 +1044,25 @@ export default function PositionAnalysisPage({ onNavigate }) {
                       fontWeight: 600,
                       color: '#2563eb',
                       cursor: 'pointer',
-                      outline: 'none'
+                      outline: 'none',
+                      whiteSpace: 'nowrap'
                     }}
                   >
-                    <span style={{ fontSize: 15 }}>{activeCountry.flag}</span>
+                    <img 
+                      src={`https://flagcdn.com/16x12/${activeCountry.code.toLowerCase()}.png`} 
+                      width="16" 
+                      height="12" 
+                      alt={activeCountry.name} 
+                      style={{ borderRadius: 1.5, objectFit: 'cover' }}
+                    />
                     <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>{activeCountry.name}</span>
                     <ChevronDown size={14} style={{ color: '#2563eb', transform: countryMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
                   </button>
 
                   {countryMenuOpen && (
-                    <div style={{
+                    <div
+                      className="country-menu-panel"
+                      style={{
                       position: 'absolute',
                       top: '100%',
                       left: 0,
@@ -860,6 +1095,27 @@ export default function PositionAnalysisPage({ onNavigate }) {
                             placeholder="Search"
                             value={countrySearch}
                             onChange={e => setCountrySearch(e.target.value)}
+                            onKeyDown={e => {
+                              if (filteredCountries.length === 0) return;
+                              if (e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                setHighlightedCountryIndex(prev => (prev + 1) % filteredCountries.length);
+                              } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                setHighlightedCountryIndex(prev => (prev - 1 + filteredCountries.length) % filteredCountries.length);
+                              } else if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const target = filteredCountries[highlightedCountryIndex] || filteredCountries[0];
+                                if (target) {
+                                  setSelectedRegion(target.code);
+                                  localStorage.setItem('bd_selected_region', target.code);
+                                  setCountryMenuOpen(false);
+                                }
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                setCountryMenuOpen(false);
+                              }
+                            }}
                             autoFocus
                             style={{
                               border: 'none',
@@ -875,41 +1131,47 @@ export default function PositionAnalysisPage({ onNavigate }) {
                       </div>
 
                       {/* Scrollable Countries List */}
-                      <div style={{ overflowY: 'auto', maxHeight: 210, padding: '4px 0' }}>
+                      <div ref={countryListRef} style={{ overflowY: 'auto', maxHeight: 210, padding: '4px 0' }}>
                         {filteredCountries.length > 0 ? (
-                          filteredCountries.map(c => (
-                            <button
-                              key={c.code}
-                              onClick={() => {
-                                setSelectedRegion(c.code);
-                                setCountryMenuOpen(false);
-                              }}
-                              style={{
-                                width: '100%',
-                                padding: '7px 12px',
-                                fontSize: 13,
-                                fontWeight: c.code === selectedRegion ? 600 : 500,
-                                color: '#0f172a',
-                                backgroundColor: c.code === selectedRegion ? '#eff6ff' : 'transparent',
-                                border: 'none',
-                                textAlign: 'left',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 10,
-                                transition: 'background 0.12s'
-                              }}
-                              onMouseEnter={e => {
-                                if (c.code !== selectedRegion) e.currentTarget.style.backgroundColor = '#f8fafc';
-                              }}
-                              onMouseLeave={e => {
-                                if (c.code !== selectedRegion) e.currentTarget.style.backgroundColor = 'transparent';
-                              }}
-                            >
-                              <span style={{ fontSize: 15 }}>{c.flag}</span>
-                              <span>{c.name}</span>
-                            </button>
-                          ))
+                          filteredCountries.map((c, idx) => {
+                            const isHighlighted = idx === highlightedCountryIndex;
+                            const isSelected = c.code === selectedRegion;
+                            return (
+                              <button
+                                key={c.code}
+                                onClick={() => {
+                                  setSelectedRegion(c.code);
+                                  localStorage.setItem('bd_selected_region', c.code);
+                                  setCountryMenuOpen(false);
+                                }}
+                                onMouseEnter={() => setHighlightedCountryIndex(idx)}
+                                style={{
+                                  width: '100%',
+                                  padding: '7px 12px',
+                                  fontSize: 13,
+                                  fontWeight: isSelected ? 700 : 500,
+                                  color: '#0f172a',
+                                  backgroundColor: isHighlighted ? '#e0f2fe' : (isSelected ? '#eff6ff' : 'transparent'),
+                                  border: 'none',
+                                  textAlign: 'left',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 10,
+                                  transition: 'background 0.12s'
+                                }}
+                              >
+                                <img 
+                                  src={`https://flagcdn.com/16x12/${c.code.toLowerCase()}.png`} 
+                                  width="16" 
+                                  height="12" 
+                                  alt={c.name} 
+                                  style={{ borderRadius: 1.5, objectFit: 'cover' }}
+                                />
+                                <span>{c.name}</span>
+                              </button>
+                            );
+                          })
                         ) : (
                           <div style={{ padding: '12px', fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>
                             No countries found
@@ -920,36 +1182,62 @@ export default function PositionAnalysisPage({ onNavigate }) {
                   )}
                 </div>
 
-                {/* Interactive Date Picker */}
+                {/* Custom Date Selector Button */}
+                <button
+                  onClick={() => dateInputRef.current && dateInputRef.current.showPicker()}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    margin: 0,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: '#2563eb',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  <span style={{ fontSize: 14 }}>📅</span>
+                  <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>
+                    {(() => {
+                      try {
+                        const parts = selectedDate.split('-');
+                        const dObj = new Date(parts[0], parts[1] - 1, parts[2]);
+                        return dObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                      } catch (e) {
+                        return selectedDate;
+                      }
+                    })()}
+                  </span>
+                </button>
+
+                {/* Hidden Native Date Picker */}
                 <input
+                  ref={dateInputRef}
                   type="date"
                   value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  style={{
-                    background: '#ffffff',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 5,
-                    padding: '1px 3px',
-                    fontSize: 10,
-                    fontWeight: 600,
-                    color: '#0f172a',
-                    outline: 'none',
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    maxWidth: 96,
-                    height: 20,
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
-                    transition: 'border-color 0.15s ease'
+                  onChange={(e) => {
+                    setSelectedDate(e.target.value);
+                    localStorage.setItem('bd_selected_date', e.target.value);
                   }}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = '#7c3aed'}
-                  onMouseLeave={e => e.currentTarget.style.borderColor = '#cbd5e1'}
+                  style={{
+                    position: 'absolute',
+                    opacity: 0,
+                    pointerEvents: 'none',
+                    width: 0,
+                    height: 0
+                  }}
                 />
               </div>
             );
           })()}
         </div>
 
-        {/* Right Column (directly above Second Box / SEO Card): Actions */}
+        {/* Right Column: Actions */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -957,11 +1245,9 @@ export default function PositionAnalysisPage({ onNavigate }) {
           gap: 10
         }}>
           <button
-            onClick={() => onNavigate ? onNavigate('project-setup') : (window.location.hash = '#project-setup')}
+            onClick={(e) => handleAiAnalysis(e, 'ai overview')}
+            disabled={!!analyzingTabs[aiTab.toLowerCase()] || !topKeywords.length}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
               background: '#7c3aed',
               color: '#ffffff',
               border: 'none',
@@ -969,51 +1255,17 @@ export default function PositionAnalysisPage({ onNavigate }) {
               padding: '9px 16px',
               fontSize: 13.5,
               fontWeight: 700,
-              cursor: 'pointer',
+              cursor: !!analyzingTabs[aiTab.toLowerCase()] || !topKeywords.length ? 'not-allowed' : 'pointer',
+              opacity: !!analyzingTabs[aiTab.toLowerCase()] || !topKeywords.length ? 0.7 : 1,
               boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
               transition: 'background 0.15s'
             }}
-            onMouseEnter={e => e.currentTarget.style.background = '#6d28d9'}
-            onMouseLeave={e => e.currentTarget.style.background = '#7c3aed'}
+            onMouseEnter={e => { if (!analyzingTabs[aiTab.toLowerCase()] && topKeywords.length) e.currentTarget.style.background = '#6d28d9'; }}
+            onMouseLeave={e => { if (!analyzingTabs[aiTab.toLowerCase()] && topKeywords.length) e.currentTarget.style.background = '#7c3aed'; }}
           >
-            <Plus size={16} />
-            Create SEO Project
-          </button>
-
-          <button
-            onClick={() => navigator.clipboard.writeText(window.location.href)}
-            style={{
-              background: '#ffffff',
-              color: '#334155',
-              border: '1px solid #cbd5e1',
-              borderRadius: 8,
-              padding: '8px 14px',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6
-            }}
-          >
-            <Share2 size={14} />
-            Share
-          </button>
-
-          <button
-            style={{
-              background: '#ffffff',
-              color: '#64748b',
-              border: '1px solid #cbd5e1',
-              borderRadius: 8,
-              padding: '8px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-          >
-            <Settings size={16} />
+            {!!analyzingTabs[aiTab.toLowerCase()] 
+              ? 'Analyzing...' 
+              : ((tabResults[aiTab.toLowerCase()] || []).length > 0 ? 'Re-analyze' : 'Analyze')}
           </button>
         </div>
       </div>
@@ -1100,7 +1352,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
               }}>
                 AI SEARCH
               </span>
-              <X size={14} style={{ cursor: 'pointer', color: '#64748b' }} onClick={() => toggleClose('aiSearch')} />
             </div>
 
             {/* Sub-nav tabs */}
@@ -1163,13 +1414,8 @@ export default function PositionAnalysisPage({ onNavigate }) {
                           gap: 8
                         }}
                       >
-                        {isCurrentTabAnalyzing ? `Analyzing Top ${topKeywords.length} Keywords via ${aiTab}...` : `Analyze Top ${topKeywords.length} Keywords`}
+                        {isCurrentTabAnalyzing ? 'Analyzing...' : 'Analyze'}
                       </button>
-                      {topKeywords.length > 0 && (
-                        <span style={{ fontSize: 12.5, color: '#64748b' }}>
-                          Keywords: {topKeywords.map(k => `"${k}"`).join(', ')}
-                        </span>
-                      )}
                       {analysisError && (
                         <div style={{ color: '#ef4444', fontSize: 13, fontWeight: 600 }}>{analysisError}</div>
                       )}
@@ -1524,48 +1770,14 @@ export default function PositionAnalysisPage({ onNavigate }) {
               }}>
                 SEO
               </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#64748b' }}>
-                <X size={14} style={{ cursor: 'pointer' }} onClick={() => toggleClose('seoCard')} />
-              </div>
             </div>
 
-            {/* 3 Column Metrics */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: 12,
-              paddingTop: 10
-            }}>
-              {/* Metric 1 */}
-              <div>
-                <div style={{ fontSize: 13, color: '#334155', fontWeight: 500, marginBottom: 6 }}>Authority Score</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>19</div>
-                <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 4 }}>Semrush: 2.4M</div>
-              </div>
-
-              {/* Metric 2 */}
-              <div>
-                <div style={{ fontSize: 13, color: '#334155', fontWeight: 500, marginBottom: 6 }}>Organic Traffic</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>261</div>
-                <div style={{ fontSize: 10.5, color: '#16a34a', fontWeight: 700, marginTop: 4 }}>+96.24%</div>
-              </div>
-
-              {/* Metric 3 */}
-              <div>
-                <div style={{ fontSize: 13, color: '#334155', fontWeight: 500, marginBottom: 6 }}>Org. Keywords</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>{kwCount}</div>
-                <div style={{ fontSize: 10.5, color: '#16a34a', fontWeight: 700, marginTop: 4 }}>+28.46%</div>
-              </div>
-            </div>
-
-            {/* Lower Section: Categories on Left | Line In Between | Top 1, Top 3 & Top 10 Columns on Right */}
+            {/* Categories on Left | Top 1, Top 3 & Top 10 Columns on Right */}
             <div style={{
               display: 'flex',
               alignItems: 'stretch',
               gap: 16,
-              paddingTop: 12,
-              borderTop: '1px solid #f1f5f9',
-              marginTop: 4
+              paddingTop: 4
             }}>
               {/* Left Side: Channel Names */}
               <div style={{ flex: 1.2, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1768,11 +1980,11 @@ export default function PositionAnalysisPage({ onNavigate }) {
           {/* Single Vertical Separator Line in between */}
           <div style={{ width: '1px', background: '#e2e8f0' }} />
 
-          {/* Right Section: Intent with Cluster & Category sub-columns */}
+          {/* Right Section: SEO with Cluster & Category sub-columns */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
             <span style={{
-              background: '#f3e8ff',
-              color: '#7c3aed',
+              background: '#e0f2fe',
+              color: '#0284c7',
               fontSize: 11,
               fontWeight: 800,
               padding: '4px 12px',
@@ -1780,7 +1992,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
               letterSpacing: '0.5px',
               textTransform: 'uppercase'
             }}>
-              INTENT
+              SEO
             </span>
             {/* Vertical Line sub-container with Cluster & Category */}
             <div style={{ width: '100%', flex: 1, display: 'flex', alignItems: 'stretch', gap: 16 }}>
@@ -1791,13 +2003,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                     Cluster
                   </span>
                 </div>
-                {[
-                  { name: 'Informational', share: '48%' },
-                  { name: 'Navigational', share: '26%' },
-                  { name: 'Commercial', share: '16%' },
-                  { name: 'Transactional', share: '7%' },
-                  { name: 'Local Intent', share: '3%' }
-                ].map((item, idx) => (
+                {getDynamicClusters().map((item, idx) => (
                   <div
                     key={idx}
                     style={{
@@ -1828,13 +2034,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                     Category
                   </span>
                 </div>
-                {[
-                  { name: 'School Fee & Cost', count: '34' },
-                  { name: 'Curriculum IB', count: '29' },
-                  { name: 'Campus Tour', count: '18' },
-                  { name: 'Admissions Inquiry', count: '14' },
-                  { name: 'Location & Map', count: '9' }
-                ].map((item, idx) => (
+                {getDynamicCategories().map((item, idx) => (
                   <div
                     key={idx}
                     style={{
@@ -1893,43 +2093,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
             {/* 3 Sub-columns Container: Page Name | Cluster | Category */}
             <div style={{ width: '100%', flex: 1, display: 'flex', alignItems: 'stretch', gap: 16 }}>
               {(() => {
-                const pageAnalysisData = [
-                  {
-                    name: '/ib-diploma',
-                    clusters: ['Informational (3)', 'Navigational (2)', 'Commercial (1)'],
-                    clusterTrend: { direction: 'up', change: '2' },
-                    categories: ['High Potential', 'Brand Search', 'Comparison'],
-                    categoryTrend: { direction: 'up', change: '1' }
-                  },
-                  {
-                    name: '/primary-school',
-                    clusters: ['Informational (2)', 'Navigational (1)', 'Local Intent (1)'],
-                    clusterTrend: { direction: 'down', change: '1' },
-                    categories: ['High Potential', 'Admissions Inquiry', 'Location & Map', 'Campus Tour', 'Brand Search', 'Fee Structure'],
-                    categoryTrend: { direction: 'up', change: '3' }
-                  },
-                  {
-                    name: '/stem-lab',
-                    clusters: ['Informational (2)', 'Commercial (1)'],
-                    clusterTrend: { direction: 'up', change: '1' },
-                    categories: ['Curriculum IB', 'Equipment & Tech'],
-                    categoryTrend: { direction: 'down', change: '1' }
-                  },
-                  {
-                    name: '/bilingual-learning',
-                    clusters: ['Informational (3)', 'Commercial (1)', 'Transactional (1)'],
-                    clusterTrend: { direction: 'up', change: '2' },
-                    categories: ['Curriculum IB', 'High Potential', 'Comparison', 'Direct Leads'],
-                    categoryTrend: { direction: 'up', change: '2' }
-                  },
-                  {
-                    name: '/admissions',
-                    clusters: ['Navigational (1)', 'Transactional (1)'],
-                    clusterTrend: { direction: 'down', change: '1' },
-                    categories: ['Admissions Inquiry', 'School Fee & Cost', 'Campus Tour'],
-                    categoryTrend: { direction: 'down', change: '2' }
-                  }
-                ];
+                const pageAnalysisData = getDynamicPageAnalysisData();
 
                 return (
                   <>
@@ -2245,141 +2409,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
         </div>
       </div>
 
-      {/* ─── BOTTOM ROW: ON-PAGE, BACKLINK & ORGANIC TRAFFIC INSIGHTS CARDS ─────── */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-        gap: 20
-      }}>
-        {/* CARD 5: On Page SEO Checker */}
-        {!closedCards.onPage && (
-          <div style={{
-            background: '#ffffff',
-            border: '1px solid #e2e8f0',
-            borderRadius: 14,
-            padding: 20,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            gap: 16,
-            minHeight: 140
-          }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>On Page SEO Checker</span>
-                  <Info size={14} color="#94a3b8" />
-                </div>
-                <X size={14} style={{ cursor: 'pointer', color: '#94a3b8' }} onClick={() => toggleClose('onPage')} />
-              </div>
-              <p style={{ fontSize: 12.5, color: '#64748b', margin: 0, lineHeight: 1.4 }}>
-                Collect ideas on strategy, content, backlinks and more.
-              </p>
-            </div>
-            <div>
-              <button style={{
-                background: '#f1f5f9',
-                color: '#334155',
-                border: 'none',
-                borderRadius: 6,
-                padding: '6px 14px',
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: 'pointer'
-              }}>
-                Set up
-              </button>
-            </div>
-          </div>
-        )}
 
-        {/* CARD 6: Backlink Audit */}
-        {!closedCards.backlink && (
-          <div style={{
-            background: '#ffffff',
-            border: '1px solid #e2e8f0',
-            borderRadius: 14,
-            padding: 20,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            gap: 16,
-            minHeight: 140
-          }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Backlink Audit</span>
-                  <Info size={14} color="#94a3b8" />
-                </div>
-                <X size={14} style={{ cursor: 'pointer', color: '#94a3b8' }} onClick={() => toggleClose('backlink')} />
-              </div>
-              <p style={{ fontSize: 12.5, color: '#64748b', margin: 0, lineHeight: 1.4 }}>
-                Detoxify your backlink portfolio and strengthen your website rankings.
-              </p>
-            </div>
-            <div>
-              <button style={{
-                background: '#f1f5f9',
-                color: '#334155',
-                border: 'none',
-                borderRadius: 6,
-                padding: '6px 14px',
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: 'pointer'
-              }}>
-                Set up
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* CARD 7: Organic Traffic Insights */}
-        {!closedCards.organicTraffic && (
-          <div style={{
-            background: '#ffffff',
-            border: '1px solid #e2e8f0',
-            borderRadius: 14,
-            padding: 20,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            gap: 16,
-            minHeight: 140
-          }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Organic Traffic Insights</span>
-                  <Info size={14} color="#94a3b8" />
-                </div>
-                <X size={14} style={{ cursor: 'pointer', color: '#94a3b8' }} onClick={() => toggleClose('organicTraffic')} />
-              </div>
-              <p style={{ fontSize: 12.5, color: '#64748b', margin: 0, lineHeight: 1.4 }}>
-                Uncover "not provided" keywords combining GA, GSC and Semrush data.
-              </p>
-            </div>
-            <div>
-              <button style={{
-                background: '#f1f5f9',
-                color: '#334155',
-                border: 'none',
-                borderRadius: 6,
-                padding: '6px 14px',
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: 'pointer'
-              }}>
-                Set up
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
 
       {/* ─── MODAL REPORT VIEW (Triggered by View Report) ────────────────────────── */}
       {showReport && (
