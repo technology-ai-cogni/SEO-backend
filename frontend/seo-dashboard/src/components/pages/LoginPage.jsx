@@ -23,7 +23,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/auth/login', {
+      const response = await fetch('http://localhost:5000/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -110,8 +110,8 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
             color: 'var(--text-muted)',
             lineHeight: 1.4
           }}>
-            {isAdmin 
-              ? 'Enter administrative credentials to manage settings' 
+            {isAdmin
+              ? 'Enter administrative credentials to manage settings'
               : 'Welcome back! Log in to access your SEO workspace'}
           </p>
         </div>

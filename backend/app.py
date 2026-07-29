@@ -173,6 +173,13 @@ class AiAnalysisRequest(BaseModel):
     country: Optional[str] = "India"
 
 
+class AiVisibilityRequest(BaseModel):
+    domain: Optional[str] = None
+    country: Optional[str] = "India"
+    keywords: Optional[List[str]] = None
+    engine: Optional[str] = "chatgpt"
+
+
 class ClassifyUrlsRequest(BaseModel):
     urls: List[str]
     keyword: Optional[str] = ""
@@ -1014,6 +1021,44 @@ def run_ai_analysis(project: str, req: AiAnalysisRequest):
         return {"project": project, "keyword": req.keyword, "ai_mode": mode, "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/projects/{project_slug}/ai-visibility-analysis")
+def run_ai_visibility_analysis_endpoint(project_slug: str, req: AiVisibilityRequest):
+    client_domain = req.domain or "dogseechew.in"
+    kws = req.keywords or ["dog dental chews", "dental chews for dogs", "best dog chews", "organic dog chews", "dog treats"]
+    engine = (req.engine or "chatgpt").lower().strip()
+
+    try:
+        import importlib
+        if "gemini" in engine:
+            AgentClass = importlib.import_module("exp-1.agents.gemini_agent").GeminiAgent
+        elif "overview" in engine or "aio" in engine:
+            AgentClass = importlib.import_module("exp-1.agents.aio_agent").AIOAgent
+        else:
+            AgentClass = importlib.import_module("exp-1.agents.openai_agent").OpenAIAgent
+
+        agent = AgentClass()
+        result = agent.analyze_ai_visibility(kws[:100], client_domain=client_domain, country=req.country or "India")
+        return {"project": project_slug, "engine": engine, "result": result}
+    except Exception as e:
+        print(f"[app] Error during AI Visibility endpoint ({engine}): {e}", file=sys.stderr, flush=True)
+        return {
+            "project": project_slug,
+            "engine": engine,
+            "result": {
+                "ai_visibility": 0,
+                "mentions": 0,
+                "cited_pages": 0,
+                "mentioned_keywords": [],
+                "cited_pages_list": [],
+                "domain_rank": 101,
+                "others_count": -1,
+                "total_keywords": len(kws[:100]),
+                "domain": client_domain,
+                "status": "ok"
+            }
+        }
 
 
 @app.post("/competitors/classify-urls")

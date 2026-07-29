@@ -1,7 +1,236 @@
 import { useState, useEffect } from 'react';
 import { ExternalLink, Plus, Share2, Settings, Info, X, CheckCircle, Globe, Monitor, ChevronDown, Search } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiAnalysis } from '../../lib/projectsApi';
+import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiAnalysis, runAiVisibilityAnalysis } from '../../lib/projectsApi';
+
+function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 100, projectTotalKeywords = 514 }) {
+  const [hoverType, setHoverType] = useState(null); // null | 'mentions' | 'cited'
+
+  const total = totalKeywords || 100;
+  let currentValue = visibility;
+  let currentLabel = 'AI Visibility';
+
+  if (hoverType === 'mentions') {
+    currentValue = Math.min(100, Math.round((mentions / total) * 100));
+    currentLabel = 'Mentions';
+  } else if (hoverType === 'cited') {
+    currentValue = Math.min(100, Math.round((citedPages / total) * 100));
+    currentLabel = 'Cited pages';
+  }
+
+  const radius = 60;
+  const strokeWidth = 12;
+  const circumference = Math.PI * radius;
+  const progressOffset = circumference - (Math.min(Math.max(currentValue, 0), 100) / 100) * circumference;
+
+  const strokeColor = hoverType === 'mentions' ? '#2563eb' : hoverType === 'cited' ? '#7c3aed' : '#8b5cf6';
+
+  return (
+    <div style={{
+      background: '#ffffff',
+      border: '1px solid #e2e8f0',
+      borderRadius: 12,
+      padding: '14px 20px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 12,
+      width: '100%'
+    }}>
+      {/* TOP HEADER: Audited Keywords Ratio Badge */}
+      <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', width: '100%' }}>
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '3px 10px',
+          borderRadius: 12,
+          backgroundColor: '#f5f3ff',
+          border: '1px solid #ddd6fe',
+          fontSize: 11,
+          fontWeight: 700,
+          color: '#7c3aed'
+        }}>
+          <Search size={11} />
+          <span>Audited {total} / {projectTotalKeywords || 514} Keywords</span>
+        </div>
+      </div>
+
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-around',
+        gap: 20,
+        width: '100%'
+      }}>
+        {/* LEFT SIDE: Compact Arc Gauge Graph */}
+      <div style={{ position: 'relative', width: 150, height: 85, display: 'flex', justifyContent: 'center' }}>
+        <svg width="150" height="85" viewBox="0 0 150 85">
+          <path
+            d="M 15 75 A 60 60 0 0 1 135 75"
+            fill="none"
+            stroke="#e2e8f0"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+          />
+          <path
+            d="M 15 75 A 60 60 0 0 1 135 75"
+            fill="none"
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={progressOffset}
+            style={{ transition: 'stroke-dashoffset 0.4s ease, stroke 0.3s ease' }}
+          />
+        </svg>
+
+        <div style={{
+          position: 'absolute',
+          top: 26,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center'
+        }}>
+          <span style={{ fontSize: 30, fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>
+            {hoverType === 'mentions' ? mentions : hoverType === 'cited' ? citedPages : Math.round(visibility)}
+          </span>
+          <span style={{ fontSize: 11.5, fontWeight: 600, color: '#64748b', marginTop: 3 }}>
+            {currentLabel}
+          </span>
+        </div>
+      </div>
+
+      {/* RIGHT SIDE: Mentions & Cited Pages metrics with Hover Keyword Popovers */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 28
+      }}>
+        {/* Mentions Metric Box */}
+        <div
+          style={{ position: 'relative' }}
+          onMouseEnter={() => setHoverType('mentions')}
+          onMouseLeave={() => setHoverType(null)}
+        >
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            cursor: 'pointer',
+            padding: '8px 14px',
+            borderRadius: 10,
+            backgroundColor: hoverType === 'mentions' ? '#eff6ff' : '#f8fafc',
+            border: hoverType === 'mentions' ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
+            transition: 'all 0.15s',
+            minWidth: 90
+          }}>
+            <span style={{ fontSize: 26, fontWeight: 800, color: '#0f172a' }}>{mentions}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginTop: 2 }}>Mentions</span>
+          </div>
+
+          {/* Mentions Hover Keywords Popover */}
+          {hoverType === 'mentions' && (
+            <div style={{
+              position: 'absolute',
+              bottom: '105%',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              paddingBottom: 6,
+              zIndex: 1000
+            }}>
+              <div style={{
+                backgroundColor: '#ffffff',
+                border: '1px solid #cbd5e1',
+                borderRadius: 10,
+                padding: 12,
+                boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.12)',
+                width: 250,
+                maxHeight: 180,
+                overflowY: 'auto'
+              }}>
+                <div style={{ fontSize: 11.5, fontWeight: 800, color: '#2563eb', marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid #f1f5f9' }}>
+                  Mentioned Keywords ({mentions})
+                </div>
+                {kwMentionsList.length > 0 ? (
+                  kwMentionsList.map((kw, i) => (
+                    <div key={i} style={{ fontSize: 11.5, color: '#1e293b', marginBottom: 4, fontWeight: 600 }}>
+                      {i + 1}. "{kw}"
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ fontSize: 11.5, color: '#64748b', fontStyle: 'italic' }}>
+                    No brand mentions found for target domain.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Cited Pages Metric Box */}
+        <div
+          style={{ position: 'relative' }}
+          onMouseEnter={() => setHoverType('cited')}
+          onMouseLeave={() => setHoverType(null)}
+        >
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            cursor: 'pointer',
+            padding: '8px 14px',
+            borderRadius: 10,
+            backgroundColor: hoverType === 'cited' ? '#f5f3ff' : '#f8fafc',
+            border: hoverType === 'cited' ? '1px solid #ddd6fe' : '1px solid #e2e8f0',
+            transition: 'all 0.15s',
+            minWidth: 90
+          }}>
+            <span style={{ fontSize: 26, fontWeight: 800, color: '#7c3aed' }}>{citedPages}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#7c3aed', marginTop: 2 }}>Cited pages</span>
+          </div>
+
+          {/* Cited Pages Hover Keywords Popover */}
+          {hoverType === 'cited' && (
+            <div style={{
+              position: 'absolute',
+              bottom: '105%',
+              right: 0,
+              paddingBottom: 6,
+              zIndex: 1000
+            }}>
+              <div style={{
+                backgroundColor: '#ffffff',
+                border: '1px solid #cbd5e1',
+                borderRadius: 10,
+                padding: 12,
+                boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.12)',
+                width: 270,
+                maxHeight: 180,
+                overflowY: 'auto'
+              }}>
+                <div style={{ fontSize: 11.5, fontWeight: 800, color: '#7c3aed', marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid #f1f5f9' }}>
+                  Cited Pages ({citedPages})
+                </div>
+                {kwCitationsList.length > 0 ? (
+                  kwCitationsList.map((item, i) => (
+                    <div key={i} style={{ fontSize: 11.5, color: '#1e293b', marginBottom: 4, fontWeight: 600 }}>
+                      {i + 1}. {item}
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ fontSize: 11.5, color: '#64748b', fontStyle: 'italic' }}>
+                    No cited pages found for target domain.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+    </div>
+  );
+}
 
 export default function PositionAnalysisPage({ onNavigate }) {
   const [projects, setProjects] = useState([]);
@@ -120,8 +349,12 @@ export default function PositionAnalysisPage({ onNavigate }) {
               }, 0);
               setNetPotential(svSum);
 
-              const sortedKws = [...kws].sort((a, b) => (b.sv || 0) - (a.sv || 0));
-              setTopKeywords(sortedKws.slice(0, 2).map(k => k.kw));
+              const sortedKws = [...kws].sort((a, b) => {
+                const svA = Number(String(a.sv || 0).replace(/[^0-9.]/g, '')) || 0;
+                const svB = Number(String(b.sv || 0).replace(/[^0-9.]/g, '')) || 0;
+                return svB - svA;
+              });
+              setTopKeywords(sortedKws.slice(0, 100).map(k => k.kw));
             } else if (isMounted) {
               setKwCount(first.keywords || 0);
               setBlogCount(first.blogPages || 0);
@@ -172,8 +405,12 @@ export default function PositionAnalysisPage({ onNavigate }) {
           }, 0);
           setNetPotential(svSum);
 
-          const sortedKws = [...kws].sort((a, b) => (b.sv || 0) - (a.sv || 0));
-          setTopKeywords(sortedKws.slice(0, 2).map(k => k.kw));
+          const sortedKws = [...kws].sort((a, b) => {
+            const svA = Number(String(a.sv || 0).replace(/[^0-9.]/g, '')) || 0;
+            const svB = Number(String(b.sv || 0).replace(/[^0-9.]/g, '')) || 0;
+            return svB - svA;
+          });
+          setTopKeywords(sortedKws.slice(0, 100).map(k => k.kw));
         } else {
           setKwCount(p.keywords || 0);
           setBlogCount(p.blogPages || 0);
@@ -211,7 +448,10 @@ export default function PositionAnalysisPage({ onNavigate }) {
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setTabResults(prev => ({ ...prev, [tabKey]: parsed }));
+          const first = parsed[0];
+          if (first && (first.ai_visibility !== undefined || first.mentions !== undefined || first.results?.length > 0)) {
+            setTabResults(prev => ({ ...prev, [tabKey]: parsed }));
+          }
         }
       }
     } catch (err) {
@@ -219,7 +459,9 @@ export default function PositionAnalysisPage({ onNavigate }) {
     }
   }, [activeProject?.slug, aiTab]);
 
-  const handleAiAnalysis = async (e) => {
+  /*
+  // OLD SINGLE-KEYWORD SCRIPT LOOP (COMMENTED OUT AS REQUESTED)
+  const handleAiAnalysisOld = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!topKeywords.length || !activeProject) return;
     const tabKey = aiTab.toLowerCase();
@@ -234,6 +476,53 @@ export default function PositionAnalysisPage({ onNavigate }) {
         const data = await runAiAnalysis(activeProject.slug, kw, tabKey, domain, countryName);
         results.push({ keyword: kw, ...data.result });
       }
+      setTabResults(prev => ({ ...prev, [tabKey]: results }));
+    } catch (err) {
+      setAnalysisError(err.message);
+    } finally {
+      setAnalyzingTabs(prev => ({ ...prev, [tabKey]: false }));
+    }
+  };
+  */
+
+  const handleAiAnalysis = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!activeProject) return;
+    const tabKey = aiTab.toLowerCase();
+    setAnalyzingTabs(prev => ({ ...prev, [tabKey]: true }));
+    setAnalysisError('');
+    try {
+      const domain = activeProject.domain || activeProject.name || 'dogseechew.in';
+      const countryObj = COUNTRY_OPTIONS.find(c => c.code === selectedRegion);
+      const countryName = countryObj ? countryObj.name : selectedRegion || 'India';
+
+      // Analyze top 100 keywords for GPT AI Visibility arc graph
+      let kwList = topKeywords;
+      if (!kwList || kwList.length === 0) {
+        const sortedKws = [...projectKeywords].sort((a, b) => {
+          const svA = Number(String(a.sv || 0).replace(/[^0-9.]/g, '')) || 0;
+          const svB = Number(String(b.sv || 0).replace(/[^0-9.]/g, '')) || 0;
+          return svB - svA;
+        });
+        kwList = sortedKws.slice(0, 100).map(k => k.kw);
+      }
+      if (!kwList || kwList.length === 0) {
+        kwList = ['dog dental chews', 'dental chews for dogs'];
+      }
+
+      const engine = tabKey.includes('gemini') ? 'gemini' : tabKey.includes('overview') ? 'ai overview' : 'chatgpt';
+      const data = await runAiVisibilityAnalysis(activeProject.slug, domain, countryName, kwList, engine);
+
+      const visibilityResult = data.result || {
+        ai_visibility: 0,
+        mentions: 0,
+        cited_pages: 0,
+        mentioned_keywords: [],
+        cited_pages_list: [],
+        total_keywords: kwList.length
+      };
+
+      const results = [visibilityResult];
       setTabResults(prev => ({ ...prev, [tabKey]: results }));
       const cacheKey = `ai_results_${activeProject.slug}_${tabKey}`;
       localStorage.setItem(cacheKey, JSON.stringify(results));
@@ -887,125 +1176,61 @@ export default function PositionAnalysisPage({ onNavigate }) {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                      {/* 1. Analyzed Keywords Box */}
-                      <div style={{
-                        background: '#ffffff',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: 10,
-                        padding: 12,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 8
-                      }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 4, borderBottom: '1px solid #f1f5f9' }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>Analyzed Keywords</span>
-                          <div style={{ display: 'flex', gap: 20 }}>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: '#0f172a', width: 55, textAlign: 'right' }}>Mentions</span>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed', width: 65, textAlign: 'right' }}>Cited pages</span>
-                          </div>
-                        </div>
-                        {currentTabResults.map((res, i) => {
-                          const kwUrls = res.results || [];
-                          const rawDomain = activeProject?.domain || activeProject?.name || '';
-                          const cleanDomain = rawDomain.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].trim().toLowerCase();
-                          const kwMentions = kwUrls.filter(u => cleanDomain && u.url?.toLowerCase().includes(cleanDomain)).length;
-                          const kwCitations = Math.min(kwUrls.length, 10);
-                          return (
-                            <div
-                              key={i}
-                              style={{
-                                position: 'relative',
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                fontSize: 12.5,
-                                color: '#334155',
-                                padding: '4px 6px',
-                                borderRadius: 6,
-                                cursor: 'pointer',
-                                backgroundColor: hoveredKwIndex === i ? '#f8fafc' : 'transparent',
-                                transition: 'background 0.12s'
-                              }}
-                              onMouseEnter={() => setHoveredKwIndex(i)}
-                              onMouseLeave={() => setHoveredKwIndex(null)}
-                            >
-                              <span style={{ fontWeight: 600, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 220 }}>
-                                "{res.keyword}"
-                              </span>
-                              <div style={{ display: 'flex', gap: 20 }}>
-                                <span style={{ fontWeight: 700, color: '#0f172a', width: 55, textAlign: 'right' }}>{kwMentions}</span>
-                                <span style={{ fontWeight: 700, color: '#7c3aed', width: 65, textAlign: 'right' }}>{kwCitations}</span>
-                              </div>
+                      {/* AI Visibility Arc Gauge Graph */}
+                      {(() => {
+                        const visibilityData = (() => {
+                          if (!currentTabResults || currentTabResults.length === 0) {
+                            return { ai_visibility: 0, mentions: 0, cited_pages: 0, mentioned_keywords: [], cited_pages_list: [] };
+                          }
+                          const first = currentTabResults[0];
+                          if (first && typeof first.ai_visibility !== 'undefined') {
+                            return first;
+                          }
+                          // Fallback calculation for old single-keyword format array [{ keyword, results: [...] }]
+                          const cleanDomain = (activeProject?.domain || activeProject?.name || 'dogseechew.in').replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].trim().toLowerCase();
+                          let mentionsCount = 0;
+                          let citedCount = 0;
+                          const mentionedKws = [];
+                          const citedList = [];
+                          currentTabResults.forEach(res => {
+                            const urls = res.results || [];
+                            const domainMatches = urls.filter(u => cleanDomain && u.url?.toLowerCase().includes(cleanDomain));
+                            if (domainMatches.length > 0) {
+                              mentionsCount++;
+                              mentionedKws.push(res.keyword);
+                              domainMatches.forEach(dm => {
+                                citedList.push(`${res.keyword} - ${dm.url}`);
+                              });
+                            }
+                            citedCount += domainMatches.length;
+                          });
+                          const visScore = currentTabResults.length > 0 ? Math.round((mentionsCount / currentTabResults.length) * 100) : 0;
+                          return {
+                            ai_visibility: visScore,
+                            mentions: mentionsCount,
+                            cited_pages: citedCount,
+                            mentioned_keywords: mentionedKws,
+                            cited_pages_list: citedList
+                          };
+                        })();
 
-                              {/* Hover Competitors Popover */}
-                              {hoveredKwIndex === i && (
-                                <div
-                                  onMouseEnter={() => setHoveredKwIndex(i)}
-                                  onMouseLeave={() => setHoveredKwIndex(null)}
-                                  style={{
-                                    position: 'absolute',
-                                    bottom: '100%',
-                                    right: 0,
-                                    paddingBottom: 4,
-                                    zIndex: 1000
-                                  }}
-                                >
-                                  <div style={{
-                                    backgroundColor: '#ffffff',
-                                    border: '1px solid #cbd5e1',
-                                    borderRadius: 10,
-                                    padding: 12,
-                                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.12)',
-                                    width: 330,
-                                    maxHeight: 200,
-                                    overflowY: 'auto'
-                                  }}>
-                                    <div style={{ fontSize: 11.5, fontWeight: 800, color: '#7c3aed', marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid #f1f5f9' }}>
-                                      Competitors / Ranking URLs for "{res.keyword}"
-                                    </div>
-                                    {kwUrls.length > 0 ? (
-                                      kwUrls.map((urlObj, idx) => (
-                                        <div key={idx} style={{ fontSize: 11.5, color: '#1e293b', marginBottom: 6, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                                          <span style={{ fontWeight: 700, color: '#0f172a' }}>
-                                            {idx + 1}. {(() => {
-                                              if (urlObj.title && urlObj.title !== '(No Title)' && urlObj.title.trim() !== '') {
-                                                return urlObj.title;
-                                              }
-                                              try {
-                                                const u = new URL(urlObj.url);
-                                                const dom = u.hostname.replace('www.', '').split('.')[0];
-                                                const capDom = dom.charAt(0).toUpperCase() + dom.slice(1);
-                                                const pathParts = u.pathname.split('/').filter(Boolean);
-                                                if (pathParts.length > 0) {
-                                                  const slug = pathParts[pathParts.length - 1].replace(/[-_]/g, ' ');
-                                                  if (slug.length > 3) return `${capDom} - ${slug}`;
-                                                }
-                                                return `${capDom} Page`;
-                                              } catch (err) {
-                                                return 'Web Result';
-                                              }
-                                            })()}
-                                          </span>
-                                          <a
-                                            href={urlObj.url}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            style={{ color: '#2563eb', fontSize: 11, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', textDecoration: 'none' }}
-                                          >
-                                            {urlObj.url}
-                                          </a>
-                                        </div>
-                                      ))
-                                    ) : (
-                                      <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>No competitors returned.</div>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                        const mList = visibilityData.mentioned_keywords || [];
+                        const cList = visibilityData.cited_pages_list || [];
+                        const mentionsVal = visibilityData.mentions ?? mList.length;
+                        const citedVal = visibilityData.cited_pages ?? cList.length;
+
+                        return (
+                          <AiVisibilityArcGauge
+                            visibility={visibilityData.ai_visibility ?? 0}
+                            mentions={mentionsVal}
+                            citedPages={citedVal}
+                            kwMentionsList={mList}
+                            kwCitationsList={cList}
+                            totalKeywords={visibilityData.total_keywords || 100}
+                            projectTotalKeywords={kwCount}
+                          />
+                        );
+                      })()}
 
                       {/* 2. Dedicated Domain Rank Tracker Feature */}
                       <div style={{
@@ -1045,21 +1270,12 @@ export default function PositionAnalysisPage({ onNavigate }) {
                               }
                             }
 
-                            let rankText = '101';
-                            let badgeBg = 'transparent';
-                            let badgeColor = '#ef4444';
+                             const domainRank = firstRes.domain_rank ?? (matchIndex >= 0 ? matchIndex + 1 : (firstRes.mentions > 0 ? 1 : 101));
+                             const othersVal = firstRes.others_count ?? (domainRank > 0 && domainRank <= 100 ? Math.max(0, domainRank - 1) : -1);
 
-                            if (matchIndex >= 0) {
-                              rankText = `#${matchIndex + 1}`;
-                              badgeBg = '#dcfce7';
-                              badgeColor = '#15803d';
-                            } else if (firstRes.ai_answer && cleanDomain && firstRes.ai_answer.toLowerCase().includes(cleanDomain)) {
-                              rankText = 'Mentioned in AI';
-                              badgeBg = '#eff6ff';
-                              badgeColor = '#2563eb';
-                            }
-
-                            const othersVal = matchIndex >= 0 ? matchIndex : -1;
+                             let rankText = domainRank > 0 && domainRank <= 100 ? `#${domainRank}` : '101';
+                             let badgeBg = domainRank > 0 && domainRank <= 100 ? '#dcfce7' : 'transparent';
+                             let badgeColor = domainRank > 0 && domainRank <= 100 ? '#15803d' : '#ef4444';
 
                             return (
                               <>
@@ -1429,82 +1645,125 @@ export default function PositionAnalysisPage({ onNavigate }) {
           gap: 24,
           minHeight: 120
         }}>
-          {/* Left Section: Top Product with Mentions & Cited sub-columns */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
-            <span style={{
-              background: '#f3e8ff',
-              color: '#7c3aed',
-              fontSize: 11,
-              fontWeight: 800,
-              padding: '4px 12px',
-              borderRadius: 6,
-              letterSpacing: '0.5px',
-              textTransform: 'uppercase'
-            }}>
-              TOP PRODUCT
-            </span>
-            {/* Vertical Line sub-container with Mentions & Cited */}
-            <div style={{ width: '100%', flex: 1, display: 'flex', alignItems: 'stretch', gap: 16 }}>
-              {/* Mentions Sub-column */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ textAlign: 'center', marginBottom: 4 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Mentions
-                  </span>
-                </div>
-                {mentions.map((item, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '6px 10px',
-                      borderRadius: 6,
-                      background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
-                      fontSize: 12
-                    }}
-                  >
-                    <span style={{ fontWeight: 600, color: '#334155' }}>{item.name}</span>
-                    <span style={{ fontWeight: 800, color: '#16a34a', background: '#f0fdf4', padding: '2px 7px', borderRadius: 4, fontSize: 11 }}>
-                      {item.count}
-                    </span>
-                  </div>
-                ))}
-              </div>
+          {/* Left Section: Mentions & Cited sub-columns */}
+          {(() => {
+            const currentAiResults = tabResults[aiTab.toLowerCase()] || [];
+            const visibilityData = currentAiResults[0] || {};
+            const liveMentionedKws = visibilityData.mentioned_keywords || [];
+            const liveCitedPagesList = visibilityData.cited_pages_list || [];
 
-              {/* Vertical Divider */}
-              <div style={{ width: '1px', background: '#e2e8f0' }} />
+            // Group unique URLs and count citations
+            const uniqueCitedUrlsMap = new Map();
+            liveCitedPagesList.forEach(item => {
+              const match = item.match(/https?:\/\/[^\s]+/i);
+              const url = match ? match[0].trim() : item.trim();
+              if (url) {
+                uniqueCitedUrlsMap.set(url, (uniqueCitedUrlsMap.get(url) || 0) + 1);
+              }
+            });
+            const uniqueCitedPages = Array.from(uniqueCitedUrlsMap.entries())
+              .map(([url, count]) => ({ url, count }))
+              .sort((a, b) => b.count - a.count);
 
-              {/* Cited Sub-column */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ textAlign: 'center', marginBottom: 4 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Cited
-                  </span>
-                </div>
-                {cited.map((item, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '6px 10px',
-                      borderRadius: 6,
-                      background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
-                      fontSize: 12
-                    }}
-                  >
-                    <span style={{ fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 180 }} title={item.source}>{item.source}</span>
-                    <span style={{ fontWeight: 800, color: '#7c3aed', background: '#f5f3ff', padding: '2px 7px', borderRadius: 4, fontSize: 11 }}>
-                      {item.count}
-                    </span>
+            return (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
+                {/* Vertical Line sub-container with Mentions & Cited */}
+                <div style={{ width: '100%', flex: 1, display: 'flex', alignItems: 'stretch', gap: 16 }}>
+                  {/* Mentions Sub-column */}
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ textAlign: 'center', marginBottom: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        Mentions ({liveMentionedKws.length})
+                      </span>
+                    </div>
+
+                    <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, paddingRight: 4 }}>
+                      {liveMentionedKws.length > 0 ? (
+                        liveMentionedKws.map((kw, idx) => (
+                          <div
+                            key={idx}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '6px 10px',
+                              borderRadius: 6,
+                              background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
+                              fontSize: 12
+                            }}
+                          >
+                            <span style={{ fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '100%' }}>
+                              "{kw}"
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic', padding: 10, textAlign: 'center' }}>
+                          No mentioned keywords yet.
+                        </div>
+                      )}
+                    </div>
                   </div>
-                ))}
+
+                  {/* Vertical Divider */}
+                  <div style={{ width: '1px', background: '#e2e8f0' }} />
+
+                  {/* Cited Sub-column */}
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ textAlign: 'center', marginBottom: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        Cited ({uniqueCitedPages.length} Unique Pages)
+                      </span>
+                    </div>
+
+                    <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, paddingRight: 4 }}>
+                      {uniqueCitedPages.length > 0 ? (
+                        uniqueCitedPages.map((item, idx) => (
+                          <div
+                            key={idx}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '6px 10px',
+                              borderRadius: 6,
+                              background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
+                              fontSize: 12
+                            }}
+                          >
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                fontWeight: 600,
+                                color: '#2563eb',
+                                textOverflow: 'ellipsis',
+                                overflow: 'hidden',
+                                whiteSpace: 'nowrap',
+                                maxWidth: 200,
+                                textDecoration: 'none'
+                              }}
+                              title={item.url}
+                            >
+                              {item.url}
+                            </a>
+                            <span style={{ fontWeight: 800, color: '#7c3aed', background: '#f5f3ff', padding: '2px 7px', borderRadius: 4, fontSize: 11 }}>
+                              {item.count}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic', padding: 10, textAlign: 'center' }}>
+                          No cited pages yet.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Single Vertical Separator Line in between */}
           <div style={{ width: '1px', background: '#e2e8f0' }} />

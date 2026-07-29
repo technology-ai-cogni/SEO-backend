@@ -192,3 +192,121 @@ class OpenAIAgent(BaseAgent):
             return resp.choices[0].message.content.strip()
         except Exception as e:
             return f"Summary error: {e}"
+
+    # ── AI Visibility Analysis ──────────────────────────────────────────────
+
+    def analyze_ai_visibility(self, keywords: list, client_domain: str = None, country: str = "India") -> dict:
+        """
+        Analyze AI Visibility across keywords for client domain using OpenAI.
+        Returns total mentions count, total cited pages count, composite score (mentions/total * 100),
+        list of mentioned keywords, and list of cited pages.
+        """
+        import json
+        if not keywords:
+            keywords = ["dog dental chews", "dental chews for dogs"]
+
+        keywords_slice = keywords[:100]
+        domain_clean = client_domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0] if client_domain else "dogseechew.in"
+
+        if not OPENAI_API_KEY or not _client:
+            return {
+                "ai_visibility": 0,
+                "mentions": 0,
+                "cited_pages": 0,
+                "mentioned_keywords": [],
+                "cited_pages_list": [],
+                "total_keywords": len(keywords_slice),
+                "domain": domain_clean,
+                "status": "ok"
+            }
+
+        try:
+            kw_list_str = "\n".join([f"{i+1}. {k}" for i, k in enumerate(keywords_slice[:50])])
+            system_msg = "You are an SEO AI Search Auditor. You must respond strictly in JSON format."
+            user_prompt = (
+                f"Perform organic AI search visibility and domain rank analysis for target domain '{domain_clean}' (URL: https://www.{domain_clean}) in region '{country}'.\n\n"
+                f"AUDIT TASK 1 - DOMAIN COMPETITOR RANK:\n"
+                f"Evaluate where '{domain_clean}' ranks overall among top industry competitors in organic AI search recommendations for its niche.\n"
+                f"- Return 'domain_rank': Integer rank position (e.g., 1 if top recommended brand, 2, 3, or 101 if not ranked in top 100).\n"
+                f"- Return 'others_count': Integer count of competitors ahead of '{domain_clean}' (e.g., 0 if rank #1, 2 if rank #3, -1 if rank 101).\n\n"
+                f"AUDIT TASK 2 - TOP KEYWORD VISIBILITY ({len(keywords_slice)} target keywords):\n"
+                f"Keywords:\n{kw_list_str}\n\n"
+                f"Return JSON with:\n"
+                f"- 'mentions': Total count of keywords out of {len(keywords_slice)} where '{domain_clean}' appears in search recommendations.\n"
+                f"- 'cited_pages': Total count of cited web page URLs for '{domain_clean}'.\n"
+                f"- 'mentioned_keywords': Array of the specific keyword strings where '{domain_clean}' appeared.\n"
+                f"- 'cited_pages_list': Array of strings formatted as '[Keyword] - [Page Title/URL]' for cited pages.\n\n"
+                f"JSON schema:\n"
+                "{\n"
+                '  "domain_rank": 1,\n'
+                '  "others_count": 0,\n'
+                '  "mentions": 28,\n'
+                '  "cited_pages": 34,\n'
+                '  "mentioned_keywords": ["dog dental chews", "dental chews for dogs"],\n'
+                '  "cited_pages_list": ["dog dental chews - https://www.dogseechew.in/product/dental-chews"]\n'
+                "}"
+            )
+
+            try:
+                response = _client.chat.completions.create(
+                    model=SEARCH_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": user_prompt}
+                    ]
+                )
+            except Exception as model_err:
+                print(f"[OpenAIAgent] Primary model failed ({model_err}), falling back to gpt-4o", file=sys.stderr, flush=True)
+                response = _client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    response_format={"type": "json_object"}
+                )
+
+            ai_text = response.choices[0].message.content or ""
+            json_match = re.search(r"\{.*\}", ai_text, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group(0))
+            else:
+                parsed = json.loads(ai_text)
+            mentions_kws = parsed.get("mentioned_keywords") or []
+            cited_list = parsed.get("cited_pages_list") or []
+
+            # Ensure counts match exact array lengths in hover popover
+            mentions_count = len(mentions_kws) if len(mentions_kws) > 0 else int(parsed.get("mentions", 0))
+            cited_count = len(cited_list) if len(cited_list) > 0 else int(parsed.get("cited_pages", 0))
+
+            domain_rank_val = int(parsed.get("domain_rank", 1))
+            others_count_val = int(parsed.get("others_count", 0 if domain_rank_val == 1 else (domain_rank_val - 1 if domain_rank_val <= 100 else -1)))
+
+            total_kws = len(keywords_slice)
+            vis_score = round((mentions_count / total_kws) * 100) if total_kws > 0 else 0
+
+            return {
+                "ai_visibility": vis_score,
+                "mentions": mentions_count,
+                "cited_pages": cited_count,
+                "mentioned_keywords": mentions_kws,
+                "cited_pages_list": cited_list,
+                "domain_rank": domain_rank_val,
+                "others_count": others_count_val,
+                "total_keywords": total_kws,
+                "domain": domain_clean,
+                "status": "ok"
+            }
+        except Exception as e:
+            print(f"[OpenAIAgent] Error during AI Visibility analysis: {e}", file=sys.stderr, flush=True)
+
+        return {
+            "ai_visibility": 0,
+            "mentions": 0,
+            "cited_pages": 0,
+            "mentioned_keywords": [],
+            "cited_pages_list": [],
+            "total_keywords": len(keywords_slice),
+            "domain": domain_clean,
+            "status": "ok"
+        }

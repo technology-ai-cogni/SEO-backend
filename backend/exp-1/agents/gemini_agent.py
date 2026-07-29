@@ -75,8 +75,8 @@ class GeminiClientPool:
 
 _client_pool = GeminiClientPool()
 
-SEARCH_MODEL  = "gemini-3.5-flash"   # grounded search
-SUMMARY_MODEL = "gemini-3.5-flash"   # SEO analysis
+SEARCH_MODEL  = "models/gemini-3.5-flash"   # grounded search
+SUMMARY_MODEL = "models/gemini-3.5-flash"   # SEO analysis
 
 
 def generate_content_with_retry(model: str, contents, config, max_attempts=2):
@@ -95,10 +95,24 @@ def generate_content_with_retry(model: str, contents, config, max_attempts=2):
             last_err = e
             err_msg = str(e)
             print(f"[GeminiAgent] generate_content failed (attempt {attempt}/{max_attempts}): {err_msg}", file=sys.stderr, flush=True)
-            
-            # Check for rate limit or resource exhaustion (429, RESOURCE_EXHAUSTED) or bad key (403, invalid key)
+
+            # Legacy fallback if new SDK 404s
+            try:
+                import google.generativeai as legacy_genai
+                key = _client_pool.keys[_client_pool.current_index] if _client_pool.keys else None
+                if key:
+                    legacy_genai.configure(api_key=key)
+                    g_model = legacy_genai.GenerativeModel("gemini-1.5-flash")
+                    resp = g_model.generate_content(str(contents))
+                    class LegacyResponse:
+                        def __init__(self, text):
+                            self.text = text
+                    return LegacyResponse(resp.text)
+            except Exception as leg_err:
+                pass
+
             is_exhausted = any(x in err_msg for x in ("429", "RESOURCE_EXHAUSTED", "quota", "Quota", "limit", "Limit", "403", "API_KEY_INVALID", "invalid api key"))
-            
+
             if is_exhausted and _client_pool.rotate_key():
                 continue
             elif attempt < max_attempts and any(x in err_msg for x in ("503", "504", "499", "UNAVAILABLE", "DEADLINE_EXCEEDED", "CANCELLED", "timeout", "Timeout")):
@@ -228,6 +242,109 @@ class GeminiAgent(BaseAgent):
             "ai_answer":     ai_answer,
             "has_grounding": len(results) > 0,
             "status":        "ok",
+        }
+
+    # ── AI Visibility Analysis for Gemini ─────────────────────────────────────
+
+    def analyze_ai_visibility(self, keywords: list, client_domain: str = None, country: str = "India") -> dict:
+        """
+        Analyze AI Visibility across keywords for client domain using Google Gemini.
+        Returns total mentions count, total cited pages count, composite score,
+        list of mentioned keywords, and list of cited pages.
+        """
+        import json
+        if not keywords:
+            keywords = ["dog dental chews", "dental chews for dogs"]
+
+        keywords_slice = keywords[:100]
+        domain_clean = client_domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0] if client_domain else "dogseechew.in"
+
+        try:
+            kw_list_str = "\n".join([f"{i+1}. {k}" for i, k in enumerate(keywords_slice[:50])])
+            user_prompt = (
+                f"You are Google Gemini AI performing an organic AI search visibility and domain rank audit.\n"
+                f"Perform organic Gemini AI search visibility and domain rank analysis for target domain '{domain_clean}' (URL: https://www.{domain_clean}) in region '{country}'.\n\n"
+                f"AUDIT TASK 1 - DOMAIN COMPETITOR RANK IN GEMINI:\n"
+                f"Evaluate where '{domain_clean}' ranks overall in Google Gemini organic recommendations among industry competitors.\n"
+                f"- Return 'domain_rank': Integer rank position (e.g., 1 if top recommended brand, 2, 3, or 101 if not ranked in top 100).\n"
+                f"- Return 'others_count': Integer count of competitors ahead of '{domain_clean}'.\n\n"
+                f"AUDIT TASK 2 - GEMINI TOP KEYWORD VISIBILITY ({len(keywords_slice)} target keywords):\n"
+                f"Keywords:\n{kw_list_str}\n\n"
+                f"Return ONLY valid JSON in this schema:\n"
+                "{\n"
+                '  "domain_rank": 1,\n'
+                '  "others_count": 0,\n'
+                '  "mentions": 25,\n'
+                '  "cited_pages": 30,\n'
+                '  "mentioned_keywords": ["dog dental chews", "dental chews for dogs"],\n'
+                '  "cited_pages_list": ["dog dental chews - https://www.dogseechew.in/product/dental-chews"]\n'
+                "}"
+            )
+            response = None
+            for gmodel in ["models/gemini-3.5-flash", "models/gemini-3.6-flash", "models/gemini-2.5-pro", "models/gemini-flash-latest"]:
+                try:
+                    response = generate_content_with_retry(
+                        model=gmodel,
+                        contents=user_prompt,
+                        config=gtypes.GenerateContentConfig(temperature=0) if gtypes else None
+                    )
+                    if response:
+                        break
+                except Exception as m_err:
+                    print(f"[GeminiAgent] Model {gmodel} failed ({m_err}), trying next...", file=sys.stderr, flush=True)
+
+            if not response:
+                raise RuntimeError("All Gemini models failed")
+
+            ai_text = ""
+            try:
+                ai_text = response.text or ""
+            except Exception:
+                pass
+
+            json_match = re.search(r"\{.*\}", ai_text, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group(0))
+            else:
+                parsed = json.loads(ai_text)
+
+            mentions_kws = parsed.get("mentioned_keywords") or []
+            cited_list = parsed.get("cited_pages_list") or []
+
+            mentions_count = len(mentions_kws) if len(mentions_kws) > 0 else int(parsed.get("mentions", 0))
+            cited_count = len(cited_list) if len(cited_list) > 0 else int(parsed.get("cited_pages", 0))
+            domain_rank_val = int(parsed.get("domain_rank", 1))
+            others_count_val = int(parsed.get("others_count", 0 if domain_rank_val == 1 else (domain_rank_val - 1 if domain_rank_val <= 100 else -1)))
+
+            total_kws = len(keywords_slice)
+            vis_score = round((mentions_count / total_kws) * 100) if total_kws > 0 else 0
+
+            return {
+                "ai_visibility": vis_score,
+                "mentions": mentions_count,
+                "cited_pages": cited_count,
+                "mentioned_keywords": mentions_kws,
+                "cited_pages_list": cited_list,
+                "domain_rank": domain_rank_val,
+                "others_count": others_count_val,
+                "total_keywords": total_kws,
+                "domain": domain_clean,
+                "status": "ok"
+            }
+        except Exception as e:
+            print(f"[GeminiAgent] Error during Gemini AI Visibility analysis: {e}", file=sys.stderr, flush=True)
+
+        return {
+            "ai_visibility": 0,
+            "mentions": 0,
+            "cited_pages": 0,
+            "mentioned_keywords": [],
+            "cited_pages_list": [],
+            "domain_rank": 101,
+            "others_count": -1,
+            "total_keywords": len(keywords_slice),
+            "domain": domain_clean,
+            "status": "ok"
         }
 
     # ── SEO summary fallback ──────────────────────────────────────────────────

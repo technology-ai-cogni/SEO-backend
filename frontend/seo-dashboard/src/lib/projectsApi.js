@@ -928,6 +928,38 @@ export async function runAiAnalysis(projectSlug, keyword, aiMode, domain, countr
   return await res.json();
 }
 
+export async function runAiVisibilityAnalysis(projectSlug, domain, country, keywords, engine = 'chatgpt') {
+  const apiBase = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000').replace('0.0.0.0', '127.0.0.1');
+
+  try {
+    const res = await fetch(`${apiBase}/projects/${projectSlug}/ai-visibility-analysis`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain, country, keywords, engine }),
+    });
+
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('[runAiVisibilityAnalysis] Backend fetch failed, using fallback metrics:', e);
+  }
+
+  return {
+    project: projectSlug,
+    result: {
+      ai_visibility: 0,
+      mentions: 0,
+      cited_pages: 0,
+      mentioned_keywords: [],
+      cited_pages_list: [],
+      total_keywords: keywords ? keywords.length : 0,
+      domain: domain || 'dogseechew.in',
+      status: 'error'
+    }
+  };
+}
+
 export async function classifyCompetitorUrls(urls, keyword = '') {
   if (!urls || urls.length === 0) return [];
   const res = await fetch(`${CATEGORY_API_BASE}/competitors/classify-urls`, {
