@@ -56,7 +56,7 @@ class BaseAgent(ABC):
         """
 
     @abstractmethod
-    def generate_seo_summary(self, keyword: str, results: list) -> str:
+    def generate_seo_summary(self, keyword: str, results: list, client_domain: str = None) -> str:
         """
         Generate a 4-section client-specific SEO analysis for this keyword
         comparing CLIENT_DOMAIN against the found competitors.

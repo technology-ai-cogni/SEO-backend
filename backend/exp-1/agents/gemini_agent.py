@@ -118,9 +118,9 @@ def generate_content_with_retry(model: str, contents, config, max_attempts=2):
                 continue
             elif attempt < max_attempts and any(x in err_msg for x in ("503", "504", "499", "UNAVAILABLE", "DEADLINE_EXCEEDED", "CANCELLED", "timeout", "Timeout")):
                 time.sleep(1)
-            else:
-                break
-    raise last_err
+    if last_err is not None:
+        raise last_err
+    raise RuntimeError("API call failed after max attempts")
 
 
 class GeminiAgent(BaseAgent):
