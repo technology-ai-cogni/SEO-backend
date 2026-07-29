@@ -72,8 +72,8 @@ class GeminiClientPool:
 
 _client_pool = GeminiClientPool()
 
-SEARCH_MODEL  = "gemini-3.5-flash"   # AI Overview model
-SUMMARY_MODEL = "gemini-3.5-flash"   # SEO analysis
+SEARCH_MODEL  = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")   # AI Overview model
+SUMMARY_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")   # SEO analysis
 
 
 def generate_content_with_retry(model: str, contents, config, max_attempts=2):

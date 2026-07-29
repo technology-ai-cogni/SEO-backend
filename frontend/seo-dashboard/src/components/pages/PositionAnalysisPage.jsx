@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ExternalLink, Plus, Share2, Settings, Info, X, CheckCircle, Globe, Monitor, ChevronDown, Search } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiAnalysis } from '../../lib/projectsApi';
@@ -28,8 +28,9 @@ export default function PositionAnalysisPage({ onNavigate }) {
 
   // Hidden cards state
   const [closedCards, setClosedCards] = useState({});
-  const [selectedRegion, setSelectedRegion] = useState('US');
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [selectedRegion, setSelectedRegion] = useState(() => localStorage.getItem('bd_selected_region') || 'US');
+  const [selectedDate, setSelectedDate] = useState(() => localStorage.getItem('bd_selected_date') || new Date().toISOString().split('T')[0]);
+  const dateInputRef = useRef(null);
   const [activeTooltip, setActiveTooltip] = useState(null);
   const [hoveredChartLine, setHoveredChartLine] = useState(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -100,13 +101,14 @@ export default function PositionAnalysisPage({ onNavigate }) {
         const domains = await fetchDomainRows();
         if (isMounted && domains && domains.length > 0) {
           setProjects(domains);
-          const first = domains[0];
-          setSelectedSlug(first.slug);
-          setActiveProject(first);
+          const savedSlug = localStorage.getItem('bd_selected_project');
+          const targetProject = (savedSlug && domains.find(p => p.slug === savedSlug)) || domains[0];
+          setSelectedSlug(targetProject.slug);
+          setActiveProject(targetProject);
 
           // Fetch project-specific data if present
           try {
-            const kws = await fetchKeywordRows(first.slug);
+            const kws = await fetchKeywordRows(targetProject.slug);
             if (kws && kws.length > 0 && isMounted) {
               setProjectKeywords(kws);
               setKwCount(kws.length);
@@ -124,12 +126,12 @@ export default function PositionAnalysisPage({ onNavigate }) {
               const sortedKws = [...kws].sort((a, b) => (b.sv || 0) - (a.sv || 0));
               setTopKeywords(sortedKws.slice(0, 2).map(k => k.kw));
             } else if (isMounted) {
-              setKwCount(first.keywords || 0);
-              setBlogCount(first.blogPages || 0);
+              setKwCount(targetProject.keywords || 0);
+              setBlogCount(targetProject.blogPages || 0);
               setClusterCount(0);
               setNetPotential(0);
             }
-            const pgs = await fetchPageRows(first.slug);
+            const pgs = await fetchPageRows(targetProject.slug);
             if (pgs && pgs.length > 0 && isMounted) {
               setProjectPages(pgs);
               setPageCount(pgs.length);
@@ -138,7 +140,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
               setPageCount(uniquePages || kws.length);
               setProjectPages([]);
             } else if (isMounted) {
-              setPageCount(first.targetPages || 0);
+              setPageCount(targetProject.targetPages || 0);
               setProjectPages([]);
             }
           } catch (e) {
@@ -155,8 +157,30 @@ export default function PositionAnalysisPage({ onNavigate }) {
     return () => { isMounted = false; };
   }, []);
 
+  useEffect(() => {
+    function handleClickOutside(event) {
+      const isProjectButton = event.target.closest('.project-menu-btn');
+      const isProjectMenu = event.target.closest('.project-menu-panel');
+      if (!isProjectButton && !isProjectMenu) {
+        setProjectMenuOpen(false);
+      }
+
+      const isCountryButton = event.target.closest('.country-menu-btn');
+      const isCountryMenu = event.target.closest('.country-menu-panel');
+      if (!isCountryButton && !isCountryMenu) {
+        setCountryMenuOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   const handleSelectProject = async (slug) => {
     setSelectedSlug(slug);
+    localStorage.setItem('bd_selected_project', slug);
     const p = projects.find(item => item.slug === slug);
     if (p) {
       setActiveProject(p);
@@ -209,28 +233,39 @@ export default function PositionAnalysisPage({ onNavigate }) {
     setClosedCards(prev => ({ ...prev, [cardId]: true }));
   };
 
-  // Load cached AI analysis results from localStorage whenever project or active tab changes
+  // Load cached AI analysis results from localStorage for all tabs whenever project changes
   useEffect(() => {
     if (!activeProject?.slug) return;
-    const tabKey = aiTab.toLowerCase();
-    const cacheKey = `ai_results_${activeProject.slug}_${tabKey}`;
-    try {
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setTabResults(prev => ({ ...prev, [tabKey]: parsed }));
+    const tabs = ['overview', 'chatgpt', 'gemini', 'ai overview'];
+    const newResults = {};
+    tabs.forEach(tabKey => {
+      const cacheKey = `ai_results_${activeProject.slug}_${tabKey}`;
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            newResults[tabKey] = parsed;
+          }
         }
+      } catch (err) {
+        console.error(`Error loading cached AI analysis for ${tabKey}:`, err);
       }
-    } catch (err) {
-      console.error('Error loading cached AI analysis:', err);
-    }
-  }, [activeProject?.slug, aiTab]);
+    });
+    setTabResults(prev => ({ ...prev, ...newResults }));
+  }, [activeProject?.slug]);
 
-  const handleAiAnalysis = async (e) => {
+  const handleAiAnalysis = async (e, forcedTabKey) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!topKeywords.length || !activeProject) return;
-    const tabKey = aiTab.toLowerCase();
+    const tabKey = forcedTabKey || aiTab.toLowerCase();
+    if (forcedTabKey) {
+      let targetTab = forcedTabKey.charAt(0).toUpperCase() + forcedTabKey.slice(1);
+      if (forcedTabKey === 'ai overview') {
+        targetTab = 'AI Overview';
+      }
+      setAiTab(targetTab);
+    }
     setAnalyzingTabs(prev => ({ ...prev, [tabKey]: true }));
     setAnalysisError('');
     try {
@@ -585,6 +620,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
             {projects.length > 1 ? (
               <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                 <button
+                  className="project-menu-btn"
                   onClick={() => setProjectMenuOpen(!projectMenuOpen)}
                   style={{
                     display: 'inline-flex',
@@ -607,7 +643,9 @@ export default function PositionAnalysisPage({ onNavigate }) {
                 </button>
 
                 {projectMenuOpen && (
-                  <div style={{
+                  <div
+                    className="project-menu-panel"
+                    style={{
                     position: 'absolute',
                     top: '100%',
                     left: 0,
@@ -690,6 +728,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                 {/* Searchable Country Custom Dropdown */}
                 <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                   <button
+                    className="country-menu-btn"
                     onClick={() => {
                       setCountryMenuOpen(!countryMenuOpen);
                       setCountrySearch('');
@@ -706,16 +745,25 @@ export default function PositionAnalysisPage({ onNavigate }) {
                       fontWeight: 600,
                       color: '#2563eb',
                       cursor: 'pointer',
-                      outline: 'none'
+                      outline: 'none',
+                      whiteSpace: 'nowrap'
                     }}
                   >
-                    <span style={{ fontSize: 15 }}>{activeCountry.flag}</span>
+                    <img 
+                      src={`https://flagcdn.com/16x12/${activeCountry.code.toLowerCase()}.png`} 
+                      width="16" 
+                      height="12" 
+                      alt={activeCountry.name} 
+                      style={{ borderRadius: 1.5, objectFit: 'cover' }}
+                    />
                     <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>{activeCountry.name}</span>
                     <ChevronDown size={14} style={{ color: '#2563eb', transform: countryMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
                   </button>
 
                   {countryMenuOpen && (
-                    <div style={{
+                    <div
+                      className="country-menu-panel"
+                      style={{
                       position: 'absolute',
                       top: '100%',
                       left: 0,
@@ -770,6 +818,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                               key={c.code}
                               onClick={() => {
                                 setSelectedRegion(c.code);
+                                localStorage.setItem('bd_selected_region', c.code);
                                 setCountryMenuOpen(false);
                               }}
                               style={{
@@ -794,7 +843,13 @@ export default function PositionAnalysisPage({ onNavigate }) {
                                 if (c.code !== selectedRegion) e.currentTarget.style.backgroundColor = 'transparent';
                               }}
                             >
-                              <span style={{ fontSize: 15 }}>{c.flag}</span>
+                              <img 
+                                src={`https://flagcdn.com/16x12/${c.code.toLowerCase()}.png`} 
+                                width="16" 
+                                height="12" 
+                                alt={c.name} 
+                                style={{ borderRadius: 1.5, objectFit: 'cover' }}
+                              />
                               <span>{c.name}</span>
                             </button>
                           ))
@@ -808,36 +863,62 @@ export default function PositionAnalysisPage({ onNavigate }) {
                   )}
                 </div>
 
-                {/* Interactive Date Picker */}
+                {/* Custom Date Selector Button */}
+                <button
+                  onClick={() => dateInputRef.current && dateInputRef.current.showPicker()}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    margin: 0,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: '#2563eb',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  <span style={{ fontSize: 14 }}>📅</span>
+                  <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>
+                    {(() => {
+                      try {
+                        const parts = selectedDate.split('-');
+                        const dObj = new Date(parts[0], parts[1] - 1, parts[2]);
+                        return dObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                      } catch (e) {
+                        return selectedDate;
+                      }
+                    })()}
+                  </span>
+                </button>
+
+                {/* Hidden Native Date Picker */}
                 <input
+                  ref={dateInputRef}
                   type="date"
                   value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  style={{
-                    background: '#ffffff',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 5,
-                    padding: '1px 3px',
-                    fontSize: 10,
-                    fontWeight: 600,
-                    color: '#0f172a',
-                    outline: 'none',
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    maxWidth: 96,
-                    height: 20,
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
-                    transition: 'border-color 0.15s ease'
+                  onChange={(e) => {
+                    setSelectedDate(e.target.value);
+                    localStorage.setItem('bd_selected_date', e.target.value);
                   }}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = '#7c3aed'}
-                  onMouseLeave={e => e.currentTarget.style.borderColor = '#cbd5e1'}
+                  style={{
+                    position: 'absolute',
+                    opacity: 0,
+                    pointerEvents: 'none',
+                    width: 0,
+                    height: 0
+                  }}
                 />
               </div>
             );
           })()}
         </div>
 
-        {/* Right Column (directly above Second Box / SEO Card): Actions */}
+        {/* Right Column: Actions */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -845,11 +926,9 @@ export default function PositionAnalysisPage({ onNavigate }) {
           gap: 10
         }}>
           <button
-            onClick={() => onNavigate ? onNavigate('project-setup') : (window.location.hash = '#project-setup')}
+            onClick={(e) => handleAiAnalysis(e, 'ai overview')}
+            disabled={!!analyzingTabs[aiTab.toLowerCase()] || !topKeywords.length}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
               background: '#7c3aed',
               color: '#ffffff',
               border: 'none',
@@ -857,51 +936,17 @@ export default function PositionAnalysisPage({ onNavigate }) {
               padding: '9px 16px',
               fontSize: 13.5,
               fontWeight: 700,
-              cursor: 'pointer',
+              cursor: !!analyzingTabs[aiTab.toLowerCase()] || !topKeywords.length ? 'not-allowed' : 'pointer',
+              opacity: !!analyzingTabs[aiTab.toLowerCase()] || !topKeywords.length ? 0.7 : 1,
               boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
               transition: 'background 0.15s'
             }}
-            onMouseEnter={e => e.currentTarget.style.background = '#6d28d9'}
-            onMouseLeave={e => e.currentTarget.style.background = '#7c3aed'}
+            onMouseEnter={e => { if (!analyzingTabs[aiTab.toLowerCase()] && topKeywords.length) e.currentTarget.style.background = '#6d28d9'; }}
+            onMouseLeave={e => { if (!analyzingTabs[aiTab.toLowerCase()] && topKeywords.length) e.currentTarget.style.background = '#7c3aed'; }}
           >
-            <Plus size={16} />
-            Create SEO Project
-          </button>
-
-          <button
-            onClick={() => navigator.clipboard.writeText(window.location.href)}
-            style={{
-              background: '#ffffff',
-              color: '#334155',
-              border: '1px solid #cbd5e1',
-              borderRadius: 8,
-              padding: '8px 14px',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6
-            }}
-          >
-            <Share2 size={14} />
-            Share
-          </button>
-
-          <button
-            style={{
-              background: '#ffffff',
-              color: '#64748b',
-              border: '1px solid #cbd5e1',
-              borderRadius: 8,
-              padding: '8px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-          >
-            <Settings size={16} />
+            {!!analyzingTabs[aiTab.toLowerCase()] 
+              ? 'Analyzing...' 
+              : ((tabResults[aiTab.toLowerCase()] || []).length > 0 ? 'Re-analyze' : 'Analyze')}
           </button>
         </div>
       </div>
@@ -988,7 +1033,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
               }}>
                 AI SEARCH
               </span>
-              <X size={14} style={{ cursor: 'pointer', color: '#64748b' }} onClick={() => toggleClose('aiSearch')} />
             </div>
 
             {/* Sub-nav tabs */}
@@ -1051,13 +1095,8 @@ export default function PositionAnalysisPage({ onNavigate }) {
                           gap: 8
                         }}
                       >
-                        {isCurrentTabAnalyzing ? `Analyzing Top ${topKeywords.length} Keywords via ${aiTab}...` : `Analyze Top ${topKeywords.length} Keywords`}
+                        {isCurrentTabAnalyzing ? 'Analyzing...' : 'Analyze'}
                       </button>
-                      {topKeywords.length > 0 && (
-                        <span style={{ fontSize: 12.5, color: '#64748b' }}>
-                          Keywords: {topKeywords.map(k => `"${k}"`).join(', ')}
-                        </span>
-                      )}
                       {analysisError && (
                         <div style={{ color: '#ef4444', fontSize: 13, fontWeight: 600 }}>{analysisError}</div>
                       )}
@@ -1485,9 +1524,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
               }}>
                 SEO
               </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#64748b' }}>
-                <X size={14} style={{ cursor: 'pointer' }} onClick={() => toggleClose('seoCard')} />
-              </div>
             </div>
 
             {/* 3 Column Metrics */}
