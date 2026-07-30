@@ -1,4 +1,4 @@
-import { Search, LogOut, Settings } from 'lucide-react';
+import { LogOut, Settings } from 'lucide-react';
 
 export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) {
   return (
@@ -20,11 +20,6 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        {/* Search */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 12px', width: 200 }}>
-          <Search size={13} color="var(--text-muted)" />
-          <input placeholder="Search..." style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: 13, color: 'var(--text-primary)', fontFamily: 'var(--font-body)', width: '100%' }} />
-        </div>
 
         {/* User state / Auth buttons */}
         {user ? (
