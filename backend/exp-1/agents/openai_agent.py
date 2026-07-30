@@ -205,7 +205,7 @@ class OpenAIAgent(BaseAgent):
         if not keywords:
             keywords = ["dog dental chews", "dental chews for dogs"]
 
-        keywords_slice = keywords[:100]
+        keywords_slice = keywords
         domain_clean = client_domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0] if client_domain else "dogseechew.in"
 
         if not OPENAI_API_KEY or not _client:
@@ -221,7 +221,7 @@ class OpenAIAgent(BaseAgent):
             }
 
         try:
-            kw_list_str = "\n".join([f"{i+1}. {k}" for i, k in enumerate(keywords_slice[:50])])
+            kw_list_str = "\n".join([f"{i+1}. {k}" for i, k in enumerate(keywords_slice[:100])])
             system_msg = "You are an SEO AI Search Auditor. You must respond strictly in JSON format."
             user_prompt = (
                 f"Perform organic AI search visibility and domain rank analysis for target domain '{domain_clean}' (URL: https://www.{domain_clean}) in region '{country}'.\n\n"

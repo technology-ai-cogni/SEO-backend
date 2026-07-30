@@ -242,11 +242,11 @@ class AIOAgent(BaseAgent):
         if not keywords:
             keywords = ["dog dental chews", "dental chews for dogs"]
 
-        keywords_slice = keywords[:100]
+        keywords_slice = keywords
         domain_clean = client_domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0] if client_domain else "dogseechew.in"
 
         try:
-            kw_list_str = "\n".join([f"{i+1}. {k}" for i, k in enumerate(keywords_slice[:50])])
+            kw_list_str = "\n".join([f"{i+1}. {k}" for i, k in enumerate(keywords_slice[:100])])
             user_prompt = (
                 f"You MUST perform your search audit specifically on Google AI Overviews (SGE / Google AI Overviews) for target domain '{domain_clean}' (URL: https://www.{domain_clean}) in region '{country}'.\n\n"
                 f"AUDIT TASK 1 - DOMAIN COMPETITOR RANK IN GOOGLE AI OVERVIEWS:\n"

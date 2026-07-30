@@ -257,11 +257,11 @@ class GeminiAgent(BaseAgent):
         if not keywords:
             keywords = ["dog dental chews", "dental chews for dogs"]
 
-        keywords_slice = keywords[:100]
+        keywords_slice = keywords
         domain_clean = client_domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0] if client_domain else "dogseechew.in"
 
         try:
-            kw_list_str = "\n".join([f"{i+1}. {k}" for i, k in enumerate(keywords_slice[:50])])
+            kw_list_str = "\n".join([f"{i+1}. {k}" for i, k in enumerate(keywords_slice[:100])])
             user_prompt = (
                 f"You are Google Gemini AI performing an organic AI search visibility and domain rank audit.\n"
                 f"Perform organic Gemini AI search visibility and domain rank analysis for target domain '{domain_clean}' (URL: https://www.{domain_clean}) in region '{country}'.\n\n"

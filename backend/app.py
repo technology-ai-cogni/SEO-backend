@@ -1039,7 +1039,7 @@ def run_ai_visibility_analysis_endpoint(project_slug: str, req: AiVisibilityRequ
             AgentClass = importlib.import_module("exp-1.agents.openai_agent").OpenAIAgent
 
         agent = AgentClass()
-        result = agent.analyze_ai_visibility(kws[:100], client_domain=client_domain, country=req.country or "India")
+        result = agent.analyze_ai_visibility(kws, client_domain=client_domain, country=req.country or "India")
         return {"project": project_slug, "engine": engine, "result": result}
     except Exception as e:
         print(f"[app] Error during AI Visibility endpoint ({engine}): {e}", file=sys.stderr, flush=True)
@@ -1054,7 +1054,7 @@ def run_ai_visibility_analysis_endpoint(project_slug: str, req: AiVisibilityRequ
                 "cited_pages_list": [],
                 "domain_rank": 101,
                 "others_count": -1,
-                "total_keywords": len(kws[:100]),
+                "total_keywords": len(kws),
                 "domain": client_domain,
                 "status": "ok"
             }
