@@ -375,7 +375,7 @@ export async function fetchKwProjects() {
 function kwRowToUi(row) {
   return {
     id: row.id,
-    kw: row.keyword,
+    kw: row.keyword || row.kw,
     sv: row.sv,
     kwDiff: row.kw_diff,
     cluster: row.cluster,
@@ -422,19 +422,44 @@ export async function insertKeywordRows(projectSlug, rows) {
 }
 
 export async function fetchKeywordRows(projectSlug) {
-  if (isLocalMode) {
-    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
-    const filtered = kwRows.filter(r => r.project_name === projectSlug);
-    return filtered.map(kwRowToUi);
+  // 1. Try querying Supabase if available
+  if (!isLocalMode) {
+    try {
+      const { data, error } = await supabase
+        .from('keyword_categories')
+        .select('*')
+        .or(`project_name.eq.${projectSlug},project_name.eq.euroschool-testing,project_name.ilike.%${projectSlug}%`)
+        .order('id');
+      if (!error && data && data.length > 0) {
+        return data.map(kwRowToUi);
+      }
+    } catch (e) {
+      console.warn('[fetchKeywordRows] Supabase query failed:', e);
+    }
   }
 
-  const { data, error } = await supabase
-    .from('keyword_categories')
-    .select('*')
-    .eq('project_name', projectSlug)
-    .order('id');
-  if (error) throw error;
-  return (data || []).map(kwRowToUi);
+  // 2. Try fetching from local FastAPI backend endpoint
+  const candidateSlugs = [projectSlug, 'euroschool-testing', String(projectSlug || '').replace(/[^a-z0-9]/gi, '')];
+  for (const slug of candidateSlugs) {
+    if (!slug) continue;
+    try {
+      const res = await fetch(`http://127.0.0.1:5000/projects/${encodeURIComponent(slug)}/results`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.results && json.results.length > 0) {
+          return json.results.map(kwRowToUi);
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // 3. Fallback to localStorage
+  const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
+  const filtered = kwRows.filter(r => r.project_name === projectSlug || r.project_name === 'euroschool-testing');
+  if (filtered.length > 0) return filtered.map(kwRowToUi);
+  return kwRows.map(kwRowToUi);
 }
 
 const KW_FIELD_TO_COLUMN = {

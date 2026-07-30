@@ -41,30 +41,10 @@ export default function LandingPage({ activeTab, onNavigate, user, onLoginSucces
           width: 100%;
           max-width: 420px;
         }
-        /* Custom overrides to strip LoginPage/SignUpPage cards and center wrappers */
-        .landing-auth-wrapper > div {
-          background: transparent !important;
-          min-height: auto !important;
-          padding: 0 !important;
-        }
-        .landing-auth-wrapper > div > div {
-          background: transparent !important;
-          border: none !important;
-          box-shadow: none !important;
-          padding: 0 !important;
-          max-width: 100% !important;
-        }
-        /* Hide the default header inside LoginPage and SignUpPage */
-        .landing-auth-wrapper > div > div > div:first-of-type {
-          display: none !important;
-        }
-        /* Hide the default already-logged-in banner inside LoginPage */
-        .landing-auth-wrapper div[style*="var(--accent-light)"] {
-          display: none !important;
-        }
-        /* Hide the default footer inside LoginPage and SignUpPage */
-        .landing-auth-wrapper > div > div > div:last-child {
-          display: none !important;
+        /* Custom overrides to center wrappers */
+        .landing-auth-wrapper {
+          width: 100%;
+          max-width: 420px;
         }
         .landing-auth-wrapper-signup {
           max-width: 440px;

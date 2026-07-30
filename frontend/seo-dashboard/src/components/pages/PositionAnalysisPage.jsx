@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { ExternalLink, Plus, Share2, Settings, Info, X, CheckCircle, Globe, Monitor, ChevronDown, Search } from 'lucide-react';
+import { ExternalLink, Search, ChevronDown, CheckCircle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiAnalysis, runAiVisibilityAnalysis } from '../../lib/projectsApi';
+import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis } from '../../lib/projectsApi';
 
 function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 100, projectTotalKeywords = 514 }) {
   const [hoverType, setHoverType] = useState(null); // null | 'mentions' | 'cited'
@@ -232,6 +232,33 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
   );
 }
 
+function extractTop2PerCategory(kws) {
+  if (!kws || kws.length === 0) return [];
+  const groups = {};
+  kws.forEach(k => {
+    const cat = k.category || k.category_name || k.targetSubtype || k.subtype || k.cluster || 'General';
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(k);
+  });
+
+  const selected = [];
+  Object.keys(groups).forEach(cat => {
+    const sortedInCat = [...groups[cat]].sort((a, b) => {
+      const svA = Number(String(a.sv || 0).replace(/[^0-9.]/g, '')) || 0;
+      const svB = Number(String(b.sv || 0).replace(/[^0-9.]/g, '')) || 0;
+      return svB - svA;
+    });
+    const top2 = sortedInCat.slice(0, 2);
+    top2.forEach(item => {
+      const keywordStr = item.kw || item.keyword;
+      if (keywordStr && !selected.includes(keywordStr)) {
+        selected.push(keywordStr);
+      }
+    });
+  });
+  return selected;
+}
+
 export default function PositionAnalysisPage({ onNavigate }) {
   const [projects, setProjects] = useState([]);
   const [selectedSlug, setSelectedSlug] = useState('');
@@ -244,9 +271,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
   const [aiTab, setAiTab] = useState('Overview');
   const [loading, setLoading] = useState(true);
   const [showReport, setShowReport] = useState(false);
-  const [analysisKeyword, setAnalysisKeyword] = useState('');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState(null);
   const [analysisError, setAnalysisError] = useState('');
   const [topKeywords, setTopKeywords] = useState([]);
   const [multiResults, setMultiResults] = useState([]);
@@ -354,12 +378,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
               }, 0);
               setNetPotential(svSum);
 
-              const sortedKws = [...kws].sort((a, b) => {
-                const svA = Number(String(a.sv || 0).replace(/[^0-9.]/g, '')) || 0;
-                const svB = Number(String(b.sv || 0).replace(/[^0-9.]/g, '')) || 0;
-                return svB - svA;
-              });
-              setTopKeywords(sortedKws.slice(0, 100).map(k => k.kw));
+              setTopKeywords(extractTop2PerCategory(kws));
             } else if (isMounted) {
               setKwCount(targetProject.keywords || 0);
               setBlogCount(targetProject.blogPages || 0);
@@ -448,12 +467,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
           }, 0);
           setNetPotential(svSum);
 
-          const sortedKws = [...kws].sort((a, b) => {
-            const svA = Number(String(a.sv || 0).replace(/[^0-9.]/g, '')) || 0;
-            const svB = Number(String(b.sv || 0).replace(/[^0-9.]/g, '')) || 0;
-            return svB - svA;
-          });
-          setTopKeywords(sortedKws.slice(0, 100).map(k => k.kw));
+          setTopKeywords(extractTop2PerCategory(kws));
         } else {
           setKwCount(p.keywords || 0);
           setBlogCount(p.blogPages || 0);
@@ -507,44 +521,19 @@ export default function PositionAnalysisPage({ onNavigate }) {
     setTabResults(prev => ({ ...prev, ...newResults }));
   }, [activeProject?.slug]);
 
-<<<<<<< HEAD
-  const handleAiAnalysis = async (e, forcedTabKey) => {
-    if (e && e.preventDefault) e.preventDefault();
-    if (!activeProject) return;
-    const tabKey = forcedTabKey || aiTab.toLowerCase();
-    if (forcedTabKey) {
-      let targetTab = forcedTabKey.charAt(0).toUpperCase() + forcedTabKey.slice(1);
-      if (forcedTabKey === 'ai overview') {
-        targetTab = 'AI Overview';
-      }
-      setAiTab(targetTab);
-    }
-    setAnalyzingTabs(prev => ({ ...prev, [tabKey]: true }));
-    setAnalysisError('');
-    try {
-      const domain = activeProject.domain || activeProject.name || 'dogseechew.in';
-      const countryObj = COUNTRY_OPTIONS.find(c => c.code === selectedRegion);
-      const countryName = countryObj ? countryObj.name : selectedRegion || 'India';
-=======
   const handleAiAnalysis = async (e, options = {}) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!activeProject) return;
->>>>>>> 80ce927c4a1fe123f3593436b27d78ecb52b1935
 
     const { targetEngine = null, analyzeAll = false } = options;
     const domain = activeProject.domain || activeProject.name || 'dogseechew.in';
     const countryObj = COUNTRY_OPTIONS.find(c => c.code === selectedRegion);
     const countryName = countryObj ? countryObj.name : selectedRegion || 'India';
 
-    // Analyze top 100 keywords
+    // Analyze top 2 keywords per category
     let kwList = topKeywords;
     if (!kwList || kwList.length === 0) {
-      const sortedKws = [...projectKeywords].sort((a, b) => {
-        const svA = Number(String(a.sv || 0).replace(/[^0-9.]/g, '')) || 0;
-        const svB = Number(String(b.sv || 0).replace(/[^0-9.]/g, '')) || 0;
-        return svB - svA;
-      });
-      kwList = sortedKws.slice(0, 100).map(k => k.kw);
+      kwList = extractTop2PerCategory(projectKeywords);
     }
     if (!kwList || kwList.length === 0) {
       kwList = ['dog dental chews', 'dental chews for dogs'];
@@ -1551,7 +1540,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                             citedPages={citedVal}
                             kwMentionsList={mList}
                             kwCitationsList={cList}
-                            totalKeywords={visibilityData.total_keywords || 100}
+                            totalKeywords={topKeywords.length > 0 ? topKeywords.length : (visibilityData.total_keywords || 100)}
                             projectTotalKeywords={kwCount}
                           />
                         );
@@ -1648,7 +1637,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                       {/* Re-analyze Action */}
                       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
                         <button
-                          onClick={(e) => handleAiAnalysis(e, { targetEngine: aiTab.toLowerCase(), analyzeAll: aiTab === 'Overview' })}
+                          onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
                           disabled={!!analyzingTabs[aiTab.toLowerCase()]}
                           style={{
                             background: 'transparent',
