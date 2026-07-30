@@ -51,7 +51,7 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
           color: '#7c3aed'
         }}>
           <Search size={11} />
-          <span>Audited {total} / {projectTotalKeywords || 514} Keywords</span>
+          <span>Audited {total} / {projectTotalKeywords || total} Keywords</span>
         </div>
       </div>
 
@@ -63,171 +63,171 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
         width: '100%'
       }}>
         {/* LEFT SIDE: Compact Arc Gauge Graph */}
-      <div style={{ position: 'relative', width: 150, height: 85, display: 'flex', justifyContent: 'center' }}>
-        <svg width="150" height="85" viewBox="0 0 150 85">
-          <path
-            d="M 15 75 A 60 60 0 0 1 135 75"
-            fill="none"
-            stroke="#e2e8f0"
-            strokeWidth={strokeWidth}
-            strokeLinecap="round"
-          />
-          <path
-            d="M 15 75 A 60 60 0 0 1 135 75"
-            fill="none"
-            stroke={strokeColor}
-            strokeWidth={strokeWidth}
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={progressOffset}
-            style={{ transition: 'stroke-dashoffset 0.4s ease, stroke 0.3s ease' }}
-          />
-        </svg>
+        <div style={{ position: 'relative', width: 150, height: 85, display: 'flex', justifyContent: 'center' }}>
+          <svg width="150" height="85" viewBox="0 0 150 85">
+            <path
+              d="M 15 75 A 60 60 0 0 1 135 75"
+              fill="none"
+              stroke="#e2e8f0"
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+            />
+            <path
+              d="M 15 75 A 60 60 0 0 1 135 75"
+              fill="none"
+              stroke={strokeColor}
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={progressOffset}
+              style={{ transition: 'stroke-dashoffset 0.4s ease, stroke 0.3s ease' }}
+            />
+          </svg>
 
+          <div style={{
+            position: 'absolute',
+            top: 26,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center'
+          }}>
+            <span style={{ fontSize: 30, fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>
+              {hoverType === 'mentions' ? mentions : hoverType === 'cited' ? citedPages : Math.round(visibility)}
+            </span>
+            <span style={{ fontSize: 11.5, fontWeight: 600, color: '#64748b', marginTop: 3 }}>
+              {currentLabel}
+            </span>
+          </div>
+        </div>
+
+        {/* RIGHT SIDE: Mentions & Cited Pages metrics with Hover Keyword Popovers */}
         <div style={{
-          position: 'absolute',
-          top: 26,
           display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center'
+          alignItems: 'center',
+          gap: 28
         }}>
-          <span style={{ fontSize: 30, fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>
-            {hoverType === 'mentions' ? mentions : hoverType === 'cited' ? citedPages : Math.round(visibility)}
-          </span>
-          <span style={{ fontSize: 11.5, fontWeight: 600, color: '#64748b', marginTop: 3 }}>
-            {currentLabel}
-          </span>
-        </div>
-      </div>
+          {/* Mentions Metric Box */}
+          <div
+            style={{ position: 'relative' }}
+            onMouseEnter={() => setHoverType('mentions')}
+            onMouseLeave={() => setHoverType(null)}
+          >
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              cursor: 'pointer',
+              padding: '8px 14px',
+              borderRadius: 10,
+              backgroundColor: hoverType === 'mentions' ? '#eff6ff' : '#f8fafc',
+              border: hoverType === 'mentions' ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
+              transition: 'all 0.15s',
+              minWidth: 90
+            }}>
+              <span style={{ fontSize: 26, fontWeight: 800, color: '#0f172a' }}>{mentions}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginTop: 2 }}>Mentions</span>
+            </div>
 
-      {/* RIGHT SIDE: Mentions & Cited Pages metrics with Hover Keyword Popovers */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 28
-      }}>
-        {/* Mentions Metric Box */}
-        <div
-          style={{ position: 'relative' }}
-          onMouseEnter={() => setHoverType('mentions')}
-          onMouseLeave={() => setHoverType(null)}
-        >
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            cursor: 'pointer',
-            padding: '8px 14px',
-            borderRadius: 10,
-            backgroundColor: hoverType === 'mentions' ? '#eff6ff' : '#f8fafc',
-            border: hoverType === 'mentions' ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
-            transition: 'all 0.15s',
-            minWidth: 90
-          }}>
-            <span style={{ fontSize: 26, fontWeight: 800, color: '#0f172a' }}>{mentions}</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginTop: 2 }}>Mentions</span>
+            {/* Mentions Hover Keywords Popover */}
+            {hoverType === 'mentions' && (
+              <div style={{
+                position: 'absolute',
+                bottom: '105%',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                paddingBottom: 6,
+                zIndex: 1000
+              }}>
+                <div style={{
+                  backgroundColor: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 10,
+                  padding: 12,
+                  boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.12)',
+                  width: 250,
+                  maxHeight: 180,
+                  overflowY: 'auto'
+                }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 800, color: '#2563eb', marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid #f1f5f9' }}>
+                    Mentioned Keywords ({mentions})
+                  </div>
+                  {kwMentionsList.length > 0 ? (
+                    kwMentionsList.map((kw, i) => (
+                      <div key={i} style={{ fontSize: 11.5, color: '#1e293b', marginBottom: 4, fontWeight: 600 }}>
+                        {i + 1}. "{kw}"
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ fontSize: 11.5, color: '#64748b', fontStyle: 'italic' }}>
+                      No brand mentions found for target domain.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Mentions Hover Keywords Popover */}
-          {hoverType === 'mentions' && (
+          {/* Cited Pages Metric Box */}
+          <div
+            style={{ position: 'relative' }}
+            onMouseEnter={() => setHoverType('cited')}
+            onMouseLeave={() => setHoverType(null)}
+          >
             <div style={{
-              position: 'absolute',
-              bottom: '105%',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              paddingBottom: 6,
-              zIndex: 1000
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              cursor: 'pointer',
+              padding: '8px 14px',
+              borderRadius: 10,
+              backgroundColor: hoverType === 'cited' ? '#f5f3ff' : '#f8fafc',
+              border: hoverType === 'cited' ? '1px solid #ddd6fe' : '1px solid #e2e8f0',
+              transition: 'all 0.15s',
+              minWidth: 90
             }}>
-              <div style={{
-                backgroundColor: '#ffffff',
-                border: '1px solid #cbd5e1',
-                borderRadius: 10,
-                padding: 12,
-                boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.12)',
-                width: 250,
-                maxHeight: 180,
-                overflowY: 'auto'
-              }}>
-                <div style={{ fontSize: 11.5, fontWeight: 800, color: '#2563eb', marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid #f1f5f9' }}>
-                  Mentioned Keywords ({mentions})
-                </div>
-                {kwMentionsList.length > 0 ? (
-                  kwMentionsList.map((kw, i) => (
-                    <div key={i} style={{ fontSize: 11.5, color: '#1e293b', marginBottom: 4, fontWeight: 600 }}>
-                      {i + 1}. "{kw}"
-                    </div>
-                  ))
-                ) : (
-                  <div style={{ fontSize: 11.5, color: '#64748b', fontStyle: 'italic' }}>
-                    No brand mentions found for target domain.
-                  </div>
-                )}
-              </div>
+              <span style={{ fontSize: 26, fontWeight: 800, color: '#7c3aed' }}>{citedPages}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#7c3aed', marginTop: 2 }}>Cited pages</span>
             </div>
-          )}
-        </div>
 
-        {/* Cited Pages Metric Box */}
-        <div
-          style={{ position: 'relative' }}
-          onMouseEnter={() => setHoverType('cited')}
-          onMouseLeave={() => setHoverType(null)}
-        >
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            cursor: 'pointer',
-            padding: '8px 14px',
-            borderRadius: 10,
-            backgroundColor: hoverType === 'cited' ? '#f5f3ff' : '#f8fafc',
-            border: hoverType === 'cited' ? '1px solid #ddd6fe' : '1px solid #e2e8f0',
-            transition: 'all 0.15s',
-            minWidth: 90
-          }}>
-            <span style={{ fontSize: 26, fontWeight: 800, color: '#7c3aed' }}>{citedPages}</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: '#7c3aed', marginTop: 2 }}>Cited pages</span>
+            {/* Cited Pages Hover Keywords Popover */}
+            {hoverType === 'cited' && (
+              <div style={{
+                position: 'absolute',
+                bottom: '105%',
+                right: 0,
+                paddingBottom: 6,
+                zIndex: 1000
+              }}>
+                <div style={{
+                  backgroundColor: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 10,
+                  padding: 12,
+                  boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.12)',
+                  width: 270,
+                  maxHeight: 180,
+                  overflowY: 'auto'
+                }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 800, color: '#7c3aed', marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid #f1f5f9' }}>
+                    Cited Pages ({citedPages})
+                  </div>
+                  {kwCitationsList.length > 0 ? (
+                    kwCitationsList.map((item, i) => (
+                      <div key={i} style={{ fontSize: 11.5, color: '#1e293b', marginBottom: 4, fontWeight: 600 }}>
+                        {i + 1}. {item}
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ fontSize: 11.5, color: '#64748b', fontStyle: 'italic' }}>
+                      No cited pages found for target domain.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
-
-          {/* Cited Pages Hover Keywords Popover */}
-          {hoverType === 'cited' && (
-            <div style={{
-              position: 'absolute',
-              bottom: '105%',
-              right: 0,
-              paddingBottom: 6,
-              zIndex: 1000
-            }}>
-              <div style={{
-                backgroundColor: '#ffffff',
-                border: '1px solid #cbd5e1',
-                borderRadius: 10,
-                padding: 12,
-                boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.12)',
-                width: 270,
-                maxHeight: 180,
-                overflowY: 'auto'
-              }}>
-                <div style={{ fontSize: 11.5, fontWeight: 800, color: '#7c3aed', marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid #f1f5f9' }}>
-                  Cited Pages ({citedPages})
-                </div>
-                {kwCitationsList.length > 0 ? (
-                  kwCitationsList.map((item, i) => (
-                    <div key={i} style={{ fontSize: 11.5, color: '#1e293b', marginBottom: 4, fontWeight: 600 }}>
-                      {i + 1}. {item}
-                    </div>
-                  ))
-                ) : (
-                  <div style={{ fontSize: 11.5, color: '#64748b', fontStyle: 'italic' }}>
-                    No cited pages found for target domain.
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </div>
       </div>
-    </div>
     </div>
   );
 }
@@ -263,8 +263,8 @@ export default function PositionAnalysisPage({ onNavigate }) {
   const [projects, setProjects] = useState([]);
   const [selectedSlug, setSelectedSlug] = useState('');
   const [activeProject, setActiveProject] = useState(null);
-  const [kwCount, setKwCount] = useState(650);
-  const [pageCount, setPageCount] = useState(150);
+  const [kwCount, setKwCount] = useState(0);
+  const [pageCount, setPageCount] = useState(0);
   const [blogCount, setBlogCount] = useState(0);
   const [clusterCount, setClusterCount] = useState(0);
   const [netPotential, setNetPotential] = useState(0);
@@ -1013,20 +1013,20 @@ export default function PositionAnalysisPage({ onNavigate }) {
                   <div
                     className="project-menu-panel"
                     style={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: 0,
-                    marginTop: 6,
-                    backgroundColor: '#ffffff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: 8,
-                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-                    zIndex: 1000,
-                    minWidth: 200,
-                    padding: '4px 0',
-                    display: 'flex',
-                    flexDirection: 'column'
-                  }}>
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      marginTop: 6,
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 8,
+                      boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                      zIndex: 1000,
+                      minWidth: 200,
+                      padding: '4px 0',
+                      display: 'flex',
+                      flexDirection: 'column'
+                    }}>
                     {projects.map(p => (
                       <button
                         key={p.slug}
@@ -1116,11 +1116,11 @@ export default function PositionAnalysisPage({ onNavigate }) {
                       whiteSpace: 'nowrap'
                     }}
                   >
-                    <img 
-                      src={`https://flagcdn.com/16x12/${activeCountry.code.toLowerCase()}.png`} 
-                      width="16" 
-                      height="12" 
-                      alt={activeCountry.name} 
+                    <img
+                      src={`https://flagcdn.com/16x12/${activeCountry.code.toLowerCase()}.png`}
+                      width="16"
+                      height="12"
+                      alt={activeCountry.name}
                       style={{ borderRadius: 1.5, objectFit: 'cover' }}
                     />
                     <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>{activeCountry.name}</span>
@@ -1131,20 +1131,20 @@ export default function PositionAnalysisPage({ onNavigate }) {
                     <div
                       className="country-menu-panel"
                       style={{
-                      position: 'absolute',
-                      top: '100%',
-                      left: 0,
-                      marginTop: 6,
-                      backgroundColor: '#ffffff',
-                      border: '1px solid #cbd5e1',
-                      borderRadius: 10,
-                      boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
-                      zIndex: 1000,
-                      width: 220,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      overflow: 'hidden'
-                    }}>
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        marginTop: 6,
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: 10,
+                        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
+                        zIndex: 1000,
+                        width: 220,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        overflow: 'hidden'
+                      }}>
                       {/* Search Input Box */}
                       <div style={{ padding: '8px 8px 6px 8px', borderBottom: '1px solid #f1f5f9' }}>
                         <div style={{
@@ -1229,11 +1229,11 @@ export default function PositionAnalysisPage({ onNavigate }) {
                                   transition: 'background 0.12s'
                                 }}
                               >
-                                <img 
-                                  src={`https://flagcdn.com/16x12/${c.code.toLowerCase()}.png`} 
-                                  width="16" 
-                                  height="12" 
-                                  alt={c.name} 
+                                <img
+                                  src={`https://flagcdn.com/16x12/${c.code.toLowerCase()}.png`}
+                                  width="16"
+                                  height="12"
+                                  alt={c.name}
                                   style={{ borderRadius: 1.5, objectFit: 'cover' }}
                                 />
                                 <span>{c.name}</span>
@@ -1332,7 +1332,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
             onMouseLeave={e => { if (!Object.values(analyzingTabs).some(Boolean)) e.currentTarget.style.background = '#7c3aed'; }}
           >
             {Object.values(analyzingTabs).some(Boolean)
-              ? 'Analyzing...' 
+              ? 'Analyzing...'
               : (Object.values(tabResults).some(r => r && r.length > 0) ? 'Re-analyze' : 'Analyze')}
           </button>
         </div>
@@ -1584,12 +1584,12 @@ export default function PositionAnalysisPage({ onNavigate }) {
                               }
                             }
 
-                             const domainRank = firstRes.domain_rank ?? (matchIndex >= 0 ? matchIndex + 1 : (firstRes.mentions > 0 ? 1 : 101));
-                             const othersVal = firstRes.others_count ?? (domainRank > 0 && domainRank <= 100 ? Math.max(0, domainRank - 1) : -1);
+                            const domainRank = firstRes.domain_rank ?? (matchIndex >= 0 ? matchIndex + 1 : (firstRes.mentions > 0 ? 1 : 101));
+                            const othersVal = firstRes.others_count ?? (domainRank > 0 && domainRank <= 100 ? Math.max(0, domainRank - 1) : -1);
 
-                             let rankText = domainRank > 0 && domainRank <= 100 ? `#${domainRank}` : '101';
-                             let badgeBg = domainRank > 0 && domainRank <= 100 ? '#dcfce7' : 'transparent';
-                             let badgeColor = domainRank > 0 && domainRank <= 100 ? '#15803d' : '#ef4444';
+                            let rankText = domainRank > 0 && domainRank <= 100 ? `#${domainRank}` : '101';
+                            let badgeBg = domainRank > 0 && domainRank <= 100 ? '#dcfce7' : 'transparent';
+                            let badgeColor = domainRank > 0 && domainRank <= 100 ? '#15803d' : '#ef4444';
 
                             return (
                               <>
@@ -1652,7 +1652,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                           }}
                         >
                           {!!analyzingTabs[aiTab.toLowerCase()]
-                            ? 'Analyzing...' 
+                            ? 'Analyzing...'
                             : ((tabResults[aiTab.toLowerCase()] || []).length > 0 ? 'Re-analyze' : 'Analyze')}
                         </button>
                       </div>

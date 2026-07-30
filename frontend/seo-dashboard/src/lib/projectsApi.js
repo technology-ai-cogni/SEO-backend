@@ -58,9 +58,28 @@ async function fetchKwCountsForSlug(slug) {
     const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
     return aggregateKwCounts(kwRows.filter(r => r.project_name === slug)).get(slug) || EMPTY_KW_COUNTS;
   }
-  const { data, error } = await supabase.from('keyword_categories').select('project_name, subtype, target_type').eq('project_name', slug);
-  if (error) throw error;
-  return aggregateKwCounts(data).get(slug) || EMPTY_KW_COUNTS;
+  let allRows = [];
+  let page = 0;
+  const pageSize = 1000;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from('keyword_categories')
+      .select('project_name, subtype, target_type')
+      .eq('project_name', slug)
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (error) throw error;
+    if (data && data.length > 0) {
+      allRows = allRows.concat(data);
+      if (data.length < pageSize) hasMore = false;
+      else page++;
+    } else {
+      hasMore = false;
+    }
+  }
+  return aggregateKwCounts(allRows).get(slug) || EMPTY_KW_COUNTS;
 }
 
 function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
@@ -172,13 +191,35 @@ export async function fetchDomainRows() {
     const counts = aggregateKwCounts(kwRows);
     return domains.map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
   }
-  const [{ data: domains, error: domainsError }, { data: kwRows, error: kwError }] = await Promise.all([
-    supabase.from('domains').select('*').order('created_at', { ascending: false }),
-    supabase.from('keyword_categories').select('project_name, subtype, target_type'),
-  ]);
+
+  let allKwRows = [];
+  let page = 0;
+  const pageSize = 1000;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data: kwRows, error: kwError } = await supabase
+      .from('keyword_categories')
+      .select('project_name, subtype, target_type')
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (kwError) throw kwError;
+    if (kwRows && kwRows.length > 0) {
+      allKwRows = allKwRows.concat(kwRows);
+      if (kwRows.length < pageSize) hasMore = false;
+      else page++;
+    } else {
+      hasMore = false;
+    }
+  }
+
+  const { data: domains, error: domainsError } = await supabase
+    .from('domains')
+    .select('*')
+    .order('created_at', { ascending: false });
+
   if (domainsError) throw domainsError;
-  if (kwError) throw kwError;
-  const counts = aggregateKwCounts(kwRows);
+  const counts = aggregateKwCounts(allKwRows);
   return (domains || []).map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
 }
 
@@ -422,16 +463,40 @@ export async function insertKeywordRows(projectSlug, rows) {
 }
 
 export async function fetchKeywordRows(projectSlug) {
+  if (!projectSlug) return [];
+
   // 1. Try querying Supabase if available
   if (!isLocalMode) {
     try {
-      const { data, error } = await supabase
-        .from('keyword_categories')
-        .select('*')
-        .or(`project_name.eq.${projectSlug},project_name.eq.euroschool-testing,project_name.ilike.%${projectSlug}%`)
-        .order('id');
-      if (!error && data && data.length > 0) {
-        return data.map(kwRowToUi);
+      let allRows = [];
+      let page = 0;
+      const pageSize = 1000;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('keyword_categories')
+          .select('*')
+          .eq('project_name', projectSlug)
+          .order('id')
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+
+        if (error) {
+          console.warn('[fetchKeywordRows] Supabase error:', error);
+          break;
+        }
+
+        if (data && data.length > 0) {
+          allRows = allRows.concat(data);
+          if (data.length < pageSize) hasMore = false;
+          else page++;
+        } else {
+          hasMore = false;
+        }
+      }
+
+      if (allRows.length > 0) {
+        return allRows.map(kwRowToUi);
       }
     } catch (e) {
       console.warn('[fetchKeywordRows] Supabase query failed:', e);
@@ -439,7 +504,7 @@ export async function fetchKeywordRows(projectSlug) {
   }
 
   // 2. Try fetching from local FastAPI backend endpoint
-  const candidateSlugs = [projectSlug, 'euroschool-testing', String(projectSlug || '').replace(/[^a-z0-9]/gi, '')];
+  const candidateSlugs = [projectSlug, String(projectSlug || '').replace(/[^a-z0-9]/gi, '')];
   for (const slug of candidateSlugs) {
     if (!slug) continue;
     try {
@@ -457,9 +522,8 @@ export async function fetchKeywordRows(projectSlug) {
 
   // 3. Fallback to localStorage
   const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
-  const filtered = kwRows.filter(r => r.project_name === projectSlug || r.project_name === 'euroschool-testing');
-  if (filtered.length > 0) return filtered.map(kwRowToUi);
-  return kwRows.map(kwRowToUi);
+  const filtered = kwRows.filter(r => r.project_name === projectSlug);
+  return filtered.map(kwRowToUi);
 }
 
 const KW_FIELD_TO_COLUMN = {

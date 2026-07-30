@@ -465,7 +465,7 @@ def find_top3_column(fieldnames: List[str]) -> str:
             return col
     for col in fieldnames:
         c_lower = col.strip().lower()
-        if "json" in c_lower and "landing" not in c_lower:
+        if "json" in c_lower and "landing page" not in c_lower:
             return col
     return None
 

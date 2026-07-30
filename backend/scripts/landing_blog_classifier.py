@@ -38,11 +38,11 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 OPENAI_CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 
 LANDING_PAGE = "Landing Page"
-BLOG_PAGE = "Blog Page"
+BLOG_PAGE = "Blogs"
 
-SYSTEM_PROMPT = """You classify search result pages by INTENT into exactly one of two types: BLOG PAGE or LANDING PAGE.
+SYSTEM_PROMPT = """You classify search result pages by INTENT into exactly one of two types: BLOG or LANDING PAGE.
 
-BLOG PAGE -- the page's purpose is to LIST, RANK, or COMPARE multiple businesses/options, not represent one business itself. This includes:
+BLOG -- the page's purpose is to LIST, RANK, or COMPARE multiple businesses/options, not represent one business itself. This includes:
 - Listing/directory pages of multiple businesses or options
 - Any "best X" or "top X" page about companies, services, agencies, providers, firms, businesses, vendors, or similar collective/plural business-type words
 - Roundup, comparison, or buying-guide style content covering multiple options
@@ -50,14 +50,14 @@ BLOG PAGE -- the page's purpose is to LIST, RANK, or COMPARE multiple businesses
 LANDING PAGE -- everything else. A page representing ONE specific business, product, or service directly -- e.g. a company's own homepage, service page, product page, or "about us" page.
 
 Judge by INTENT, using the Title, URL, Meta Description, and H1 tags provided.
-- If the Meta Description or H1 implies a list of top/best providers, it's a BLOG PAGE.
+- If the Meta Description or H1 implies a list of top/best providers, it's a BLOG.
 - If the Meta Description or H1 describes a single company's own services, it's a LANDING PAGE.
 
-Decide BLOG PAGE or LANDING PAGE for EACH result given, in the same order they're given.
+Decide BLOG or LANDING PAGE for EACH result given, in the same order they're given.
 
 Respond with ONLY valid JSON, in this exact shape:
-{"classifications": ["BLOG", "LANDING", ...]}
-One entry per result given, in the same order, using only the words BLOG or LANDING (nothing else)."""
+{"classifications": ["BLOG", "LANDING PAGE", ...]}
+One entry per result given, in the same order, using only the words BLOG or LANDING PAGE (nothing else)."""
 
 
 def get_openai_client():

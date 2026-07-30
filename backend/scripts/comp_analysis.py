@@ -122,7 +122,7 @@ def aggregate_competitors(
     return stats, own_domain
 
 
-def serp_comp_level(coverage: float, avg_rank: float, max_pos: int = 40) -> (str, float):
+def serp_comp_level(coverage: float, avg_rank: float, max_pos: int = 40) -> Dict[str, float]:
     """Rule-based competitor strength score from keyword coverage + average rank position."""
     position_score = max(0.0, (max_pos + 1 - avg_rank) / max_pos)
     score = round(0.6 * coverage + 0.4 * position_score, 3)

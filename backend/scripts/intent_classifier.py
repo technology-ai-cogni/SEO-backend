@@ -55,7 +55,7 @@ RENDER_WAIT_SECONDS = 2.5
 MAX_LLM_RETRIES = 3
 LLM_RETRY_BACKOFF_SECONDS = 3
 
-MAIN_CONTENT_MAX_CHARS = 8000
+MAIN_CONTENT_MAX_CHARS = 400
 
 DEFAULT_WORKERS = 8
 
@@ -80,129 +80,28 @@ PRICE_PATTERN = re.compile(
     r"[$â¬Â£â¹]\s?\d[\d,]*(?:\.\d+)?|\b\d[\d,]*(?:\.\d+)?\s?(?:USD|INR|EUR|GBP)\b"
 )
 
-SYSTEM_PROMPT = """You are an expert Webpage Intent Classifier.
+SYSTEM_PROMPT = """Classify the webpage as INFORMATIONAL or COMMERCIAL.
 
-Your task is to determine the **primary intent** of a webpage based on the information provided by the user.
+INFORMATIONAL: educates, explains, answers questions (blogs, tutorials, guides, docs).
+COMMERCIAL: markets, sells, generates leads (product pages, service pages, pricing, landing pages).
 
-The user may provide some or all of the following:
+Rules:
+- Choose the DOMINANT intent. If mixed, pick whichever is stronger.
+- You MUST pick one. Never return UNKNOWN.
+- If unsure, default to COMMERCIAL.
 
-* URL
-* Page title
-* Meta description
-* H1/H2/H3 headings
-* Main page content
-* Call-to-action (CTA) buttons
-* Product pricing
-* Forms
-* Structured data
-* Other extracted webpage information
-
-Your job is to classify the page into exactly one of these categories:
-
-1. **INFORMATIONAL**
-
-* The primary purpose is to educate, explain, answer questions, or provide knowledge.
-* Examples include:
-
-  * Blog posts
-  * Tutorials
-  * Documentation
-  * Guides
-  * Research articles
-  * Educational resources
-  * FAQs whose purpose is to help users understand a topic
-
-Typical signals:
-
-* Long explanatory content
-* Definitions
-* Step-by-step instructions
-* Examples
-* Code snippets
-* Educational headings
-* Author information
-* Publication date
-* Very few sales-oriented CTAs
-
----
-
-2. **COMMERCIAL**
-
-* The primary purpose is to market, promote, or sell a product or service, generate leads, or encourage business actions.
-* Examples include:
-
-  * Product pages
-  * Service pages
-  * SaaS landing pages
-  * Pricing pages
-  * Ecommerce pages
-  * Company marketing pages
-
-Typical signals:
-
-* Buy Now
-* Add to Cart
-* Pricing
-* Plans
-* Start Free Trial
-* Book Demo
-* Contact Sales
-* Request Quote
-* Checkout
-* Subscription plans
-* Product comparisons
-* Customer testimonials
-* Feature lists focused on selling
-* Lead generation forms
-
----
-
-### Classification Rules
-
-1. Determine the **primary purpose** of the page, not individual elements.
-
-2. Ignore unrelated advertisements.
-
-3. If the page mainly teaches or explains, classify it as **INFORMATIONAL**, even if it contains a few CTA buttons.
-
-4. If the page mainly promotes, markets, or sells a product or service, classify it as **COMMERCIAL**, even if it contains educational sections.
-
-5. If both intents are present, choose the dominant one.
-
-6. Base your decision on all available evidence.
-
-7. If the provided information is insufficient to confidently classify the page, return **UNKNOWN** and explain what additional information is needed.
-
----
-
-### Input
-
-The user will provide webpage information in JSON or plain text.
-
----
-
-### Output
-
-Return only valid JSON.
-
-{
-"classification": "INFORMATIONAL | COMMERCIAL",
-"confidence": 0,
-"reason": "Brief explanation of why this classification was chosen.",
-"evidence": [
-"Evidence 1",
-"Evidence 2",
-"Evidence 3"
-]
-}
+Return ONLY valid JSON:
+{"classification": "INFORMATIONAL" or "COMMERCIAL", "confidence": 0-100, "reason": "brief"}
 """
 
 
 def get_openai_client():
-    """Deliberately NOT cached at module level -- see category_checker.py's
-    get_openai_client() docstring: a persistent client's connection pool
-    is unsafe to share across worker threads/processes long-term. Built
-    fresh per call, right where it's used."""
+    """Deliberately NOT cached at module level -- a persistent OpenAI
+    client wraps an httpx connection pool, which is the same class of
+    object (open sockets, SSL state, pool locks) that turned out to be
+    unsafe to reuse across RQ's forked work-horse processes for
+    rank_checker.py's requests.Session (see that module's docstring).
+    Always build a fresh, short-lived client right where it's used."""
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY is not set. Fill it in in .env.")
     return OpenAI(api_key=OPENAI_API_KEY)
@@ -474,8 +373,8 @@ def classify_page_intent(signals):
                 time.sleep(LLM_RETRY_BACKOFF_SECONDS * attempt)
     else:
         return {
-            "classification": UNKNOWN, "confidence": 0,
-            "reason": f"OpenAI request failed after retries: {last_error}", "evidence": [],
+            "classification": COMMERCIAL, "confidence": 0,
+            "reason": f"API failed after retries: {last_error}", "evidence": [],
         }
 
     raw = resp.choices[0].message.content.strip()
@@ -483,14 +382,35 @@ def classify_page_intent(signals):
         parsed = json.loads(raw)
     except json.JSONDecodeError:
         return {
-            "classification": UNKNOWN, "confidence": 0,
+            "classification": COMMERCIAL, "confidence": 0,
             "reason": "Model returned unparseable JSON", "evidence": [],
         }
 
     classification = str(parsed.get("classification", "")).strip().upper()
-    label_by_code = {"INFORMATIONAL": INFORMATIONAL, "COMMERCIAL": COMMERCIAL, "UNKNOWN": UNKNOWN}
-    parsed["classification"] = label_by_code.get(classification, UNKNOWN)
+    label_by_code = {"INFORMATIONAL": INFORMATIONAL, "COMMERCIAL": COMMERCIAL}
+    parsed["classification"] = label_by_code.get(classification, COMMERCIAL)
     return parsed
+
+
+def classify_batch_intent(signals_list):
+    """Classify a batch/list of signals dicts and return results for each."""
+    results = []
+    for sig in (signals_list or []):
+        if not sig:
+            continue
+        try:
+            res = classify_page_intent(sig)
+            if isinstance(res, dict):
+                res["url"] = sig.get("url")
+                results.append(res)
+        except Exception as e:
+            results.append({
+                "classification": COMMERCIAL,
+                "confidence": 0,
+                "reason": f"Error: {e}",
+                "url": sig.get("url") if isinstance(sig, dict) else None,
+            })
+    return results
 
 
 def classify_single_result(url, title):
@@ -559,7 +479,7 @@ def majority_subtype(results):
     there falls back alphabetically, for determinism."""
     usable = [r for r in results if r and r.get("classification") in (INFORMATIONAL, COMMERCIAL)]
     if not usable:
-        return UNKNOWN
+        return COMMERCIAL
 
     counts = Counter(r["classification"] for r in usable)
     max_count = max(counts.values())

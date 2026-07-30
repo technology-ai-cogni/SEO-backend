@@ -1,3 +1,466 @@
+# """
+# hosted_categorize.py
+
+# Category/landing-blog/info-comm engine driven by app.py's /jobs/category
+# and /projects/{project}/categorize endpoints (background thread inside
+# this same process, no RQ/Redis). Driven by the SAME `jobs` table status/
+# progress tracking the frontend already polls (db.create_job/
+# set_job_status/increment_job_progress/get_job).
+
+# Two engines live here, switched by the USE_SELENIUM_PIPELINE env var:
+
+#   SELENIUM ENGINE (default, USE_SELENIUM_PIPELINE unset or true)
+#     Uses scripts/exp_category_pipeline UNCHANGED -- serp_fetch.py's real
+#     Selenium tab pool for SERP fetch, scripts/intent_classifier.py's real
+#     headless-Chrome fetch + OpenAI classification for metadata/info-
+#     comm, category_namer.py's independent (no cross-referencing)
+#     category naming, cluster_grouper.py's deterministic clustering.
+#     Category assignment does NOT need to run sequentially per-project
+#     with this engine (each keyword's category comes only from its own
+#     metadata), unlike the legacy engine below.
+
+#   BRIGHT DATA ENGINE (fallback, USE_SELENIUM_PIPELINE=false)
+#     The ORIGINAL engine, UNCHANGED: services/category_checker's Bright
+#     Data SERP fetch, scripts/category_assigner.py's sequential/cross-
+#     referencing category matching, scripts/landing_blog_classifier.py,
+#     scripts/intent_classifier.py's plain-requests fetch path, scripts/
+#     cluster_assigner.py. Needed because a real browser isn't available on
+#     a hosted deployment like Render -- set USE_SELENIUM_PIPELINE=false in
+#     that environment's variables. Category assignment MUST run
+#     sequentially per project with this engine (each decision depends on
+#     categories already created by prior keywords) -- _category_lock
+#     ensures only one categorize job runs at a time across this whole
+#     process, matching the "run only ONE category worker" rule the old
+#     RQ-based deployment enforced by only ever running one
+#     `category_checks` worker.
+
+# Either way, `_category_lock` also caps this process to one categorize
+# job at a time, so two jobs (Selenium or not) never contend for the same
+# CPU/Chrome sessions or race on the same project's categories.
+# """
+
+# import os
+# import threading
+# from concurrent.futures import ThreadPoolExecutor
+
+# from core import db
+# from services import category_checker
+# from scripts.category_assigner import categorize_from_top3
+# from scripts.landing_blog_classifier import classify_landing_or_blog, force_blog_if_best_top
+# from scripts.intent_classifier import classify_single_result_via_requests, majority_subtype
+# from scripts.cluster_assigner import cluster_project
+
+# from scripts import intent_classifier
+# from scripts.exp_category_pipeline import serp_fetch, category_namer, classifiers, cluster_grouper
+
+# from scripts import category_assigner
+
+# INTENT_WORKERS = 15
+
+# # Only one categorize job runs at a time across this whole process --
+# # see module docstring for why both engines need this.
+# _category_lock = threading.Lock()
+
+
+# def _use_selenium_pipeline():
+#     """Explicit env-var switch -- sniffing for a real Chrome install via
+#     PATH isn't reliable across platforms (macOS's Chrome.app isn't on
+#     PATH either), so this is controlled directly. Defaults to True
+#     (Selenium/exp_category_pipeline) for local development; set
+#     USE_SELENIUM_PIPELINE=false in any environment without a real browser
+#     (e.g. a standard Render web service, no Dockerfile/Chrome installed)."""
+#     return os.environ.get("USE_SELENIUM_PIPELINE", "true").strip().lower() not in ("false", "0", "no")
+
+
+# # =====================================================================
+# # SELENIUM ENGINE -- scripts/exp_category_pipeline, unmodified
+# # =====================================================================
+
+# def _process_keyword_selenium(keyword, top3):
+#     """One keyword's metadata fetch + info/comm + category + landing/blog,
+#     all via scripts/intent_classifier.py (real headless Chrome) and
+#     scripts/exp_category_pipeline (category_namer.py, classifiers.py) --
+#     exactly the same logic scripts/exp_category_pipeline/run_experiment.py
+#     uses, reused here as-is rather than reimplemented."""
+#     signals_list = []
+#     per_url_results = []
+#     for r in (top3 or [])[:3]:
+#         url = (r or {}).get("url")
+#         title = (r or {}).get("title")
+#         if not url:
+#             continue
+#         try:
+#             html, fetch_error = intent_classifier.fetch_page(url)
+#             if html:
+#                 signals = intent_classifier.extract_page_signals(url, html)
+#             else:
+#                 signals = {"url": url, "title": title, "fetch_error": fetch_error}
+#             signals_list.append(signals)
+#             per_url_results.append(intent_classifier.classify_page_intent(signals))
+#         except Exception as e:
+#             print(f"[hosted_categorize/selenium] intent error '{keyword}' / '{url}': {e}")
+
+#     info_comm = intent_classifier.majority_subtype(per_url_results)
+
+#     category = ""
+#     try:
+#         category = category_namer.categorize_from_metadata(keyword, signals_list)
+#     except Exception as e:
+#         print(f"[hosted_categorize/selenium] category error '{keyword}': {e}")
+
+#     landing_blog = None
+#     if signals_list:
+#         try:
+#             landing_blog = classifiers.classify_landing_or_blog(signals_list)
+#         except Exception as e:
+#             print(f"[hosted_categorize/selenium] landing/blog error '{keyword}': {e}")
+
+#     # HARD override: a Best/Top category is always a Blog Page, no
+#     # matter what the classifier above decided.
+#     landing_blog = force_blog_if_best_top(category, landing_blog)
+
+#     return {"top3": top3, "category": category, "target_type": landing_blog or "", "subtype": info_comm}
+
+
+# def _run_categorize_job_selenium(job_id, domain, rows):
+#     """`rows`: list of dicts with at least `id` and `keyword`. Fetches
+#     top-3 for every keyword via ONE Selenium browser (tab pool), fanning
+#     each keyword's metadata+info/comm+category+landing/blog work out to a
+#     pool the instant its top-3 lands -- same flow as
+#     exp_category_pipeline/run_experiment.py, just writing results into
+#     Postgres instead of a CSV."""
+#     keywords = [r["keyword"] for r in rows]
+#     records = {}
+
+#     intent_pool = ThreadPoolExecutor(max_workers=INTENT_WORKERS)
+#     pending = []
+
+#     def _submit(keyword, top3):
+#         pending.append(intent_pool.submit(lambda: records.__setitem__(keyword, _process_keyword_selenium(keyword, top3))))
+
+#     try:
+#         serp_fetch.fetch_top3_batch(keywords, num_tabs=serp_fetch.NUM_TABS, on_result=_submit)
+#         for f in pending:
+#             f.result()
+
+#         empty_keywords = [kw for kw in keywords if not records.get(kw, {}).get("top3")]
+#         if empty_keywords:
+#             retry_pending = []
+
+#             def _submit_retry(keyword, top3):
+#                 if top3:
+#                     retry_pending.append(
+#                         intent_pool.submit(lambda: records.__setitem__(keyword, _process_keyword_selenium(keyword, top3)))
+#                     )
+
+#             retry_tabs = min(serp_fetch.NUM_TABS, len(empty_keywords))
+#             serp_fetch.fetch_top3_batch(empty_keywords, num_tabs=retry_tabs, on_result=_submit_retry)
+#             for f in retry_pending:
+#                 f.result()
+#     finally:
+#         intent_pool.shutdown(wait=True)
+#         intent_classifier.close_all_drivers()
+
+#     for row in rows:
+#         row_id, keyword = row["id"], row["keyword"]
+#         record = records.get(keyword, {})
+#         category = record.get("category") or None
+#         try:
+#             if category:
+#                 db.add_category(domain, category)
+#             db.update_keyword_result(
+#                 domain, row_id, category, None, "processed" if category else "no_data",
+#                 meta={"top3": record.get("top3", [])},
+#                 computed_target_type=record.get("target_type"),
+#                 computed_subtype=record.get("subtype"),
+#             )
+#         except Exception as e:
+#             db.update_keyword_result(domain, row_id, None, None, "error", error=str(e))
+#         finally:
+#             db.increment_job_progress(job_id)
+
+#     job = db.get_job(job_id)
+#     if job and job["status"] == "completed":
+#         if db.try_mark_clustering_triggered(job_id):
+#             try:
+#                 categories = db.list_category_names(domain)
+#                 assignment = cluster_grouper.cluster_categories(
+#                     categories,
+#                     location_words=category_namer._LOCATION_WORDS,
+#                     extra_stopwords=category_namer._FILLER_WORDS,
+#                 )
+#                 db.replace_domain_clusters(domain, assignment)
+#             except Exception as e:
+#                 print(f"[hosted_categorize/selenium] cluster error for job {job_id}: {e}")
+
+
+# # =====================================================================
+# # BRIGHT DATA ENGINE -- the original engine, UNCHANGED
+# # =====================================================================
+
+# def _classify_intent(top3_results):
+#     from concurrent.futures import ThreadPoolExecutor
+#     def classify(r):
+#         url = (r or {}).get("url")
+#         title = (r or {}).get("title")
+#         if not url:
+#             return None
+#         try:
+#             return classify_single_result_via_requests(url, title)
+#         except Exception as e:
+#             return {"classification": "Unknown", "confidence": 0, "reason": f"Error: {e}", "url": url}
+
+#     valid_results = (top3_results or [])[:5]
+#     with ThreadPoolExecutor(max_workers=len(valid_results) or 1) as executor:
+#         futures = [executor.submit(classify, r) for r in valid_results]
+#         results = [f.result() for f in futures if f.result() is not None]
+#     return majority_subtype(results)
+
+
+# def _process_one_keyword_bright_data(job_id, domain, row, country_code, intent_pool):
+#     row_id, keyword = row["id"], row["keyword"]
+#     try:
+#         import time
+#         top3 = []
+#         for attempt in range(1, 4):
+#             try:
+#                 top3 = category_checker.get_top3_for_category(keyword, country_code)
+#                 if top3:
+#                     break
+#                 print(f"[hosted_categorize/bright_data] Attempt {attempt} for '{keyword}' returned empty. Retrying...")
+#             except Exception as e:
+#                 print(f"[hosted_categorize/bright_data] Attempt {attempt} for '{keyword}' failed: {e}")
+#                 if attempt == 3:
+#                     raise e
+#             time.sleep(2)
+
+#         if not top3:
+#             db.update_keyword_result(domain, row_id, None, None, "no_data")
+#             return
+
+#         # 1. Fetch metadata (signals) for the top results first
+#         def get_signals(r):
+#             url = (r or {}).get("url")
+#             title = (r or {}).get("title")
+#             if not url:
+#                 return None
+#             from scripts.intent_classifier import fetch_page_via_requests, extract_page_signals
+#             html, err = fetch_page_via_requests(url)
+#             if html:
+#                 sig = extract_page_signals(url, html)
+#                 if not sig.get("title"):
+#                     sig["title"] = title
+#                 return sig
+#             else:
+#                 return {"url": url, "title": title, "fetch_error": err}
+
+#         valid_results = (top3 or [])[:3]
+#         with ThreadPoolExecutor(max_workers=len(valid_results) or 1) as executor:
+#             futures = [executor.submit(get_signals, r) for r in valid_results]
+#             signals_list = [f.result() for f in futures if f.result() is not None]
+#         print(f"DEBUG: signals_list length = {len(signals_list)}")
+#         if signals_list:
+#             print(f"DEBUG: signals_list[0] keys = {signals_list[0].keys()}")
+
+#         # 2. Classify intent (Informational vs Commercial) using the fetched signals
+#         def classify_intent_with_signals(sig):
+#             from scripts.intent_classifier import classify_page_intent
+#             res = classify_page_intent(sig)
+#             res["url"] = sig["url"]
+#             return res
+        
+#         with ThreadPoolExecutor(max_workers=len(signals_list) or 1) as executor:
+#             futures2 = [executor.submit(classify_intent_with_signals, sig) for sig in signals_list]
+#             per_url_results = [f.result() for f in futures2]
+        
+#         from scripts.intent_classifier import majority_subtype
+#         subtype = majority_subtype(per_url_results)
+
+#         # 3. Classify landing vs blog using the fetched signals
+#         category = categorize_from_top3(keyword, top3, domain)
+#         from scripts.landing_blog_classifier import classify_landing_or_blog
+#         target_type = classify_landing_or_blog(signals_list)
+        
+#         # HARD override: a Best/Top category is always a Blog Page, no
+#         # matter what the classifier above decided.
+#         target_type = force_blog_if_best_top(category, target_type)
+#         print(f"DEBUG: target_type={target_type}, subtype={subtype}, category={category}")
+
+#         db.update_keyword_result(
+#             domain, row_id, category, None, "processed" if category else "no_data",
+#             meta={"top3": (top3 or [])[:3]}, computed_target_type=target_type, computed_subtype=subtype,
+#         )
+#     except Exception as e:
+#         db.update_keyword_result(domain, row_id, None, None, "error", error=str(e))
+#     finally:
+#         db.increment_job_progress(job_id)
+
+
+# from scripts import category_assigner  # replaces: from scripts.category_assigner import categorize_from_top3
+
+# BRIGHT_DATA_BATCH_SIZE = 3  # tune against Bright Data zone concurrency + OpenAI rate limits
+
+
+# def _fetch_and_prepare_keyword(row, country_code):
+#     """Phase A -- SERP fetch, signal fetch, intent classification, and
+#     category-NAME derivation (NOT matching). Independent of every other
+#     keyword's result, so safe to run many of these concurrently."""
+#     row_id, keyword = row["id"], row["keyword"]
+#     try:
+#         import time
+#         top3 = []
+#         for attempt in range(1, 4):
+#             try:
+#                 top3 = category_checker.get_top3_for_category(keyword, country_code)
+#                 if top3:
+#                     break
+#                 print(f"[hosted_categorize/bright_data] Attempt {attempt} for '{keyword}' returned empty. Retrying...")
+#             except Exception as e:
+#                 print(f"[hosted_categorize/bright_data] Attempt {attempt} for '{keyword}' failed: {e}")
+#                 if attempt == 3:
+#                     raise e
+#             time.sleep(2)
+
+#         if not top3:
+#             return {"row": row, "status": "no_data"}
+
+#         def get_signals(r):
+#             url = (r or {}).get("url")
+#             title = (r or {}).get("title")
+#             if not url:
+#                 return None
+#             from scripts.intent_classifier import fetch_page_via_requests, extract_page_signals
+#             html, err = fetch_page_via_requests(url)
+#             if html:
+#                 sig = extract_page_signals(url, html)
+#                 if not sig.get("title"):
+#                     sig["title"] = title
+#                 return sig
+#             return {"url": url, "title": title, "fetch_error": err}
+
+#         valid_results = (top3 or [])[:3]
+#         with ThreadPoolExecutor(max_workers=len(valid_results) or 1) as executor:
+#             futures = [executor.submit(get_signals, r) for r in valid_results]
+#             signals_list = [f.result() for f in futures if f.result() is not None]
+
+#         def classify_intent_with_signals(sig):
+#             from scripts.intent_classifier import classify_page_intent
+#             res = classify_page_intent(sig)
+#             res["url"] = sig["url"]
+#             return res
+
+#         with ThreadPoolExecutor(max_workers=len(signals_list) or 1) as executor:
+#             futures2 = [executor.submit(classify_intent_with_signals, sig) for sig in signals_list]
+#             per_url_results = [f.result() for f in futures2]
+
+#         from scripts.intent_classifier import majority_subtype
+#         subtype = majority_subtype(per_url_results)
+
+#         # Derive a candidate category NAME only -- matching against
+#         # existing categories happens later, sequentially, in Phase B.
+#         _, candidate_name, titles = category_assigner.fetch_and_derive_candidate(keyword, top3)
+
+#         from scripts.landing_blog_classifier import classify_landing_or_blog
+#         target_type = classify_landing_or_blog(signals_list)
+#         # Uses candidate_name (pre-match), not the final matched category --
+#         # safe, since Best/Top-ness comes from the SERP titles themselves
+#         # and is preserved whether this keyword creates a new category or
+#         # matches an existing one.
+#         target_type = force_blog_if_best_top(candidate_name, target_type)
+
+#         return {
+#             "row": row, "status": "ok", "top3": top3, "titles": titles,
+#             "candidate_name": candidate_name, "target_type": target_type, "subtype": subtype,
+#         }
+#     except Exception as e:
+#         return {"row": row, "status": "error", "error": str(e)}
+
+
+# def _match_and_finalize_keyword(job_id, domain, prepared):
+#     """Phase B -- the only part that must run strictly in order."""
+#     row = prepared["row"]
+#     row_id = row["id"]
+#     try:
+#         if prepared["status"] == "no_data":
+#             db.update_keyword_result(domain, row_id, None, None, "no_data")
+#             return
+#         if prepared["status"] == "error":
+#             db.update_keyword_result(domain, row_id, None, None, "error", error=prepared["error"])
+#             return
+
+#         category = category_assigner.match_and_save_candidate(
+#             domain, prepared["candidate_name"], prepared["titles"]
+#         )
+#         db.update_keyword_result(
+#             domain, row_id, category, None, "processed" if category else "no_data",
+#             meta={"top3": (prepared.get("top3") or [])[:3]},
+#             computed_target_type=prepared["target_type"],
+#             computed_subtype=prepared["subtype"],
+#         )
+#     except Exception as e:
+#         db.update_keyword_result(domain, row_id, None, None, "error", error=str(e))
+#     finally:
+#         db.increment_job_progress(job_id)
+
+
+# def _run_categorize_job_bright_data(job_id, domain, rows, country_code):
+#     for i in range(0, len(rows), BRIGHT_DATA_BATCH_SIZE):
+#         batch = rows[i:i + BRIGHT_DATA_BATCH_SIZE]
+
+#         # Phase A -- fetch + derive candidate NAME, in parallel.
+#         prepared_by_row_id = {}
+#         with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+#             futures = {
+#                 pool.submit(_fetch_and_prepare_keyword, row, country_code): row
+#                 for row in batch
+#             }
+#             for fut, row in futures.items():
+#                 prepared_by_row_id[row["id"]] = fut.result()
+
+#         # Phase B -- match + write, STRICTLY in original row order, not
+#         # whatever order the threads finished in.
+#         for row in batch:
+#             _match_and_finalize_keyword(job_id, domain, prepared_by_row_id[row["id"]])
+
+#     job = db.get_job(job_id)
+#     if job and job["status"] == "completed":
+#         if db.try_mark_clustering_triggered(job_id):
+#             try:
+#                 cluster_project(domain)
+#             except Exception as e:
+#                 print(f"[hosted_categorize/bright_data] cluster error for job {job_id}: {e}")
+# # =====================================================================
+# # Dispatcher -- SAME entry point app.py already calls, unchanged signature
+# # =====================================================================
+
+# def run_categorize_job(job_id, domain, rows, country_code):
+#     """Runs SYNCHRONOUSLY in the calling thread -- callers (app.py) are
+#     responsible for launching this in a background thread so the HTTP
+#     request that triggered it returns immediately. `rows`: list of dicts
+#     with at least `id` and `keyword` (e.g. from
+#     db.get_uncategorized_keyword_rows())."""
+#     if not _category_lock.acquire(blocking=False):
+#         db.set_job_status(job_id, "failed", error="Another categorization job is already running on this server -- try again shortly.")
+#         return
+
+#     try:
+#         if _use_selenium_pipeline():
+#             _run_categorize_job_selenium(job_id, domain, rows)
+#         else:
+#             _run_categorize_job_bright_data(job_id, domain, rows, country_code)
+#     finally:
+#         _category_lock.release()
+
+
+# def run_categorize_job_in_background(job_id, domain, rows, country_code):
+#     """Fire-and-forget entry point for app.py -- starts run_categorize_job()
+#     on a daemon thread and returns immediately."""
+#     thread = threading.Thread(
+#         target=run_categorize_job, args=(job_id, domain, rows, country_code), daemon=True,
+#     )
+#     thread.start()
+
+
 """
 hosted_categorize.py
 
@@ -10,7 +473,7 @@ set_job_status/increment_job_progress/get_job).
 Two engines live here, switched by the USE_SELENIUM_PIPELINE env var:
 
   SELENIUM ENGINE (default, USE_SELENIUM_PIPELINE unset or true)
-    Uses scripts/exp_category_pipeline UNCHANGED -- serp_fetch.py's real
+    Uses scripts/exp_category_pipeline UNCHANGED -- serp_fetch.py's realx
     Selenium tab pool for SERP fetch, scripts/intent_classifier.py's real
     headless-Chrome fetch + OpenAI classification for metadata/info-
     comm, category_namer.py's independent (no cross-referencing)
@@ -41,6 +504,7 @@ CPU/Chrome sessions or race on the same project's categories.
 
 import os
 import threading
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
 from core import db
@@ -53,8 +517,8 @@ from scripts.cluster_assigner import cluster_project
 from scripts import intent_classifier
 from scripts.exp_category_pipeline import serp_fetch, category_namer, classifiers, cluster_grouper
 
+# INTENT_WORKERS = 8
 INTENT_WORKERS = 15
-
 # Only one categorize job runs at a time across this whole process --
 # see module docstring for why both engines need this.
 _category_lock = threading.Lock()
@@ -94,9 +558,10 @@ def _process_keyword_selenium(keyword, top3):
             else:
                 signals = {"url": url, "title": title, "fetch_error": fetch_error}
             signals_list.append(signals)
-            per_url_results.append(intent_classifier.classify_page_intent(signals))
         except Exception as e:
             print(f"[hosted_categorize/selenium] intent error '{keyword}' / '{url}': {e}")
+
+    per_url_results = intent_classifier.classify_batch_intent(signals_list)
 
     info_comm = intent_classifier.majority_subtype(per_url_results)
 
@@ -215,95 +680,193 @@ def _classify_intent(top3_results):
     return majority_subtype(results)
 
 
-def _process_one_keyword_bright_data(job_id, domain, row, country_code, intent_pool):
-    row_id, keyword = row["id"], row["keyword"]
-    try:
-        import time
-        top3 = []
-        for attempt in range(1, 4):
-            try:
-                top3 = category_checker.get_top3_for_category(keyword, country_code)
-                if top3:
-                    break
-                print(f"[hosted_categorize/bright_data] Attempt {attempt} for '{keyword}' returned empty. Retrying...")
-            except Exception as e:
-                print(f"[hosted_categorize/bright_data] Attempt {attempt} for '{keyword}' failed: {e}")
-                if attempt == 3:
-                    raise e
-            time.sleep(2)
+def _fetch_metadata_for_keyword(keyword, country_code):
+    import time
+    top3 = []
+    max_attempts = 5
+    for attempt in range(1, max_attempts + 1):
+        try:
+            top3 = category_checker.get_top3_for_category(keyword, country_code)
+            if top3:
+                break
+            print(f"[hosted_categorize/scraping] Attempt {attempt} for '{keyword}' returned empty. Retrying...")
+        except Exception as e:
+            print(f"[hosted_categorize/scraping] Attempt {attempt} for '{keyword}' failed: {e}")
+            if attempt == max_attempts:
+                raise e
+        time.sleep(2)
 
-        if not top3:
-            db.update_keyword_result(domain, row_id, None, None, "no_data")
-            return
+    if not top3:
+        return None
 
-        # 1. Fetch metadata (signals) for the top results first
-        def get_signals(r):
-            url = (r or {}).get("url")
-            title = (r or {}).get("title")
-            if not url:
-                return None
-            from scripts.intent_classifier import fetch_page_via_requests, extract_page_signals
-            html, err = fetch_page_via_requests(url)
-            if html:
-                sig = extract_page_signals(url, html)
-                if not sig.get("title"):
-                    sig["title"] = title
-                return sig
-            else:
-                return {"url": url, "title": title, "fetch_error": err}
+    def get_signals(r):
+        url = (r or {}).get("url")
+        title = (r or {}).get("title")
+        if not url:
+            return None
+        from scripts.intent_classifier import fetch_page_via_requests, extract_page_signals
+        html, err = fetch_page_via_requests(url)
+        if html:
+            sig = extract_page_signals(url, html)
+            if not sig.get("title"):
+                sig["title"] = title
+            return sig
+        else:
+            return {"url": url, "title": title, "fetch_error": err}
 
-        valid_results = top3[:5]
-        with ThreadPoolExecutor(max_workers=len(valid_results) or 1) as executor:
-            futures = [executor.submit(get_signals, r) for r in valid_results]
-            signals_list = [f.result() for f in futures if f.result() is not None]
-        print(f"DEBUG: signals_list length = {len(signals_list)}")
-        if signals_list:
-            print(f"DEBUG: signals_list[0] keys = {signals_list[0].keys()}")
+    valid_results = top3[:5]
+    with ThreadPoolExecutor(max_workers=len(valid_results) or 1) as executor:
+        futures = [executor.submit(get_signals, r) for r in valid_results]
+        signals_list = [f.result() for f in futures if f.result() is not None]
 
-        # 2. Classify intent (Informational vs Commercial) using the fetched signals
-        def classify_intent_with_signals(sig):
-            from scripts.intent_classifier import classify_page_intent
-            res = classify_page_intent(sig)
-            res["url"] = sig["url"]
-            return res
-        
-        with ThreadPoolExecutor(max_workers=len(signals_list) or 1) as executor:
-            futures2 = [executor.submit(classify_intent_with_signals, sig) for sig in signals_list]
-            per_url_results = [f.result() for f in futures2]
-        
-        from scripts.intent_classifier import majority_subtype
-        subtype = majority_subtype(per_url_results)
+    return {"top3": top3, "signals_list": signals_list}
 
-        # 3. Classify landing vs blog using the fetched signals
-        category = categorize_from_top3(keyword, top3, domain)
-        from scripts.landing_blog_classifier import classify_landing_or_blog
-        target_type = classify_landing_or_blog(signals_list)
-        
-        # HARD override: a Best/Top category is always a Blog Page, no
-        # matter what the classifier above decided.
-        target_type = force_blog_if_best_top(category, target_type)
-        print(f"DEBUG: target_type={target_type}, subtype={subtype}, category={category}")
 
-        db.update_keyword_result(
-            domain, row_id, category, None, "processed" if category else "no_data",
-            meta={"top3": top3}, computed_target_type=target_type, computed_subtype=subtype,
-        )
-    except Exception as e:
-        db.update_keyword_result(domain, row_id, None, None, "error", error=str(e))
-    finally:
-        db.increment_job_progress(job_id)
+CHUNK_SIZE = 100
 
 
 def _run_categorize_job_bright_data(job_id, domain, rows, country_code):
-    with ThreadPoolExecutor(max_workers=INTENT_WORKERS) as intent_pool:
-        for row in rows:
-            _process_one_keyword_bright_data(job_id, domain, row, country_code, intent_pool)
+    from scripts.intent_classifier import majority_subtype
+    from scripts.landing_blog_classifier import force_blog_if_best_top, classify_landing_or_blog
 
+    for chunk_idx, i in enumerate(range(0, len(rows), CHUNK_SIZE), start=1):
+        chunk_rows = rows[i:i + CHUNK_SIZE]
+        print(f"[hosted_categorize/bright_data] Processing batch {chunk_idx} ({len(chunk_rows)} keywords)...")
+
+        # Phase 1: Concurrent Metadata Fetching for current 100 keywords
+        metadata_map = {}
+        missing_rows = []
+        with ThreadPoolExecutor(max_workers=INTENT_WORKERS) as pool:
+            future_to_row = {
+                pool.submit(_fetch_metadata_for_keyword, row["keyword"], country_code): row
+                for row in chunk_rows
+            }
+            for future in future_to_row:
+                row = future_to_row[future]
+                try:
+                    res = future.result()
+                    if res:
+                        metadata_map[row["keyword"]] = res
+                    else:
+                        missing_rows.append(row)
+                except Exception as e:
+                    missing_rows.append(row)
+
+        # Retry loop: retry up to 5 times for keywords that failed to get metadata
+        MAX_FETCH_RETRIES = 5
+        import time
+        for attempt in range(1, MAX_FETCH_RETRIES + 1):
+            if not missing_rows:
+                break
+            print(f"[hosted_categorize/bright_data] Retry attempt {attempt}/{MAX_FETCH_RETRIES} for {len(missing_rows)} missing keywords...")
+            time.sleep(2 * attempt)  # increasing backoff: 2s, 4s, 6s, 8s, 10s
+            still_missing = []
+            with ThreadPoolExecutor(max_workers=min(INTENT_WORKERS, len(missing_rows))) as retry_pool:
+                retry_futures = {
+                    retry_pool.submit(_fetch_metadata_for_keyword, row["keyword"], country_code): row
+                    for row in missing_rows
+                }
+                for future in retry_futures:
+                    row = retry_futures[future]
+                    try:
+                        res = future.result()
+                        if res:
+                            metadata_map[row["keyword"]] = res
+                        else:
+                            still_missing.append(row)
+                    except Exception:
+                        still_missing.append(row)
+            missing_rows = still_missing
+
+        # After all retries exhausted, mark remaining as no_data
+        for row in missing_rows:
+            db.update_keyword_result(domain, row["id"], None, None, "no_data")
+            db.increment_job_progress(job_id)
+
+        # Phase 2: Category, Target Type & Subtype Classification
+        valid_rows = [r for r in chunk_rows if r["keyword"] in metadata_map]
+
+        def _process_single_row(row):
+            kw = row["keyword"]
+            row_id = row["id"]
+            top3 = metadata_map[kw]["top3"]
+            signals_list = metadata_map[kw]["signals_list"]
+
+            # Intent classification (subtype)
+            per_url_results = intent_classifier.classify_batch_intent(signals_list)
+            subtype = majority_subtype(per_url_results)
+
+            # Categorization
+            try:
+                category, meta = category_checker.categorize_keyword(
+                    kw, domain, country_code=country_code, pre_fetched_top3=top3
+                )
+            except Exception as e:
+                print(f"[hosted_categorize/bright_data] Categorization failed for {kw}: {e}")
+                category = None
+
+            if category:
+                # Target type classification
+                target_type = classify_landing_or_blog(signals_list)
+                target_type = force_blog_if_best_top(category, target_type)
+
+                db.update_keyword_result(
+                    domain, row_id, category, None, "processed",
+                    meta={"top3": top3}, computed_target_type=target_type, computed_subtype=subtype,
+                )
+            else:
+                db.update_keyword_result(
+                    domain, row_id, None, None, "no_data",
+                    meta={"top3": top3}, computed_target_type=None, computed_subtype=subtype,
+                )
+            db.increment_job_progress(job_id)
+            return {
+                "row_id": row_id,
+                "category": category,
+                "target_type": target_type if category else None,
+                "subtype": subtype,
+                "top3": top3,
+            }
+
+        # Process Phase 2 in parallel across 10 workers
+        batch_results = []
+        with ThreadPoolExecutor(max_workers=10) as cat_pool:
+            futures = [cat_pool.submit(_process_single_row, row) for row in valid_rows]
+            for f in futures:
+                res = f.result()
+                if res:
+                    batch_results.append(res)
+
+        # Phase 3: Low-count category fallback (<3 count in batch) - Runs BEFORE Clustering
+        cat_counts = Counter(item["category"] for item in batch_results if item.get("category"))
+        if cat_counts:
+            top_category, max_freq = cat_counts.most_common(1)[0]
+            rare_categories = {c for c, count in cat_counts.items() if count < 3 and c != top_category}
+            if rare_categories and top_category:
+                print(f"[hosted_categorize/bright_data] Batch fallback: categories {rare_categories} (<3 count) falling back to top category '{top_category}'")
+                for item in batch_results:
+                    if item.get("category") in rare_categories:
+                        db.update_keyword_result(
+                            domain, item["row_id"], top_category, None, "processed",
+                            meta={"top3": item.get("top3")},
+                            computed_target_type=item.get("target_type"),
+                            computed_subtype=item.get("subtype")
+                        )
+
+        # Phase 4: All Clustering happens AFTER fallback is complete
+        try:
+            assignment = category_checker.cluster_all_categories(domain)
+            db.replace_domain_clusters(domain, assignment)
+        except Exception as e:
+            print(f"[hosted_categorize/bright_data] Batch cluster sync error: {e}")
+
+    # Phase 3: Final Clustering Sync
     job = db.get_job(job_id)
     if job and job["status"] == "completed":
         if db.try_mark_clustering_triggered(job_id):
             try:
-                cluster_project(domain)
+                assignment = category_checker.cluster_all_categories(domain)
+                db.replace_domain_clusters(domain, assignment)
             except Exception as e:
                 print(f"[hosted_categorize/bright_data] cluster error for job {job_id}: {e}")
 
