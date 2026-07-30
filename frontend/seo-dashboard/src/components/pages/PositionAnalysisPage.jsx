@@ -509,7 +509,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
 
   const handleAiAnalysis = async (e, forcedTabKey) => {
     if (e && e.preventDefault) e.preventDefault();
-    if (!topKeywords.length || !activeProject) return;
+    if (!activeProject) return;
     const tabKey = forcedTabKey || aiTab.toLowerCase();
     if (forcedTabKey) {
       let targetTab = forcedTabKey.charAt(0).toUpperCase() + forcedTabKey.slice(1);
@@ -518,30 +518,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
       }
       setAiTab(targetTab);
     }
-    setAnalyzingTabs(prev => ({ ...prev, [tabKey]: true }));
-    setAnalysisError('');
-    try {
-      const results = [];
-      const domain = activeProject.domain || activeProject.name || 'socialoffline.in';
-      const countryObj = COUNTRY_OPTIONS.find(c => c.code === selectedRegion);
-      const countryName = countryObj ? countryObj.name : selectedRegion || 'India';
-      for (const kw of topKeywords) {
-        const data = await runAiAnalysis(activeProject.slug, kw, tabKey, domain, countryName);
-        results.push({ keyword: kw, ...data.result });
-      }
-      setTabResults(prev => ({ ...prev, [tabKey]: results }));
-    } catch (err) {
-      setAnalysisError(err.message);
-    } finally {
-      setAnalyzingTabs(prev => ({ ...prev, [tabKey]: false }));
-    }
-  };
-  */
-
-  const handleAiAnalysis = async (e) => {
-    if (e && e.preventDefault) e.preventDefault();
-    if (!activeProject) return;
-    const tabKey = aiTab.toLowerCase();
     setAnalyzingTabs(prev => ({ ...prev, [tabKey]: true }));
     setAnalysisError('');
     try {
