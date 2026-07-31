@@ -1178,122 +1178,192 @@ function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedPro
 
 function ChooseProjectModal({ open, onClose, onApply, projects }) {
   const [projectSlug, setProjectSlug] = useState('');
-  const [selectedCluster, setSelectedCluster] = useState('');
-  const [selectedCategories, setSelectedCategories] = useState([]);
-  const [clusters, setClusters] = useState([]);
-  const [categoryMap, setCategoryMap] = useState({}); // cluster → [categories]
   const [loadingKw, setLoadingKw] = useState(false);
-  const [catDropdownOpen, setCatDropdownOpen] = useState(false);
-  const catDropdownRef = useRef(null);
+
+  // Tree data structure: array of { cluster: string, categories: string[] }
+  const [treeData, setTreeData] = useState([]);
+  
+  // Selection state
+  const [selectedClusters, setSelectedClusters] = useState(new Set());
+  const [selectedCategories, setSelectedCategories] = useState(new Set()); // values are `${cluster}:::${cat}`
+
+  // Expanded clusters state
+  const [expandedClusters, setExpandedClusters] = useState(new Set());
+
+  // Tree search query
+  const [searchQuery, setSearchQuery] = useState('');
 
   const resetForm = () => {
-    setProjectSlug(''); setSelectedCluster(''); setSelectedCategories([]);
-    setClusters([]); setCategoryMap({});
+    setProjectSlug('');
+    setTreeData([]);
+    setSelectedClusters(new Set());
+    setSelectedCategories(new Set());
+    setExpandedClusters(new Set());
+    setSearchQuery('');
   };
 
   const handleClose = () => { resetForm(); onClose(); };
 
-  // Fetch keyword rows when project changes → derive clusters & categories
+  // Fetch keywords when project changes -> build cluster & category tree
   useEffect(() => {
-    if (!projectSlug) { setClusters([]); setCategoryMap({}); setSelectedCluster(''); setSelectedCategories([]); return; }
+    if (!projectSlug) {
+      resetForm();
+      return;
+    }
     let cancelled = false;
     setLoadingKw(true);
     fetchKeywordRows(projectSlug).then(rows => {
       if (cancelled) return;
-      const clusterSet = new Set();
-      const cMap = {};
+      
+      const map = {};
       rows.forEach(r => {
-        if (r.cluster) {
-          clusterSet.add(r.cluster);
-          if (!cMap[r.cluster]) cMap[r.cluster] = new Set();
-          if (r.category) cMap[r.cluster].add(r.category);
+        const clusterName = r.cluster || 'General';
+        if (!map[clusterName]) map[clusterName] = new Set();
+        if (r.category) {
+          map[clusterName].add(r.category);
         }
       });
-      const clusterList = [...clusterSet].sort();
-      const catMapArr = {};
-      Object.keys(cMap).forEach(k => { catMapArr[k] = [...cMap[k]].sort(); });
-      setClusters(clusterList);
-      setCategoryMap(catMapArr);
-      setSelectedCluster('');
-      setSelectedCategories([]);
-    }).finally(() => { if (!cancelled) setLoadingKw(false); });
+
+      const derivedTree = Object.keys(map).sort().map(clusterName => ({
+        cluster: clusterName,
+        categories: Array.from(map[clusterName]).sort(),
+      }));
+
+      setTreeData(derivedTree);
+      setExpandedClusters(new Set(derivedTree.map(t => t.cluster)));
+      setSelectedClusters(new Set());
+      setSelectedCategories(new Set());
+    }).finally(() => {
+      if (!cancelled) setLoadingKw(false);
+    });
     return () => { cancelled = true; };
   }, [projectSlug]);
 
-  // Reset categories when cluster changes
-  useEffect(() => { setSelectedCategories([]); }, [selectedCluster]);
+  const toggleClusterExpand = (clusterName) => {
+    setExpandedClusters(prev => {
+      const next = new Set(prev);
+      if (next.has(clusterName)) next.delete(clusterName);
+      else next.add(clusterName);
+      return next;
+    });
+  };
 
-  const portalRef = useRef(null);
+  const isClusterFullySelected = (item) => {
+    if (selectedClusters.has(item.cluster)) return true;
+    if (item.categories.length === 0) return false;
+    return item.categories.every(cat => selectedCategories.has(`${item.cluster}:::${cat}`));
+  };
 
-  // Close category dropdown on outside click
-  useEffect(() => {
-    if (!catDropdownOpen) return;
-    const handler = (e) => {
-      if (
-        catDropdownRef.current && !catDropdownRef.current.contains(e.target) &&
-        portalRef.current && !portalRef.current.contains(e.target)
-      ) {
-        setCatDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [catDropdownOpen]);
+  const isClusterPartial = (item) => {
+    if (isClusterFullySelected(item)) return false;
+    return item.categories.some(cat => selectedCategories.has(`${item.cluster}:::${cat}`));
+  };
 
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+  const toggleClusterSelection = (item) => {
+    const isFull = isClusterFullySelected(item);
+    setSelectedClusters(prevC => {
+      const nextC = new Set(prevC);
+      if (isFull) nextC.delete(item.cluster);
+      else nextC.add(item.cluster);
+      return nextC;
+    });
 
-  const updateDropdownPos = () => {
-    if (catDropdownRef.current) {
-      const rect = catDropdownRef.current.getBoundingClientRect();
-      setDropdownPos({
-        top: rect.bottom + 4,
-        left: rect.left,
-        width: rect.width,
+    setSelectedCategories(prevCat => {
+      const nextCat = new Set(prevCat);
+      item.categories.forEach(cat => {
+        const key = `${item.cluster}:::${cat}`;
+        if (isFull) nextCat.delete(key);
+        else nextCat.add(key);
       });
-    }
+      return nextCat;
+    });
   };
 
-  const toggleDropdown = () => {
-    if (!catDropdownOpen) {
-      updateDropdownPos();
-    }
-    setCatDropdownOpen(prev => !prev);
+  const toggleCategorySelection = (clusterName, catName, clusterItem) => {
+    const key = `${clusterName}:::${catName}`;
+    const willSelect = !selectedCategories.has(key);
+
+    setSelectedCategories(prevCat => {
+      const nextCat = new Set(prevCat);
+      if (willSelect) nextCat.add(key);
+      else nextCat.delete(key);
+
+      const allSelectedNow = clusterItem.categories.length > 0 && clusterItem.categories.every(c => nextCat.has(`${clusterName}:::${c}`));
+      setSelectedClusters(prevClus => {
+        const nextClus = new Set(prevClus);
+        if (allSelectedNow) nextClus.add(clusterName);
+        else nextClus.delete(clusterName);
+        return nextClus;
+      });
+
+      return nextCat;
+    });
   };
 
-  useEffect(() => {
-    if (catDropdownOpen) {
-      updateDropdownPos();
-      window.addEventListener('scroll', updateDropdownPos, true);
-      window.addEventListener('resize', updateDropdownPos);
-      return () => {
-        window.removeEventListener('scroll', updateDropdownPos, true);
-        window.removeEventListener('resize', updateDropdownPos);
-      };
-    }
-  }, [catDropdownOpen]);
+  const handleSelectAll = () => {
+    const allC = new Set();
+    const allCat = new Set();
+    treeData.forEach(item => {
+      allC.add(item.cluster);
+      item.categories.forEach(cat => allCat.add(`${item.cluster}:::${cat}`));
+    });
+    setSelectedClusters(allC);
+    setSelectedCategories(allCat);
+  };
 
-  const availableCategories = selectedCluster ? (categoryMap[selectedCluster] || []) : [];
+  const handleClearAll = () => {
+    setSelectedClusters(new Set());
+    setSelectedCategories(new Set());
+  };
 
-  const toggleCategory = (cat) => {
-    setSelectedCategories(prev =>
-      prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
-    );
+  const handleExpandAll = () => {
+    setExpandedClusters(new Set(treeData.map(t => t.cluster)));
+  };
+
+  const handleCollapseAll = () => {
+    setExpandedClusters(new Set());
   };
 
   const handleApply = () => {
     const project = projects.find(p => p.slug === projectSlug);
     if (!project) return;
+
+    const clustersList = Array.from(selectedClusters);
+    const categoriesList = Array.from(selectedCategories).map(key => key.split(':::')[1]).filter(Boolean);
+
     onApply({
       project,
-      cluster: selectedCluster || null,
-      categories: selectedCategories.length > 0 ? selectedCategories : null,
+      clusters: clustersList.length > 0 ? clustersList : null,
+      categories: categoriesList.length > 0 ? categoriesList : null,
     });
     handleClose();
   };
 
+  const filteredTree = treeData.filter(item => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    const matchCluster = item.cluster.toLowerCase().includes(q);
+    const matchCategory = item.categories.some(cat => cat.toLowerCase().includes(q));
+    return matchCluster || matchCategory;
+  });
+
+  const totalSelectedCount = selectedClusters.size + selectedCategories.size;
+
   return (
-    <Modal open={open} onClose={handleClose} title="Auto-generated Competitors"
-      footer={<><Btn variant="primary" onClick={handleApply} style={!projectSlug ? { opacity: 0.5, pointerEvents: 'none' } : {}}>Apply</Btn><Btn variant="outline" onClick={handleClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
+    <Modal
+      open={open}
+      onClose={handleClose}
+      title="Auto-generated Competitors"
+      footer={
+        <>
+          <Btn variant="primary" onClick={handleApply} style={!projectSlug ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
+            Apply {totalSelectedCount > 0 ? `(${totalSelectedCount} Selected)` : ''}
+          </Btn>
+          <Btn variant="outline" onClick={handleClose} style={{ flex: 'none', padding: '10px 28px' }}>
+            Cancel
+          </Btn>
+        </>
+      }
     >
       {/* Project selector */}
       <Select
@@ -1301,140 +1371,247 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
         placeholder={projects.length ? 'Select a project' : 'No projects yet — add one in the Domain tab'}
         value={projectSlug}
         onChange={setProjectSlug}
-        options={projects.map(p => ({ value: p.slug, label: p.name }))}
+        options={projects.map(p => ({ value: p.slug, label: `${p.name} (${p.domain || p.slug})` }))}
       />
 
       {loadingKw && (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 0' }}>Loading clusters…</div>
-      )}
-
-      {/* Cluster selector */}
-      {projectSlug && clusters.length > 0 && (
-        <Select
-          label="Choose Cluster"
-          placeholder="Select a cluster"
-          value={selectedCluster}
-          onChange={setSelectedCluster}
-          options={clusters.map(c => ({ value: c, label: c }))}
-        />
-      )}
-      {projectSlug && !loadingKw && clusters.length === 0 && (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 0' }}>No clusters found for this project.</div>
-      )}
-
-      {/* Multi-select Category dropdown */}
-      {selectedCluster && availableCategories.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Choose Category</span>
-          <div ref={catDropdownRef} style={{ position: 'relative' }}>
-            <div
-              onClick={toggleDropdown}
-              style={{
-                width: '100%', border: '1.5px solid #d1d5db', borderRadius: 8,
-                padding: '8px 36px 8px 14px', fontSize: 13, fontFamily: 'var(--font-body)',
-                background: '#fff', cursor: 'pointer', minHeight: 40,
-                display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center',
-                boxSizing: 'border-box',
-              }}
-            >
-              {selectedCategories.length === 0 ? (
-                <span style={{ color: 'var(--text-muted)' }}>Select categories</span>
-              ) : selectedCategories.map(cat => (
-                <span key={cat} style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  background: '#ede9fe', color: '#7c3aed', borderRadius: 12,
-                  padding: '2px 10px', fontSize: 12, fontWeight: 600,
-                }}>
-                  {cat}
-                  <X size={12} style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); toggleCategory(cat); }} />
-                </span>
-              ))}
-            </div>
-            <ChevronDown size={14} color="var(--text-muted)" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-
-            {catDropdownOpen && createPortal(
-              <>
-                <div
-                  style={{ position: 'fixed', inset: 0, zIndex: 99998 }}
-                  onClick={() => setCatDropdownOpen(false)}
-                />
-                <div
-                  ref={portalRef}
-                  style={{
-                    position: 'fixed',
-                    top: dropdownPos.top,
-                    left: dropdownPos.left,
-                    width: dropdownPos.width,
-                    zIndex: 99999,
-                    background: '#fff',
-                    border: '1.5px solid #d1d5db',
-                    borderRadius: 8,
-                    boxShadow: '0 8px 30px rgba(0,0,0,0.18)',
-                    maxHeight: 280,
-                    overflowY: 'auto',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    boxSizing: 'border-box',
-                  }}
-                >
-                  <div style={{
-                    padding: '8px 12px', borderBottom: '1px solid #e5e7eb',
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    background: '#f9fafb', sticky: 'top', position: 'sticky', top: 0, zIndex: 2,
-                  }}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedCategories(availableCategories)}
-                      style={{ background: 'none', border: 'none', color: '#7c3aed', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}
-                    >
-                      Select All ({availableCategories.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedCategories([])}
-                      style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0 }}
-                    >
-                      Clear
-                    </button>
-                  </div>
-
-                  {availableCategories.map(cat => {
-                    const isSelected = selectedCategories.includes(cat);
-                    return (
-                      <div
-                        key={cat}
-                        onClick={() => toggleCategory(cat)}
-                        style={{
-                          padding: '9px 14px', fontSize: 13, cursor: 'pointer',
-                          display: 'flex', alignItems: 'center', gap: 8,
-                          background: isSelected ? '#f5f3ff' : 'transparent',
-                          borderBottom: '1px solid #f9fafb',
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.background = isSelected ? '#ede9fe' : '#f9fafb'}
-                        onMouseLeave={e => e.currentTarget.style.background = isSelected ? '#f5f3ff' : 'transparent'}
-                      >
-                        <div style={{
-                          width: 16, height: 16, borderRadius: 3,
-                          border: isSelected ? '2px solid #7c3aed' : '2px solid #d1d5db',
-                          background: isSelected ? '#7c3aed' : '#fff',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          flexShrink: 0,
-                        }}>
-                          {isSelected && <Check size={11} color="#fff" strokeWidth={3} />}
-                        </div>
-                        <span style={{ color: 'var(--text-primary)', fontWeight: isSelected ? 600 : 400 }}>{cat}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>,
-              document.body
-            )}
-          </div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '12px 0', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <RefreshCw size={14} className="spin-icon" /> Loading project hierarchy tree…
         </div>
       )}
-      {selectedCluster && availableCategories.length === 0 && (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 0' }}>No categories found under this cluster.</div>
+
+      {projectSlug && !loadingKw && treeData.length === 0 && (
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '12px 0' }}>
+          No clusters or categories found for this project.
+        </div>
+      )}
+
+      {/* HIERARCHY TREE VIEW */}
+      {projectSlug && treeData.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+          {/* Header Controls: Search + Quick Action Buttons */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+              Select Clusters & Categories
+            </span>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 12 }}>
+              <button
+                type="button"
+                onClick={expandedClusters.size === treeData.length ? handleCollapseAll : handleExpandAll}
+                style={{ background: 'none', border: 'none', color: '#7c3aed', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+              >
+                {expandedClusters.size === treeData.length ? 'Collapse All' : 'Expand All'}
+              </button>
+              <span style={{ color: '#d1d5db' }}>|</span>
+              <button
+                type="button"
+                onClick={handleSelectAll}
+                style={{ background: 'none', border: 'none', color: '#7c3aed', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+              >
+                Select All
+              </button>
+              <span style={{ color: '#d1d5db' }}>|</span>
+              <button
+                type="button"
+                onClick={handleClearAll}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+
+          {/* Search Bar */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: 'var(--surface-2, #f8fafc)', border: '1px solid var(--border, #e2e8f0)',
+            borderRadius: 6, padding: '6px 10px'
+          }}>
+            <Search size={13} color="var(--text-muted)" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Filter clusters or categories..."
+              style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: 12.5, color: 'var(--text-primary)', width: '100%' }}
+            />
+            {searchQuery && (
+              <X size={13} color="var(--text-muted)" style={{ cursor: 'pointer' }} onClick={() => setSearchQuery('')} />
+            )}
+          </div>
+
+          {/* Scrollable Tree Container */}
+          <div style={{
+            border: '1.5px solid #d1d5db',
+            borderRadius: 8,
+            background: '#ffffff',
+            maxHeight: 280,
+            overflowY: 'auto',
+            padding: '8px 12px',
+            fontFamily: 'var(--font-body, system-ui, sans-serif)',
+          }}>
+            {filteredTree.map(item => {
+              const isExpanded = expandedClusters.has(item.cluster) || Boolean(searchQuery);
+              const isFull = isClusterFullySelected(item);
+              const isPartial = isClusterPartial(item);
+
+              const visibleCategories = searchQuery.trim()
+                ? item.categories.filter(cat => cat.toLowerCase().includes(searchQuery.toLowerCase()) || item.cluster.toLowerCase().includes(searchQuery.toLowerCase()))
+                : item.categories;
+
+              return (
+                <div key={item.cluster} style={{ marginBottom: 6 }}>
+                  {/* Cluster Parent Row */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 6px',
+                    borderRadius: 4,
+                    userSelect: 'none',
+                    backgroundColor: isFull ? '#f5f3ff' : (isPartial ? '#faf5ff' : 'transparent'),
+                    transition: 'background 0.12s'
+                  }}>
+                    {/* Expand/Collapse [+]/[-] Button */}
+                    <button
+                      type="button"
+                      onClick={() => toggleClusterExpand(item.cluster)}
+                      style={{
+                        width: 18,
+                        height: 18,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: '1px solid #94a3b8',
+                        borderRadius: 3,
+                        background: '#ffffff',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        fontWeight: 800,
+                        color: '#334155',
+                        padding: 0,
+                        lineHeight: 1,
+                        flexShrink: 0
+                      }}
+                    >
+                      {isExpanded ? '−' : '+'}
+                    </button>
+
+                    {/* Cluster Multi-select Checkbox */}
+                    <div
+                      onClick={() => toggleClusterSelection(item)}
+                      style={{
+                        width: 16,
+                        height: 16,
+                        borderRadius: 3,
+                        border: isFull || isPartial ? '2px solid #7c3aed' : '2px solid #94a3b8',
+                        background: isFull ? '#7c3aed' : (isPartial ? '#ede9fe' : '#ffffff'),
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        flexShrink: 0
+                      }}
+                    >
+                      {isFull && <Check size={11} color="#ffffff" strokeWidth={3} />}
+                      {isPartial && <div style={{ width: 8, height: 2, background: '#7c3aed', borderRadius: 1 }} />}
+                    </div>
+
+                    {/* Folder Icon & Cluster Label */}
+                    <div
+                      onClick={() => toggleClusterExpand(item.cluster)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        cursor: 'pointer',
+                        flex: 1,
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: '#1e293b'
+                      }}
+                    >
+                      <span style={{ fontSize: 14 }}>{isExpanded ? '📂' : '📁'}</span>
+                      <span>{item.cluster}</span>
+                      <span style={{ fontSize: 11.5, color: '#64748b', fontWeight: 500 }}>
+                        ({item.categories.length})
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Child Categories (Indented) */}
+                  {isExpanded && (
+                    <div style={{
+                      marginLeft: 15,
+                      paddingLeft: 12,
+                      borderLeft: '1.5px dashed #cbd5e1',
+                      marginTop: 2,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4
+                    }}>
+                      {visibleCategories.length > 0 ? (
+                        visibleCategories.map(cat => {
+                          const key = `${item.cluster}:::${cat}`;
+                          const isCatSelected = selectedCategories.has(key);
+
+                          return (
+                            <div
+                              key={cat}
+                              onClick={() => toggleCategorySelection(item.cluster, cat, item)}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 8,
+                                padding: '3px 8px',
+                                borderRadius: 4,
+                                cursor: 'pointer',
+                                userSelect: 'none',
+                                backgroundColor: isCatSelected ? '#eff6ff' : 'transparent',
+                                transition: 'background 0.12s'
+                              }}
+                              onMouseEnter={e => { if (!isCatSelected) e.currentTarget.style.backgroundColor = '#f8fafc'; }}
+                              onMouseLeave={e => { if (!isCatSelected) e.currentTarget.style.backgroundColor = 'transparent'; }}
+                            >
+                              {/* Category Checkbox */}
+                              <div style={{
+                                width: 15,
+                                height: 15,
+                                borderRadius: 3,
+                                border: isCatSelected ? '2px solid #2563eb' : '2px solid #cbd5e1',
+                                background: isCatSelected ? '#2563eb' : '#ffffff',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0
+                              }}>
+                                {isCatSelected && <Check size={10} color="#ffffff" strokeWidth={3} />}
+                              </div>
+
+                              {/* Icon & Category Label */}
+                              <span style={{ fontSize: 12, color: '#475569' }}>🏷️</span>
+                              <span style={{
+                                fontSize: 12.5,
+                                fontWeight: isCatSelected ? 600 : 400,
+                                color: isCatSelected ? '#1e40af' : '#334155'
+                              }}>
+                                {cat}
+                              </span>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div style={{ fontSize: 11.5, color: '#94a3b8', fontStyle: 'italic', padding: '2px 8px' }}>
+                          No categories match "{searchQuery}"
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </Modal>
   );
@@ -4766,21 +4943,24 @@ export default function ProjectSetupPage({ tab }) {
     return () => { cancelled = true; };
   }, [selectedCompetitorProject?.slug]);
 
-  const handleChooseProjectApply = async ({ project, cluster, categories }) => {
+  const handleChooseProjectApply = async ({ project, cluster, clusters, categories }) => {
     // Navigate to the selected project's competitor list
     setSelectedCompetitorProject(project);
-    setFindCompetitorsMessage(
-      cluster
-        ? `Filtered: ${cluster}${categories ? ` → ${categories.join(', ')}` : ''}`
-        : ''
-    );
+
+    const clusterList = clusters && clusters.length > 0 ? clusters : (cluster ? [cluster] : []);
+    const clusterText = clusterList.length > 0 ? `Clusters (${clusterList.length}): ${clusterList.join(', ')}` : '';
+    const catText = categories && categories.length > 0 ? `Categories (${categories.length}): ${categories.join(', ')}` : '';
+    const filterMsg = [clusterText, catText].filter(Boolean).join(' → ');
+
+    setFindCompetitorsMessage(filterMsg ? `Filtered: ${filterMsg}` : '');
     setTop3KwLoading(true);
     setFindingCompetitors(true);
     try {
       const rows = await fetchKeywordRows(project.slug);
       let filtered = rows.filter(r => r.kw);
-      if (cluster) {
-        filtered = filtered.filter(r => r.cluster === cluster);
+
+      if (clusterList.length > 0) {
+        filtered = filtered.filter(r => clusterList.includes(r.cluster || 'General'));
       }
       if (categories && categories.length > 0) {
         filtered = filtered.filter(r => categories.includes(r.category));
