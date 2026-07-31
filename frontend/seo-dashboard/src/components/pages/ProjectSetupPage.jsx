@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Plus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2, RefreshCw, Filter, Download } from 'lucide-react';
+import { Search, Plus, Minus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2, RefreshCw, Filter, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { Badge } from '../ui/Card';
@@ -1190,16 +1190,12 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
   // Expanded clusters state
   const [expandedClusters, setExpandedClusters] = useState(new Set());
 
-  // Tree search query
-  const [searchQuery, setSearchQuery] = useState('');
-
   const resetForm = () => {
     setProjectSlug('');
     setTreeData([]);
     setSelectedClusters(new Set());
     setSelectedCategories(new Set());
     setExpandedClusters(new Set());
-    setSearchQuery('');
   };
 
   const handleClose = () => { resetForm(); onClose(); };
@@ -1230,7 +1226,7 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
       }));
 
       setTreeData(derivedTree);
-      setExpandedClusters(new Set(derivedTree.map(t => t.cluster)));
+      setExpandedClusters(new Set());
       setSelectedClusters(new Set());
       setSelectedCategories(new Set());
     }).finally(() => {
@@ -1339,21 +1335,13 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
     handleClose();
   };
 
-  const filteredTree = treeData.filter(item => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    const matchCluster = item.cluster.toLowerCase().includes(q);
-    const matchCategory = item.categories.some(cat => cat.toLowerCase().includes(q));
-    return matchCluster || matchCategory;
-  });
-
   const totalSelectedCount = selectedClusters.size + selectedCategories.size;
 
   return (
     <Modal
       open={open}
       onClose={handleClose}
-      title="Auto-generated Competitors"
+      title="Find Competitors"
       footer={
         <>
           <Btn variant="primary" onClick={handleApply} style={!projectSlug ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
@@ -1371,7 +1359,7 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
         placeholder={projects.length ? 'Select a project' : 'No projects yet — add one in the Domain tab'}
         value={projectSlug}
         onChange={setProjectSlug}
-        options={projects.map(p => ({ value: p.slug, label: `${p.name} (${p.domain || p.slug})` }))}
+        options={projects.map(p => ({ value: p.slug, label: p.name }))}
       />
 
       {loadingKw && (
@@ -1389,7 +1377,7 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
       {/* HIERARCHY TREE VIEW */}
       {projectSlug && treeData.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-          {/* Header Controls: Search + Quick Action Buttons */}
+          {/* Header Controls: Quick Action Buttons */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
               Select Clusters & Categories
@@ -1398,7 +1386,7 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
               <button
                 type="button"
                 onClick={expandedClusters.size === treeData.length ? handleCollapseAll : handleExpandAll}
-                style={{ background: 'none', border: 'none', color: '#7c3aed', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                style={{ background: 'none', border: 'none', color: '#2563eb', fontWeight: 600, cursor: 'pointer', padding: 0 }}
               >
                 {expandedClusters.size === treeData.length ? 'Collapse All' : 'Expand All'}
               </button>
@@ -1406,7 +1394,7 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
               <button
                 type="button"
                 onClick={handleSelectAll}
-                style={{ background: 'none', border: 'none', color: '#7c3aed', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                style={{ background: 'none', border: 'none', color: '#2563eb', fontWeight: 600, cursor: 'pointer', padding: 0 }}
               >
                 Select All
               </button>
@@ -1421,43 +1409,18 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
             </div>
           </div>
 
-          {/* Search Bar */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            background: 'var(--surface-2, #f8fafc)', border: '1px solid var(--border, #e2e8f0)',
-            borderRadius: 6, padding: '6px 10px'
-          }}>
-            <Search size={13} color="var(--text-muted)" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Filter clusters or categories..."
-              style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: 12.5, color: 'var(--text-primary)', width: '100%' }}
-            />
-            {searchQuery && (
-              <X size={13} color="var(--text-muted)" style={{ cursor: 'pointer' }} onClick={() => setSearchQuery('')} />
-            )}
-          </div>
-
           {/* Scrollable Tree Container */}
           <div style={{
-            border: '1.5px solid #d1d5db',
-            borderRadius: 8,
-            background: '#ffffff',
             maxHeight: 280,
             overflowY: 'auto',
-            padding: '8px 12px',
+            padding: '4px 0',
             fontFamily: 'var(--font-body, system-ui, sans-serif)',
           }}>
-            {filteredTree.map(item => {
-              const isExpanded = expandedClusters.has(item.cluster) || Boolean(searchQuery);
+            {treeData.map(item => {
+              const isExpanded = expandedClusters.has(item.cluster);
               const isFull = isClusterFullySelected(item);
               const isPartial = isClusterPartial(item);
-
-              const visibleCategories = searchQuery.trim()
-                ? item.categories.filter(cat => cat.toLowerCase().includes(searchQuery.toLowerCase()) || item.cluster.toLowerCase().includes(searchQuery.toLowerCase()))
-                : item.categories;
+              const visibleCategories = item.categories;
 
               return (
                 <div key={item.cluster} style={{ marginBottom: 6 }}>
@@ -1472,29 +1435,25 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
                     backgroundColor: isFull ? '#f5f3ff' : (isPartial ? '#faf5ff' : 'transparent'),
                     transition: 'background 0.12s'
                   }}>
-                    {/* Expand/Collapse [+]/[-] Button */}
+                    {/* Borderless Plus/Minus Toggle Button at EXTREME LEFT */}
                     <button
                       type="button"
                       onClick={() => toggleClusterExpand(item.cluster)}
+                      title={isExpanded ? "Collapse" : "Expand"}
                       style={{
-                        width: 18,
-                        height: 18,
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        padding: '2px 2px',
+                        margin: 0,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        border: '1px solid #94a3b8',
-                        borderRadius: 3,
-                        background: '#ffffff',
-                        cursor: 'pointer',
-                        fontSize: 12,
-                        fontWeight: 800,
-                        color: '#334155',
-                        padding: 0,
-                        lineHeight: 1,
-                        flexShrink: 0
+                        outline: 'none',
+                        color: '#64748b'
                       }}
                     >
-                      {isExpanded ? '−' : '+'}
+                      {isExpanded ? <Minus size={15} color="#64748b" strokeWidth={2.5} /> : <Plus size={15} color="#64748b" strokeWidth={2.5} />}
                     </button>
 
                     {/* Cluster Multi-select Checkbox */}
@@ -1517,7 +1476,7 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
                       {isPartial && <div style={{ width: 8, height: 2, background: '#7c3aed', borderRadius: 1 }} />}
                     </div>
 
-                    {/* Folder Icon & Cluster Label */}
+                    {/* Cluster Label & Category Count */}
                     <div
                       onClick={() => toggleClusterExpand(item.cluster)}
                       style={{
@@ -1525,13 +1484,11 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
                         alignItems: 'center',
                         gap: 6,
                         cursor: 'pointer',
-                        flex: 1,
                         fontSize: 13,
                         fontWeight: 700,
                         color: '#1e293b'
                       }}
                     >
-                      <span style={{ fontSize: 14 }}>{isExpanded ? '📂' : '📁'}</span>
                       <span>{item.cluster}</span>
                       <span style={{ fontSize: 11.5, color: '#64748b', fontWeight: 500 }}>
                         ({item.categories.length})
@@ -1588,8 +1545,7 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
                                 {isCatSelected && <Check size={10} color="#ffffff" strokeWidth={3} />}
                               </div>
 
-                              {/* Icon & Category Label */}
-                              <span style={{ fontSize: 12, color: '#475569' }}>🏷️</span>
+                              {/* Category Label */}
                               <span style={{
                                 fontSize: 12.5,
                                 fontWeight: isCatSelected ? 600 : 400,
@@ -3981,7 +3937,7 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
             ) : error ? (
               <tr><td colSpan={5} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={5} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors tracked yet. Click <strong>+ Auto-generated</strong> to get started.</td></tr>
+              <tr><td colSpan={5} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors tracked yet. Click <strong>+ Choose project</strong> to get started.</td></tr>
             ) : rows.map((p, i) => (
               <tr key={p.slug} style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
                 onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
@@ -3993,7 +3949,6 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
                     onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
                     {p.name}
                   </div>
-                  {p.domain && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{p.domain}</div>}
                 </td>
                 <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{p.location}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{p.competitorCount}</td>
@@ -4489,7 +4444,7 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
   );
 }
 
-function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor, onSelectKwDetail, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, hasPendingChanges, saving, saveError, onSaveChanges, loading, error, top3KwByCategory, top3KwLoading }) {
+function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor, onSelectKwDetail, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, onFindCompetitors, onAddPages, hasPendingChanges, saving, saveError, onSaveChanges, loading, error, top3KwByCategory, top3KwLoading }) {
   const [editingIdx, setEditingIdx] = useState(null);
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -4571,78 +4526,112 @@ function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor
   return (
     <>
       {scopedProject && (
-        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 0', fontFamily: 'var(--font-body)', fontSize: 13 }}
-            onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
-            onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}>
-            <ArrowLeft size={16} /> Back
-          </button>
-          <div style={{ height: 20, width: 1, background: 'var(--border)' }} />
-          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{scopedProject.name}</span>
-          {scopedProject.domain && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>{scopedProject.domain}</span>}
-          <TableFilterDropdown
-            filters={competitorFilterConfigs}
-            rows={baseFiltered}
-            activeFilters={tableFilters}
-            onFiltersChange={setTableFilters}
-          />
-          <ActionsDropdown
-            selectedCount={selectedIds.size}
-            onBulkEdit={() => setShowBulkEdit(true)}
-            onBulkDelete={() => setShowBulkDelete(true)}
-          />
-          <button
-            onClick={() => {
-              const rowsToExport = filtered.map(c => ({
-                Competitor: c.name || c.domain,
-                Domain: c.domain,
-                Device: c.device || 'Desktop',
-                Location: c.location,
-                DA: c.da ?? '',
-                'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
-                'Total KWs': c.totalKw,
-                'AI Comp Level': c.aiCompLevel,
-                'SERP Comp Level': c.serpCompLevel,
-                'Comp Level': c.compLevel,
-              }));
-              downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
-            }}
-            title="Download CSV"
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'var(--surface-2)', color: 'var(--text-secondary)',
-              border: '1px solid var(--border)', borderRadius: 8,
-              padding: '7px 10px', cursor: 'pointer',
-              fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-            }}
-            onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-          >
-            <Download size={14} />
-          </button>
-          <div style={{ flex: 1 }} />
-          {(saveError || bulkError) && (
-            <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError || bulkError}</span>
-          )}
-          {hasPendingChanges && !saving && (
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Unsaved changes</span>
-          )}
-          {hasPendingChanges && (
+        <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Row 1: Back, Project Name, Filters & Tools */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 0', fontFamily: 'var(--font-body)', fontSize: 13 }}
+              onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
+              onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}>
+              <ArrowLeft size={16} /> Back
+            </button>
+            <div style={{ height: 20, width: 1, background: 'var(--border)' }} />
+            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{scopedProject.name}</span>
+            <TableFilterDropdown
+              filters={competitorFilterConfigs}
+              rows={baseFiltered}
+              activeFilters={tableFilters}
+              onFiltersChange={setTableFilters}
+            />
+            <ActionsDropdown
+              selectedCount={selectedIds.size}
+              onBulkEdit={() => setShowBulkEdit(true)}
+              onBulkDelete={() => setShowBulkDelete(true)}
+            />
             <button
-              onClick={onSaveChanges}
-              disabled={saving}
+              onClick={() => {
+                const rowsToExport = filtered.map(c => ({
+                  Competitor: c.name || c.domain,
+                  Domain: c.domain,
+                  Device: c.device || 'Desktop',
+                  Location: c.location,
+                  DA: c.da ?? '',
+                  'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
+                  'Total KWs': c.totalKw,
+                  'AI Comp Level': c.aiCompLevel,
+                  'SERP Comp Level': c.serpCompLevel,
+                  'Comp Level': c.compLevel,
+                }));
+                downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
+              }}
+              title="Download CSV"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--surface-2)', color: 'var(--text-secondary)',
+                border: '1px solid var(--border)', borderRadius: 8,
+                padding: '7px 10px', cursor: 'pointer',
+                fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+            >
+              <Download size={14} />
+            </button>
+            <div style={{ flex: 1 }} />
+            {(saveError || bulkError) && (
+              <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError || bulkError}</span>
+            )}
+            {hasPendingChanges && !saving && (
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Unsaved changes</span>
+            )}
+            {hasPendingChanges && (
+              <button
+                onClick={onSaveChanges}
+                disabled={saving}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                  padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: saving ? 'default' : 'pointer',
+                  fontFamily: 'var(--font-body)', opacity: saving ? 0.6 : 1, transition: 'opacity 0.15s',
+                }}
+                onMouseEnter={e => { if (!saving) e.currentTarget.style.opacity = '0.85'; }}
+                onMouseLeave={e => { if (!saving) e.currentTarget.style.opacity = '1'; }}
+              >
+                {saving ? 'Saving…' : 'Save Changes'}
+              </button>
+            )}
+          </div>
+
+          {/* Row 2: Find Competitors and Add Pages buttons below Project Name */}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', paddingTop: 2 }}>
+            <button
+              onClick={onFindCompetitors}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
                 background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
-                padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: saving ? 'default' : 'pointer',
-                fontFamily: 'var(--font-body)', opacity: saving ? 0.6 : 1, transition: 'opacity 0.15s',
+                padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
               }}
-              onMouseEnter={e => { if (!saving) e.currentTarget.style.opacity = '0.85'; }}
-              onMouseLeave={e => { if (!saving) e.currentTarget.style.opacity = '1'; }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
             >
-              {saving ? 'Saving…' : 'Save Changes'}
+              <Plus size={14} />
+              Find Competitors
             </button>
-          )}
+            <button
+              onClick={onAddPages}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: '#fff', color: '#0f1523', border: '1.5px solid #0f1523', borderRadius: 8,
+                padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.75'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+            >
+              <Plus size={14} />
+              Add Pages
+            </button>
+          </div>
         </div>
       )}
       <Top3KeywordsByCategorySection
@@ -5359,21 +5348,7 @@ export default function ProjectSetupPage({ tab }) {
 
           {/* CTA */}
           {activeTab === 'Competitors' ? (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button
-                onClick={handleRefreshCompetitors}
-                disabled={competitorsRefreshing}
-                title="Refresh"
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'none', border: '1.5px solid var(--border)', borderRadius: 8, padding: 9,
-                  cursor: competitorsRefreshing ? 'default' : 'pointer', color: 'var(--text-muted)',
-                }}
-                onMouseEnter={e => { if (!competitorsRefreshing) { e.currentTarget.style.borderColor = 'var(--border-hover)'; e.currentTarget.style.color = 'var(--text-primary)'; } }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
-              >
-                <RefreshCw size={14} className={competitorsRefreshing ? 'spin-icon' : ''} />
-              </button>
+            selectedCompetitorProject === null ? (
               <button
                 onClick={() => setShowChooseProject(true)}
                 style={{
@@ -5386,23 +5361,54 @@ export default function ProjectSetupPage({ tab }) {
                 onMouseLeave={e => e.currentTarget.style.opacity = '1'}
               >
                 <Plus size={15} />
-                Auto-generated
+                Choose project
               </button>
-              <button
-                onClick={() => setShowAddPages(true)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  background: '#fff', color: '#0f1523', border: '1.5px solid #0f1523', borderRadius: 8,
-                  padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
-                  fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-                }}
-                onMouseEnter={e => e.currentTarget.style.opacity = '0.75'}
-                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-              >
-                <Plus size={15} />
-                Add Manually
-              </button>
-            </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  onClick={handleRefreshCompetitors}
+                  disabled={competitorsRefreshing}
+                  title="Refresh"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'none', border: '1.5px solid var(--border)', borderRadius: 8, padding: 9,
+                    cursor: competitorsRefreshing ? 'default' : 'pointer', color: 'var(--text-muted)',
+                  }}
+                  onMouseEnter={e => { if (!competitorsRefreshing) { e.currentTarget.style.borderColor = 'var(--border-hover)'; e.currentTarget.style.color = 'var(--text-primary)'; } }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+                >
+                  <RefreshCw size={14} className={competitorsRefreshing ? 'spin-icon' : ''} />
+                </button>
+                <button
+                  onClick={() => setShowChooseProject(true)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                    padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
+                    fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                >
+                  <Plus size={15} />
+                  Find Competitors
+                </button>
+                <button
+                  onClick={() => setShowAddPages(true)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    background: '#fff', color: '#0f1523', border: '1.5px solid #0f1523', borderRadius: 8,
+                    padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
+                    fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '0.75'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                >
+                  <Plus size={15} />
+                  Add Pages
+                </button>
+              </div>
+            )
           ) : (
             <button
               onClick={cta.onClick}
@@ -5505,6 +5511,8 @@ export default function ProjectSetupPage({ tab }) {
                 onSaveCompetitor={handleSaveCompetitor}
                 onBulkEditCompetitors={handleBulkEditCompetitors}
                 onBulkDeleteCompetitors={handleBulkDeleteCompetitors}
+                onFindCompetitors={() => setShowChooseProject(true)}
+                onAddPages={() => setShowAddPages(true)}
                 hasPendingChanges={hasCompetitorPendingChanges}
                 saving={competitorSaving}
                 saveError={competitorSaveError}
