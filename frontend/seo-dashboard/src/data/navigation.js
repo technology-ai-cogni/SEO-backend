@@ -30,6 +30,7 @@ export const NAV_STRUCTURE = [
         type: 'section',
         items: [
           { id: 'position-analysis', label: 'Brand Discovery', path: 'search-visibility/position-analysis' },
+          { id: 'ai-analysis', label: 'AI Analysis', path: 'search-visibility/ai-analysis' },
           { id: 'keywords', label: 'Keywords', path: 'search-visibility/keywords' },
           { id: 'top-pages', label: 'Top Pages', path: 'search-visibility/top-pages' },
           { id: 'sales-pipeline', label: 'Sales Pipeline', path: 'search-visibility/sales-pipeline' },

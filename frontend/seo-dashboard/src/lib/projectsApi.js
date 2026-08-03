@@ -414,10 +414,11 @@ export async function fetchKwProjects() {
 }
 
 function kwRowToUi(row) {
+  const svVal = row.sv ?? row.search_volume ?? row.kw_volume ?? row.volume ?? row['search volume'] ?? row['KW Volume'] ?? row.sv_value;
   return {
     id: row.id,
     kw: row.keyword || row.kw,
-    sv: row.sv,
+    sv: svVal !== undefined && svVal !== null && String(svVal).trim() !== '' ? String(svVal) : null,
     kwDiff: row.kw_diff,
     cluster: row.cluster,
     category: row.category,

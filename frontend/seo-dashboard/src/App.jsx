@@ -3,6 +3,7 @@ import Sidebar from './components/layout/Sidebar';
 import Topbar from './components/layout/Topbar';
 import HomePage from './components/pages/HomePage';
 import DashboardPage from './components/pages/DashboardPage';
+import AiAnalysisPage from './components/pages/AiAnalysisPage';
 import PositionAnalysisPage from './components/pages/PositionAnalysisPage';
 import KeywordsPage from './components/pages/KeywordsPage';
 import TopPagesPage from './components/pages/TopPagesPage';
@@ -37,6 +38,7 @@ const PAGE_TITLES = {
   'project-setup/outreach': { title: 'Project Setup · Outreach', subtitle: 'Manage link outreach' },
   'project-setup/connectors': { title: 'Project Setup · Connectors', subtitle: 'Connect data sources' },
   'search-visibility/position-analysis': { title: 'Brand Discovery', subtitle: `${totalKeywordCount.toLocaleString()} keywords` },
+  'search-visibility/ai-analysis': { title: 'AI Analysis', subtitle: 'Mentions and Citations analytics across AI Search Engines' },
   'search-visibility/keywords': { title: 'Keywords', subtitle: `${totalKeywordCount.toLocaleString()} tracked keywords` },
   'search-visibility/top-pages': { title: 'Top Pages', subtitle: 'Best performing pages by organic traffic' },
   'search-visibility/sales-pipeline': { title: 'Sales Pipeline', subtitle: 'Track keyword-to-conversion funnel' },
@@ -96,6 +98,7 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
     />;
     case 'project-setup': return <ProjectSetupPage />;
     case 'search-visibility/position-analysis': return <PositionAnalysisPage onNavigate={onNavigate} />;
+    case 'search-visibility/ai-analysis': return <AiAnalysisPage />;
     case 'search-visibility/keywords': return <KeywordsPage />;
     case 'search-visibility/top-pages': return <TopPagesPage />;
     case 'search-visibility/competitors': return <CompetitorsPage />;

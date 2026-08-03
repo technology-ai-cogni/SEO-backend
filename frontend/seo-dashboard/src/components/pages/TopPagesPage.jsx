@@ -1,42 +1,407 @@
-import { Card, CardHeader, Badge, Table } from '../ui/Card';
-import { SparkLine } from '../ui/MiniChart';
-import { topPages, visibilityData } from '../../data/mockData';
-import { ExternalLink } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Search, ChevronDown, ExternalLink, FileText } from 'lucide-react';
+import { fetchDomainRows, fetchPageRows, fetchKeywordRows } from '../../lib/projectsApi';
 
 export default function TopPagesPage() {
+  const [projects, setProjects] = useState([]);
+  const [activeProject, setActiveProject] = useState(null);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const [pagesData, setPagesData] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [intentFilter, setIntentFilter] = useState('all'); // 'all' | 'informational' | 'commercial'
+  const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'landing' | 'blog'
+
+  // Load project list on mount
+  useEffect(() => {
+    let isMounted = true;
+    async function loadProjects() {
+      try {
+        setLoading(true);
+        const domains = await fetchDomainRows();
+        if (isMounted && domains && domains.length > 0) {
+          setProjects(domains);
+          const savedSlug = localStorage.getItem('bd_selected_project');
+          const target = (savedSlug && domains.find(p => p.slug === savedSlug)) || domains[0];
+          setActiveProject(target);
+          await loadPageDataForProject(target);
+        }
+      } catch (err) {
+        console.error('[TopPagesPage] Error loading projects:', err);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+    loadProjects();
+    return () => { isMounted = false; };
+  }, []);
+
+  // Fetch page and keyword data for selected project strictly from Project Setup
+  const loadPageDataForProject = async (proj) => {
+    if (!proj?.slug) return;
+    try {
+      setLoading(true);
+      const [fetchedPages, fetchedKws] = await Promise.all([
+        fetchPageRows(proj.slug).catch(() => []),
+        fetchKeywordRows(proj.slug).catch(() => [])
+      ]);
+
+      const pages = fetchedPages || [];
+      const kws = fetchedKws || [];
+
+      // Map STRICTLY pages defined in Project Setup
+      const combinedPages = pages.map(p => {
+        if (!p.url) return null;
+        const normUrl = p.url.trim().toLowerCase();
+        const cleanTargetSlug = normUrl.replace(/^https?:\/\/[^\/]+/, '').replace(/\/$/, '');
+
+        // Find matching intent keywords for this project setup page
+        const matchingKws = kws.filter(k => {
+          const rawKUrl = (k.landingPage || k.url || k.page_url || k.landing_page || k.page || '').trim();
+          if (!rawKUrl) return false;
+          const kNormUrl = rawKUrl.toLowerCase();
+          if (kNormUrl === normUrl || kNormUrl.includes(normUrl) || normUrl.includes(kNormUrl)) return true;
+          
+          const kSlug = kNormUrl.replace(/^https?:\/\/[^\/]+/, '').replace(/\/$/, '');
+          return cleanTargetSlug && kSlug && (cleanTargetSlug.includes(kSlug) || kSlug.includes(cleanTargetSlug));
+        });
+
+        const kwList = Array.from(new Set(matchingKws.map(k => k.kw).filter(Boolean)));
+        
+        const subtype = p.targetCategory || matchingKws.map(k => k.targetSubtype || k.subtype || k.intent).find(Boolean) || 'Informational';
+        const targetType = p.targetType || matchingKws.map(k => k.targetType || k.page_type).find(Boolean) || 'Landing Page';
+
+        const cleanPageName = p.pageName || p.url.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ').toUpperCase() || 'PAGE';
+
+        return {
+          id: p.id || normUrl,
+          pageName: cleanPageName,
+          url: p.url,
+          cluster: p.cluster || p.category || 'General',
+          targetCategory: subtype,
+          targetType: targetType,
+          keywords: kwList,
+          totalKws: kwList.length
+        };
+      }).filter(Boolean);
+
+      // Sort by Total Keywords descending by default
+      combinedPages.sort((a, b) => b.totalKws - a.totalKws);
+
+      setPagesData(combinedPages);
+    } catch (err) {
+      console.error('[TopPagesPage] Error loading page data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle project switch
+  const handleSelectProject = async (proj) => {
+    setActiveProject(proj);
+    localStorage.setItem('bd_selected_project', proj.slug);
+    setProjectMenuOpen(false);
+    await loadPageDataForProject(proj);
+  };
+
+  // Filtered pages based on search & intent/type dropdowns
+  const filteredPages = pagesData.filter(p => {
+    const matchSearch = searchQuery === '' || 
+      p.pageName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      p.url.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.keywords.some(kw => kw.toLowerCase().includes(searchQuery.toLowerCase()));
+    
+    const matchIntent = intentFilter === 'all' || p.targetCategory.toLowerCase().includes(intentFilter.toLowerCase());
+    const matchType = typeFilter === 'all' || (typeFilter === 'landing' ? p.targetType.toLowerCase().includes('landing') : p.targetType.toLowerCase().includes('blog'));
+    
+    return matchSearch && matchIntent && matchType;
+  });
+
+  // Calculate metrics
+  const totalPagesCount = pagesData.length;
+  const totalKwsSum = pagesData.reduce((acc, p) => acc + p.totalKws, 0);
+  const avgKwsPerPage = totalPagesCount > 0 ? (totalKwsSum / totalPagesCount).toFixed(1) : 0;
+
   return (
-    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: '#f8fafc', minHeight: '100vh' }}>
+      
+      {/* ─── HEADER BAR: Title & Domain Selector ─────────────────────────────── */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 16,
+        background: '#ffffff',
+        padding: '16px 20px',
+        borderRadius: 12,
+        border: '1px solid #e2e8f0',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+      }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <FileText size={20} color="#7c3aed" />
+            <h1 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: 0 }}>Top Pages</h1>
+          </div>
+          <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0 0' }}>
+            Pages tracked under Project Setup for {activeProject?.domain || activeProject?.name || 'Selected Domain'}
+          </p>
+        </div>
+
+        {/* Project Selector Dropdown */}
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setProjectMenuOpen(!projectMenuOpen)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              background: '#f1f5f9',
+              border: '1px solid #cbd5e1',
+              borderRadius: 8,
+              padding: '8px 14px',
+              fontSize: 13,
+              fontWeight: 700,
+              color: '#0f172a',
+              cursor: 'pointer'
+            }}
+          >
+            <span>Domain: <strong>{activeProject?.domain || activeProject?.name || 'Select Domain'}</strong></span>
+            <ChevronDown size={14} />
+          </button>
+
+          {projectMenuOpen && (
+            <div style={{
+              position: 'absolute',
+              right: 0,
+              top: '110%',
+              background: '#ffffff',
+              border: '1px solid #e2e8f0',
+              borderRadius: 8,
+              boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+              zIndex: 100,
+              minWidth: 200,
+              overflow: 'hidden'
+            }}>
+              {projects.map(p => (
+                <div
+                  key={p.slug}
+                  onClick={() => handleSelectProject(p)}
+                  style={{
+                    padding: '10px 14px',
+                    fontSize: 13,
+                    fontWeight: activeProject?.slug === p.slug ? 700 : 500,
+                    color: activeProject?.slug === p.slug ? '#7c3aed' : '#334155',
+                    background: activeProject?.slug === p.slug ? '#f5f3ff' : 'transparent',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {p.domain || p.name}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ─── SUMMARY CARDS ─────────────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
         {[
-          { label: 'Total Pages Tracked', value: '5' },
-          { label: 'Avg. Traffic per Page', value: '469' },
-          { label: 'Avg. Position', value: '18.1' },
+          { label: 'Total Pages Tracked', value: totalPagesCount },
+          { label: 'Total Mapped Keywords', value: totalKwsSum },
+          { label: 'Avg. Keywords per Page', value: avgKwsPerPage },
         ].map(s => (
-          <Card key={s.label} style={{ padding: '16px 20px' }}>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>{s.label}</div>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 800 }}>{s.value}</div>
-          </Card>
+          <div key={s.label} style={{
+            background: '#ffffff',
+            border: '1px solid #e2e8f0',
+            borderRadius: 10,
+            padding: '16px 20px',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+          }}>
+            <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 4 }}>{s.label}</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>{s.value}</div>
+          </div>
         ))}
       </div>
 
-      <Card>
-        <CardHeader title="Top Performing Pages" subtitle="Ranked by organic traffic" />
-        <Table
-          headers={['Page URL', 'Traffic', 'Keywords', 'Avg Position', 'Trend']}
-          rows={topPages.map(p => [
-            <div key="url" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontWeight: 500, color: 'var(--accent)' }}>{p.page}</span>
-              <ExternalLink size={11} color="var(--text-muted)" />
-            </div>,
-            <span key="t" style={{ fontWeight: 700 }}>{p.traffic.toLocaleString()}</span>,
-            p.keywords,
-            p.position,
-            <div key="tr" style={{ width: 80, display: 'inline-block' }}>
-              <SparkLine data={visibilityData} color="var(--accent)" height={28} />
-            </div>,
-          ])}
-        />
-      </Card>
+      {/* ─── SEARCH & FILTERS BAR ───────────────────────────────────────────── */}
+      <div style={{
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: 12,
+        padding: '14px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        flexWrap: 'wrap'
+      }}>
+        {/* Search Box */}
+        <div style={{ position: 'relative', flex: 1, minWidth: 240 }}>
+          <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: '#94a3b8' }} />
+          <input
+            type="text"
+            placeholder="Search pages by name, URL, or keyword..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '7px 12px 7px 32px',
+              fontSize: 12.5,
+              borderRadius: 6,
+              border: '1px solid #cbd5e1',
+              outline: 'none'
+            }}
+          />
+        </div>
+
+        {/* Intent Filter */}
+        <select
+          value={intentFilter}
+          onChange={e => setIntentFilter(e.target.value)}
+          style={{
+            padding: '7px 12px',
+            fontSize: 12.5,
+            fontWeight: 600,
+            borderRadius: 6,
+            border: '1px solid #cbd5e1',
+            color: '#334155',
+            background: '#ffffff'
+          }}
+        >
+          <option value="all">All Intent (Info / Comm)</option>
+          <option value="informational">Informational</option>
+          <option value="commercial">Commercial</option>
+        </select>
+
+        {/* Target Type Filter */}
+        <select
+          value={typeFilter}
+          onChange={e => setTypeFilter(e.target.value)}
+          style={{
+            padding: '7px 12px',
+            fontSize: 12.5,
+            fontWeight: 600,
+            borderRadius: 6,
+            border: '1px solid #cbd5e1',
+            color: '#334155',
+            background: '#ffffff'
+          }}
+        >
+          <option value="all">All Types (Landing / Blog)</option>
+          <option value="landing">Landing Page</option>
+          <option value="blog">Blog Page</option>
+        </select>
+      </div>
+
+      {/* ─── TOP PAGES DATA TABLE ─────────────────────────────────────────────── */}
+      <div style={{
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: 12,
+        overflow: 'hidden',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+      }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Page Name</th>
+                <th style={{ padding: '12px 16px', fontWeight: 700 }}>URL</th>
+                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Total KWs</th>
+                <th style={{ padding: '12px 16px', fontWeight: 700, minWidth: 260 }}>Keywords</th>
+                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Info / Comm</th>
+                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Landing / Blog</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
+                    Loading pages for {activeProject?.domain || activeProject?.name}...
+                  </td>
+                </tr>
+              ) : filteredPages.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
+                    No pages found under Project Setup for {activeProject?.domain || activeProject?.name}.
+                  </td>
+                </tr>
+              ) : (
+                filteredPages.map(row => (
+                  <tr key={row.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    
+                    {/* PAGE NAME */}
+                    <td style={{ padding: '12px 16px', fontWeight: 700, color: '#0f172a', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {row.pageName}
+                    </td>
+
+                    {/* URL */}
+                    <td style={{ padding: '12px 16px', color: '#2563eb', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <a href={row.url} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        {row.url}
+                        <ExternalLink size={11} />
+                      </a>
+                    </td>
+
+                    {/* TOTAL KWS */}
+                    <td style={{ padding: '12px 16px', fontWeight: 800, color: '#0f172a' }}>
+                      {row.totalKws}
+                    </td>
+
+                    {/* KEYWORDS */}
+                    <td style={{ padding: '12px 16px' }}>
+                      {row.keywords && row.keywords.length > 0 ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 60, overflowY: 'auto' }}>
+                          {row.keywords.slice(0, 4).map((kw, i) => (
+                            <span key={i} style={{
+                              background: '#f1f5f9',
+                              color: '#334155',
+                              fontSize: 11.5,
+                              fontWeight: 600,
+                              padding: '2px 8px',
+                              borderRadius: 4,
+                              whiteSpace: 'nowrap'
+                            }}>
+                              {kw}
+                            </span>
+                          ))}
+                          {row.keywords.length > 4 && (
+                            <span style={{
+                              background: '#e2e8f0',
+                              color: '#64748b',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              padding: '2px 6px',
+                              borderRadius: 4
+                            }} title={row.keywords.slice(4).join(', ')}>
+                              +{row.keywords.length - 4} more
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>
+                      )}
+                    </td>
+
+                    {/* INFO / COMM */}
+                    <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
+                      {row.targetCategory}
+                    </td>
+
+                    {/* LANDING / BLOG */}
+                    <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
+                      {row.targetType}
+                    </td>
+
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </div>
   );
 }

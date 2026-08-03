@@ -6,16 +6,20 @@ import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalys
 function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 100, projectTotalKeywords = 514 }) {
   const [hoverType, setHoverType] = useState(null); // null | 'mentions' | 'cited'
 
-  const total = totalKeywords || 100;
-  let currentValue = visibility;
-  let currentLabel = 'AI Visibility';
+  const runKeywords = totalKeywords || 0;
+  const projectTotal = projectTotalKeywords || runKeywords || 100;
+
+  // Progress percentage based on ratio of keywords run vs project total keywords
+  const keywordsRatioPercent = projectTotal > 0 ? Math.min(100, (runKeywords / projectTotal) * 100) : 0;
+
+  let currentValue = keywordsRatioPercent;
+  let currentLabel = hoverType === 'mentions' ? 'Mentions' : hoverType === 'cited' ? 'Cited pages' : '';
+  let centerText = hoverType === 'mentions' ? `${mentions}` : hoverType === 'cited' ? `${citedPages}` : `${runKeywords} / ${projectTotal}`;
 
   if (hoverType === 'mentions') {
-    currentValue = Math.min(100, Math.round((mentions / total) * 100));
-    currentLabel = 'Mentions';
+    currentValue = projectTotal > 0 ? Math.min(100, (mentions / projectTotal) * 100) : 0;
   } else if (hoverType === 'cited') {
-    currentValue = Math.min(100, Math.round((citedPages / total) * 100));
-    currentLabel = 'Cited pages';
+    currentValue = projectTotal > 0 ? Math.min(100, (citedPages / projectTotal) * 100) : 0;
   }
 
   const radius = 60;
@@ -36,25 +40,6 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
       gap: 12,
       width: '100%'
     }}>
-      {/* TOP HEADER: Audited Keywords Ratio Badge */}
-      <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', width: '100%' }}>
-        <div style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '3px 10px',
-          borderRadius: 12,
-          backgroundColor: '#f5f3ff',
-          border: '1px solid #ddd6fe',
-          fontSize: 11,
-          fontWeight: 700,
-          color: '#7c3aed'
-        }}>
-          <Search size={11} />
-          <span>Audited {total} / {projectTotalKeywords || total} Keywords</span>
-        </div>
-      </div>
-
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -86,17 +71,19 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
 
           <div style={{
             position: 'absolute',
-            top: 26,
+            top: currentLabel ? 26 : 40,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center'
           }}>
-            <span style={{ fontSize: 30, fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>
-              {hoverType === 'mentions' ? mentions : hoverType === 'cited' ? citedPages : Math.round(visibility)}
+            <span style={{ fontSize: centerText.length > 5 ? 19 : 28, fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>
+              {centerText}
             </span>
-            <span style={{ fontSize: 11.5, fontWeight: 600, color: '#64748b', marginTop: 3 }}>
-              {currentLabel}
-            </span>
+            {currentLabel && (
+              <span style={{ fontSize: 11.5, fontWeight: 600, color: '#64748b', marginTop: 3 }}>
+                {currentLabel}
+              </span>
+            )}
           </div>
         </div>
 
@@ -259,6 +246,61 @@ function extractTop2PerCategory(kws) {
   return selected;
 }
 
+const COUNTRY_OPTIONS = [
+  { code: 'AF', flag: '🇦🇫', name: 'Afghanistan' },
+  { code: 'AL', flag: '🇦🇱', name: 'Albania' },
+  { code: 'DZ', flag: '🇩🇿', name: 'Algeria' },
+  { code: 'AR', flag: '🇦🇷', name: 'Argentina' },
+  { code: 'AU', flag: '🇦🇺', name: 'Australia' },
+  { code: 'AT', flag: '🇦🇹', name: 'Austria' },
+  { code: 'BD', flag: '🇧🇩', name: 'Bangladesh' },
+  { code: 'BE', flag: '🇧🇪', name: 'Belgium' },
+  { code: 'BR', flag: '🇧🇷', name: 'Brazil' },
+  { code: 'CA', flag: '🇨🇦', name: 'Canada' },
+  { code: 'CL', flag: '🇨🇱', name: 'Chile' },
+  { code: 'CN', flag: '🇨🇳', name: 'China' },
+  { code: 'CO', flag: '🇨🇴', name: 'Colombia' },
+  { code: 'CZ', flag: '🇨🇿', name: 'Czech Republic' },
+  { code: 'DK', flag: '🇩🇰', name: 'Denmark' },
+  { code: 'EG', flag: '🇪🇬', name: 'Egypt' },
+  { code: 'FI', flag: '🇫🇮', name: 'Finland' },
+  { code: 'FR', flag: '🇫🇷', name: 'France' },
+  { code: 'DE', flag: '🇩🇪', name: 'Germany' },
+  { code: 'GR', flag: '🇬🇷', name: 'Greece' },
+  { code: 'HU', flag: '🇭🇺', name: 'Hungary' },
+  { code: 'IN', flag: '🇮🇳', name: 'India' },
+  { code: 'ID', flag: '🇮🇩', name: 'Indonesia' },
+  { code: 'IE', flag: '🇮🇪', name: 'Ireland' },
+  { code: 'IL', flag: '🇮🇱', name: 'Israel' },
+  { code: 'IT', flag: '🇮🇹', name: 'Italy' },
+  { code: 'JP', flag: '🇯🇵', name: 'Japan' },
+  { code: 'KE', flag: '🇰🇪', name: 'Kenya' },
+  { code: 'MY', flag: '🇲🇾', name: 'Malaysia' },
+  { code: 'MX', flag: '🇲🇽', name: 'Mexico' },
+  { code: 'NL', flag: '🇳🇱', name: 'Netherlands' },
+  { code: 'NZ', flag: '🇳🇿', name: 'New Zealand' },
+  { code: 'NG', flag: '🇳🇬', name: 'Nigeria' },
+  { code: 'NO', flag: '🇳🇴', name: 'Norway' },
+  { code: 'PK', flag: '🇵🇰', name: 'Pakistan' },
+  { code: 'PH', flag: '🇵🇭', name: 'Philippines' },
+  { code: 'PL', flag: '🇵🇱', name: 'Poland' },
+  { code: 'PT', flag: '🇵🇹', name: 'Portugal' },
+  { code: 'RO', flag: '🇷🇴', name: 'Romania' },
+  { code: 'SA', flag: '🇸🇦', name: 'Saudi Arabia' },
+  { code: 'SG', flag: '🇸🇬', name: 'Singapore' },
+  { code: 'ZA', flag: '🇿🇦', name: 'South Africa' },
+  { code: 'KR', flag: '🇰🇷', name: 'South Korea' },
+  { code: 'ES', flag: '🇪🇸', name: 'Spain' },
+  { code: 'SE', flag: '🇸🇪', name: 'Sweden' },
+  { code: 'CH', flag: '🇨🇭', name: 'Switzerland' },
+  { code: 'TH', flag: '🇹🇭', name: 'Thailand' },
+  { code: 'TR', flag: '🇹🇷', name: 'Turkey' },
+  { code: 'AE', flag: '🇦🇪', name: 'United Arab Emirates' },
+  { code: 'GB', flag: '🇬🇧', name: 'United Kingdom' },
+  { code: 'US', flag: '🇺🇸', name: 'United States' },
+  { code: 'VN', flag: '🇻🇳', name: 'Vietnam' }
+];
+
 export default function PositionAnalysisPage({ onNavigate }) {
   const [projects, setProjects] = useState([]);
   const [selectedSlug, setSelectedSlug] = useState('');
@@ -281,7 +323,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
 
   // Hidden cards state
   const [closedCards, setClosedCards] = useState({});
-  const [selectedRegion, setSelectedRegion] = useState(() => localStorage.getItem('bd_selected_region') || 'US');
+  const [selectedRegion, setSelectedRegion] = useState('US');
   const [selectedDate, setSelectedDate] = useState(() => localStorage.getItem('bd_selected_date') || new Date().toISOString().split('T')[0]);
   const dateInputRef = useRef(null);
   const countryListRef = useRef(null);
@@ -293,60 +335,16 @@ export default function PositionAnalysisPage({ onNavigate }) {
   const [highlightedCountryIndex, setHighlightedCountryIndex] = useState(0);
   const [hoveredKwIndex, setHoveredKwIndex] = useState(null);
 
-  const COUNTRY_OPTIONS = [
-    { code: 'AF', flag: '🇦🇫', name: 'Afghanistan' },
-    { code: 'AL', flag: '🇦🇱', name: 'Albania' },
-    { code: 'DZ', flag: '🇩🇿', name: 'Algeria' },
-    { code: 'AR', flag: '🇦🇷', name: 'Argentina' },
-    { code: 'AU', flag: '🇦🇺', name: 'Australia' },
-    { code: 'AT', flag: '🇦🇹', name: 'Austria' },
-    { code: 'BD', flag: '🇧🇩', name: 'Bangladesh' },
-    { code: 'BE', flag: '🇧🇪', name: 'Belgium' },
-    { code: 'BR', flag: '🇧🇷', name: 'Brazil' },
-    { code: 'CA', flag: '🇨🇦', name: 'Canada' },
-    { code: 'CL', flag: '🇨🇱', name: 'Chile' },
-    { code: 'CN', flag: '🇨🇳', name: 'China' },
-    { code: 'CO', flag: '🇨🇴', name: 'Colombia' },
-    { code: 'CZ', flag: '🇨🇿', name: 'Czech Republic' },
-    { code: 'DK', flag: '🇩🇰', name: 'Denmark' },
-    { code: 'EG', flag: '🇪🇬', name: 'Egypt' },
-    { code: 'FI', flag: '🇫🇮', name: 'Finland' },
-    { code: 'FR', flag: '🇫🇷', name: 'France' },
-    { code: 'DE', flag: '🇩🇪', name: 'Germany' },
-    { code: 'GR', flag: '🇬🇷', name: 'Greece' },
-    { code: 'HU', flag: '🇭🇺', name: 'Hungary' },
-    { code: 'IN', flag: '🇮🇳', name: 'India' },
-    { code: 'ID', flag: '🇮🇩', name: 'Indonesia' },
-    { code: 'IE', flag: '🇮🇪', name: 'Ireland' },
-    { code: 'IL', flag: '🇮🇱', name: 'Israel' },
-    { code: 'IT', flag: '🇮🇹', name: 'Italy' },
-    { code: 'JP', flag: '🇯🇵', name: 'Japan' },
-    { code: 'KE', flag: '🇰🇪', name: 'Kenya' },
-    { code: 'MY', flag: '🇲🇾', name: 'Malaysia' },
-    { code: 'MX', flag: '🇲🇽', name: 'Mexico' },
-    { code: 'NL', flag: '🇳🇱', name: 'Netherlands' },
-    { code: 'NZ', flag: '🇳🇿', name: 'New Zealand' },
-    { code: 'NG', flag: '🇳🇬', name: 'Nigeria' },
-    { code: 'NO', flag: '🇳🇴', name: 'Norway' },
-    { code: 'PK', flag: '🇵🇰', name: 'Pakistan' },
-    { code: 'PH', flag: '🇵🇭', name: 'Philippines' },
-    { code: 'PL', flag: '🇵🇱', name: 'Poland' },
-    { code: 'PT', flag: '🇵🇹', name: 'Portugal' },
-    { code: 'RO', flag: '🇷🇴', name: 'Romania' },
-    { code: 'SA', flag: '🇸🇦', name: 'Saudi Arabia' },
-    { code: 'SG', flag: '🇸🇬', name: 'Singapore' },
-    { code: 'ZA', flag: '🇿🇦', name: 'South Africa' },
-    { code: 'KR', flag: '🇰🇷', name: 'South Korea' },
-    { code: 'ES', flag: '🇪🇸', name: 'Spain' },
-    { code: 'SE', flag: '🇸🇪', name: 'Sweden' },
-    { code: 'CH', flag: '🇨🇭', name: 'Switzerland' },
-    { code: 'TH', flag: '🇹🇭', name: 'Thailand' },
-    { code: 'TR', flag: '🇹🇷', name: 'Turkey' },
-    { code: 'AE', flag: '🇦🇪', name: 'United Arab Emirates' },
-    { code: 'GB', flag: '🇬🇧', name: 'United Kingdom' },
-    { code: 'US', flag: '🇺🇸', name: 'United States' },
-    { code: 'VN', flag: '🇻🇳', name: 'Vietnam' }
-  ];
+  // Sync country from the domain's target location whenever project changes
+  useEffect(() => {
+    const loc = activeProject?.location;
+    if (!loc || loc === 'Global') {
+      setSelectedRegion('US');
+      return;
+    }
+    const match = COUNTRY_OPTIONS.find(c => c.name.toLowerCase() === loc.toLowerCase());
+    setSelectedRegion(match ? match.code : 'US');
+  }, [activeProject?.location]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1075,7 +1073,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
             </a>
           </h1>
 
-          {/* Interactive Country Dropdown & Metadata aligned with the end of the first box (removed if AI Search card is closed) */}
+          {/* Country dropdown (defaults to domain target location, user can override) & date picker */}
           {!closedCards.aiSearch && (() => {
             const activeCountry = COUNTRY_OPTIONS.find(c => c.code === selectedRegion) || COUNTRY_OPTIONS.find(c => c.code === 'US') || COUNTRY_OPTIONS[0];
             const filteredCountries = COUNTRY_OPTIONS.filter(c =>
@@ -1176,7 +1174,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
                                 const target = filteredCountries[highlightedCountryIndex] || filteredCountries[0];
                                 if (target) {
                                   setSelectedRegion(target.code);
-                                  localStorage.setItem('bd_selected_region', target.code);
                                   setCountryMenuOpen(false);
                                 }
                               } else if (e.key === 'Escape') {
@@ -1209,7 +1206,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
                                 key={c.code}
                                 onClick={() => {
                                   setSelectedRegion(c.code);
-                                  localStorage.setItem('bd_selected_region', c.code);
                                   setCountryMenuOpen(false);
                                 }}
                                 onMouseEnter={() => setHighlightedCountryIndex(idx)}
@@ -1313,7 +1309,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
           gap: 10
         }}>
           <button
-            onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
+            onClick={(e) => handleAiAnalysis(e, { analyzeAll: aiTab.toLowerCase() === 'overview', targetEngine: aiTab.toLowerCase() })}
             disabled={Object.values(analyzingTabs).some(Boolean)}
             style={{
               background: '#7c3aed',
@@ -1464,7 +1460,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                       textAlign: 'center'
                     }}>
                       <button
-                        onClick={handleAiAnalysis}
+                        onClick={(e) => handleAiAnalysis(e, { targetEngine: aiTab.toLowerCase() })}
                         disabled={isCurrentTabAnalyzing || !topKeywords.length}
                         style={{
                           background: '#7c3aed',
@@ -1546,98 +1542,12 @@ export default function PositionAnalysisPage({ onNavigate }) {
                         );
                       })()}
 
-                      {/* 2. Dedicated Domain Rank Tracker Feature */}
-                      <div style={{
-                        background: '#ffffff',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: 10,
-                        padding: 12,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 8
-                      }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 4, borderBottom: '1px solid #f1f5f9' }}>
-                          <span style={{ fontSize: 11.5, fontWeight: 800, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
-                            Domain Rank Tracker
-                          </span>
-                        </div>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          {(() => {
-                            const firstRes = currentTabResults[0] || {};
-                            const kwUrls = firstRes.results || [];
-                            const rawDomain = activeProject?.domain || activeProject?.name || '';
-                            const cleanDomain = rawDomain.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].trim().toLowerCase();
-
-                            let matchIndex = cleanDomain ? kwUrls.findIndex(u => u.url?.toLowerCase().includes(cleanDomain)) : -1;
-
-                            if (matchIndex === -1 && cleanDomain && firstRes.ai_answer) {
-                              const lines = firstRes.ai_answer.split('\n');
-                              for (let l of lines) {
-                                if (l.toLowerCase().includes(cleanDomain)) {
-                                  const rankMatch = l.match(/^(?:#|\b)?(\d{1,2})[\.\)\s]/);
-                                  if (rankMatch) {
-                                    matchIndex = parseInt(rankMatch[1], 10) - 1;
-                                    break;
-                                  }
-                                }
-                              }
-                            }
-
-                            const domainRank = firstRes.domain_rank ?? (matchIndex >= 0 ? matchIndex + 1 : (firstRes.mentions > 0 ? 1 : 101));
-                            const othersVal = firstRes.others_count ?? (domainRank > 0 && domainRank <= 100 ? Math.max(0, domainRank - 1) : -1);
-
-                            let rankText = domainRank > 0 && domainRank <= 100 ? `#${domainRank}` : '101';
-                            let badgeBg = domainRank > 0 && domainRank <= 100 ? '#dcfce7' : 'transparent';
-                            let badgeColor = domainRank > 0 && domainRank <= 100 ? '#15803d' : '#ef4444';
-
-                            return (
-                              <>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5, color: '#1e293b' }}>
-                                  <span style={{ fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 240 }}>
-                                    "{rawDomain || 'dogseechew.in'}"
-                                  </span>
-                                  <span style={{
-                                    fontSize: 11.5,
-                                    fontWeight: 700,
-                                    color: badgeColor,
-                                    backgroundColor: badgeBg,
-                                    padding: '2px 10px',
-                                    borderRadius: 12,
-                                    minWidth: 95,
-                                    textAlign: 'center',
-                                    display: 'inline-block'
-                                  }}>
-                                    {rankText}
-                                  </span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5, color: '#1e293b' }}>
-                                  <span style={{ fontWeight: 600, color: '#334155' }}>
-                                    "Others"
-                                  </span>
-                                  <span style={{
-                                    fontSize: 11.5,
-                                    fontWeight: 700,
-                                    color: '#64748b',
-                                    backgroundColor: 'transparent',
-                                    padding: '2px 10px',
-                                    minWidth: 95,
-                                    textAlign: 'center',
-                                    display: 'inline-block'
-                                  }}>
-                                    {othersVal}
-                                  </span>
-                                </div>
-                              </>
-                            );
-                          })()}
-                        </div>
-                      </div>
 
                       {/* Re-analyze Action */}
                       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
                         <button
-                          onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
+                          onClick={(e) => handleAiAnalysis(e, { targetEngine: aiTab.toLowerCase() })}
                           disabled={!!analyzingTabs[aiTab.toLowerCase()]}
                           style={{
                             background: 'transparent',
@@ -1675,14 +1585,12 @@ export default function PositionAnalysisPage({ onNavigate }) {
                   hasData,
                   mentions: hasData ? (first.mentions ?? 0) : 'N/A',
                   citedPages: hasData ? (first.cited_pages ?? 0) : 'N/A',
-                  visibility: hasData ? (first.ai_visibility ?? 0) : null
+                  visibility: hasData ? (first.ai_visibility ?? 0) : null,
+                  totalKeywords: hasData ? (first.total_keywords ?? topKeywords.length) : (topKeywords.length || 0)
                 };
               });
 
               const analyzedPlatforms = overviewPlatforms.filter(p => p.hasData);
-              const overallVis = analyzedPlatforms.length > 0
-                ? Math.round(analyzedPlatforms.reduce((sum, p) => sum + p.visibility, 0) / analyzedPlatforms.length)
-                : 'N/A';
               const totalMentionsSum = analyzedPlatforms.length > 0
                 ? analyzedPlatforms.reduce((sum, p) => sum + p.mentions, 0)
                 : 'N/A';
@@ -1690,103 +1598,140 @@ export default function PositionAnalysisPage({ onNavigate }) {
                 ? analyzedPlatforms.reduce((sum, p) => sum + p.citedPages, 0)
                 : 'N/A';
 
-              const progressPercent = typeof overallVis === 'number' ? overallVis : 0;
+              const overviewRunCount = analyzedPlatforms.length > 0
+                ? (topKeywords.length > 0 ? topKeywords.length : (analyzedPlatforms[0].totalKeywords || 0))
+                : 0;
+              const overviewProjectTotal = kwCount || activeProject?.keywords || 514;
+              const overviewProgressPercent = overviewProjectTotal > 0
+                ? Math.min(100, (overviewRunCount / overviewProjectTotal) * 100)
+                : 0;
+              const overviewRatioText = `${overviewRunCount} / ${overviewProjectTotal}`;
 
               return (
-                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 24, alignItems: 'center' }}>
-                  {/* Left Meter */}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-                    <div style={{ position: 'relative', width: 120, height: 65, display: 'flex', justifyContent: 'center', alignItems: 'flex-end' }}>
-                      <svg width="120" height="65" viewBox="0 0 120 65">
-                        <defs>
-                          <linearGradient id="aiVisibilityGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                            <stop offset="0%" stopColor="#7c3aed" />
-                            <stop offset="100%" stopColor="#a855f7" />
-                          </linearGradient>
-                        </defs>
-                        {/* Background Track */}
-                        <path
-                          d="M 12 58 A 48 48 0 0 1 108 58"
-                          fill="none"
-                          stroke="#e2e8f0"
-                          strokeWidth="9"
-                          strokeLinecap="round"
-                        />
-                        {/* Progress Track */}
-                        <path
-                          d="M 12 58 A 48 48 0 0 1 108 58"
-                          fill="none"
-                          stroke="url(#aiVisibilityGrad)"
-                          strokeWidth="9"
-                          strokeLinecap="round"
-                          strokeDasharray="150.8"
-                          strokeDashoffset={150.8 * (1 - progressPercent / 100)}
-                          style={{ transition: 'stroke-dashoffset 0.5s ease-in-out' }}
-                        />
-                      </svg>
-                      <div style={{ position: 'absolute', bottom: 2, textAlign: 'center' }}>
-                        <span style={{ fontSize: 24, fontWeight: 900, color: '#0f172a', letterSpacing: '-0.5px' }}>
-                          {overallVis}
-                        </span>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600, marginTop: 4 }}>AI Visibility</div>
-
-                    <div style={{ display: 'flex', gap: 16, marginTop: 14 }}>
-                      <div>
-                        <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>{totalMentionsSum}</div>
-                        <div style={{ fontSize: 11, color: '#94a3b8' }}>Mentions</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 15, fontWeight: 800, color: '#7c3aed' }}>{totalCitedSum}</div>
-                        <div style={{ fontSize: 11, color: '#94a3b8' }}>Cited pages</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right Table List */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: '#64748b',
-                      paddingBottom: 4,
-                      borderBottom: '1px solid #f1f5f9',
-                      marginBottom: 2
-                    }}>
-                      <span>Platform</span>
-                      <div style={{ display: 'flex', gap: 20 }}>
-                        <span style={{ color: '#0f172a', fontWeight: 700, width: 65, textAlign: 'right' }}>Mentions</span>
-                        <span style={{ color: '#7c3aed', fontWeight: 700, width: 75, textAlign: 'right' }}>Cited pages</span>
-                      </div>
-                    </div>
-                    {overviewPlatforms.map(row => (
-                      <div
-                        key={row.name}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          fontSize: 13,
-                          color: '#334155',
-                          fontWeight: 500,
-                          padding: '4px 0'
-                        }}
-                      >
-                        <span>{row.name}</span>
-                        <div style={{ display: 'flex', gap: 20 }}>
-                          <span style={{ fontWeight: 700, color: row.hasData ? '#0f172a' : '#94a3b8', width: 65, textAlign: 'right' }}>
-                            {row.mentions}
-                          </span>
-                          <span style={{ fontWeight: 700, color: row.hasData ? '#7c3aed' : '#94a3b8', width: 75, textAlign: 'right' }}>
-                            {row.citedPages}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 24, alignItems: 'center' }}>
+                    {/* Left Meter */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                      <div style={{ position: 'relative', width: 120, height: 65, display: 'flex', justifyContent: 'center', alignItems: 'flex-end' }}>
+                        <svg width="120" height="65" viewBox="0 0 120 65">
+                          <defs>
+                            <linearGradient id="aiVisibilityGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                              <stop offset="0%" stopColor="#7c3aed" />
+                              <stop offset="100%" stopColor="#a855f7" />
+                            </linearGradient>
+                          </defs>
+                          {/* Background Track */}
+                          <path
+                            d="M 12 58 A 48 48 0 0 1 108 58"
+                            fill="none"
+                            stroke="#e2e8f0"
+                            strokeWidth="9"
+                            strokeLinecap="round"
+                          />
+                          {/* Progress Track */}
+                          <path
+                            d="M 12 58 A 48 48 0 0 1 108 58"
+                            fill="none"
+                            stroke="url(#aiVisibilityGrad)"
+                            strokeWidth="9"
+                            strokeLinecap="round"
+                            strokeDasharray="150.8"
+                            strokeDashoffset={150.8 * (1 - overviewProgressPercent / 100)}
+                            style={{ transition: 'stroke-dashoffset 0.5s ease-in-out' }}
+                          />
+                        </svg>
+                        <div style={{ position: 'absolute', bottom: 14, textAlign: 'center' }}>
+                          <span style={{ fontSize: overviewRatioText.length > 6 ? 16 : 22, fontWeight: 900, color: '#0f172a', letterSpacing: '-0.5px' }}>
+                            {overviewRatioText}
                           </span>
                         </div>
                       </div>
-                    ))}
+
+                      <div style={{ display: 'flex', gap: 16, marginTop: 14 }}>
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>{totalMentionsSum}</div>
+                          <div style={{ fontSize: 11, color: '#94a3b8' }}>Mentions</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: '#7c3aed' }}>{totalCitedSum}</div>
+                          <div style={{ fontSize: 11, color: '#94a3b8' }}>Cited pages</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right Table List */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: '#64748b',
+                        paddingBottom: 4,
+                        borderBottom: '1px solid #f1f5f9',
+                        marginBottom: 2
+                      }}>
+                        <span>Platform</span>
+                        <div style={{ display: 'flex', gap: 20 }}>
+                          <span style={{ color: '#0f172a', fontWeight: 700, width: 65, textAlign: 'right' }}>Mentions</span>
+                          <span style={{ color: '#7c3aed', fontWeight: 700, width: 75, textAlign: 'right' }}>Cited pages</span>
+                        </div>
+                      </div>
+                      {overviewPlatforms.map(row => (
+                        <div
+                          key={row.name}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            fontSize: 13,
+                            color: '#334155',
+                            fontWeight: 500,
+                            padding: '4px 0'
+                          }}
+                        >
+                          <span>{row.name}</span>
+                          <div style={{ display: 'flex', gap: 20 }}>
+                            <span style={{ fontWeight: 700, color: row.hasData ? '#0f172a' : '#94a3b8', width: 65, textAlign: 'right' }}>
+                              {row.mentions}
+                            </span>
+                            <span style={{ fontWeight: 700, color: row.hasData ? '#7c3aed' : '#94a3b8', width: 75, textAlign: 'right' }}>
+                              {row.citedPages}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 4 }}>
+                    <button
+                      onClick={() => onNavigate && onNavigate('search-visibility/ai-analysis')}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#f1f5f9';
+                        e.currentTarget.style.color = '#7c3aed';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                        e.currentTarget.style.color = '#0f172a';
+                      }}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#0f172a',
+                        fontSize: 14.5,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '6px 12px',
+                        borderRadius: 6,
+                        transition: 'all 0.15s ease-in-out'
+                      }}
+                    >
+                      View all &gt;
+                    </button>
                   </div>
                 </div>
               );
@@ -1821,71 +1766,119 @@ export default function PositionAnalysisPage({ onNavigate }) {
               </span>
             </div>
 
-            {/* Categories on Left | Top 1, Top 3 & Top 10 Columns on Right */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'stretch',
-              gap: 16,
-              paddingTop: 4
-            }}>
-              {/* Left Side: Channel Names */}
-              <div style={{ flex: 1.2, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Category</div>
-                {[
-                  'Links',
-                  'Local',
-                  'Google Shopping'
-                ].map(name => (
-                  <div
-                    key={name}
-                    style={{
-                      fontSize: 12.5,
-                      fontWeight: 700,
-                      color: '#0f172a',
-                      height: 24,
-                      display: 'flex',
-                      alignItems: 'center'
-                    }}
-                  >
-                    {name}
-                  </div>
-                ))}
-              </div>
+            {/* Categories on Left | Top 1, Top 5 & Top 10 Columns on Right */}
+            {(() => {
+              const parseRank = (val) => {
+                if (val == null) return null;
+                const num = parseInt(String(val).replace(/[^0-9]/g, ''), 10);
+                return isNaN(num) || num <= 0 ? null : num;
+              };
 
-              {/* Right Side: Top 1, Top 3 & Top 10 Columns */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {/* Column Headers */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  <span>Top 1</span>
-                  <span>Top 3</span>
-                  <span>Top 10</span>
+              const calculateRanges = (kwList) => {
+                let top1 = 0;
+                let top2to5 = 0;
+                let top6to10 = 0;
+
+                kwList.forEach(k => {
+                  const r = parseRank(k.rank);
+                  if (r === 1) {
+                    top1++;
+                  } else if (r >= 2 && r <= 5) {
+                    top2to5++;
+                  } else if (r >= 6 && r <= 10) {
+                    top6to10++;
+                  }
+                });
+
+                return { top1, top5: top2to5, top10: top6to10 };
+              };
+
+              const kws = projectKeywords || [];
+
+              const linksKws = kws.filter(k => {
+                const t = (k.type || k.category || k.cluster || '').toLowerCase();
+                return !t.includes('local') && !t.includes('shopping');
+              });
+
+              const localKws = kws.filter(k => {
+                const t = (k.type || k.category || k.cluster || k.targetSubtype || '').toLowerCase();
+                return t.includes('local');
+              });
+
+              const shoppingKws = kws.filter(k => {
+                const t = (k.type || k.category || k.cluster || k.targetSubtype || '').toLowerCase();
+                return t.includes('shopping');
+              });
+
+              const linksCounts = kws.length > 0 ? calculateRanges(linksKws.length > 0 ? linksKws : kws) : { top1: 5, top5: 14, top10: 58 };
+              const localCounts = kws.length > 0 ? calculateRanges(localKws) : { top1: 1, top5: 2, top10: 9 };
+              const shoppingCounts = kws.length > 0 ? calculateRanges(shoppingKws) : { top1: 0, top5: 0, top10: 0 };
+
+              const rows = [
+                { id: 'links', label: 'Links', ...linksCounts, color: '#16a34a' },
+                { id: 'local', label: 'Local', ...localCounts, color: '#7c3aed' },
+                { id: 'shopping', label: 'Google Shopping', ...shoppingCounts, color: '#94a3b8' }
+              ];
+
+              return (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'stretch',
+                  gap: 16,
+                  paddingTop: 4
+                }}>
+                  {/* Left Side: Channel Names */}
+                  <div style={{ flex: 1.2, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Category</div>
+                    {rows.map(row => (
+                      <div
+                        key={row.id}
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: 700,
+                          color: '#0f172a',
+                          height: 24,
+                          display: 'flex',
+                          alignItems: 'center'
+                        }}
+                      >
+                        {row.label}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Right Side: Top 1, Top 5 & Top 10 Columns */}
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {/* Column Headers */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      <span title="Rank 1">Top 1</span>
+                      <span title="Rank 2 - 5">Top 5</span>
+                      <span title="Rank 6 - 10">Top 10</span>
+                    </div>
+
+                    {/* Row Values for Links, Local, Google Shopping */}
+                    {rows.map(row => (
+                      <div
+                        key={row.id}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(3, 1fr)',
+                          gap: 12,
+                          alignItems: 'center',
+                          height: 24,
+                          fontSize: 13,
+                          fontWeight: 800
+                        }}
+                      >
+                        <span style={{ color: row.color }}>{row.top1}</span>
+                        <span style={{ color: row.color }}>{row.top5}</span>
+                        <span style={{ color: row.color }}>{row.top10}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-
-                {/* Row Values for Links, Local, Google Shopping */}
-                {[
-                  { id: 'links', top1: '5', top3: '14', top10: '58', color: '#16a34a' },
-                  { id: 'local', top1: '1', top3: '2', top10: '9', color: '#7c3aed' },
-                  { id: 'shopping', top1: '0', top3: '0', top10: '0', color: '#94a3b8' }
-                ].map(row => (
-                  <div
-                    key={row.id}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(3, 1fr)',
-                      gap: 12,
-                      alignItems: 'center',
-                      height: 24,
-                      fontSize: 13,
-                      fontWeight: 800
-                    }}
-                  >
-                    <span style={{ color: row.color }}>{row.top1}</span>
-                    <span style={{ color: row.color }}>{row.top3}</span>
-                    <span style={{ color: row.color }}>{row.top10}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+              );
+            })()}
           </div>
         )}
       </div>

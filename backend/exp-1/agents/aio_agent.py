@@ -78,8 +78,34 @@ SUMMARY_MODEL = os.environ.get("GEMINI_MODEL", "models/gemini-3.5-flash")   # SE
 
 
 def generate_content_with_retry(model: str, contents, config, max_attempts=2):
-    """Wrapper that tries API calls with key rotation and fast timeout."""
+    """Wrapper that tries API calls with key rotation and fast timeout, with OpenAI fallback."""
     last_err = None
+
+    # Check if Gemini clients exist; if not, fallback to OpenAI
+    if not _client_pool.clients:
+        openai_key = os.environ.get("OPENAI_API_KEY")
+        if openai_key:
+            try:
+                from openai import OpenAI
+                o_client = OpenAI(api_key=openai_key)
+                prompt_text = str(contents)
+                sys_inst = getattr(config, 'system_instruction', '') if config else ''
+                messages = []
+                if sys_inst:
+                    messages.append({"role": "system", "content": str(sys_inst)})
+                messages.append({"role": "user", "content": prompt_text})
+                completion = o_client.chat.completions.create(
+                    model=os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
+                    messages=messages,
+                    temperature=0.3
+                )
+                class FallbackResp:
+                    def __init__(self, text):
+                        self.text = text
+                return FallbackResp(completion.choices[0].message.content or "")
+            except Exception as o_err:
+                print(f"[AIOAgent] OpenAI fallback failed: {o_err}", file=sys.stderr, flush=True)
+
     for attempt in range(1, max_attempts + 1):
         try:
             client = _client_pool.get_client()
@@ -94,20 +120,29 @@ def generate_content_with_retry(model: str, contents, config, max_attempts=2):
             err_msg = str(e)
             print(f"[AIOAgent] generate_content failed (attempt {attempt}/{max_attempts}): {err_msg}", file=sys.stderr, flush=True)
 
-            # Legacy fallback if new SDK 404s
-            try:
-                import google.generativeai as legacy_genai
-                key = _client_pool.keys[_client_pool.current_index] if _client_pool.keys else None
-                if key:
-                    legacy_genai.configure(api_key=key)
-                    g_model = legacy_genai.GenerativeModel("gemini-1.5-flash")
-                    resp = g_model.generate_content(str(contents))
-                    class LegacyResponse:
+            # Try OpenAI fallback on error
+            openai_key = os.environ.get("OPENAI_API_KEY")
+            if openai_key:
+                try:
+                    from openai import OpenAI
+                    o_client = OpenAI(api_key=openai_key)
+                    prompt_text = str(contents)
+                    sys_inst = getattr(config, 'system_instruction', '') if config else ''
+                    messages = []
+                    if sys_inst:
+                        messages.append({"role": "system", "content": str(sys_inst)})
+                    messages.append({"role": "user", "content": prompt_text})
+                    completion = o_client.chat.completions.create(
+                        model=os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
+                        messages=messages,
+                        temperature=0.3
+                    )
+                    class FallbackResp:
                         def __init__(self, text):
                             self.text = text
-                    return LegacyResponse(resp.text)
-            except Exception as leg_err:
-                pass
+                    return FallbackResp(completion.choices[0].message.content or "")
+                except Exception as o_err:
+                    pass
 
             is_exhausted = any(x in err_msg for x in ("429", "RESOURCE_EXHAUSTED", "quota", "Quota", "limit", "Limit", "403", "API_KEY_INVALID", "invalid api key"))
             if is_exhausted and _client_pool.rotate_key():
