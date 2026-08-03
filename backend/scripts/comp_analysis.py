@@ -96,17 +96,20 @@ def aggregate_competitors(
 ) -> Dict[str, dict]:
     """
     For a single project's rows, build per-competitor-domain stats:
-    {domain: {"keywords": {keyword: best_position}, ...}}
+    {domain: {"keywords": {keyword: best_position}, "categories": set(), "clusters": set()}}
     """
     own_domain = ""
     if len(project_rows) and project_rows["checked_domain"].iloc[0]:
         own_domain = get_domain(str(project_rows["checked_domain"].iloc[0]))
 
-    stats: Dict[str, dict] = defaultdict(lambda: {"keywords": {}})
+    stats: Dict[str, dict] = defaultdict(lambda: {"keywords": {}, "categories": set(), "clusters": set()})
 
     for _, row in project_rows.iterrows():
         keyword = row["keyword"]
         top_links = row["top_links"] or []
+        cat = str(row.get("category") or row.get("target_subtype") or "").strip()
+        cls = str(row.get("cluster") or "").strip()
+
         seen_this_keyword = set()
         for idx, url in enumerate(top_links, start=1):
             dom = get_domain(url)
@@ -118,6 +121,10 @@ def aggregate_competitors(
             best = stats[dom]["keywords"].get(keyword)
             if best is None or idx < best:
                 stats[dom]["keywords"][keyword] = idx
+            if cat and cat.lower() not in ("nan", "none", "null"):
+                stats[dom]["categories"].add(cat)
+            if cls and cls.lower() not in ("nan", "none", "null"):
+                stats[dom]["clusters"].add(cls)
 
     return stats, own_domain
 
@@ -143,8 +150,16 @@ def build_competitor_table(stats: dict, total_keywords: int, top_n: Optional[int
         avg_rank = round(sum(kw_positions.values()) / ranking_keywords, 2) if ranking_keywords else 0
         coverage = ranking_keywords / total_keywords if total_keywords else 0
         level, score = serp_comp_level(coverage, avg_rank if avg_rank else 999)
+
+        categories = sorted(list(data.get("categories", set())))
+        clusters = sorted(list(data.get("clusters", set())))
+        cat_str = ", ".join(c for c in categories if c)
+        cls_str = ", ".join(c for c in clusters if c)
+
         rows.append({
             "competitor_domain": domain,
+            "category": cat_str,
+            "cluster": cls_str,
             "total_keywords": total_keywords,
             "ranking_keywords": ranking_keywords,
             "coverage_pct": round(coverage * 100, 1),

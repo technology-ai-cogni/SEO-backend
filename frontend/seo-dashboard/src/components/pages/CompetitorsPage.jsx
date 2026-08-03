@@ -232,7 +232,7 @@ export default function CompetitorsPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['Project', 'Device & Location', 'Target Platforms', 'PA', "Common KW's", '', "Tot. KW's", 'AI Comp. Level', 'SERP Comp Level', 'Comp Level', 'dated', ''].map((h, i) => (
+                {['Project', 'Device & Location', 'Target Platforms', 'PA', "Common KW's", '', "Tot. KW's", 'SERP Comp Level', 'Comp Level', 'dated', ''].map((h, i) => (
                   <th key={i} style={{
                     padding: '10px 16px',
                     textAlign: i === 0 || i === 1 || i === 2 ? 'left' : 'right',
@@ -304,13 +304,6 @@ export default function CompetitorsPage() {
                   {/* Total KW's */}
                   <td style={{ padding: '14px 16px', textAlign: 'right' }}>
                     <ChangeIndicator value={comp.totalKwChange} />
-                  </td>
-
-                  {/* AI Comp Level */}
-                  <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                    <span style={{ fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-                      {Math.min(comp.aiCompLevel, 100)}%
-                    </span>
                   </td>
 
                   {/* SERP Comp Level */}

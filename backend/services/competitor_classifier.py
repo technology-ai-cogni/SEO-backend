@@ -1,6 +1,6 @@
 """
 Service for classifying URLs into website types ("Official Entity" vs "Platform")
-and determining competitor status ("YES" vs "NO") using Gemini API.
+and determining competitor status ("YES" vs "NO") using OpenAI API.
 """
 
 import os
@@ -16,6 +16,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 from bs4 import BeautifulSoup, Comment
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
@@ -23,8 +24,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CONNECT_TIMEOUT = 5.0
 DEFAULT_READ_TIMEOUT = 20.0
-DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-GEMINI_REST_URL_TEMPLATE = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 
 REALISTIC_HEADERS = {
     "User-Agent": (
@@ -170,115 +170,103 @@ def classify_url(
     model: Optional[str] = None
 ) -> Dict[str, str]:
     """
-    Classifies a single URL using BeautifulSoup scraping + Gemini API.
+    Classifies a single URL using BeautifulSoup scraping + OpenAI API.
     Returns: {"url": str, "website_type": str, "is_competitor": str}
     """
-    resolved_api_key = api_key or os.getenv("GEMINI_API_KEY")
+    resolved_api_key = api_key or os.getenv("OPENAI_API_KEY")
     if not resolved_api_key:
-        raise ValueError("GEMINI_API_KEY is not configured in environment variables or request parameters.")
+        raise ValueError("OPENAI_API_KEY is not configured in environment variables or request parameters.")
 
-    target_model = model or DEFAULT_GEMINI_MODEL
+    target_model = model or DEFAULT_OPENAI_MODEL
     close_session = False
     if session is None:
         session = create_http_session()
         close_session = True
+
+    # 1. Check DB cache first to avoid re-classifying already classified URLs
+    try:
+        from core import db
+        cached = db.get_url_classification(url)
+        if cached and cached.get("website_type"):
+            logger.info(f"[Classification Cache Hit] '{url}' already classified as '{cached['website_type']}'. Skipping re-classification.")
+            return {
+                "url": url,
+                "website_type": cached["website_type"],
+                "is_competitor": cached.get("is_competitor", "NO")
+            }
+    except Exception as cache_err:
+        logger.warning(f"Failed to check classification cache for '{url}': {cache_err}")
 
     try:
         page_data = scrape_website(session, url)
         if page_data.get("error"):
             logger.warning(f"Scrape warning for URL '{url}': {page_data['error']}")
 
-        prompt = f"""You are an expert website classification AI.
+        system_prompt = (
+            "You are an expert website classification AI. "
+            "Analyze website metadata and content snippet to classify it into exactly one of two categories:\n\n"
+            "1. 'Official Entity': The website belongs to one specific organization, business, company, institution, university, school, college, hospital, hotel, restaurant, government department, NGO, SaaS company, manufacturer, retailer, startup, real estate firm, or brand (is_competitor: YES).\n"
+            "   Note: An official school/company site is 'Official Entity' even if the URL path is a blog/guide page on their domain.\n\n"
+            "2. 'Platform': Operating as a third-party marketplace, directory, listing portal, review aggregator, independent news/media portal, blog platform, search engine, or comparison portal (is_competitor: NO).\n\n"
+            "Respond ONLY in valid raw JSON with exact keys: 'website_type' ('Official Entity' or 'Platform') and 'is_competitor' ('YES' or 'NO')."
+        )
 
-Analyze the provided website metadata and content snippet to classify it into exactly one of two categories:
-
-1. "Official Entity": The website belongs to one specific organization, business, company, institution, university, school, college, hospital, hotel, restaurant, government department, NGO, SaaS company, manufacturer, retailer, startup, real estate firm, or brand (is_competitor: YES).
-   Note: An official school/company site is "Official Entity" even if the URL path is a blog/guide page on their domain.
-
-2. "Platform": Operating as a third-party marketplace, directory, listing portal, review aggregator, independent news/media portal, blog platform, search engine, or comparison portal (is_competitor: NO).
-
-Extracted Website Data:
+        user_prompt = f"""Extracted Website Data:
 - Target URL: {page_data['original_url']}
 - Domain: {page_data['domain']}
 - Page Title: {page_data['title']}
 - Meta Description: {page_data['description']}
 - Meta Keywords: {page_data['keywords']}
 - Page Text Content: {page_data['text_snippet']}
-
-Respond ONLY in valid raw JSON:
-{{
-  "website_type": "Official Entity" or "Platform",
-  "is_competitor": "YES" or "NO"
-}}
 """
 
-        candidate_models = [target_model, "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash"]
+        client = OpenAI(api_key=resolved_api_key)
+
+        candidate_models = [target_model, "gpt-4o-mini", "gpt-4o"]
         seen_models = []
         for m in candidate_models:
             if m and m not in seen_models:
                 seen_models.append(m)
 
         for current_model in seen_models:
-            endpoint = f"{GEMINI_REST_URL_TEMPLATE.format(model=current_model)}?key={resolved_api_key}"
-            headers = {"Content-Type": "application/json", "X-goog-api-key": resolved_api_key}
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json"}
-            }
-
-            for attempt in range(5):
+            for attempt in range(3):
                 try:
-                    res = session.post(endpoint, headers=headers, json=payload, timeout=30)
-                    if res.status_code == 200:
-                        text_content = ""
-                        res_data = res.json()
-                        candidates = res_data.get("candidates", [])
-                        if candidates and "content" in candidates[0]:
-                            text_content = candidates[0]["content"].get("parts", [{}])[0].get("text", "").strip()
+                    response = client.chat.completions.create(
+                        model=current_model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        temperature=0.1,
+                        response_format={"type": "json_object"}
+                    )
+                    content = response.choices[0].message.content.strip()
+                    parsed_json = json.loads(content)
 
-                        clean_text = re.sub(r"^```json\s*", "", text_content, flags=re.I)
-                        clean_text = re.sub(r"^```\s*", "", clean_text)
-                        clean_text = re.sub(r"```$", "", clean_text).strip()
+                    w_type = str(parsed_json.get("website_type", "Platform")).strip()
+                    is_comp = str(parsed_json.get("is_competitor", "NO")).strip().upper()
 
-                        match = re.search(r"\{.*\}", clean_text, re.DOTALL)
-                        if match:
-                            parsed_json = json.loads(match.group(0))
-                            w_type = str(parsed_json.get("website_type", "Platform")).strip()
-                            is_comp = str(parsed_json.get("is_competitor", "NO")).strip().upper()
-
-                            if is_comp not in ["YES", "NO"]:
-                                is_comp = "YES" if "Official" in w_type else "NO"
-                            if "Official" in w_type:
-                                w_type = "Official Entity"
-                                is_comp = "YES"
-                            else:
-                                w_type = "Platform"
-                                is_comp = "NO"
-
-                            return {
-                                "url": url,
-                                "website_type": w_type,
-                                "is_competitor": is_comp
-                            }
-                    elif res.status_code == 429:
-                        wait_sec = 10
-                        m_sec = re.search(r"retry in (\d+\.?\d*)s", res.text, re.IGNORECASE)
-                        if m_sec:
-                            wait_sec = int(float(m_sec.group(1))) + 2
-                        logger.warning(f"Gemini API rate limit 429. Retrying in {wait_sec}s...")
-                        time.sleep(wait_sec)
-                        continue
-                    elif res.status_code == 404:
-                        logger.warning(f"Model '{current_model}' not found (404), trying fallback model...")
-                        break
+                    if is_comp not in ["YES", "NO"]:
+                        is_comp = "YES" if "Official" in w_type else "NO"
+                    if "Official" in w_type:
+                        w_type = "Official Entity"
+                        is_comp = "YES"
                     else:
-                        logger.error(f"Gemini API HTTP Error {res.status_code}: {res.text}")
-                        time.sleep(2)
-                except Exception as req_err:
-                    logger.error(f"Gemini API request error: {str(req_err)}")
-                    time.sleep(2)
+                        w_type = "Platform"
+                        is_comp = "NO"
 
-        # Fallback if LLM classification fails
+                    print(f"[OpenAI Model Output] Model: '{current_model}' | Output: website_type='{w_type}', is_competitor='{is_comp}'", flush=True)
+                    logger.info(f"[OpenAI Model Output] Model: '{current_model}' | Output: website_type='{w_type}', is_competitor='{is_comp}'")
+
+                    return {
+                        "url": url,
+                        "website_type": w_type,
+                        "is_competitor": is_comp
+                    }
+                except Exception as req_err:
+                    logger.error(f"OpenAI API request error (model: {current_model}, attempt {attempt+1}): {str(req_err)}")
+                    time.sleep(1.5)
+
         return {
             "url": url,
             "website_type": "Platform",

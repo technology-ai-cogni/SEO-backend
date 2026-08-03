@@ -296,6 +296,22 @@ def init_db():
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pages_project ON pages (project_name)"))
 
+        # --- Competitor Pages (separate db for Competitors tab Add Pages) ---
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS competitor_pages (
+                id BIGSERIAL PRIMARY KEY,
+                project_name TEXT NOT NULL REFERENCES projects(slug),
+                page_name TEXT,
+                url TEXT,
+                cluster TEXT,
+                category TEXT,
+                target_category TEXT,
+                target_type TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_competitor_pages_project ON competitor_pages (project_name)"))
+
         # --- Competitors ---------------------------------------------------
         # Each competitor is tracked against one of the projects registered
         # in the `projects` table (project_slug), so the Competitors tab can
@@ -325,6 +341,8 @@ def init_db():
         conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS project_slug TEXT"))
         conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS website_type TEXT"))
         conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS type TEXT"))
+        conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS category TEXT"))
+        conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS cluster TEXT"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_competitors_project ON competitors (project_slug)"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS url_classifications (
@@ -434,6 +452,7 @@ def delete_project(slug):
         conn.execute(text("DELETE FROM clusters WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM category_cluster_map WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM pages WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM competitor_pages WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM projects WHERE slug = :slug"), {"slug": slug})
 
 
@@ -906,25 +925,88 @@ def bulk_delete_page_rows(ids):
         conn.execute(text("DELETE FROM pages WHERE id = ANY(:ids)"), {"ids": ids})
 
 
+# --- Competitor Pages (separate db for Competitors tab Add Pages) ---
+
+def insert_competitor_page_rows(project_slug, rows):
+    if not rows:
+        return []
+    inserted = []
+    with engine.begin() as conn:
+        for batch in _chunked(rows, 500):
+            values_sql = ", ".join(
+                f"(:project_name, :page_name{i}, :url{i}, :cluster{i}, :category{i})"
+                for i in range(len(batch))
+            )
+            params = {"project_name": project_slug}
+            for i, r in enumerate(batch):
+                params[f"page_name{i}"] = r.get("pageName")
+                params[f"url{i}"] = r.get("url")
+                params[f"cluster{i}"] = r.get("cluster")
+                params[f"category{i}"] = r.get("category")
+            result = conn.execute(text(f"""
+                INSERT INTO competitor_pages (project_name, page_name, url, cluster, category)
+                VALUES {values_sql}
+                RETURNING id, page_name, url, cluster, category, target_category, target_type
+            """), params)
+            inserted.extend(dict(r) for r in result.mappings().fetchall())
+    return inserted
+
+
+def get_competitor_page_rows(project_slug):
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT id, page_name, url, cluster, category, target_category, target_type
+            FROM competitor_pages WHERE project_name = :project_name ORDER BY id
+        """), {"project_name": project_slug}).mappings().fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_competitor_page_row(row_id, updates):
+    fields = {k: v for k, v in updates.items() if k in _PAGE_UPDATABLE_COLUMNS}
+    if not fields:
+        return
+    set_sql = ", ".join(f"{k} = :{k}" for k in fields)
+    with engine.begin() as conn:
+        conn.execute(text(f"UPDATE competitor_pages SET {set_sql} WHERE id = :id"), {**fields, "id": row_id})
+
+
+def delete_competitor_page_row(row_id):
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM competitor_pages WHERE id = :id"), {"id": row_id})
+
+
+def bulk_delete_competitor_page_rows(ids):
+    if not ids:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM competitor_pages WHERE id = ANY(:ids)"), {"ids": ids})
+
+
+def delete_pages_by_project(project_slug):
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM pages WHERE project_name = :project_slug"), {"project_slug": project_slug})
+        conn.execute(text("DELETE FROM competitor_pages WHERE project_name = :project_slug"), {"project_slug": project_slug})
+
+
 # --- Competitors (each scoped to a project via project_slug) --------------
 
-_COMPETITOR_UPDATABLE_COLUMNS = {"name", "domain", "da", "target_regions", "project_slug"}
+_COMPETITOR_UPDATABLE_COLUMNS = {"name", "domain", "da", "target_regions", "project_slug", "category", "cluster", "type", "website_type"}
 
 
-def insert_competitor(domain, name=None, da=None, target_regions=None, project_slug=None):
-    """The analytics columns (common_kw/total_kw/ai_comp_level/
-    serp_comp_level/comp_level and their *_change counterparts) have no
-    real computation pipeline behind them yet -- they start at 0, same as
-    a freshly-added KW Cluster/Pages project shows 0 until real data
-    exists, rather than fabricating numbers."""
+def insert_competitor(domain, name=None, da=None, target_regions=None, project_slug=None, category=None, cluster=None, type=None, website_type=None):
+    wtype = type or website_type
     with engine.begin() as conn:
         row = conn.execute(text("""
             INSERT INTO competitors
-                (domain, name, da, target_regions, project_slug, common_kw, common_kw_change,
+                (domain, name, da, target_regions, project_slug, category, cluster, type, website_type, common_kw, common_kw_change,
                  total_kw, total_kw_change, ai_comp_level, ai_comp_change, serp_comp_level, comp_level)
-            VALUES (:domain, :name, :da, :target_regions, :project_slug, 0, 0, 0, 0, 0, 0, 0, 0)
+            VALUES (:domain, :name, :da, :target_regions, :project_slug, :category, :cluster, :type, :website_type, 0, 0, 0, 0, 0, 0, 0, 0)
             RETURNING *
-        """), {"domain": domain, "name": name, "da": da, "target_regions": target_regions or [], "project_slug": project_slug}).mappings().fetchone()
+        """), {
+            "domain": domain, "name": name, "da": da, "target_regions": target_regions or [],
+            "project_slug": project_slug, "category": category, "cluster": cluster,
+            "type": wtype, "website_type": wtype
+        }).mappings().fetchone()
         return dict(row)
 
 
@@ -941,9 +1023,8 @@ def get_competitors(project_slug=None):
 
 
 def update_competitor(competitor_id, updates):
-    """Updates whichever of name/domain/da/target_regions/project_slug are
-    present in `updates` (snake_case keys) -- silently ignores anything
-    else (the analytics columns aren't user-editable)."""
+    """Updates whichever of name/domain/da/target_regions/project_slug/category/cluster/type are
+    present in `updates` (snake_case keys) -- silently ignores anything else."""
     fields = {k: v for k, v in updates.items() if k in _COMPETITOR_UPDATABLE_COLUMNS}
     if not fields:
         return
@@ -968,8 +1049,8 @@ def update_competitor_website_type(domain_or_url, website_type):
 
     with engine.begin() as conn:
         conn.execute(
-            text("UPDATE competitors SET website_type = :wtype, type = :wtype, updated_at = now() WHERE LOWER(domain) LIKE :dom"),
-            {"wtype": website_type, "dom": f"%{clean_domain}%"}
+            text("UPDATE competitors SET website_type = :wtype, type = :wtype, updated_at = now() WHERE LOWER(domain) LIKE :dom OR LOWER(domain) = :exact"),
+            {"wtype": website_type, "dom": f"%{clean_domain}%", "exact": clean_domain}
         )
 
 
@@ -1054,6 +1135,11 @@ def save_url_classification(url: str, website_type: str, is_competitor: str = "N
 def delete_competitor(competitor_id):
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM competitors WHERE id = :id"), {"id": competitor_id})
+
+
+def delete_competitors_by_project(project_slug):
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM competitors WHERE project_slug = :project_slug"), {"project_slug": project_slug})
 
 
 def get_competitor(competitor_id):

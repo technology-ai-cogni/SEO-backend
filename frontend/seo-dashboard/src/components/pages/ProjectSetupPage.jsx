@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Plus, Minus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2, RefreshCw, Filter, Download } from 'lucide-react';
+import { Search, Plus, Minus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2, RefreshCw, Filter, Download, Folder, FolderTree } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { Badge } from '../ui/Card';
@@ -8,7 +8,8 @@ import {
   fetchDomainRows, createProject, updateDomainRow, deleteDomainRow,
   fetchKwProjects, fetchKeywordRows, insertKeywordRows, updateKeywordRow, bulkDeleteKeywordRows, deleteKwClusterData,
   fetchPageRows, insertPageRows, updatePageRow, deletePageRow, bulkDeletePageRows, deletePagesData, fetchPagesCounts,
-  fetchCompetitors, insertCompetitor, updateCompetitor, deleteCompetitor,
+  fetchCompetitorPageRows, insertCompetitorPageRows, updateCompetitorPageRow, deleteCompetitorPageRow,
+  fetchCompetitors, insertCompetitor, updateCompetitor, deleteCompetitor, deleteCompetitorProjectData,
   findCompetitors, fetchCompetitorSnapshots, classifyCompetitorUrls,
 } from '../../lib/projectsApi';
 
@@ -429,7 +430,15 @@ function TableFilterDropdown({ filters, rows, activeFilters, onFiltersChange }) 
         uniqueVals[f.key] = f.options;
       } else {
         const set = new Set();
-        (rows || []).forEach(r => { const v = r[f.key]; if (v != null && v !== '') set.add(String(v)); });
+        (rows || []).forEach(r => {
+          const v = r[f.key];
+          if (v != null && v !== '') {
+            String(v).split(',').forEach(item => {
+              const trimmed = item.trim();
+              if (trimmed) set.add(trimmed);
+            });
+          }
+        });
         uniqueVals[f.key] = [...set].sort();
       }
     }
@@ -963,7 +972,7 @@ function AddPagesModal({ open, onClose, projects, onImportPages, lockedProject }
 
 // ─── Add Keywords Modal ──────────────────────────────────────────────────────
 
-const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://54.196.75.9:8000';
+const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://3.94.159.201:8000';
 
 function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedProject }) {
   const [project, setProject] = useState('');
@@ -1027,7 +1036,7 @@ function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedPro
   };
 
   const downloadSampleTemplate = async () => {
-    const headers = ['KW', 'SV', 'KW Diff', 'Type', 'Cluster', 'Category', 'Target Type', 'Target Subtype', 'Target Geo', 'Priority', 'Landing Page'];
+    const headers = ['KW', 'SV', 'KW Diff', 'Type', 'Cluster', 'Category', 'Target Type', 'Target Subtype', 'Target Geo', 'Priority', 'he'];
     const sampleRows = [
       ['school admission form', 14800, 20, 'Organic', 'ICSE Board', 'Icse vs cbse', 'Landing Page', 'Informational', 'India', 'P1', 'URL'],
       ['best schools in bangalore', 12100, 28, 'SERP', 'High School', 'Fees Structure', 'Landing Page', 'Commercial', 'India', 'P2', 'URL'],
@@ -1176,64 +1185,61 @@ function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedPro
 
 // ─── Add Competitors Modal ───────────────────────────────────────────────────
 
-function ChooseProjectModal({ open, onClose, onApply, projects }) {
+function ChooseProjectModal({ open, onClose, onApply, projects, mode = 'findCompetitors' }) {
   const [projectSlug, setProjectSlug] = useState('');
-  const [loadingKw, setLoadingKw] = useState(false);
-
-  // Tree data structure: array of { cluster: string, categories: string[] }
   const [treeData, setTreeData] = useState([]);
-  
-  // Selection state
-  const [selectedClusters, setSelectedClusters] = useState(new Set());
-  const [selectedCategories, setSelectedCategories] = useState(new Set()); // values are `${cluster}:::${cat}`
-
-  // Expanded clusters state
+  const [loadingTree, setLoadingTree] = useState(false);
   const [expandedClusters, setExpandedClusters] = useState(new Set());
+  const [selectedCategories, setSelectedCategories] = useState(new Set());
 
-  const resetForm = () => {
-    setProjectSlug('');
-    setTreeData([]);
-    setSelectedClusters(new Set());
-    setSelectedCategories(new Set());
-    setExpandedClusters(new Set());
-  };
+  const showTree = mode === 'findCompetitors';
 
-  const handleClose = () => { resetForm(); onClose(); };
-
-  // Fetch keywords when project changes -> build cluster & category tree
   useEffect(() => {
-    if (!projectSlug) {
-      resetForm();
+    if (!projectSlug || !showTree) {
+      setTreeData([]);
+      setSelectedCategories(new Set());
+      setExpandedClusters(new Set());
       return;
     }
+
     let cancelled = false;
-    setLoadingKw(true);
-    fetchKeywordRows(projectSlug).then(rows => {
-      if (cancelled) return;
-      
-      const map = {};
-      rows.forEach(r => {
-        const clusterName = r.cluster || 'General';
-        if (!map[clusterName]) map[clusterName] = new Set();
-        if (r.category) {
-          map[clusterName].add(r.category);
-        }
+    setLoadingTree(true);
+    fetchKeywordRows(projectSlug)
+      .then(rows => {
+        if (cancelled) return;
+        const clusterMap = {};
+        (rows || []).forEach(r => {
+          const cluster = r.cluster || 'General';
+          const cat = r.category || 'General';
+          if (!clusterMap[cluster]) clusterMap[cluster] = new Set();
+          if (cat) clusterMap[cluster].add(cat);
+        });
+
+        const formatted = Object.keys(clusterMap).map(cluster => ({
+          cluster,
+          categories: Array.from(clusterMap[cluster])
+        }));
+
+        setTreeData(formatted);
+        setExpandedClusters(new Set());
+        setSelectedCategories(new Set());
+      })
+      .catch(() => {
+        if (!cancelled) setTreeData([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingTree(false);
       });
 
-      const derivedTree = Object.keys(map).sort().map(clusterName => ({
-        cluster: clusterName,
-        categories: Array.from(map[clusterName]).sort(),
-      }));
-
-      setTreeData(derivedTree);
-      setExpandedClusters(new Set());
-      setSelectedClusters(new Set());
-      setSelectedCategories(new Set());
-    }).finally(() => {
-      if (!cancelled) setLoadingKw(false);
-    });
     return () => { cancelled = true; };
-  }, [projectSlug]);
+  }, [projectSlug, showTree]);
+
+  const handleClose = () => {
+    setProjectSlug('');
+    setTreeData([]);
+    setSelectedCategories(new Set());
+    onClose();
+  };
 
   const toggleClusterExpand = (clusterName) => {
     setExpandedClusters(prev => {
@@ -1244,72 +1250,29 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
     });
   };
 
-  const isClusterFullySelected = (item) => {
-    if (selectedClusters.has(item.cluster)) return true;
-    if (item.categories.length === 0) return false;
-    return item.categories.every(cat => selectedCategories.has(`${item.cluster}:::${cat}`));
-  };
-
-  const isClusterPartial = (item) => {
-    if (isClusterFullySelected(item)) return false;
-    return item.categories.some(cat => selectedCategories.has(`${item.cluster}:::${cat}`));
-  };
-
-  const toggleClusterSelection = (item) => {
-    const isFull = isClusterFullySelected(item);
-    setSelectedClusters(prevC => {
-      const nextC = new Set(prevC);
-      if (isFull) nextC.delete(item.cluster);
-      else nextC.add(item.cluster);
-      return nextC;
-    });
-
-    setSelectedCategories(prevCat => {
-      const nextCat = new Set(prevCat);
-      item.categories.forEach(cat => {
-        const key = `${item.cluster}:::${cat}`;
-        if (isFull) nextCat.delete(key);
-        else nextCat.add(key);
-      });
-      return nextCat;
+  const toggleCategorySelect = (clusterName, catName) => {
+    const key = `${clusterName}::${catName}`;
+    setSelectedCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
     });
   };
 
-  const toggleCategorySelection = (clusterName, catName, clusterItem) => {
-    const key = `${clusterName}:::${catName}`;
-    const willSelect = !selectedCategories.has(key);
+  const toggleClusterSelect = (clusterObj) => {
+    const clusterKeys = clusterObj.categories.map(c => `${clusterObj.cluster}::${c}`);
+    const allSelected = clusterKeys.every(k => selectedCategories.has(k));
 
-    setSelectedCategories(prevCat => {
-      const nextCat = new Set(prevCat);
-      if (willSelect) nextCat.add(key);
-      else nextCat.delete(key);
-
-      const allSelectedNow = clusterItem.categories.length > 0 && clusterItem.categories.every(c => nextCat.has(`${clusterName}:::${c}`));
-      setSelectedClusters(prevClus => {
-        const nextClus = new Set(prevClus);
-        if (allSelectedNow) nextClus.add(clusterName);
-        else nextClus.delete(clusterName);
-        return nextClus;
-      });
-
-      return nextCat;
+    setSelectedCategories(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        clusterKeys.forEach(k => next.delete(k));
+      } else {
+        clusterKeys.forEach(k => next.add(k));
+      }
+      return next;
     });
-  };
-
-  const handleSelectAll = () => {
-    const allC = new Set();
-    const allCat = new Set();
-    treeData.forEach(item => {
-      allC.add(item.cluster);
-      item.categories.forEach(cat => allCat.add(`${item.cluster}:::${cat}`));
-    });
-    setSelectedClusters(allC);
-    setSelectedCategories(allCat);
-  };
-
-  const handleClearAll = () => {
-    setSelectedClusters(new Set());
-    setSelectedCategories(new Set());
   };
 
   const handleExpandAll = () => {
@@ -1320,32 +1283,47 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
     setExpandedClusters(new Set());
   };
 
+  const handleSelectAll = () => {
+    const allKeys = new Set();
+    treeData.forEach(t => t.categories.forEach(c => allKeys.add(`${t.cluster}::${c}`)));
+    setSelectedCategories(allKeys);
+  };
+
+  const handleClearAll = () => {
+    setSelectedCategories(new Set());
+  };
+
   const handleApply = () => {
     const project = projects.find(p => p.slug === projectSlug);
     if (!project) return;
 
-    const clustersList = Array.from(selectedClusters);
-    const categoriesList = Array.from(selectedCategories).map(key => key.split(':::')[1]).filter(Boolean);
-
-    onApply({
-      project,
-      clusters: clustersList.length > 0 ? clustersList : null,
-      categories: categoriesList.length > 0 ? categoriesList : null,
-    });
+    if (showTree) {
+      const chosenCategories = Array.from(selectedCategories).map(k => k.split('::')[1]);
+      const chosenClusters = treeData
+        .filter(t => t.categories.some(c => selectedCategories.has(`${t.cluster}::${c}`)))
+        .map(t => t.cluster);
+      onApply({ project, chosenClusters, chosenCategories });
+    } else {
+      onApply({ project });
+    }
     handleClose();
   };
 
-  const totalSelectedCount = selectedClusters.size + selectedCategories.size;
+  const isApplyDisabled = !projectSlug || (showTree && selectedCategories.size === 0);
 
   return (
     <Modal
       open={open}
       onClose={handleClose}
-      title="Find Competitors"
+      title={showTree ? "Find Competitors" : "Choose Project"}
       footer={
         <>
-          <Btn variant="primary" onClick={handleApply} style={!projectSlug ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
-            Apply {totalSelectedCount > 0 ? `(${totalSelectedCount} Selected)` : ''}
+          <Btn
+            variant="primary"
+            onClick={handleApply}
+            style={isApplyDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}}
+          >
+            {showTree ? 'Apply Selection' : 'Apply'}
           </Btn>
           <Btn variant="outline" onClick={handleClose} style={{ flex: 'none', padding: '10px 28px' }}>
             Cancel
@@ -1353,220 +1331,127 @@ function ChooseProjectModal({ open, onClose, onApply, projects }) {
         </>
       }
     >
-      {/* Project selector */}
       <Select
         label="Choose Project"
-        placeholder={projects.length ? 'Select a project' : 'No projects yet — add one in the Domain tab'}
+        placeholder={projects?.length ? 'Select a project' : 'No projects yet — add one in the Domain tab'}
         value={projectSlug}
         onChange={setProjectSlug}
-        options={projects.map(p => ({ value: p.slug, label: p.name }))}
+        options={(projects || []).map(p => ({ value: p.slug, label: p.name || p.domain }))}
       />
 
-      {loadingKw && (
-        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '12px 0', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <RefreshCw size={14} className="spin-icon" /> Loading project hierarchy tree…
-        </div>
-      )}
-
-      {projectSlug && !loadingKw && treeData.length === 0 && (
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '12px 0' }}>
-          No clusters or categories found for this project.
-        </div>
-      )}
-
-      {/* HIERARCHY TREE VIEW */}
-      {projectSlug && treeData.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-          {/* Header Controls: Quick Action Buttons */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+      {showTree && projectSlug && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
               Select Clusters & Categories
             </span>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 12 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
               <button
                 type="button"
                 onClick={expandedClusters.size === treeData.length ? handleCollapseAll : handleExpandAll}
-                style={{ background: 'none', border: 'none', color: '#2563eb', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, padding: '3px 8px', fontSize: 11, cursor: 'pointer', color: 'var(--text-secondary)' }}
               >
                 {expandedClusters.size === treeData.length ? 'Collapse All' : 'Expand All'}
               </button>
-              <span style={{ color: '#d1d5db' }}>|</span>
               <button
                 type="button"
-                onClick={handleSelectAll}
-                style={{ background: 'none', border: 'none', color: '#2563eb', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                onClick={selectedCategories.size > 0 ? handleClearAll : handleSelectAll}
+                style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, padding: '3px 8px', fontSize: 11, cursor: 'pointer', color: 'var(--text-secondary)' }}
               >
-                Select All
-              </button>
-              <span style={{ color: '#d1d5db' }}>|</span>
-              <button
-                type="button"
-                onClick={handleClearAll}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontWeight: 600, cursor: 'pointer', padding: 0 }}
-              >
-                Clear
+                {selectedCategories.size > 0 ? 'Clear All' : 'Select All'}
               </button>
             </div>
           </div>
 
-          {/* Scrollable Tree Container */}
-          <div style={{
-            maxHeight: 280,
-            overflowY: 'auto',
-            padding: '4px 0',
-            fontFamily: 'var(--font-body, system-ui, sans-serif)',
-          }}>
-            {treeData.map(item => {
-              const isExpanded = expandedClusters.has(item.cluster);
-              const isFull = isClusterFullySelected(item);
-              const isPartial = isClusterPartial(item);
-              const visibleCategories = item.categories;
+          {loadingTree ? (
+            <div style={{ padding: 16, textAlign: 'center', fontSize: 12.5, color: 'var(--text-muted)' }}>
+              Loading…
+            </div>
+          ) : treeData.length === 0 ? (
+            <div style={{ padding: 16, textAlign: 'center', fontSize: 12.5, color: 'var(--text-muted)', border: '1px dashed var(--border)', borderRadius: 8 }}>
+              No clusters or categories found for this project.
+            </div>
+          ) : (
+            <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', background: '#fafbfc' }}>
+              {treeData.map(item => {
+                const isExpanded = expandedClusters.has(item.cluster);
+                const clusterKeys = item.categories.map(c => `${item.cluster}::${c}`);
+                const selectedCount = clusterKeys.filter(k => selectedCategories.has(k)).length;
+                const isAllSelected = selectedCount === item.categories.length && item.categories.length > 0;
+                const isSomeSelected = selectedCount > 0 && !isAllSelected;
 
-              return (
-                <div key={item.cluster} style={{ marginBottom: 6 }}>
-                  {/* Cluster Parent Row */}
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '4px 6px',
-                    borderRadius: 4,
-                    userSelect: 'none',
-                    backgroundColor: isFull ? '#f5f3ff' : (isPartial ? '#faf5ff' : 'transparent'),
-                    transition: 'background 0.12s'
-                  }}>
-                    {/* Borderless Plus/Minus Toggle Button at EXTREME LEFT */}
-                    <button
-                      type="button"
-                      onClick={() => toggleClusterExpand(item.cluster)}
-                      title={isExpanded ? "Collapse" : "Expand"}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                        padding: '2px 2px',
-                        margin: 0,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        outline: 'none',
-                        color: '#64748b'
-                      }}
-                    >
-                      {isExpanded ? <Minus size={15} color="#64748b" strokeWidth={2.5} /> : <Plus size={15} color="#64748b" strokeWidth={2.5} />}
-                    </button>
-
-                    {/* Cluster Multi-select Checkbox */}
-                    <div
-                      onClick={() => toggleClusterSelection(item)}
-                      style={{
-                        width: 16,
-                        height: 16,
-                        borderRadius: 3,
-                        border: isFull || isPartial ? '2px solid #7c3aed' : '2px solid #94a3b8',
-                        background: isFull ? '#7c3aed' : (isPartial ? '#ede9fe' : '#ffffff'),
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer',
-                        flexShrink: 0
-                      }}
-                    >
-                      {isFull && <Check size={11} color="#ffffff" strokeWidth={3} />}
-                      {isPartial && <div style={{ width: 8, height: 2, background: '#7c3aed', borderRadius: 1 }} />}
-                    </div>
-
-                    {/* Cluster Label & Category Count */}
-                    <div
-                      onClick={() => toggleClusterExpand(item.cluster)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        cursor: 'pointer',
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: '#1e293b'
-                      }}
-                    >
-                      <span>{item.cluster}</span>
-                      <span style={{ fontSize: 11.5, color: '#64748b', fontWeight: 500 }}>
-                        ({item.categories.length})
+                return (
+                  <div key={item.cluster} style={{ marginBottom: 6 }}>
+                    {/* Cluster Parent Node */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                      <button
+                        type="button"
+                        onClick={() => toggleClusterExpand(item.cluster)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}
+                      >
+                        <ChevronRight
+                          size={14}
+                          style={{ transform: isExpanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s ease' }}
+                        />
+                      </button>
+                      <div
+                        onClick={() => toggleClusterSelect(item)}
+                        style={{
+                          width: 16, height: 16, borderRadius: 3,
+                          border: isAllSelected || isSomeSelected ? '1.5px solid var(--accent)' : '1.5px solid #d1d5db',
+                          background: isAllSelected ? 'var(--accent)' : isSomeSelected ? 'var(--accent)' : '#fff',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          cursor: 'pointer', flexShrink: 0
+                        }}
+                      >
+                        {isAllSelected && <Check size={10} color="#fff" strokeWidth={3} />}
+                        {isSomeSelected && <span style={{ width: 6, height: 2, background: '#fff', borderRadius: 1, display: 'block' }} />}
+                      </div>
+                      <span
+                        onClick={() => toggleClusterExpand(item.cluster)}
+                        style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', cursor: 'pointer' }}
+                      >
+                        {item.cluster} ({item.categories.length})
                       </span>
                     </div>
-                  </div>
 
-                  {/* Child Categories (Indented) */}
-                  {isExpanded && (
-                    <div style={{
-                      marginLeft: 15,
-                      paddingLeft: 12,
-                      borderLeft: '1.5px dashed #cbd5e1',
-                      marginTop: 2,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 4
-                    }}>
-                      {visibleCategories.length > 0 ? (
-                        visibleCategories.map(cat => {
-                          const key = `${item.cluster}:::${cat}`;
+                    {/* Category Child Nodes */}
+                    {isExpanded && (
+                      <div style={{ marginLeft: 28, borderLeft: '1px dashed #e2e8f0', paddingLeft: 10, marginTop: 2 }}>
+                        {item.categories.map(cat => {
+                          const key = `${item.cluster}::${cat}`;
                           const isCatSelected = selectedCategories.has(key);
 
                           return (
-                            <div
-                              key={cat}
-                              onClick={() => toggleCategorySelection(item.cluster, cat, item)}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 8,
-                                padding: '3px 8px',
-                                borderRadius: 4,
-                                cursor: 'pointer',
-                                userSelect: 'none',
-                                backgroundColor: isCatSelected ? '#eff6ff' : 'transparent',
-                                transition: 'background 0.12s'
-                              }}
-                              onMouseEnter={e => { if (!isCatSelected) e.currentTarget.style.backgroundColor = '#f8fafc'; }}
-                              onMouseLeave={e => { if (!isCatSelected) e.currentTarget.style.backgroundColor = 'transparent'; }}
-                            >
-                              {/* Category Checkbox */}
-                              <div style={{
-                                width: 15,
-                                height: 15,
-                                borderRadius: 3,
-                                border: isCatSelected ? '2px solid #2563eb' : '2px solid #cbd5e1',
-                                background: isCatSelected ? '#2563eb' : '#ffffff',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                flexShrink: 0
-                              }}>
-                                {isCatSelected && <Check size={10} color="#ffffff" strokeWidth={3} />}
+                            <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
+                              <div
+                                onClick={() => toggleCategorySelect(item.cluster, cat)}
+                                style={{
+                                  width: 14, height: 14, borderRadius: 3,
+                                  border: isCatSelected ? '1.5px solid var(--accent)' : '1.5px solid #d1d5db',
+                                  background: isCatSelected ? 'var(--accent)' : '#fff',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  cursor: 'pointer', flexShrink: 0
+                                }}
+                              >
+                                {isCatSelected && <Check size={9} color="#fff" strokeWidth={3} />}
                               </div>
-
-                              {/* Category Label */}
-                              <span style={{
-                                fontSize: 12.5,
-                                fontWeight: isCatSelected ? 600 : 400,
-                                color: isCatSelected ? '#1e40af' : '#334155'
-                              }}>
+                              <span
+                                onClick={() => toggleCategorySelect(item.cluster, cat)}
+                                style={{ fontSize: 12.5, color: 'var(--text-secondary)', cursor: 'pointer' }}
+                              >
                                 {cat}
                               </span>
                             </div>
                           );
-                        })
-                      ) : (
-                        <div style={{ fontSize: 11.5, color: '#94a3b8', fontStyle: 'italic', padding: '2px 8px' }}>
-                          No categories match "{searchQuery}"
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </Modal>
@@ -1721,7 +1606,7 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
   );
 }
 
-function DomainTab({ projects, filter, onUpdateProject, onDeleteProject, loading, error }) {
+function DomainTab({ projects, filter, onUpdateProject, onDeleteProject, loading, error, search }) {
   const [expandedRows, setExpandedRows] = useState(new Set());
   const [editingProject, setEditingProject] = useState(null);
 
@@ -1731,9 +1616,16 @@ function DomainTab({ projects, filter, onUpdateProject, onDeleteProject, loading
     return next;
   });
 
-  const visibleProjects = filter
-    ? projects.filter(p => (p.targetPlatforms || ALL_PLATFORMS).includes(filter))
-    : projects;
+  const visibleProjects = projects.filter(p => {
+    if (filter && !(p.targetPlatforms || ALL_PLATFORMS).includes(filter)) return false;
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      const n = (p.name || '').toLowerCase();
+      const d = (p.domain || '').toLowerCase();
+      if (!n.includes(q) && !d.includes(q)) return false;
+    }
+    return true;
+  });
 
   return (
     <>
@@ -1852,12 +1744,21 @@ function DomainTab({ projects, filter, onUpdateProject, onDeleteProject, loading
     </>
   );
 }
-function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, totalLabel = 'Total  Pages', keywordsLabel = 'Keywords', deleteScopeLabel = 'the project and all its keywords' }) {
+function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, totalLabel = 'Total  Pages', keywordsLabel = 'Keywords', deleteScopeLabel = 'the project and all its keywords', search }) {
   const [confirmingProject, setConfirmingProject] = useState(null);
 
   const handleConfirmDelete = async () => {
     await onDeleteProject?.(confirmingProject);
   };
+
+  const visiblePages = search && search.trim()
+    ? pages.filter(p => {
+        const q = search.trim().toLowerCase();
+        const n = (p.name || '').toLowerCase();
+        const d = (p.domain || '').toLowerCase();
+        return n.includes(q) || d.includes(q);
+      })
+    : pages;
 
   return (
     <>
@@ -1895,9 +1796,9 @@ function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, tot
               <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
             ) : error ? (
               <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
-            ) : pages.length === 0 ? (
+            ) : visiblePages.length === 0 ? (
               <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No projects yet.</td></tr>
-            ) : pages.map((p, i) => (
+            ) : visiblePages.map((p, i) => (
               <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}
                 onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
@@ -2004,6 +1905,7 @@ const KW_BULK_FIELDS = [
 const COMPETITOR_BULK_FIELDS = [
   { value: 'name', label: 'Name', type: 'text' },
   { value: 'da', label: 'DA', type: 'text' },
+  { value: 'type', label: 'Type', type: 'select', options: ['Official Entity', 'Listing'] },
 ];
 
 function BulkEditModal({ open, onClose, count, onApply, fields, itemLabel = 'page' }) {
@@ -3635,7 +3537,6 @@ function CompetitorDetailView({ competitor, onBack }) {
               Location: d.location,
               'Common KWs': Math.round(((d.commonKw ?? 0) / 100) * d.totalKw),
               'Total KWs': d.totalKw,
-              'AI Comp Level': d.aiCompLevel,
               'SERP Comp Level': d.serpCompLevel,
               'Comp Level': d.compLevel,
             }));
@@ -3671,7 +3572,6 @@ function CompetitorDetailView({ competitor, onBack }) {
                 { label: 'Location', align: 'left' },
                 { label: "Common KW's", align: 'right' },
                 { label: "Tot. KW's", align: 'right' },
-                { label: 'AI Comp. Level', align: 'right' },
                 { label: 'SERP Comp Level', align: 'right' },
                 { label: 'Comp Level', align: 'right' },
                 { label: 'dated', align: 'right' },
@@ -3682,9 +3582,9 @@ function CompetitorDetailView({ competitor, onBack }) {
           </thead>
           <tbody>
             {detailsLoading ? (
-              <tr><td colSpan={12} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
+              <tr><td colSpan={11} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
             ) : details.length === 0 ? (
-              <tr><td colSpan={12} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No detail entries yet. Click <strong>Find Competitors</strong> to run an analysis.</td></tr>
+              <tr><td colSpan={11} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No detail entries yet. Click <strong>Find Competitors</strong> to run an analysis.</td></tr>
             ) : details.map((d, i) => (
               <tr key={i} style={{ borderBottom: i < details.length - 1 ? '1px solid var(--border)' : 'none' }}
                 onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
@@ -3706,7 +3606,7 @@ function CompetitorDetailView({ competitor, onBack }) {
                 <td style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
                   {d.totalKw}
                 </td>
-                <td style={{ padding: '12px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{Math.min(d.aiCompLevel, 100)}%</td>
+                <td style={{ padding: '12px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{Math.min(d.serpCompLevel, 100)}%</td>
                 <td style={{ padding: '12px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{Math.min(d.serpCompLevel, 100)}%</td>
                 <td style={{ padding: '12px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{Math.min(d.compLevel, 100)}%</td>
                 <td style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{d.dated}</td>
@@ -3756,6 +3656,7 @@ function EditCompetitorModal({ open, onClose, competitor, onSave, onDelete }) {
   const [name, setName] = useState('');
   const [regions, setRegions] = useState([]);
   const [da, setDa] = useState('');
+  const [type, setType] = useState('Official Entity');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [apiError, setApiError] = useState('');
@@ -3765,6 +3666,7 @@ function EditCompetitorModal({ open, onClose, competitor, onSave, onDelete }) {
       setName(competitor.name || '');
       setRegions(competitor.targetRegions || []);
       setDa(competitor.da != null ? String(competitor.da) : '');
+      setType(competitor.type || competitor.websiteType || 'Official Entity');
       setConfirmDelete(false);
       setSubmitting(false);
       setApiError('');
@@ -3779,7 +3681,13 @@ function EditCompetitorModal({ open, onClose, competitor, onSave, onDelete }) {
     setSubmitting(true);
     setApiError('');
     try {
-      await onSave({ name: name.trim() || null, targetRegions: regions, da: da.trim() || null });
+      await onSave({
+        name: name.trim() || null,
+        targetRegions: regions,
+        da: da !== '' ? Number(da) : null,
+        type: type,
+        websiteType: type,
+      });
       handleClose();
     } catch (err) {
       setSubmitting(false);
@@ -3838,15 +3746,18 @@ function EditCompetitorModal({ open, onClose, competitor, onSave, onDelete }) {
           {competitor?.domain}
         </div>
       </div>
-      <Input label="Name" placeholder="e.g. ISS International School" value={name} onChange={setName} />
-      <CountryTagInput
-        label="Target Regions"
-        tags={regions}
-        onAdd={r => setRegions(prev => [...prev, r])}
-        onRemove={r => setRegions(prev => prev.filter(x => x !== r))}
-        placeholder="e.g. India, Singapore, USA"
+      
+      <Input label="DA" placeholder="e.g. 45" value={da} onChange={setDa} type="number" />
+      <Select
+        label="Type"
+        value={type}
+        onChange={setType}
+        options={[
+          { value: 'Official Entity', label: 'Official Entity' },
+          { value: 'Listing', label: 'Listing' },
+          { value: 'Platform', label: 'Platform' },
+        ]}
       />
-      <Input label="DA" placeholder="e.g. 45" value={da} onChange={setDa} />
     </Modal>
   );
 }
@@ -3895,14 +3806,115 @@ function PaginationFooter({ page, setPage, pageCount, pageSize = COMPETITORS_PAG
 // the Domain/KW Cluster/Pages tabs' "list of projects, drill into one"
 // pattern instead of dumping every competitor from every project into one
 // flat list.
-function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDeleteProject, loading, error }) {
+function getSyncUniqueCounts(slug, competitors) {
+  const catSet = new Set();
+  const clusSet = new Set();
+  (competitors || []).filter(c => c.projectSlug === slug).forEach(c => {
+    if (c.category != null && String(c.category).trim() !== '') {
+      String(c.category).split(',').forEach(s => {
+        const t = s.trim().toLowerCase();
+        if (t) catSet.add(t);
+      });
+    }
+    if (c.cluster != null && String(c.cluster).trim() !== '') {
+      String(c.cluster).split(',').forEach(s => {
+        const t = s.trim().toLowerCase();
+        if (t) clusSet.add(t);
+      });
+    }
+  });
+  return { categoryCount: catSet.size, clusterCount: clusSet.size };
+}
+
+function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDeleteProject, loading, error, search }) {
   const [page, setPage] = useState(1);
   const [deletingProject, setDeletingProject] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [projectCountsMap, setProjectCountsMap] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(
+      (projects || []).map(p =>
+        fetchKeywordRows(p.slug)
+          .then(kwRows => ({ slug: p.slug, kwRows: kwRows || [] }))
+          .catch(() => ({ slug: p.slug, kwRows: [] }))
+      )
+    ).then(results => {
+      if (cancelled) return;
+      const map = {};
+      results.forEach(({ slug, kwRows }) => {
+        const catSet = new Set();
+        const clusSet = new Set();
+
+        (kwRows || []).filter(r => r.kw).forEach(r => {
+          const cat = r.category || r.categoryName || r.targetSubtype || r.targetCategory;
+          if (cat != null && String(cat).trim() !== '') {
+            String(cat).split(',').forEach(s => {
+              const t = s.trim().toLowerCase();
+              if (t) catSet.add(t);
+            });
+          }
+          const clus = r.cluster;
+          if (clus != null && String(clus).trim() !== '') {
+            String(clus).split(',').forEach(s => {
+              const t = s.trim().toLowerCase();
+              if (t) clusSet.add(t);
+            });
+          }
+        });
+
+        (competitors || []).filter(c => c.projectSlug === slug).forEach(c => {
+          if (c.category != null && String(c.category).trim() !== '') {
+            String(c.category).split(',').forEach(s => {
+              const t = s.trim().toLowerCase();
+              if (t) catSet.add(t);
+            });
+          }
+          if (c.cluster != null && String(c.cluster).trim() !== '') {
+            String(c.cluster).split(',').forEach(s => {
+              const t = s.trim().toLowerCase();
+              if (t) clusSet.add(t);
+            });
+          }
+        });
+
+        map[slug] = {
+          categoryCount: catSet.size,
+          clusterCount: clusSet.size,
+        };
+      });
+      setProjectCountsMap(map);
+    });
+
+    return () => { cancelled = true; };
+  }, [projects, competitors]);
 
   const allRows = projects
-    .map(p => ({ ...p, competitorCount: competitors.filter(c => c.projectSlug === p.slug).length }))
-    .filter(p => p.competitorCount > 0);
+    .map(p => {
+      const syncCounts = getSyncUniqueCounts(p.slug, competitors);
+      const asyncCounts = projectCountsMap[p.slug];
+
+      const clusterCount = asyncCounts?.clusterCount ?? (syncCounts.clusterCount || p.clusterCount || 0);
+      const categoryCount = asyncCounts?.categoryCount ?? (syncCounts.categoryCount || p.categoryCount || 0);
+
+      return {
+        ...p,
+        competitorCount: competitors.filter(c => c.projectSlug === p.slug).length,
+        clusterCount,
+        categoryCount,
+      };
+    })
+    .filter(p => {
+      if (p.competitorCount <= 0) return false;
+      if (search && search.trim()) {
+        const q = search.trim().toLowerCase();
+        const n = (p.name || '').toLowerCase();
+        const d = (p.domain || '').toLowerCase();
+        if (!n.includes(q) && !d.includes(q)) return false;
+      }
+      return true;
+    });
   const pageCount = Math.max(1, Math.ceil(allRows.length / COMPETITORS_PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const rows = allRows.slice((safePage - 1) * COMPETITORS_PAGE_SIZE, safePage * COMPETITORS_PAGE_SIZE);
@@ -3923,21 +3935,29 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
   return (
     <>
       <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 750 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Project', 'Location', 'Competitors', 'Updated', ''].map((h, i) => (
-                <th key={i} style={{ padding: '10px 16px', textAlign: i <= 1 ? 'left' : 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
+              {[
+                { label: 'Project', align: 'left' },
+                { label: 'Location', align: 'left' },
+                { label: 'Clusters', align: 'right' },
+                { label: 'Categories', align: 'right' },
+                { label: 'Competitors', align: 'right' },
+                { label: 'Updated', align: 'right' },
+                { label: '', align: 'right' }
+              ].map((h, i) => (
+                <th key={i} style={{ padding: '10px 16px', textAlign: h.align, fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h.label}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={5} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
+              <tr><td colSpan={7} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
             ) : error ? (
-              <tr><td colSpan={5} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+              <tr><td colSpan={7} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={5} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors tracked yet. Click <strong>+ Choose project</strong> to get started.</td></tr>
+              <tr><td colSpan={7} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors tracked yet. Click <strong>+ Choose project</strong> to get started.</td></tr>
             ) : rows.map((p, i) => (
               <tr key={p.slug} style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
                 onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
@@ -3951,6 +3971,8 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
                   </div>
                 </td>
                 <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{p.location}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{p.clusterCount}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{p.categoryCount}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{p.competitorCount}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right' }}>
@@ -4298,7 +4320,7 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
           }}
         >
           <RefreshCw size={14} style={{ animation: classifying ? 'spin 1s linear infinite' : 'none' }} />
-          {classifying ? 'Classifying…' : 'Classify Competitors'}
+          {classifying ? 'Classifying…' : 'Classify All'}
         </button>
       </div>
 
@@ -4312,7 +4334,6 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
               <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>da</th>
               <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>category</th>
               <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>cluster</th>
-              <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>ai comp level</th>
               <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>serp comp level</th>
               <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>comp level</th>
             </tr>
@@ -4320,7 +4341,7 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={9} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                <td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
                   No competitor data found in rank_meta for this keyword.
                 </td>
               </tr>
@@ -4415,24 +4436,6 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>—</span>
                       )}
                     </td>
-                    <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>
-                      {c.da}
-                    </td>
-                    <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>
-                      {c.category}
-                    </td>
-                    <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>
-                      {c.cluster}
-                    </td>
-                    <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>
-                      {c.aiCompLevel}
-                    </td>
-                    <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>
-                      {c.serpCompLevel}
-                    </td>
-                    <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>
-                      {c.compLevel}
-                    </td>
                   </tr>
                 );
               })
@@ -4444,7 +4447,236 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
   );
 }
 
-function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor, onSelectKwDetail, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, onFindCompetitors, onAddPages, hasPendingChanges, saving, saveError, onSaveChanges, loading, error, top3KwByCategory, top3KwLoading }) {
+function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewComp, competitors }) {
+  const [expandedClusters, setExpandedClusters] = useState(new Set());
+
+  const clusterGroups = useMemo(() => {
+    const map = {};
+    (rows || []).forEach(r => {
+      const clusterName = r.cluster || 'General';
+      if (!map[clusterName]) {
+        map[clusterName] = {
+          clusterName,
+          totalKeywords: 0,
+          categories: [],
+        };
+      }
+      map[clusterName].categories.push(r);
+      map[clusterName].totalKeywords += (r.totalKeywords || 0);
+    });
+    return Object.values(map);
+  }, [rows]);
+
+  if (loading) {
+    const loadedCount = (competitors || []).length;
+    return (
+      <div style={{ padding: '16px 20px', background: '#fafbfc', borderBottom: '1px solid var(--border)', fontSize: 13, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <RefreshCw size={14} className="spin-icon" style={{ animation: 'spin 1s linear infinite' }} />
+        {loadedCount > 0
+          ? `Loading competitors into hierarchy tree… (${loadedCount} loaded so far)`
+          : 'Loading category/clusters hierarchy tree…'}
+      </div>
+    );
+  }
+
+  if (!rows || rows.length === 0) {
+    return (
+      <div style={{ padding: '24px 20px', background: '#fafbfc', borderBottom: '1px solid var(--border)', fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', marginBottom: 16 }}>
+        No categories selected. Click <strong>Find Competitors</strong> to select categories.
+      </div>
+    );
+  }
+
+  const toggleClusterExpand = (clusterName) => {
+    setExpandedClusters(prev => {
+      const next = new Set(prev);
+      if (next.has(clusterName)) next.delete(clusterName);
+      else next.add(clusterName);
+      return next;
+    });
+  };
+
+  const handleExpandAll = () => {
+    setExpandedClusters(new Set(clusterGroups.map(g => g.clusterName)));
+  };
+
+  const handleCollapseAll = () => {
+    setExpandedClusters(new Set());
+  };
+
+  return (
+    <div style={{ borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
+      {/* Hierarchy Tree Top Toolbar */}
+      <div style={{ padding: '10px 16px', background: '#f8fafc', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+            Cluster & Category
+          </span>
+          <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)', background: '#fff', padding: '2px 8px', borderRadius: 12, border: '1px solid var(--border)' }}>
+            {clusterGroups.length} {clusterGroups.length === 1 ? 'Cluster' : 'Clusters'}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={handleExpandAll}
+            style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'var(--font-body)', transition: 'all 0.15s' }}
+            onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--text-primary)'}
+            onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+          >
+            Expand All
+          </button>
+          <button
+            onClick={handleCollapseAll}
+            style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'var(--font-body)', transition: 'all 0.15s' }}
+            onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--text-primary)'}
+            onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+          >
+            Collapse All
+          </button>
+        </div>
+      </div>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 850 }}>
+          <thead>
+            <tr style={{ background: 'var(--surface-2, #f8fafc)', borderBottom: '1px solid var(--border)' }}>
+              <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Category / Cluster</th>
+              <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>No. of Categories</th>
+              <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Official / Total</th>
+              <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Location</th>
+              <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Total No. of Keywords</th>
+              <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px', width: 130 }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {clusterGroups.map((group) => {
+              const isExpanded = expandedClusters.has(group.clusterName);
+              const clusterComps = (competitors || []).filter(c => {
+                if (!c.cluster) return false;
+                const clusList = c.cluster.split(',').map(s => s.trim().toLowerCase());
+                return clusList.includes(group.clusterName.toLowerCase());
+              });
+              const grpOffCount = clusterComps.filter(c => (c.type || c.websiteType) === 'Official Entity').length;
+
+              return (
+                <Fragment key={group.clusterName}>
+                  {/* Cluster Parent Row */}
+                  <tr
+                    onClick={() => toggleClusterExpand(group.clusterName)}
+                    style={{
+                      background: '#f1f5f9',
+                      borderBottom: '1px solid var(--border)',
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#e2e8f0'}
+                    onMouseLeave={e => e.currentTarget.style.background = '#f1f5f9'}
+                  >
+                    <td style={{ padding: '11px 16px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {isExpanded ? <ChevronDown size={16} color="var(--accent)" /> : <ChevronRight size={16} color="var(--text-muted)" />}
+                        <span style={{ fontSize: 13.5, fontWeight: 700 }}>{group.clusterName}</span>
+                      </div>
+                    </td>
+                    <td style={{ padding: '11px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                      {group.categories.length}
+                    </td>
+                    <td style={{ padding: '11px 16px', textAlign: 'center', fontWeight: 700, fontSize: 13 }} title={`${grpOffCount} Official out of ${clusterComps.length} Total Competitors`}>
+                      <span style={{ color: '#16a34a' }}>{grpOffCount}</span>
+                      <span style={{ color: 'var(--text-muted)', margin: '0 4px' }}>/</span>
+                      <span style={{ color: 'var(--text-primary)' }}>{clusterComps.length}</span>
+                    </td>
+                    <td style={{ padding: '11px 16px', color: 'var(--text-secondary)' }}>
+                      {group.categories[0]?.location || scopedProject?.location || 'Singapore'}
+                    </td>
+                    <td style={{ padding: '11px 16px', textAlign: 'center', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {group.totalKeywords}
+                    </td>
+                    <td style={{ padding: '11px 16px', textAlign: 'center' }}>
+                      <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontWeight: 500 }}>
+                        {isExpanded ? 'Collapse' : 'Expand'}
+                      </span>
+                    </td>
+                  </tr>
+
+                  {/* Category Child Rows */}
+                  {isExpanded && group.categories.map((r, i) => {
+                    const catComps = (competitors || []).filter(c => {
+                      if (!c.category) return false;
+                      const catList = c.category.split(',').map(s => s.trim().toLowerCase());
+                      return catList.includes((r.category || '').toLowerCase());
+                    });
+                    const catOffCount = catComps.filter(c => (c.type || c.websiteType) === 'Official Entity').length;
+
+                    return (
+                      <tr
+                        key={r.category || i}
+                        style={{
+                          borderBottom: '1px solid var(--border)',
+                          background: '#fff',
+                          transition: 'background 0.15s'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
+                        onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                      >
+                        <td style={{ padding: '10px 16px 10px 44px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ color: '#94a3b8', fontSize: 14, fontFamily: 'monospace' }}>└─</span>
+                            <span style={{ fontSize: 13 }}>{r.category}</span>
+                          </div>
+                        </td>
+                        <td style={{ padding: '10px 16px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                          1
+                        </td>
+                        <td style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, fontSize: 12.5 }} title={`${catOffCount} Official out of ${catComps.length} Total Competitors`}>
+                          <span style={{ color: '#16a34a' }}>{catOffCount}</span>
+                          <span style={{ color: 'var(--text-muted)', margin: '0 4px' }}>/</span>
+                          <span style={{ color: 'var(--text-secondary)' }}>{catComps.length}</span>
+                        </td>
+                        <td style={{ padding: '10px 16px', color: 'var(--text-secondary)' }}>
+                          {r.location || scopedProject?.location || 'Singapore'}
+                        </td>
+                        <td style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 500, color: 'var(--text-secondary)' }}>
+                          {r.totalKeywords}
+                        </td>
+                        <td style={{ padding: '8px 16px', textAlign: 'center' }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onViewComp(r.category);
+                            }}
+                            style={{
+                              padding: '6px 14px',
+                              borderRadius: 6,
+                              border: 'none',
+                              background: '#0f1523',
+                              color: '#fff',
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              fontFamily: 'var(--font-body)',
+                              transition: 'opacity 0.15s ease'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+                            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                          >
+                            View Comp
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, onBack, onSelectCompetitor, onSelectKwDetail, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, onFindCompetitors, onAddPages, hasPendingChanges, saving, saveError, onSaveChanges, loading, error, top3KwByCategory, top3KwLoading, search, findingCompetitors }) {
   const [editingIdx, setEditingIdx] = useState(null);
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -4452,22 +4684,205 @@ function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [bulkError, setBulkError] = useState('');
 
+  // Sub-view mode inside CompetitorsTab: 'competitors' | 'pages'
+  const [subView, setSubView] = useState('competitors');
+  const [pageRows, setPageRows] = useState([]);
+  const [pagesLoading, setPagesLoading] = useState(false);
+  const [selectedPageIds, setSelectedPageIds] = useState(new Set());
+  const [pageFilterTargetCategory, setPageFilterTargetCategory] = useState('');
+  const [pageFilterTargetType, setPageFilterTargetType] = useState('');
+
+  const competitorsRef = useRef(competitors);
+  useEffect(() => { competitorsRef.current = competitors; }, [competitors]);
+
+  useEffect(() => {
+    if (subView === 'pages' && scopedProject?.slug) {
+      let cancelled = false;
+      setPagesLoading(true);
+      fetchCompetitorPageRows(scopedProject.slug)
+        .then(rows => { if (!cancelled) setPageRows(rows || []); })
+        .catch(() => { if (!cancelled) setPageRows([]); })
+        .finally(() => { if (!cancelled) setPagesLoading(false); });
+      return () => { cancelled = true; };
+    }
+  }, [subView, scopedProject?.slug]);
+
+  const filteredPageRows = pageRows.filter(r => {
+    if (pageFilterTargetCategory && r.targetCategory !== pageFilterTargetCategory) return false;
+    if (pageFilterTargetType && r.targetType !== pageFilterTargetType) return false;
+    return true;
+  });
+
+  const allPagesSelected = filteredPageRows.length > 0 && filteredPageRows.every(r => selectedPageIds.has(r.id || r.url));
+  const somePagesSelected = !allPagesSelected && filteredPageRows.some(r => selectedPageIds.has(r.id || r.url));
+
+  const toggleAllPages = () => {
+    setSelectedPageIds(prev => {
+      const next = new Set(prev);
+      if (allPagesSelected) filteredPageRows.forEach(r => next.delete(r.id || r.url));
+      else filteredPageRows.forEach(r => next.add(r.id || r.url));
+      return next;
+    });
+  };
+
+  const togglePageRow = (key) => {
+    setSelectedPageIds(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleDeletePageRow = async (key) => {
+    setPageRows(prev => prev.filter((r, i) => (r.id || i) !== key));
+    if (typeof key === 'number') {
+      try { await deleteCompetitorPageRow(key); } catch (e) {}
+    }
+  };
+
+  const [categorySummaryRows, setCategorySummaryRows] = useState([]);
+  const [categorySummaryLoading, setCategorySummaryLoading] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState(null);
+  const [classifyingCompetitors, setClassifyingCompetitors] = useState(false);
+  const [classifiedTypes, setClassifiedTypes] = useState({});
+
+  const handleClassifyCategoryCompetitors = async () => {
+    const unclassified = paged.filter(c => {
+      const existing = classifiedTypes[c.domain] || classifiedTypes[c.name] || classifiedTypes[c.url] || c.type || c.websiteType;
+      return !existing;
+    });
+
+    const urlsToClassify = unclassified
+      .map(c => c.url || c.domain || c.name)
+      .filter(Boolean);
+    if (urlsToClassify.length === 0) return;
+
+    setClassifyingCompetitors(true);
+    try {
+      const results = await classifyCompetitorUrls(urlsToClassify, categoryFilter || '');
+      const newMap = { ...classifiedTypes };
+      (results || []).forEach(res => {
+        const rawType = res.website_type || res.websiteType || res.type;
+        const finalType = rawType === 'Platform' ? 'Listing' : rawType;
+        const key = res.url || res.domain;
+        if (key && finalType) {
+          newMap[key] = finalType;
+        }
+      });
+      setClassifiedTypes(newMap);
+
+      (results || []).forEach(res => {
+        const rawType = res.website_type || res.websiteType || res.type;
+        const finalType = rawType === 'Platform' ? 'Listing' : rawType;
+        const targetComp = paged.find(c => (c.domain === res.url || c.name === res.url || c.url === res.url));
+        if (targetComp && finalType && onSaveCompetitor) {
+          onSaveCompetitor(targetComp, { device: finalType, type: finalType });
+        }
+      });
+    } catch (err) {
+      console.error('Failed to classify competitor URLs:', err);
+    } finally {
+      setClassifyingCompetitors(false);
+    }
+  };
+
+  useEffect(() => {
+    if (scopedProject?.slug) {
+      let cancelled = false;
+      setCategorySummaryLoading(true);
+      fetchKeywordRows(scopedProject.slug)
+        .then(rows => {
+          if (cancelled) return;
+          const map = {};
+          (rows || []).filter(r => r.kw).forEach(r => {
+            const cat = r.category || r.targetSubtype || 'General';
+            const clus = r.cluster || 'General';
+            const loc = r.targetGeo || scopedProject?.location || 'Singapore';
+
+            if (!map[cat]) {
+              map[cat] = {
+                category: cat,
+                cluster: clus,
+                location: loc,
+                totalKeywords: 0,
+              };
+            }
+            map[cat].totalKeywords += 1;
+          });
+
+          // Also include categories from competitor rows for this project
+          (competitorsRef.current || []).filter(c => c.projectSlug === scopedProject.slug && c.category).forEach(c => {
+            const catList = c.category.split(',').map(s => s.trim()).filter(Boolean);
+            catList.forEach(cat => {
+              if (!map[cat]) {
+                map[cat] = {
+                  category: cat,
+                  cluster: c.cluster || 'General',
+                  location: c.location || scopedProject?.location || 'Singapore',
+                  totalKeywords: c.totalKw || 0,
+                };
+              }
+            });
+          });
+
+          setCategorySummaryRows(Object.values(map));
+        })
+        .catch(() => { if (!cancelled) setCategorySummaryRows([]); })
+        .finally(() => { if (!cancelled) setCategorySummaryLoading(false); });
+      return () => { cancelled = true; };
+    }
+  }, [scopedProject?.slug, competitors]);
+
   const [tableFilters, setTableFilters] = useState({
-    location: [],
+    category: [],
+    cluster: [],
+    type: [],
     da: { min: '', max: '' },
     commonKw: { min: '', max: '' },
   });
 
   const competitorFilterConfigs = [
-    { key: 'location', label: 'Location', type: 'select' },
-    { key: 'da', label: 'DA Range', type: 'range' },
-    { key: 'commonKw', label: 'Common KW Range', type: 'range' },
+    { key: 'category', label: 'Category', type: 'select' },
+    { key: 'cluster', label: 'Cluster', type: 'select' },
+    { key: 'type', label: 'Type', type: 'select', options: ['Official Entity', 'Listing'] },
+    { key: 'commonKw', label: 'Common KWs', type: 'range' },
+    { key: 'da', label: 'DA', type: 'range' },
   ];
 
   const baseFiltered = scopedProject ? competitors.filter(c => c.projectSlug === scopedProject.slug) : competitors;
   const filtered = baseFiltered
     .filter(c => {
-      if (tableFilters.location?.length && !tableFilters.location.includes(c.location)) return false;
+      if (search && search.trim()) {
+        const q = search.trim().toLowerCase();
+        const n = (c.name || '').toLowerCase();
+        const d = (c.domain || '').toLowerCase();
+        const u = (c.url || '').toLowerCase();
+        const cat = (c.category || '').toLowerCase();
+        const clus = (c.cluster || '').toLowerCase();
+        if (!n.includes(q) && !d.includes(q) && !u.includes(q) && !cat.includes(q) && !clus.includes(q)) return false;
+      }
+      if (categoryFilter && c.category) {
+        const filterLower = categoryFilter.toLowerCase();
+        const catLower = c.category.toLowerCase();
+        const clusLower = (c.cluster || '').toLowerCase();
+        const matches = catLower.includes(filterLower) || filterLower.includes(catLower) || clusLower.includes(filterLower) || filterLower.includes(clusLower);
+        if (!matches) return false;
+      }
+      if (tableFilters.category?.length) {
+        const cCats = (c.category || '').split(',').map(s => s.trim().toLowerCase());
+        const hasMatch = tableFilters.category.some(selCat => cCats.includes(selCat.toLowerCase()));
+        if (!hasMatch) return false;
+      }
+      if (tableFilters.cluster?.length) {
+        const cClus = (c.cluster || '').split(',').map(s => s.trim().toLowerCase());
+        const hasMatch = tableFilters.cluster.some(selClus => cClus.includes(selClus.toLowerCase()));
+        if (!hasMatch) return false;
+      }
+      if (tableFilters.type?.length) {
+        const cType = c.type || c.websiteType || '';
+        if (!tableFilters.type.some(selType => selType.toLowerCase() === cType.toLowerCase())) return false;
+      }
       if (tableFilters.da?.min !== '' && (c.da == null || Number(c.da) < Number(tableFilters.da.min))) return false;
       if (tableFilters.da?.max !== '' && (c.da == null || Number(c.da) > Number(tableFilters.da.max))) return false;
       if (tableFilters.commonKw?.min !== '' && (c.commonKw == null || Number(c.commonKw) < Number(tableFilters.commonKw.min))) return false;
@@ -4521,7 +4936,11 @@ function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor
     }
   };
 
-  useEffect(() => { setPage(1); setSelectedIds(new Set()); }, [scopedProject?.slug]);
+  useEffect(() => { setPage(1); setSelectedIds(new Set()); setSubView('competitors'); }, [scopedProject?.slug]);
+
+  const displayedCategorySummaryRows = (selectedCategoriesFilter && selectedCategoriesFilter.length > 0)
+    ? categorySummaryRows.filter(r => selectedCategoriesFilter.some(c => r.category.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(r.category.toLowerCase()) || (r.cluster && (r.cluster.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(r.cluster.toLowerCase())))))
+    : categorySummaryRows;
 
   return (
     <>
@@ -4536,46 +4955,49 @@ function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor
             </button>
             <div style={{ height: 20, width: 1, background: 'var(--border)' }} />
             <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{scopedProject.name}</span>
-            <TableFilterDropdown
-              filters={competitorFilterConfigs}
-              rows={baseFiltered}
-              activeFilters={tableFilters}
-              onFiltersChange={setTableFilters}
-            />
-            <ActionsDropdown
-              selectedCount={selectedIds.size}
-              onBulkEdit={() => setShowBulkEdit(true)}
-              onBulkDelete={() => setShowBulkDelete(true)}
-            />
-            <button
-              onClick={() => {
-                const rowsToExport = filtered.map(c => ({
-                  Competitor: c.name || c.domain,
-                  Domain: c.domain,
-                  Device: c.device || 'Desktop',
-                  Location: c.location,
-                  DA: c.da ?? '',
-                  'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
-                  'Total KWs': c.totalKw,
-                  'AI Comp Level': c.aiCompLevel,
-                  'SERP Comp Level': c.serpCompLevel,
-                  'Comp Level': c.compLevel,
-                }));
-                downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
-              }}
-              title="Download CSV"
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'var(--surface-2)', color: 'var(--text-secondary)',
-                border: '1px solid var(--border)', borderRadius: 8,
-                padding: '7px 10px', cursor: 'pointer',
-                fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-              }}
-              onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-            >
-              <Download size={14} />
-            </button>
+            {subView === 'competitors' && (
+              <>
+                <TableFilterDropdown
+                  filters={competitorFilterConfigs}
+                  rows={baseFiltered}
+                  activeFilters={tableFilters}
+                  onFiltersChange={setTableFilters}
+                />
+                <ActionsDropdown
+                  selectedCount={selectedIds.size}
+                  onBulkEdit={() => setShowBulkEdit(true)}
+                  onBulkDelete={() => setShowBulkDelete(true)}
+                />
+                <button
+                  onClick={() => {
+                    const rowsToExport = filtered.map(c => ({
+                      Competitor: c.name || c.domain,
+                      Domain: c.domain,
+                      Device: c.device || 'Desktop',
+                      Location: c.location,
+                      DA: c.da ?? '',
+                      'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
+                      'Total KWs': c.totalKw,
+                      'SERP Comp Level': c.serpCompLevel,
+                      'Comp Level': c.compLevel,
+                    }));
+                    downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
+                  }}
+                  title="Download CSV"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'var(--surface-2)', color: 'var(--text-secondary)',
+                    border: '1px solid var(--border)', borderRadius: 8,
+                    padding: '7px 10px', cursor: 'pointer',
+                    fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                >
+                  <Download size={14} />
+                </button>
+              </>
+            )}
             <div style={{ flex: 1 }} />
             {(saveError || bulkError) && (
               <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError || bulkError}</span>
@@ -4604,28 +5026,45 @@ function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor
           {/* Row 2: Find Competitors and Add Pages buttons below Project Name */}
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', paddingTop: 2 }}>
             <button
-              onClick={onFindCompetitors}
+              onClick={() => {
+                if (subView === 'competitors') {
+                  onFindCompetitors?.();
+                } else {
+                  setSubView('competitors');
+                }
+              }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
-                background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                background: subView === 'competitors' ? '#0f1523' : '#fff',
+                color: subView === 'competitors' ? '#fff' : '#0f1523',
+                border: subView === 'competitors' ? 'none' : '1.5px solid #0f1523',
+                borderRadius: 8,
                 padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                fontFamily: 'var(--font-body)', transition: 'all 0.15s',
               }}
               onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
               onMouseLeave={e => e.currentTarget.style.opacity = '1'}
             >
-              <Plus size={14} />
               Find Competitors
             </button>
             <button
-              onClick={onAddPages}
+              onClick={() => {
+                if (subView === 'pages') {
+                  onAddPages?.();
+                } else {
+                  setSubView('pages');
+                }
+              }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
-                background: '#fff', color: '#0f1523', border: '1.5px solid #0f1523', borderRadius: 8,
+                background: subView === 'pages' ? '#0f1523' : '#fff',
+                color: subView === 'pages' ? '#fff' : '#0f1523',
+                border: subView === 'pages' ? 'none' : '1.5px solid #0f1523',
+                borderRadius: 8,
                 padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                fontFamily: 'var(--font-body)', transition: 'all 0.15s',
               }}
-              onMouseEnter={e => e.currentTarget.style.opacity = '0.75'}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
               onMouseLeave={e => e.currentTarget.style.opacity = '1'}
             >
               <Plus size={14} />
@@ -4634,14 +5073,291 @@ function CompetitorsTab({ competitors, scopedProject, onBack, onSelectCompetitor
           </div>
         </div>
       )}
-      <Top3KeywordsByCategorySection
-        top3Map={top3KwByCategory}
-        loading={top3KwLoading}
-        scopedProject={scopedProject}
-        onSelectKw={(kw, kwObj) => {
-          if (onSelectKwDetail) onSelectKwDetail({ kw, kwObj });
-        }}
-      />
+
+      {subView === 'pages' ? (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
+            <thead>
+              <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
+                <th style={{ padding: '10px 12px 10px 16px', width: 36 }}>
+                  <div
+                    onClick={toggleAllPages}
+                    style={{
+                      width: 18, height: 18, borderRadius: 4,
+                      border: allPagesSelected || somePagesSelected ? '2px solid var(--accent)' : '2px solid #d1d5db',
+                      background: allPagesSelected ? 'var(--accent)' : somePagesSelected ? 'var(--accent)' : '#fff',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
+                    }}
+                  >
+                    {allPagesSelected && <Check size={11} color="#fff" strokeWidth={3} />}
+                    {somePagesSelected && <span style={{ width: 8, height: 2, background: '#fff', borderRadius: 1, display: 'block' }} />}
+                  </div>
+                </th>
+                {['Page Name', 'URL', 'Cluster', 'Category'].map((h, i) => (
+                  <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
+                ))}
+                <th style={{ padding: '6px 16px', textAlign: 'left' }}>
+                  <HeaderQuickSelect placeholder="Target Category" options={['Blogs', 'Landing Page']} value={pageFilterTargetCategory} onSet={setPageFilterTargetCategory} />
+                </th>
+                <th style={{ padding: '6px 16px', textAlign: 'left' }}>
+                  <HeaderQuickSelect placeholder="Target Type" options={['Commercial', 'Informational']} value={pageFilterTargetType} onSet={setPageFilterTargetType} />
+                </th>
+                <th style={{ padding: '10px 16px' }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pagesLoading ? (
+                <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading pages…</td></tr>
+              ) : pageRows.length === 0 ? (
+                <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No pages added yet. Click <strong>Add Pages</strong> to import.</td></tr>
+              ) : filteredPageRows.length === 0 ? (
+                <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No pages match the selected filters.</td></tr>
+              ) : filteredPageRows.map((r, i) => (
+                <tr key={r.id || i} style={{ borderBottom: '1px solid var(--border)' }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  <td style={{ padding: '10px 12px 10px 16px', width: 36 }}>
+                    <div
+                      onClick={() => togglePageRow(r.id || i)}
+                      style={{
+                        width: 18, height: 18, borderRadius: 4,
+                        border: selectedPageIds.has(r.id || i) ? '2px solid var(--accent)' : '2px solid #d1d5db',
+                        background: selectedPageIds.has(r.id || i) ? 'var(--accent)' : '#fff',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
+                      }}
+                    >
+                      {selectedPageIds.has(r.id || i) && <Check size={11} color="#fff" strokeWidth={3} />}
+                    </div>
+                  </td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', maxWidth: 200 }}>{r.pageName || r.name || r.kw || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--accent)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.url || r.landingPage || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.cluster || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.category || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetCategory ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetCategory || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetType ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetType || '—'}</td>
+                  <td style={{ padding: '10px 16px' }}>
+                    <button onClick={() => handleDeletePageRow(r.id || i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
+                      <Trash2 size={14} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (categoryFilter === null || loading || findingCompetitors || baseFiltered.length < 10) ? (
+        <CategoryBasedCompetitorsTable
+          rows={displayedCategorySummaryRows}
+          loading={categorySummaryLoading || loading || findingCompetitors}
+          scopedProject={scopedProject}
+          competitors={competitors}
+          onViewComp={(catName) => {
+            setCategoryFilter(catName);
+            setPage(1);
+          }}
+        />
+      ) : (
+        <>
+          <div style={{
+            padding: '10px 16px',
+            marginBottom: 14,
+            background: '#f8fafc',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            display: 'flex',
+            alignItems: 'center',
+            justify: 'space-between'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                onClick={() => setCategoryFilter(null)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: '#fff',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  padding: '5px 12px',
+                  cursor: 'pointer',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'var(--font-body)',
+                  fontSize: 12.5,
+                  fontWeight: 600
+                }}
+                onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--text-primary)'}
+                onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+              >
+                <ArrowLeft size={14} /> Back
+              </button>
+              <div style={{ height: 18, width: 1, background: 'var(--border)' }} />
+              <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)' }}>
+                Competitors for Category: <span style={{ color: 'var(--accent)' }}>"{categoryFilter}"</span>
+              </span>
+            </div>
+
+            <button
+              onClick={handleClassifyCategoryCompetitors}
+              disabled={classifyingCompetitors || paged.length === 0}
+              style={{
+                marginLeft: 'auto',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 14px',
+                borderRadius: 6,
+                border: 'none',
+                background: 'var(--accent, #3b82f6)',
+                color: '#fff',
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: classifyingCompetitors || paged.length === 0 ? 'not-allowed' : 'pointer',
+                opacity: classifyingCompetitors || paged.length === 0 ? 0.7 : 1,
+                transition: 'all 0.15s ease',
+              }}
+            >
+              {classifyingCompetitors ? 'Classifying…' : 'Classify All'}
+            </button>
+          </div>
+
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1000 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface-2, #f8fafc)' }}>
+                  <th style={{ padding: '10px 12px 10px 16px', width: 36 }}>
+                    <div
+                      onClick={toggleAll}
+                      style={{
+                        width: 18, height: 18, borderRadius: 4,
+                        border: allSelected || someSelected ? '2px solid var(--accent)' : '2px solid #d1d5db',
+                        background: allSelected ? 'var(--accent)' : someSelected ? 'var(--accent)' : '#fff',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
+                      }}
+                    >
+                      {allSelected && <Check size={11} color="#fff" strokeWidth={3} />}
+                      {someSelected && <span style={{ width: 8, height: 2, background: '#fff', borderRadius: 1, display: 'block' }} />}
+                    </div>
+                  </th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Competitors</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Type</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>DA</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Common KWs</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Category</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>Cluster</th>
+                  <th style={{ padding: '12px 16px' }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={7} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading competitors…</td></tr>
+                ) : error ? (
+                  <tr><td colSpan={7} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+                ) : paged.length === 0 ? (
+                  <tr><td colSpan={7} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors found for category "{categoryFilter}".</td></tr>
+                ) : paged.map((c, i) => {
+                  const catList = c.category ? c.category.split(',').map(s => s.trim()).filter(Boolean) : [];
+                  const clusList = c.cluster ? c.cluster.split(',').map(s => s.trim()).filter(Boolean) : [];
+                  const commonKwVal = Math.round(((c.commonKw ?? 0) / 100) * (c.totalKw || 0));
+
+                  const rawDomain = c.domain || c.name || c.url || '';
+                  const fullUrl = c.url || c.fullUrl || (rawDomain ? (rawDomain.startsWith('http') ? rawDomain : `https://${rawDomain}`) : '');
+                  let cleanName = (c.name || rawDomain)
+                    .replace(/^https?:\/\//i, '')
+                    .replace(/^www\./i, '')
+                    .replace(/\/+$/, '')
+                    .replace(/\.(com|co\.in|in|org|net|edu\.sg|edu|co|io|ai|gov|ac\.in|org\.in|info|biz|me|app)$/i, '');
+                  const displayName = cleanName ? (cleanName.charAt(0).toUpperCase() + cleanName.slice(1)) : '—';
+
+                  return (
+                    <tr key={c.id || i} style={{ borderBottom: '1px solid var(--border)' }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                      <td style={{ padding: '10px 12px 10px 16px', width: 36 }}>
+                        <div
+                          onClick={() => toggleRow(c.id)}
+                          style={{
+                            width: 18, height: 18, borderRadius: 4,
+                            border: selectedIds.has(c.id) ? '2px solid var(--accent)' : '2px solid #d1d5db',
+                            background: selectedIds.has(c.id) ? 'var(--accent)' : '#fff',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
+                          }}
+                        >
+                          {selectedIds.has(c.id) && <Check size={11} color="#fff" strokeWidth={3} />}
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>
+                          {displayName || '—'}
+                        </div>
+                        {fullUrl && (
+                          <a
+                            href={fullUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              fontSize: 12,
+                              color: 'var(--accent)',
+                              cursor: 'pointer',
+                              textDecoration: 'none',
+                              display: 'inline-block',
+                              wordBreak: 'break-all'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                            onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            {fullUrl}
+                          </a>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        {(() => {
+                          const rawType = classifiedTypes[c.domain] || classifiedTypes[c.name] || classifiedTypes[c.url] || c.type || c.websiteType || (c.device !== 'Desktop' && c.device !== 'Mobile' ? c.device : null);
+                          const typeVal = rawType === 'Platform' ? 'Listing' : rawType;
+                          if (!typeVal) return <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>—</span>;
+                          return (
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 12,
+                              fontSize: 11, fontWeight: 600,
+                              background: typeVal === 'Official Entity' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(100, 116, 139, 0.1)',
+                              color: typeVal === 'Official Entity' ? '#16a34a' : '#64748b',
+                              border: `1px solid ${typeVal === 'Official Entity' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(100, 116, 139, 0.2)'}`,
+                            }}>
+                              {typeVal}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'right', fontSize: 13, color: 'var(--text-primary)', fontWeight: 600 }}>{c.da ?? '—'}</td>
+                      <td style={{ padding: '12px 16px', textAlign: 'right', fontSize: 13, color: 'var(--text-primary)', fontWeight: 600 }}>{commonKwVal}</td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: 13, color: 'var(--text-secondary)' }} title={c.category || ''}>
+                        {catList.length ? `${catList.length} ` : '—'}
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: 13, color: 'var(--text-secondary)' }} title={c.cluster || ''}>
+                        {clusList.length ? `${clusList.length} ` : '—'}
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                        <button onClick={() => setEditingIdx(filtered.indexOf(c))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                          <Edit2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
       <EditCompetitorModal
         open={editingIdx !== null}
         onClose={() => setEditingIdx(null)}
@@ -4677,11 +5393,13 @@ export default function ProjectSetupPage({ tab }) {
   const [competitorsError, setCompetitorsError] = useState('');
   const [selectedCompetitor, setSelectedCompetitor] = useState(null);
   const [selectedCompetitorProject, setSelectedCompetitorProject] = useState(null);
+  const [selectedCategoriesFilter, setSelectedCategoriesFilter] = useState(null);
   const [selectedKwProject, setSelectedKwProject] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showAddPages, setShowAddPages] = useState(false);
   const [showAddKeywords, setShowAddKeywords] = useState(false);
   const [showChooseProject, setShowChooseProject] = useState(false);
+  const [chooseProjectMode, setChooseProjectMode] = useState('findCompetitors');
   const [showAddCompetitor, setShowAddCompetitor] = useState(false);
   const [findingCompetitors, setFindingCompetitors] = useState(false);
   const [findCompetitorsMessage, setFindCompetitorsMessage] = useState('');
@@ -4891,10 +5609,7 @@ export default function ProjectSetupPage({ tab }) {
 
   const handleDeleteCompetitorProject = async (project) => {
     const slug = project.slug;
-    const projectComps = competitors.filter(c => c.projectSlug === slug);
-    if (projectComps.length > 0) {
-      await Promise.all(projectComps.map(c => deleteCompetitor(c.id)));
-    }
+    await deleteCompetitorProjectData(slug);
     setCompetitors(prev => prev.filter(c => c.projectSlug !== slug));
   };
 
@@ -4935,6 +5650,7 @@ export default function ProjectSetupPage({ tab }) {
   const handleChooseProjectApply = async ({ project, cluster, clusters, categories }) => {
     // Navigate to the selected project's competitor list
     setSelectedCompetitorProject(project);
+    setSelectedCategoriesFilter(categories && categories.length > 0 ? categories : null);
 
     const clusterList = clusters && clusters.length > 0 ? clusters : (cluster ? [cluster] : []);
     const clusterText = clusterList.length > 0 ? `Clusters (${clusterList.length}): ${clusterList.join(', ')}` : '';
@@ -4972,18 +5688,22 @@ export default function ProjectSetupPage({ tab }) {
 
       setTop3KwByCategory(top3Map);
 
-      // Auto-generate competitors from DB rank data and persist to Supabase DB
+      // Auto-generate competitors from DB rank data for chosen categories/clusters
       try {
-        const res = await findCompetitors(project.slug, { useAi: true });
-        if (res?.competitors && res.competitors.length > 0) {
-          handleFoundCompetitors(res.competitors);
+        const res = await findCompetitors(project.slug, {
+          useAi: true,
+          categories: categories && categories.length > 0 ? categories : undefined,
+          clusters: clusterList && clusterList.length > 0 ? clusterList : undefined,
+        });
+        if (res?.competitors) {
+          setCompetitors(res.competitors);
         } else {
-          const latestComps = await fetchCompetitors();
+          const latestComps = await fetchCompetitors(project.slug);
           setCompetitors(latestComps);
         }
       } catch (findErr) {
         console.warn('Auto-generation from SERP data error:', findErr);
-        const latestComps = await fetchCompetitors();
+        const latestComps = await fetchCompetitors(project.slug);
         setCompetitors(latestComps);
       }
     } catch (err) {
@@ -5101,6 +5821,11 @@ export default function ProjectSetupPage({ tab }) {
   };
 
   const handleImportPages = async (data) => {
+    if (activeTab === 'Competitors') {
+      const insertedRows = await insertCompetitorPageRows(data.slug, data.pages);
+      return insertedRows;
+    }
+
     const insertedRows = await insertPageRows(data.slug, data.pages);
 
     setPagesCounts(prev => ({ ...prev, [data.slug]: (prev[data.slug] || 0) + insertedRows.length }));
@@ -5225,7 +5950,6 @@ export default function ProjectSetupPage({ tab }) {
         DA: c.da ?? '',
         CommonKWs: Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
         TotalKWs: c.totalKw,
-        AICompLevel: c.aiCompLevel,
         SERPCompLevel: c.serpCompLevel,
         CompLevel: c.compLevel,
       }));
@@ -5269,7 +5993,19 @@ export default function ProjectSetupPage({ tab }) {
         {TABS.map(t => (
           <button
             key={t}
-            onClick={() => { setActiveTab(t); setSelectedPageProject(null); setSelectedCompetitor(null); setSelectedCompetitorProject(null); setSelectedKwProject(null); setSelectedKwDetail(null); setSearch(''); }}
+            onClick={() => {
+              if (t === 'Pages' && activeTab === 'Pages') {
+                setShowAddPages(true);
+              } else {
+                setActiveTab(t);
+                setSelectedPageProject(null);
+                setSelectedCompetitor(null);
+                setSelectedCompetitorProject(null);
+                setSelectedKwProject(null);
+                setSelectedKwDetail(null);
+                setSearch('');
+              }
+            }}
             style={{
               padding: '8px 16px',
               fontSize: 14,
@@ -5303,9 +6039,10 @@ export default function ProjectSetupPage({ tab }) {
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder={
-                activeTab === 'Pages' && selectedPageProject !== null ? 'Page name or url'
-                  : activeTab === 'Intent' && selectedKwProject !== null ? 'Search keywords'
-                    : 'Project name or domain'
+                activeTab === 'Pages' && selectedPageProject !== null ? 'Search page or url...'
+                  : activeTab === 'Intent' && selectedKwProject !== null ? 'Search keywords...'
+                    : activeTab === 'Competitors' && selectedCompetitorProject !== null ? 'Search competitor or domain...'
+                      : 'Search project name or domain...'
               }
               style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--text-primary)', width: '100%' }}
             />
@@ -5350,7 +6087,7 @@ export default function ProjectSetupPage({ tab }) {
           {activeTab === 'Competitors' ? (
             selectedCompetitorProject === null ? (
               <button
-                onClick={() => setShowChooseProject(true)}
+                onClick={() => { setChooseProjectMode('chooseProject'); setShowChooseProject(true); }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
@@ -5378,34 +6115,6 @@ export default function ProjectSetupPage({ tab }) {
                   onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
                 >
                   <RefreshCw size={14} className={competitorsRefreshing ? 'spin-icon' : ''} />
-                </button>
-                <button
-                  onClick={() => setShowChooseProject(true)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
-                    padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
-                    fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
-                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-                >
-                  <Plus size={15} />
-                  Find Competitors
-                </button>
-                <button
-                  onClick={() => setShowAddPages(true)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    background: '#fff', color: '#0f1523', border: '1.5px solid #0f1523', borderRadius: 8,
-                    padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
-                    fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.opacity = '0.75'}
-                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-                >
-                  <Plus size={15} />
-                  Add Pages
                 </button>
               </div>
             )
@@ -5481,13 +6190,14 @@ export default function ProjectSetupPage({ tab }) {
           />
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} />}
-            {activeTab === 'Intent' && <PagesTab pages={kwClusters} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's Intent data (keywords, categories, clusters)" />}
-            {activeTab === 'Pages' && <PagesTab pages={pages} onSelectProject={setSelectedPageProject} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" />}
+            {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} search={search} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} />}
+            {activeTab === 'Intent' && <PagesTab pages={kwClusters} search={search} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's Intent data (keywords, categories, clusters)" />}
+            {activeTab === 'Pages' && <PagesTab pages={pages} search={search} onSelectProject={setSelectedPageProject} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" />}
             {activeTab === 'Competitors' && selectedCompetitorProject === null && (
               <CompetitorProjectsTab
                 projects={projects}
                 competitors={competitors}
+                search={search}
                 onSelectProject={(p) => { setSelectedCompetitorProject(p); setFindCompetitorsMessage(''); }}
                 onDeleteProject={handleDeleteCompetitorProject}
                 loading={competitorsLoading}
@@ -5498,9 +6208,12 @@ export default function ProjectSetupPage({ tab }) {
               <CompetitorsTab
                 competitors={competitors}
                 scopedProject={selectedCompetitorProject}
+                selectedCategoriesFilter={selectedCategoriesFilter}
+                search={search}
                 onBack={() => {
                   if (hasCompetitorPendingChanges && !window.confirm('You have unsaved changes. Discard them?')) return;
                   setSelectedCompetitorProject(null);
+                  setSelectedCategoriesFilter(null);
                   setFindCompetitorsMessage('');
                   setCompetitorPendingUpdates(new Map());
                   setCompetitorPendingDeleteIds(new Set());
@@ -5511,7 +6224,7 @@ export default function ProjectSetupPage({ tab }) {
                 onSaveCompetitor={handleSaveCompetitor}
                 onBulkEditCompetitors={handleBulkEditCompetitors}
                 onBulkDeleteCompetitors={handleBulkDeleteCompetitors}
-                onFindCompetitors={() => setShowChooseProject(true)}
+                onFindCompetitors={() => runFindCompetitors(selectedCompetitorProject)}
                 onAddPages={() => setShowAddPages(true)}
                 hasPendingChanges={hasCompetitorPendingChanges}
                 saving={competitorSaving}
@@ -5521,6 +6234,7 @@ export default function ProjectSetupPage({ tab }) {
                 error={competitorsError}
                 top3KwByCategory={top3KwByCategory}
                 top3KwLoading={top3KwLoading}
+                findingCompetitors={findingCompetitors}
               />
             )}
             {(activeTab === 'Outreach' || activeTab === 'Connectors') && (
@@ -5562,16 +6276,28 @@ export default function ProjectSetupPage({ tab }) {
         onClose={() => setShowAddPages(false)}
         projects={projects}
         onImportPages={handleImportPages}
-        lockedProject={activeTab === 'Pages' && selectedPageProject !== null ? { index: selectedPageProject, slug: pages[selectedPageProject].slug, name: pages[selectedPageProject].name, domain: pages[selectedPageProject].domain } : null}
+        lockedProject={
+          activeTab === 'Competitors' && selectedCompetitorProject !== null
+            ? { slug: selectedCompetitorProject.slug, name: selectedCompetitorProject.name, domain: selectedCompetitorProject.domain }
+            : activeTab === 'Pages' && selectedPageProject !== null
+            ? { index: selectedPageProject, slug: pages[selectedPageProject].slug, name: pages[selectedPageProject].name, domain: pages[selectedPageProject].domain }
+            : null
+        }
       />
       <AddKeywordsModal
         open={showAddKeywords}
         onClose={() => setShowAddKeywords(false)}
         projects={projects}
         onImportKeywords={handleImportKeywords}
-        lockedProject={activeTab === 'Intent' && selectedKwProject !== null ? { index: selectedKwProject, slug: kwClusters[selectedKwProject].slug, name: kwClusters[selectedKwProject].name, domain: kwClusters[selectedKwProject].domain } : null}
+        lockedProject={
+          activeTab === 'Competitors' && selectedCompetitorProject !== null
+            ? { slug: selectedCompetitorProject.slug, name: selectedCompetitorProject.name, domain: selectedCompetitorProject.domain }
+            : activeTab === 'Intent' && selectedKwProject !== null
+            ? { index: selectedKwProject, slug: kwClusters[selectedKwProject].slug, name: kwClusters[selectedKwProject].name, domain: kwClusters[selectedKwProject].domain }
+            : null
+        }
       />
-      <ChooseProjectModal open={showChooseProject} onClose={() => setShowChooseProject(false)} onApply={handleChooseProjectApply} projects={projects} />
+      <ChooseProjectModal open={showChooseProject} onClose={() => setShowChooseProject(false)} onApply={handleChooseProjectApply} projects={projects} mode={chooseProjectMode} />
       <AddCompetitorModal
         open={showAddCompetitor}
         onClose={() => setShowAddCompetitor(false)}

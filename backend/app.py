@@ -637,12 +637,58 @@ def bulk_delete_project_pages(payload: BulkDeletePagesRequest):
     return {"deleted": len(payload.ids)}
 
 
+@app.get("/projects/{project}/competitor-pages")
+def list_project_competitor_pages(project: str):
+    """Every page row uploaded for this project under the Competitors tab Add Pages subView."""
+    proj = _resolve_project_or_404(project)
+    return {"project": proj["name"], "pages": [_page_row_to_json(r) for r in db.get_competitor_page_rows(proj["slug"])]}
+
+
+@app.post("/projects/{project}/competitor-pages")
+def create_project_competitor_pages(project: str, rows: List[PageRow]):
+    """Bulk-inserts competitor page rows for a project."""
+    proj = _resolve_project_or_404(project)
+    if not rows:
+        raise HTTPException(400, "No page rows to import.")
+    inserted = db.insert_competitor_page_rows(proj["slug"], [r.dict() for r in rows])
+    return {"project": proj["name"], "pages": [_page_row_to_json(r) for r in inserted]}
+
+
+@app.patch("/competitor-pages/{page_id}")
+def update_project_competitor_page(page_id: int, payload: PageUpdateRequest):
+    """Updates whichever fields are present on a single competitor page row."""
+    updates = {
+        "page_name": payload.pageName, "url": payload.url, "cluster": payload.cluster,
+        "category": payload.category, "target_category": payload.targetCategory,
+        "target_type": payload.targetType,
+    }
+    updates = {k: v for k, v in updates.items() if v is not None}
+    db.update_competitor_page_row(page_id, updates)
+    return {"id": page_id}
+
+
+@app.delete("/competitor-pages/{page_id}")
+def delete_project_competitor_page(page_id: int):
+    db.delete_competitor_page_row(page_id)
+    return {"deleted": page_id}
+
+
+@app.post("/competitor-pages/bulk-delete")
+def bulk_delete_project_competitor_pages(payload: BulkDeletePagesRequest):
+    db.bulk_delete_competitor_page_rows(payload.ids)
+    return {"deleted": len(payload.ids)}
+
+
 class CompetitorCreateRequest(BaseModel):
     domain: str
     name: Optional[str] = None
     da: Optional[str] = None
     targetRegions: Optional[List[str]] = None
     projectSlug: Optional[str] = None
+    category: Optional[str] = None
+    cluster: Optional[str] = None
+    type: Optional[str] = None
+    websiteType: Optional[str] = None
 
 
 class CompetitorUpdateRequest(BaseModel):
@@ -651,6 +697,10 @@ class CompetitorUpdateRequest(BaseModel):
     da: Optional[str] = None
     targetRegions: Optional[List[str]] = None
     projectSlug: Optional[str] = None
+    category: Optional[str] = None
+    cluster: Optional[str] = None
+    type: Optional[str] = None
+    websiteType: Optional[str] = None
 
 
 class CompetitorClassifierRequest(BaseModel):
@@ -675,10 +725,12 @@ def _competitor_to_json(row):
         "domain": row.get("domain"),
         "name": row.get("name"),
         "da": row.get("da"),
-        "websiteType": row.get("website_type") or row.get("type") or "Official Entity",
-        "type": row.get("type") or row.get("website_type") or "Official Entity",
+        "websiteType": row.get("website_type") or row.get("type") or None,
+        "type": row.get("type") or row.get("website_type") or None,
         "targetRegions": row.get("target_regions") or [],
         "projectSlug": row.get("project_slug"),
+        "category": row.get("category"),
+        "cluster": row.get("cluster"),
         "device": row.get("device"),
         "location": row.get("location"),
         "commonKw": row.get("common_kw"),
@@ -709,7 +761,11 @@ def create_competitor(payload: CompetitorCreateRequest):
     project_slug = (payload.projectSlug or "").strip()
     if not project_slug:
         raise HTTPException(400, "Project is required.")
-    row = db.insert_competitor(domain, payload.name, payload.da, payload.targetRegions, project_slug)
+    row = db.insert_competitor(
+        domain, payload.name, payload.da, payload.targetRegions, project_slug,
+        category=payload.category, cluster=payload.cluster,
+        type=payload.type or payload.websiteType
+    )
     return _competitor_to_json(row)
 
 
@@ -718,6 +774,9 @@ def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequ
     updates = {
         "name": payload.name, "domain": payload.domain, "da": payload.da,
         "target_regions": payload.targetRegions, "project_slug": payload.projectSlug,
+        "category": payload.category, "cluster": payload.cluster,
+        "type": payload.type or payload.websiteType,
+        "website_type": payload.websiteType or payload.type,
     }
     updates = {k: v for k, v in updates.items() if v is not None}
     db.update_competitor(competitor_id, updates)
@@ -730,16 +789,142 @@ def delete_competitor_endpoint(competitor_id: int):
     return {"deleted": competitor_id}
 
 
+@app.delete("/projects/{project_slug}/competitors")
+def delete_project_competitors_endpoint(project_slug: str):
+    db.delete_competitors_by_project(project_slug)
+    return {"deleted_project": project_slug}
+
+
+# --- Pages & Competitor Pages Endpoints ---
+
+class PageItem(BaseModel):
+    pageName: Optional[str] = ""
+    url: Optional[str] = ""
+    cluster: Optional[str] = ""
+    category: Optional[str] = ""
+    targetCategory: Optional[str] = ""
+    targetType: Optional[str] = ""
+
+class PageUpdateRequest(BaseModel):
+    pageName: Optional[str] = None
+    url: Optional[str] = None
+    cluster: Optional[str] = None
+    category: Optional[str] = None
+    targetCategory: Optional[str] = None
+    targetType: Optional[str] = None
+
+class BulkDeletePagesRequest(BaseModel):
+    ids: List[int]
+
+def _page_to_json(row):
+    return {
+        "id": row["id"],
+        "pageName": row.get("page_name") or "",
+        "url": row.get("url") or "",
+        "cluster": row.get("cluster") or "",
+        "category": row.get("category") or "",
+        "targetCategory": row.get("target_category") or "",
+        "targetType": row.get("target_type") or "",
+    }
+
+@app.get("/pages/counts")
+def get_pages_counts_endpoint():
+    counts = db.get_pages_counts()
+    stats = db.get_pages_stats()
+    return {"counts": counts, "stats": stats}
+
+@app.get("/projects/{project_slug}/pages")
+def get_project_pages_endpoint(project_slug: str):
+    rows = db.get_page_rows(project_slug)
+    return {"pages": [_page_to_json(r) for r in rows]}
+
+@app.post("/projects/{project_slug}/pages")
+def insert_project_pages_endpoint(project_slug: str, rows: List[PageItem]):
+    inserted = db.insert_page_rows(project_slug, [r.dict() for r in rows])
+    return {"pages": [_page_to_json(r) for r in inserted]}
+
+@app.patch("/pages/{page_id}")
+def update_page_endpoint(page_id: int, payload: PageUpdateRequest):
+    updates = {
+        "page_name": payload.pageName, "url": payload.url,
+        "cluster": payload.cluster, "category": payload.category,
+        "target_category": payload.targetCategory, "target_type": payload.targetType,
+    }
+    updates = {k: v for k, v in updates.items() if v is not None}
+    db.update_page_row(page_id, updates)
+    return {"id": page_id}
+
+@app.delete("/pages/{page_id}")
+def delete_page_endpoint(page_id: int):
+    db.delete_page_row(page_id)
+    return {"deleted": page_id}
+
+@app.delete("/projects/{project_slug}/pages")
+def delete_project_pages_endpoint(project_slug: str):
+    db.delete_pages_by_project(project_slug)
+    return {"deleted_project": project_slug}
+
+@app.post("/pages/bulk-delete")
+def bulk_delete_pages_endpoint(payload: BulkDeletePagesRequest):
+    db.bulk_delete_page_rows(payload.ids)
+    return {"deleted_ids": payload.ids}
+
+# --- Competitor Pages Endpoints ---
+
+@app.get("/projects/{project_slug}/competitor-pages")
+def get_project_competitor_pages_endpoint(project_slug: str):
+    rows = db.get_competitor_page_rows(project_slug)
+    return {"pages": [_page_to_json(r) for r in rows]}
+
+@app.post("/projects/{project_slug}/competitor-pages")
+def insert_project_competitor_pages_endpoint(project_slug: str, rows: List[PageItem]):
+    inserted = db.insert_competitor_page_rows(project_slug, [r.dict() for r in rows])
+    return {"pages": [_page_to_json(r) for r in inserted]}
+
+@app.patch("/competitor-pages/{page_id}")
+def update_competitor_page_endpoint(page_id: int, payload: PageUpdateRequest):
+    updates = {
+        "page_name": payload.pageName, "url": payload.url,
+        "cluster": payload.cluster, "category": payload.category,
+        "target_category": payload.targetCategory, "target_type": payload.targetType,
+    }
+    updates = {k: v for k, v in updates.items() if v is not None}
+    db.update_competitor_page_row(page_id, updates)
+    return {"id": page_id}
+
+@app.delete("/competitor-pages/{page_id}")
+def delete_competitor_page_endpoint(page_id: int):
+    db.delete_competitor_page_row(page_id)
+    return {"deleted": page_id}
+
+@app.post("/competitor-pages/bulk-delete")
+def bulk_delete_competitor_pages_endpoint(payload: BulkDeletePagesRequest):
+    db.bulk_delete_competitor_page_rows(payload.ids)
+    return {"deleted_ids": payload.ids}
+
+
 @app.post("/competitors/classify", response_model=CompetitorClassifierResponse)
 def classify_competitors(payload: CompetitorClassifierRequest):
     """
     Classifies top URLs for a given keyword into website types (Official Entity / Platform)
-    and determines whether each URL is a competitor (YES / NO) using Gemini API.
+    and determines whether each URL is a competitor (YES / NO) using OpenAI API.
     """
     if not payload.urls:
         raise HTTPException(400, "urls array cannot be empty.")
     try:
         results = competitor_classifier.classify_urls(payload.keyword, payload.urls)
+        for item in results.get("results", []):
+            url = item.get("url")
+            wtype = item.get("website_type")
+            if url and wtype:
+                try:
+                    db.save_url_classification(url=url, domain=None, website_type=wtype, is_competitor=item.get("is_competitor"))
+                except Exception:
+                    pass
+                try:
+                    db.update_competitor_website_type(url, wtype)
+                except Exception:
+                    pass
         return results
     except ValueError as ve:
         raise HTTPException(400, str(ve))
@@ -751,6 +936,8 @@ class FindCompetitorsRequest(BaseModel):
     targetRegions: Optional[List[str]] = None
     useAi: bool = True
     topN: Optional[int] = None
+    categories: Optional[List[str]] = None
+    clusters: Optional[List[str]] = None
 
 
 # comp_analysis.py's rule-based/AI levels are the categorical "High"/
@@ -790,23 +977,34 @@ def _snapshot_to_json(row):
 
 @app.post("/projects/{project}/find-competitors")
 def find_competitors_endpoint(project: str, payload: FindCompetitorsRequest):
-    """Runs comp_analysis's SERP-based competitor discovery (see
-    scripts/comp_analysis.py) against this project's already rank-checked
-    keywords (keyword_categories.rank_meta) and upserts one `competitors`
-    row per discovered rival domain, keyed by (domain, project_slug) --
-    re-running this for the same project updates the existing rows
-    instead of duplicating them. Also appends one competitor_snapshots row
-    per competitor so the detail view keeps a dated history of each run."""
+    """Runs comp_analysis's SERP-based competitor discovery against this
+    project's already rank-checked keywords (filtered by category/cluster if specified)
+    and saves competitor rows for the chosen category and cluster."""
     proj = _resolve_project_or_404(project)
     rows = db.get_domain_results(proj["slug"])
+
+    if payload.categories and len(payload.categories) > 0:
+        cats_set = {c.lower() for c in payload.categories}
+        rows = [r for r in rows if (r.get("category") and str(r.get("category")).lower() in cats_set) or (r.get("target_subtype") and str(r.get("target_subtype")).lower() in cats_set)]
+
+    if payload.clusters and len(payload.clusters) > 0:
+        clusters_set = {c.lower() for c in payload.clusters}
+        rows = [r for r in rows if r.get("cluster") and str(r.get("cluster")).lower() in clusters_set]
+
     results, own_domain = find_competitors_for_rows(
         rows, proj["name"], top_n=payload.topN, use_ai=payload.useAi,
     )
     if not results:
+        if (payload.categories and len(payload.categories) > 0) or (payload.clusters and len(payload.clusters) > 0):
+            db.delete_competitors_by_project(proj["slug"])
         return {
             "competitors": [], "ownDomain": own_domain,
-            "message": "No ranked keywords found for this project yet -- run rank checking first.",
+            "message": "No ranked keywords found for the selected category/cluster.",
         }
+
+    # Clear existing competitors for this project when specific categories/clusters are selected
+    if (payload.categories and len(payload.categories) > 0) or (payload.clusters and len(payload.clusters) > 0):
+        db.delete_competitors_by_project(proj["slug"])
 
     created = []
     for r in results:
@@ -814,15 +1012,33 @@ def find_competitors_endpoint(project: str, payload: FindCompetitorsRequest):
         ai_score = _level_score(r["ai_comp_level"]) if r.get("ai_comp_level") else None
         comp_score = round((serp_score + ai_score) / 2) if ai_score is not None else serp_score
 
+        cat_from_results = r.get("category") or r.get("target_subtype") or ""
+        cls_from_results = r.get("cluster") or ""
+
+        category_val = (
+            ", ".join(payload.categories)
+            if payload.categories and len(payload.categories) > 0
+            else (cat_from_results if cat_from_results else "General")
+        )
+        cluster_val = (
+            ", ".join(payload.clusters)
+            if payload.clusters and len(payload.clusters) > 0
+            else (cls_from_results if cls_from_results else "General")
+        )
+
         existing = db.get_competitor_by_domain_and_project(r["competitor_domain"], proj["slug"])
         if existing:
             competitor_id = existing["id"]
-            if payload.targetRegions:
-                db.update_competitor(competitor_id, {"target_regions": payload.targetRegions})
+            db.update_competitor(competitor_id, {
+                "category": category_val,
+                "cluster": cluster_val,
+                "target_regions": payload.targetRegions if payload.targetRegions else None,
+            })
         else:
             inserted = db.insert_competitor(
                 domain=r["competitor_domain"], name=None, da=None,
                 target_regions=payload.targetRegions, project_slug=proj["slug"],
+                category=category_val, cluster=cluster_val,
             )
             competitor_id = inserted["id"]
 

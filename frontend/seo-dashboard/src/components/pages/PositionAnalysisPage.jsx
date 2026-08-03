@@ -1791,61 +1791,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
                 </div>
               );
             })()}
-
-            {/* Rank Audit Complete Status Banner — Overview only */}
-            {aiTab === 'Overview' && (
-              <div style={{
-                background: '#f8fafc',
-                border: '1.5px dashed #c084fc',
-                borderRadius: 10,
-                padding: '12px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                marginTop: 4
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: '50%',
-                    background: '#7c3aed',
-                    color: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    flexShrink: 0
-                  }}>
-                    ✓
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Rank Audit Complete</div>
-                    <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 1 }}>
-                      Ranks successfully generated for all {kwCount} keywords.
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setShowReport(true)}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#7c3aed',
-                    fontSize: 12.5,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    padding: 0,
-                    flexShrink: 0
-                  }}
-                >
-                  View Report
-                </button>
-              </div>
-            )}
           </div>
         )}
 

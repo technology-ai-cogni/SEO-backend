@@ -834,6 +834,109 @@ export async function bulkDeletePageRows(ids) {
   }
 }
 
+// ─── Competitor Pages API (separate DB from main Pages tab) ──────────────────
+
+export async function fetchCompetitorPageRows(slug) {
+  if (isLocalMode) {
+    const pageRows = JSON.parse(localStorage.getItem('seo_competitor_pages') || '[]');
+    return pageRows.filter(r => r.project_name === slug).map(pageRowToUi);
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/competitor-pages`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to load competitor pages.');
+  }
+  const data = await res.json();
+  return (data.pages || []).map(pageRowToUi);
+}
+
+export async function insertCompetitorPageRows(slug, rows) {
+  if (isLocalMode) {
+    const pageRows = JSON.parse(localStorage.getItem('seo_competitor_pages') || '[]');
+    const maxId = pageRows.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
+    const inserted = rows.map((r, i) => ({
+      id: maxId + i + 1,
+      project_name: slug,
+      pageName: r.pageName || '',
+      url: r.url || '',
+      cluster: r.cluster || '',
+      category: r.category || '',
+      targetCategory: '',
+      targetType: '',
+    }));
+    localStorage.setItem('seo_competitor_pages', JSON.stringify([...pageRows, ...inserted]));
+    return inserted.map(pageRowToUi);
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/competitor-pages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(rows),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail?.[0]?.msg || body?.detail || 'Failed to import competitor pages.');
+  }
+  const data = await res.json();
+  return (data.pages || []).map(pageRowToUi);
+}
+
+export async function updateCompetitorPageRow(id, updates) {
+  if (isLocalMode) {
+    const pageRows = JSON.parse(localStorage.getItem('seo_competitor_pages') || '[]');
+    const index = pageRows.findIndex(r => String(r.id) === String(id));
+    if (index !== -1) {
+      pageRows[index] = { ...pageRows[index], ...updates };
+      localStorage.setItem('seo_competitor_pages', JSON.stringify(pageRows));
+    }
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/competitor-pages/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to update competitor page.');
+  }
+}
+
+export async function deleteCompetitorPageRow(id) {
+  if (isLocalMode) {
+    const pageRows = JSON.parse(localStorage.getItem('seo_competitor_pages') || '[]');
+    localStorage.setItem('seo_competitor_pages', JSON.stringify(pageRows.filter(r => String(r.id) !== String(id))));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/competitor-pages/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete competitor page.');
+  }
+}
+
+export async function bulkDeleteCompetitorPageRows(ids) {
+  if (isLocalMode) {
+    const pageRows = JSON.parse(localStorage.getItem('seo_competitor_pages') || '[]');
+    const stringIds = ids.map(String);
+    localStorage.setItem('seo_competitor_pages', JSON.stringify(pageRows.filter(r => !stringIds.includes(String(r.id)))));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/competitor-pages/bulk-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete competitor pages.');
+  }
+}
+
 // ─── Competitors tab ────────────────────────────────────────────────────────
 // Each competitor is tracked against one project (projectSlug) -- routed
 // through the backend (new table, same RLS-not-set-up-yet reasoning as
@@ -845,8 +948,12 @@ function competitorRowToUi(row) {
     domain: row.domain,
     name: row.name,
     da: row.da,
+    websiteType: row.websiteType || row.type || row.website_type || null,
+    type: row.type || row.websiteType || row.website_type || null,
     targetRegions: row.targetRegions || [],
     projectSlug: row.projectSlug || row.project_slug || null,
+    category: row.category || row.categoryName || '—',
+    cluster: row.cluster || '—',
     device: row.device,
     location: row.location,
     commonKw: row.commonKw,
@@ -944,11 +1051,25 @@ export async function deleteCompetitor(id) {
   }
 }
 
+export async function deleteCompetitorProjectData(slug) {
+  if (isLocalMode) {
+    const rows = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
+    localStorage.setItem('seo_competitors', JSON.stringify(rows.filter(r => r.projectSlug !== slug)));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/competitors`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete competitor project data.');
+  }
+}
+
 // Runs the comp_analysis SERP-discovery pipeline (backend scripts/comp_analysis.py)
 // against a project's already rank-checked keywords, and upserts one
 // competitor row per rival domain it finds. Local mode has no rank-check/
 // AI pipeline behind it, so it just reports nothing found there.
-export async function findCompetitors(projectSlug, { targetRegions, useAi = true, topN } = {}) {
+export async function findCompetitors(projectSlug, { targetRegions, useAi = true, topN, categories, clusters } = {}) {
   if (isLocalMode) {
     return { competitors: [], ownDomain: '', message: 'Find Competitors requires the hosted backend (no rank-check data in local mode).' };
   }
@@ -956,7 +1077,7 @@ export async function findCompetitors(projectSlug, { targetRegions, useAi = true
   const res = await fetch(`${CATEGORY_API_BASE}/projects/${projectSlug}/find-competitors`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ targetRegions, useAi, topN }),
+    body: JSON.stringify({ targetRegions, useAi, topN, categories, clusters }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
@@ -1065,7 +1186,7 @@ export async function runAiVisibilityAnalysis(projectSlug, domain, country, keyw
 
 export async function classifyCompetitorUrls(urls, keyword = '') {
   if (!urls || urls.length === 0) return [];
-  const res = await fetch(`${CATEGORY_API_BASE}/competitors/classify-urls`, {
+  const res = await fetch(`${CATEGORY_API_BASE}/competitors/classify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ urls, keyword }),
