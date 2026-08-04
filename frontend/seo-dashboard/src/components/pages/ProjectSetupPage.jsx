@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Plus, Minus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2, RefreshCw, Filter, Download, Folder, FolderTree } from 'lucide-react';
+import { Search, Plus, Minus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2, RefreshCw, Filter, Download, Folder, FolderTree, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { Badge } from '../ui/Card';
@@ -4447,16 +4447,17 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
   );
 }
 
-function isClassifiedOfficial(c) {
-  if (!c) return false;
-  const isClassified = c.isClassified === true || c.classified === true || Boolean(c.classifiedAt || c.classified_at || c.is_classified);
-  if (!isClassified) return false;
-  const type = c.type || c.websiteType;
-  return type === 'Official Entity';
-}
-
 function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewComp, competitors }) {
   const [expandedClusters, setExpandedClusters] = useState(new Set());
+
+  const scopedCompetitors = useMemo(() => {
+    if (!scopedProject) return competitors || [];
+    const targetSlug = (scopedProject.slug || scopedProject.project_slug || scopedProject.name || '').toLowerCase();
+    return (competitors || []).filter(c => {
+      const cSlug = (c.projectSlug || c.project_slug || c.project_name || c.projectName || '').toLowerCase();
+      return cSlug === targetSlug;
+    });
+  }, [competitors, scopedProject]);
 
   const clusterGroups = useMemo(() => {
     const map = {};
@@ -4475,26 +4476,6 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
     return Object.values(map);
   }, [rows]);
 
-  if (loading) {
-    const loadedCount = (competitors || []).length;
-    return (
-      <div style={{ padding: '16px 20px', background: '#fafbfc', borderBottom: '1px solid var(--border)', fontSize: 13, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
-        <RefreshCw size={14} className="spin-icon" style={{ animation: 'spin 1s linear infinite' }} />
-        {loadedCount > 0
-          ? `Loading competitors into hierarchy tree… (${loadedCount} loaded so far)`
-          : 'Loading category/clusters hierarchy tree…'}
-      </div>
-    );
-  }
-
-  if (!rows || rows.length === 0) {
-    return (
-      <div style={{ padding: '24px 20px', background: '#fafbfc', borderBottom: '1px solid var(--border)', fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', marginBottom: 16 }}>
-        No categories selected. Click <strong>Find Competitors</strong> to select categories.
-      </div>
-    );
-  }
-
   const toggleClusterExpand = (clusterName) => {
     setExpandedClusters(prev => {
       const next = new Set(prev);
@@ -4504,40 +4485,79 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
     });
   };
 
-  const handleExpandAll = () => {
+  const expandAll = () => {
     setExpandedClusters(new Set(clusterGroups.map(g => g.clusterName)));
   };
 
-  const handleCollapseAll = () => {
+  const collapseAll = () => {
     setExpandedClusters(new Set());
   };
 
   return (
-    <div style={{ borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
-      {/* Hierarchy Tree Top Toolbar */}
-      <div style={{ padding: '10px 16px', background: '#f8fafc', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-            Cluster & Category
-          </span>
-          <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)', background: '#fff', padding: '2px 8px', borderRadius: 12, border: '1px solid var(--border)' }}>
+    <>
+      {loading && (
+        <div style={{ padding: '14px 20px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, fontSize: 13, color: '#1d4ed8', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <RefreshCw size={15} className="spin-icon" style={{ animation: 'spin 1s linear infinite' }} />
+          <span>Competitors are still getting loaded… {scopedCompetitors.length > 0 ? `(${scopedCompetitors.length} loaded so far)` : ''}</span>
+        </div>
+      )}
+
+      {(!rows || rows.length === 0) ? (
+        <div style={{ padding: '24px 20px', background: '#fafbfc', borderBottom: '1px solid var(--border)', fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', marginBottom: 16 }}>
+          No categories selected. Click <strong>Find Competitors</strong> to select categories.
+        </div>
+      ) : (
+        <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', marginBottom: 20 }}>
+      <div style={{
+        padding: '14px 20px',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        background: '#fafbfc'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>Cluster & Category</span>
+          <span style={{
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: 'var(--text-muted)',
+            background: 'var(--surface-2)',
+            padding: '2px 8px',
+            borderRadius: 12,
+            border: '1px solid var(--border)'
+          }}>
             {clusterGroups.length} {clusterGroups.length === 1 ? 'Cluster' : 'Clusters'}
           </span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
-            onClick={handleExpandAll}
-            style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'var(--font-body)', transition: 'all 0.15s' }}
-            onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--text-primary)'}
-            onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+            onClick={expandAll}
+            style={{
+              padding: '5px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              background: '#fff',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              cursor: 'pointer',
+              color: 'var(--text-secondary)'
+            }}
           >
             Expand All
           </button>
           <button
-            onClick={handleCollapseAll}
-            style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'var(--font-body)', transition: 'all 0.15s' }}
-            onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--text-primary)'}
-            onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+            onClick={collapseAll}
+            style={{
+              padding: '5px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              background: '#fff',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              cursor: 'pointer',
+              color: 'var(--text-secondary)'
+            }}
           >
             Collapse All
           </button>
@@ -4550,8 +4570,8 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
             <tr style={{ background: 'var(--surface-2, #f8fafc)', borderBottom: '1px solid var(--border)' }}>
               <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Category / Cluster</th>
               <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>No. of Categories</th>
-              <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Official / Total</th>
               <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Location</th>
+              <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Total No. of Competitors</th>
               <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Total No. of Keywords</th>
               <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px', width: 130 }}>Action</th>
             </tr>
@@ -4559,12 +4579,14 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
           <tbody>
             {clusterGroups.map((group) => {
               const isExpanded = expandedClusters.has(group.clusterName);
-              const clusterComps = (competitors || []).filter(c => {
-                if (!c.cluster) return false;
-                const clusList = c.cluster.split(',').map(s => s.trim().toLowerCase());
-                return clusList.includes(group.clusterName.toLowerCase());
-              });
-              const grpOffCount = clusterComps.filter(c => isClassifiedOfficial(c)).length;
+              const clusFilter = group.clusterName.trim().toLowerCase();
+              const uniqueClusterComps = new Set(
+                scopedCompetitors.filter(c => {
+                  if (!c.cluster) return false;
+                  const clusList = c.cluster.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+                  return clusList.some(clus => clus === clusFilter || clus.includes(clusFilter));
+                }).map(c => (c.domain || c.name || c.url || '').toLowerCase()).filter(Boolean)
+              );
 
               return (
                 <Fragment key={group.clusterName}>
@@ -4589,13 +4611,11 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
                     <td style={{ padding: '11px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontWeight: 700 }}>
                       {group.categories.length}
                     </td>
-                    <td style={{ padding: '11px 16px', textAlign: 'center', fontWeight: 700, fontSize: 13 }} title={`${grpOffCount} Official out of ${clusterComps.length} Total Competitors`}>
-                      <span style={{ color: grpOffCount > 0 ? '#16a34a' : 'var(--text-muted)' }}>{grpOffCount}</span>
-                      <span style={{ color: 'var(--text-muted)', margin: '0 4px' }}>/</span>
-                      <span style={{ color: 'var(--text-primary)' }}>{clusterComps.length}</span>
-                    </td>
                     <td style={{ padding: '11px 16px', color: 'var(--text-secondary)' }}>
                       {group.categories[0]?.location || scopedProject?.location || 'Singapore'}
+                    </td>
+                    <td style={{ padding: '11px 16px', textAlign: 'center', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {uniqueClusterComps.size}
                     </td>
                     <td style={{ padding: '11px 16px', textAlign: 'center', fontWeight: 700, color: 'var(--text-primary)' }}>
                       {group.totalKeywords}
@@ -4609,12 +4629,14 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
 
                   {/* Category Child Rows */}
                   {isExpanded && group.categories.map((r, i) => {
-                    const catComps = (competitors || []).filter(c => {
-                      if (!c.category) return false;
-                      const catList = c.category.split(',').map(s => s.trim().toLowerCase());
-                      return catList.includes((r.category || '').toLowerCase());
-                    });
-                    const catOffCount = catComps.filter(c => isClassifiedOfficial(c)).length;
+                    const catFilter = (r.category || '').trim().toLowerCase();
+                    const uniqueCatComps = new Set(
+                      scopedCompetitors.filter(c => {
+                        if (!c.category) return false;
+                        const catList = c.category.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+                        return catList.some(cat => cat === catFilter || cat.includes(catFilter));
+                      }).map(c => (c.domain || c.name || c.url || '').toLowerCase()).filter(Boolean)
+                    );
 
                     return (
                       <tr
@@ -4636,13 +4658,11 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
                         <td style={{ padding: '10px 16px', textAlign: 'center', color: 'var(--text-secondary)' }}>
                           1
                         </td>
-                        <td style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, fontSize: 12.5 }} title={`${catOffCount} Official out of ${catComps.length} Total Competitors`}>
-                          <span style={{ color: catOffCount > 0 ? '#16a34a' : 'var(--text-muted)' }}>{catOffCount}</span>
-                          <span style={{ color: 'var(--text-muted)', margin: '0 4px' }}>/</span>
-                          <span style={{ color: 'var(--text-secondary)' }}>{catComps.length}</span>
-                        </td>
                         <td style={{ padding: '10px 16px', color: 'var(--text-secondary)' }}>
                           {r.location || scopedProject?.location || 'Singapore'}
+                        </td>
+                        <td style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                          {uniqueCatComps.size}
                         </td>
                         <td style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 500, color: 'var(--text-secondary)' }}>
                           {r.totalKeywords}
@@ -4681,6 +4701,8 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
         </table>
       </div>
     </div>
+  )}
+</>
   );
 }
 
@@ -4820,7 +4842,11 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
           });
 
           // Also include categories from competitor rows for this project
-          (competitorsRef.current || []).filter(c => c.projectSlug === scopedProject.slug && c.category).forEach(c => {
+          const targetSlug = (scopedProject?.slug || scopedProject?.project_slug || scopedProject?.name || '').toLowerCase();
+          (competitorsRef.current || []).filter(c => {
+            const cSlug = (c.projectSlug || c.project_slug || c.project_name || '').toLowerCase();
+            return cSlug === targetSlug && c.category;
+          }).forEach(c => {
             const catList = c.category.split(',').map(s => s.trim()).filter(Boolean);
             catList.forEach(cat => {
               if (!map[cat]) {
@@ -4858,7 +4884,13 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
     { key: 'da', label: 'DA', type: 'range' },
   ];
 
-  const baseFiltered = scopedProject ? competitors.filter(c => c.projectSlug === scopedProject.slug) : competitors;
+  const targetSlug = (scopedProject?.slug || scopedProject?.project_slug || scopedProject?.name || '').toLowerCase();
+  const baseFiltered = scopedProject
+    ? competitors.filter(c => {
+        const cSlug = (c.projectSlug || c.project_slug || c.project_name || '').toLowerCase();
+        return cSlug === targetSlug;
+      })
+    : competitors;
   const filtered = baseFiltered
     .filter(c => {
       if (search && search.trim()) {
@@ -4870,11 +4902,12 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
         const clus = (c.cluster || '').toLowerCase();
         if (!n.includes(q) && !d.includes(q) && !u.includes(q) && !cat.includes(q) && !clus.includes(q)) return false;
       }
-      if (categoryFilter && c.category) {
-        const filterLower = categoryFilter.toLowerCase();
-        const catLower = c.category.toLowerCase();
-        const clusLower = (c.cluster || '').toLowerCase();
-        const matches = catLower.includes(filterLower) || filterLower.includes(catLower) || clusLower.includes(filterLower) || filterLower.includes(clusLower);
+      if (categoryFilter) {
+        const filterLower = categoryFilter.trim().toLowerCase();
+        const cCats = (c.category || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+        const cClus = (c.cluster || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+        const matches = cCats.some(cat => cat === filterLower || cat.includes(filterLower)) ||
+                        cClus.some(clus => clus === filterLower || clus.includes(filterLower));
         if (!matches) return false;
       }
       if (tableFilters.category?.length) {
@@ -5379,6 +5412,67 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
   );
 }
 
+function PrerequisiteModal({ open, onClose, title, message, actionLabel, onAction }) {
+  if (!open) return null;
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
+    }}>
+      <div style={{
+        background: '#fff', borderRadius: 14, maxWidth: 420, width: '100%',
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+        border: '1px solid var(--border)', overflow: 'hidden'
+      }}>
+        <div style={{ padding: '24px 24px 16px 24px', display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+          <div style={{
+            width: 42, height: 42, borderRadius: 10, background: '#fef3c7',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+          }}>
+            <AlertCircle size={22} color="#d97706" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6, margin: 0 }}>
+              {title || 'Action Required'}
+            </h3>
+            <p style={{ fontSize: 13.5, color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+              {message}
+            </p>
+          </div>
+        </div>
+        <div style={{
+          padding: '14px 24px', display: 'flex', justifyContent: 'flex-end', gap: 10,
+          background: '#fafbfc', borderTop: '1px solid var(--border)'
+        }}>
+          <button
+            onClick={onClose}
+            style={{
+              padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)',
+              background: '#fff', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)',
+              cursor: 'pointer'
+            }}
+          >
+            Cancel
+          </button>
+          {actionLabel && (
+            <button
+              onClick={() => { onClose(); onAction?.(); }}
+              style={{
+                padding: '8px 18px', borderRadius: 8, border: 'none',
+                background: 'var(--accent, #0f1523)', fontSize: 13, fontWeight: 600, color: '#fff',
+                cursor: 'pointer'
+              }}
+            >
+              {actionLabel}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function ProjectSetupPage({ tab }) {
@@ -5421,7 +5515,101 @@ export default function ProjectSetupPage({ tab }) {
   const [top3KwByCategory, setTop3KwByCategory] = useState({});
   const [top3KwLoading, setTop3KwLoading] = useState(false);
   const [selectedKwDetail, setSelectedKwDetail] = useState(null);
+  const [prerequisiteModal, setPrerequisiteModal] = useState({ open: false, title: '', message: '', targetTab: '' });
   const hasCompetitorPendingChanges = competitorPendingUpdates.size > 0 || competitorPendingDeleteIds.size > 0;
+
+  const checkPrerequisites = (targetTab) => {
+    const hasDomain = projects && projects.length > 0;
+    const hasIntent = kwClusters && kwClusters.length > 0;
+    const totalPages = (pages && pages.length > 0)
+      ? pages.length
+      : Object.values(pagesCounts || {}).reduce((sum, count) => sum + (Number(count) || 0), 0);
+    const hasPages = totalPages > 0;
+
+    if (targetTab === 'Intent') {
+      if (!hasDomain && !projectsLoading) {
+        setPrerequisiteModal({
+          open: true,
+          title: 'Domain Not Set',
+          message: 'Please set the domain first before proceeding to Intent.',
+          targetTab: 'Domain'
+        });
+        return false;
+      }
+    }
+
+    if (targetTab === 'Pages') {
+      if (!hasDomain && !projectsLoading) {
+        setPrerequisiteModal({
+          open: true,
+          title: 'Domain Not Set',
+          message: 'Please set the domain first before proceeding to Pages.',
+          targetTab: 'Domain'
+        });
+        return false;
+      }
+      if (!hasIntent && !kwClustersLoading) {
+        setPrerequisiteModal({
+          open: true,
+          title: 'Intent Not Set',
+          message: 'Please set the intent first before proceeding to Pages.',
+          targetTab: 'Intent'
+        });
+        return false;
+      }
+    }
+
+    if (targetTab === 'Competitors') {
+      if (!hasDomain && !projectsLoading) {
+        setPrerequisiteModal({
+          open: true,
+          title: 'Domain Not Set',
+          message: 'Please set the domain first before proceeding to Competitors.',
+          targetTab: 'Domain'
+        });
+        return false;
+      }
+      if (!hasIntent && !kwClustersLoading) {
+        setPrerequisiteModal({
+          open: true,
+          title: 'Intent Not Set',
+          message: 'Please set the intent first before proceeding to Competitors.',
+          targetTab: 'Intent'
+        });
+        return false;
+      }
+      if (!hasPages) {
+        setPrerequisiteModal({
+          open: true,
+          title: 'Pages Not Set',
+          message: 'Please set the pages first before proceeding to Competitors.',
+          targetTab: 'Pages'
+        });
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const handleTabClick = (t) => {
+    if (!checkPrerequisites(t)) return;
+
+    if (t === activeTab) {
+      if (t === 'Pages') setShowAddPages(true);
+      if (t === 'Intent') setShowAddKeywords(true);
+      if (t === 'Domain') setShowCreate(true);
+      return;
+    }
+
+    setActiveTab(t);
+    setSelectedPageProject(null);
+    setSelectedCompetitor(null);
+    setSelectedCompetitorProject(null);
+    setSelectedKwProject(null);
+    setSelectedKwDetail(null);
+    setSearch('');
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -5986,52 +6174,41 @@ export default function ProjectSetupPage({ tab }) {
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 0 }}>
-      {/* Breadcrumb */}
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span>Home</span><span>›</span><span>SEO</span><span>›</span><span style={{ color: 'var(--text-primary)' }}>Brand Discovery</span>
-      </div>
-
       {/* Page title */}
       <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 12 }}>
         Project Setup
       </h1>
 
       {/* Horizontal tabs */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--border)', marginBottom: 12 }}>
-        {TABS.map(t => (
-          <button
-            key={t}
-            onClick={() => {
-              if (t === 'Pages' && activeTab === 'Pages') {
-                setShowAddPages(true);
-              } else {
-                setActiveTab(t);
-                setSelectedPageProject(null);
-                setSelectedCompetitor(null);
-                setSelectedCompetitorProject(null);
-                setSelectedKwProject(null);
-                setSelectedKwDetail(null);
-                setSearch('');
-              }
-            }}
-            style={{
-              padding: '8px 16px',
-              fontSize: 14,
-              fontWeight: activeTab === t ? 600 : 500,
-              color: activeTab === t ? 'var(--text-primary)' : 'var(--text-muted)',
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === t ? '2px solid var(--accent)' : '2px solid transparent',
-              marginBottom: -2,
-              cursor: 'pointer',
-              fontFamily: 'var(--font-body)',
-              transition: 'color 0.15s, border-color 0.15s',
-            }}
-            onMouseEnter={e => { if (activeTab !== t) e.currentTarget.style.color = 'var(--text-secondary)'; }}
-            onMouseLeave={e => { if (activeTab !== t) e.currentTarget.style.color = 'var(--text-muted)'; }}
-          >
-            {t}
-          </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 0, borderBottom: '2px solid var(--border)', marginBottom: 12 }}>
+        {TABS.map((t, index) => (
+          <Fragment key={t}>
+            <button
+              onClick={() => handleTabClick(t)}
+              style={{
+                padding: '8px 16px',
+                fontSize: 14,
+                fontWeight: activeTab === t ? 600 : 500,
+                color: activeTab === t ? 'var(--text-primary)' : 'var(--text-muted)',
+                background: 'none',
+                border: 'none',
+                borderBottom: activeTab === t ? '2px solid var(--accent)' : '2px solid transparent',
+                marginBottom: -2,
+                cursor: 'pointer',
+                fontFamily: 'var(--font-body)',
+                transition: 'color 0.15s, border-color 0.15s',
+              }}
+              onMouseEnter={e => { if (activeTab !== t) e.currentTarget.style.color = 'var(--text-secondary)'; }}
+              onMouseLeave={e => { if (activeTab !== t) e.currentTarget.style.color = 'var(--text-muted)'; }}
+            >
+              {t}
+            </button>
+            {index < TABS.length - 1 && (
+              <span style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 2px', userSelect: 'none' }}>
+                ›
+              </span>
+            )}
+          </Fragment>
         ))}
       </div>
 
@@ -6318,6 +6495,25 @@ export default function ProjectSetupPage({ tab }) {
         onClose={() => setShowRefindConfirm(false)}
         projectName={pendingFindProject?.name}
         onConfirm={() => { if (pendingFindProject) runFindCompetitors(pendingFindProject); }}
+      />
+      <PrerequisiteModal
+        open={prerequisiteModal.open}
+        onClose={() => setPrerequisiteModal(prev => ({ ...prev, open: false }))}
+        title={prerequisiteModal.title}
+        message={prerequisiteModal.message}
+        actionLabel={`Set ${prerequisiteModal.targetTab}`}
+        onAction={() => {
+          setActiveTab(prerequisiteModal.targetTab);
+          setSelectedPageProject(null);
+          setSelectedCompetitor(null);
+          setSelectedCompetitorProject(null);
+          setSelectedKwProject(null);
+          setSelectedKwDetail(null);
+          setSearch('');
+          if (prerequisiteModal.targetTab === 'Domain') setShowCreate(true);
+          if (prerequisiteModal.targetTab === 'Intent') setShowAddKeywords(true);
+          if (prerequisiteModal.targetTab === 'Pages') setShowAddPages(true);
+        }}
       />
     </div>
   );
