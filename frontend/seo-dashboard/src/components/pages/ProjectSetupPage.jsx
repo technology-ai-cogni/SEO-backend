@@ -4447,6 +4447,14 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
   );
 }
 
+function isClassifiedOfficial(c) {
+  if (!c) return false;
+  const isClassified = c.isClassified === true || c.classified === true || Boolean(c.classifiedAt || c.classified_at || c.is_classified);
+  if (!isClassified) return false;
+  const type = c.type || c.websiteType;
+  return type === 'Official Entity';
+}
+
 function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewComp, competitors }) {
   const [expandedClusters, setExpandedClusters] = useState(new Set());
 
@@ -4556,7 +4564,7 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
                 const clusList = c.cluster.split(',').map(s => s.trim().toLowerCase());
                 return clusList.includes(group.clusterName.toLowerCase());
               });
-              const grpOffCount = clusterComps.filter(c => (c.type || c.websiteType) === 'Official Entity').length;
+              const grpOffCount = clusterComps.filter(c => isClassifiedOfficial(c)).length;
 
               return (
                 <Fragment key={group.clusterName}>
@@ -4582,7 +4590,7 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
                       {group.categories.length}
                     </td>
                     <td style={{ padding: '11px 16px', textAlign: 'center', fontWeight: 700, fontSize: 13 }} title={`${grpOffCount} Official out of ${clusterComps.length} Total Competitors`}>
-                      <span style={{ color: '#16a34a' }}>{grpOffCount}</span>
+                      <span style={{ color: grpOffCount > 0 ? '#16a34a' : 'var(--text-muted)' }}>{grpOffCount}</span>
                       <span style={{ color: 'var(--text-muted)', margin: '0 4px' }}>/</span>
                       <span style={{ color: 'var(--text-primary)' }}>{clusterComps.length}</span>
                     </td>
@@ -4606,7 +4614,7 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
                       const catList = c.category.split(',').map(s => s.trim().toLowerCase());
                       return catList.includes((r.category || '').toLowerCase());
                     });
-                    const catOffCount = catComps.filter(c => (c.type || c.websiteType) === 'Official Entity').length;
+                    const catOffCount = catComps.filter(c => isClassifiedOfficial(c)).length;
 
                     return (
                       <tr
@@ -4629,7 +4637,7 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
                           1
                         </td>
                         <td style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, fontSize: 12.5 }} title={`${catOffCount} Official out of ${catComps.length} Total Competitors`}>
-                          <span style={{ color: '#16a34a' }}>{catOffCount}</span>
+                          <span style={{ color: catOffCount > 0 ? '#16a34a' : 'var(--text-muted)' }}>{catOffCount}</span>
                           <span style={{ color: 'var(--text-muted)', margin: '0 4px' }}>/</span>
                           <span style={{ color: 'var(--text-secondary)' }}>{catComps.length}</span>
                         </td>
