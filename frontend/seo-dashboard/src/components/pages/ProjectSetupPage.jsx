@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { Badge } from '../ui/Card';
 import {
-  fetchDomainRows, createProject, updateDomainRow, deleteDomainRow,
+  fetchDomainRows, createProject, updateDomainRow, deleteDomainRow, deleteKwProject,
   fetchKwProjects, fetchKeywordRows, insertKeywordRows, updateKeywordRow, bulkDeleteKeywordRows, deleteKwClusterData,
   fetchPageRows, insertPageRows, updatePageRow, deletePageRow, bulkDeletePageRows, deletePagesData, fetchPagesCounts,
   fetchCompetitorPageRows, insertCompetitorPageRows, updateCompetitorPageRow, deleteCompetitorPageRow,
@@ -5475,7 +5475,7 @@ function PrerequisiteModal({ open, onClose, title, message, actionLabel, onActio
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export default function ProjectSetupPage({ tab }) {
+export default function ProjectSetupPage({ tab, user }) {
   const [activeTab, setActiveTab] = useState(tab || 'Domain');
   useEffect(() => { if (tab) { setActiveTab(tab); setSelectedPageProject(null); setSelectedCompetitor(null); setSelectedCompetitorProject(null); setSelectedKwProject(null); setSearch(''); } }, [tab]);
   const [filter, setFilter] = useState(null);
@@ -5609,6 +5609,87 @@ export default function ProjectSetupPage({ tab }) {
     setSelectedKwProject(null);
     setSelectedKwDetail(null);
     setSearch('');
+  };
+
+  const [outreachLinks, setOutreachLinks] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('seo_outreach_links') || '[]');
+    } catch (e) {
+      return [];
+    }
+  });
+  const [showAddOutreach, setShowAddOutreach] = useState(false);
+  const [newOutreachLink, setNewOutreachLink] = useState('');
+  const [outreachError, setOutreachError] = useState('');
+  const [deletingOutreachLink, setDeletingOutreachLink] = useState(null);
+
+  const handleAddOutreachLink = (e) => {
+    if (e) e.preventDefault();
+    setOutreachError('');
+    let link = newOutreachLink.trim();
+    if (!link) {
+      setOutreachError('Link cannot be empty.');
+      return;
+    }
+    
+    if (!/^https?:\/\//i.test(link)) {
+      link = 'https://' + link;
+    }
+
+    let isValid = false;
+    try {
+      const parsed = new URL(link);
+      isValid = (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.includes('.');
+    } catch (_) {
+      isValid = false;
+    }
+
+    if (!isValid) {
+      setOutreachError('Please enter a valid link or domain (e.g. google.com or https://example.com/outreach).');
+      return;
+    }
+
+    const domainPart = link.replace(/https?:\/\/(www\.)?/, '').split('/')[0];
+    const hash = domainPart.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    
+    const mockDa = (hash % 80) + 15;
+    const mockPa = Math.max(10, mockDa - (hash % 15) - 2);
+    const mockSs = (hash % 5) === 0 ? `${(hash % 4) + 1}%` : '0%';
+    const trafficVal = ((hash % 180) + 10) * 100;
+    const mockTraffic = trafficVal >= 1000 ? `${(trafficVal / 1000).toFixed(1)}K` : `${trafficVal}`;
+    const totalVal = trafficVal * ((hash % 5) + 2);
+    const mockTotalTraffic = totalVal >= 1000 ? `${(totalVal / 1000).toFixed(1)}K` : `${totalVal}`;
+    
+    const mockRegion1 = `US: ${((trafficVal * 0.5) / 1000).toFixed(1)}K`;
+    const mockRegion2 = `UK: ${((trafficVal * 0.25) / 1000).toFixed(1)}K`;
+    const mockRegion3 = `IN: ${((trafficVal * 0.15) / 1000).toFixed(1)}K`;
+
+    const updated = [
+      ...outreachLinks,
+      {
+        id: Date.now(),
+        url: link,
+        da: mockDa,
+        pa: mockPa,
+        ss: mockSs,
+        traffic: mockTraffic,
+        totalTraffic: mockTotalTraffic,
+        region1Traffic: mockRegion1,
+        region2Traffic: mockRegion2,
+        region3Traffic: mockRegion3
+      }
+    ];
+    setOutreachLinks(updated);
+    localStorage.setItem('seo_outreach_links', JSON.stringify(updated));
+    
+    setNewOutreachLink('');
+    setShowAddOutreach(false);
+  };
+
+  const handleDeleteOutreachLink = (id) => {
+    const updated = outreachLinks.filter(lnk => lnk.id !== id);
+    setOutreachLinks(updated);
+    localStorage.setItem('seo_outreach_links', JSON.stringify(updated));
   };
 
   useEffect(() => {
@@ -5773,31 +5854,20 @@ export default function ProjectSetupPage({ tab }) {
     setProjects(prev => prev.map(p => p === project ? updated : p));
   };
 
+  const currentUserEmail = user?.email || 'system';
+
   const handleDeleteProject = async (project) => {
-    await deleteDomainRow(project.id);
+    await deleteKwProject(project.slug, currentUserEmail);
     setProjects(prev => prev.filter(p => p !== project));
   };
 
-  // Deletes just this project's KW Cluster data (keyword_categories/
-  // categories/clusters/category_cluster_map) -- deliberately does NOT
-  // touch `projects`, so the project itself keeps showing up on the
-  // Domain and Pages tabs. Removes the row from `kwClusters` entirely
-  // (rather than zeroing it in place) since this tab only lists projects
-  // with >=1 keyword -- it comes back on its own once keywords are added
-  // to it again via "+ Add Keywords".
   const handleDeleteKwProject = async (project) => {
-    await deleteKwClusterData(project.slug);
+    await deleteKwProject(project.slug, currentUserEmail);
     setKwClusters(prev => prev.filter(p => p.slug !== project.slug));
   };
 
-  // Deletes just this project's page rows -- deliberately does NOT touch
-  // `projects`/`kwClusters`, so the project keeps showing up on the
-  // Domain and KW Cluster tabs. Drops its entry from `pagesCounts` (the
-  // Pages tab's sync effect only lists projects with a >0 count there),
-  // so the row disappears from the Pages tab specifically instead of
-  // lingering with a permanent "0" row.
   const handleDeletePagesProject = async (project) => {
-    await deletePagesData(project.slug);
+    await deleteKwProject(project.slug, currentUserEmail);
     setPagesCounts(prev => { const next = { ...prev }; delete next[project.slug]; return next; });
     setPagesStats(prev => { const next = { ...prev }; delete next[project.slug]; return next; });
     setPages(prev => prev.filter(p => p.slug !== project.slug));
@@ -5805,7 +5875,7 @@ export default function ProjectSetupPage({ tab }) {
 
   const handleDeleteCompetitorProject = async (project) => {
     const slug = project.slug;
-    await deleteCompetitorProjectData(slug);
+    await deleteKwProject(slug, currentUserEmail);
     setCompetitors(prev => prev.filter(c => c.projectSlug !== slug));
   };
 
@@ -6166,7 +6236,7 @@ export default function ProjectSetupPage({ tab }) {
     'Intent': { label: 'Add Keywords', onClick: () => setShowAddKeywords(true) },
     Pages: { label: 'Add Pages', onClick: () => setShowAddPages(true) },
     Competitors: { label: 'Choose Project', onClick: () => setShowChooseProject(true) },
-    Outreach: { label: 'Add Outreach', onClick: () => { } },
+    Outreach: { label: 'Add Outreach', onClick: () => setShowAddOutreach(true) },
     Connectors: { label: 'Connect', onClick: () => { } },
   };
 
@@ -6422,9 +6492,124 @@ export default function ProjectSetupPage({ tab }) {
                 findingCompetitors={findingCompetitors}
               />
             )}
-            {(activeTab === 'Outreach' || activeTab === 'Connectors') && (
+            {activeTab === 'Outreach' && (
+              outreachLinks.length === 0 ? (
+                <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+                  No outreach domains configured yet. Click <strong>+ {cta.label}</strong> to get started.
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto', padding: '12px 0' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 950 }}>
+                    <thead>
+                      <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 320 }}>
+                          Domain
+                        </th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                          DA
+                        </th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                          PA
+                        </th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                          SS
+                        </th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                          Traffic
+                        </th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                          Total Traffic
+                        </th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                          Region 1
+                        </th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                          Region 2
+                        </th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                          Region 3
+                        </th>
+                        <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 100 }}>
+                          Action
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {outreachLinks.map((lnk) => (
+                        <tr key={lnk.id} style={{ borderBottom: '1px solid var(--border)' }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                          <td style={{ padding: '14px 16px', fontSize: 13.5, width: 320, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <a href={lnk.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}
+                              onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                              onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
+                              {(() => {
+                                try {
+                                  const parsed = new URL(lnk.url);
+                                  const baseUrl = `${parsed.protocol}//${parsed.hostname}`;
+                                  if (lnk.url.length > baseUrl.length + 3) {
+                                    return `${baseUrl}...`;
+                                  }
+                                  return lnk.url;
+                                } catch (_) {
+                                  return lnk.url;
+                                }
+                              })()}
+                            </a>
+                          </td>
+                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                            {lnk.da || '-'}
+                          </td>
+                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                            {lnk.pa || '-'}
+                          </td>
+                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                            {lnk.ss || '-'}
+                          </td>
+                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                            {lnk.traffic || '-'}
+                          </td>
+                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                            {lnk.totalTraffic || '-'}
+                          </td>
+                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                            {lnk.region1Traffic || '-'}
+                          </td>
+                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                            {lnk.region2Traffic || '-'}
+                          </td>
+                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                            {lnk.region3Traffic || '-'}
+                          </td>
+                          <td style={{ padding: '14px 16px', textAlign: 'right' }}>
+                            <button
+                              onClick={() => setDeletingOutreachLink(lnk)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--red, #dc2626)',
+                                fontSize: 12.5,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                padding: '4px 8px',
+                                borderRadius: 4
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
+                              onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            )}
+            {activeTab === 'Connectors' && (
               <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-                No {activeTab.toLowerCase()} configured yet. Click <strong>+ {cta.label}</strong> to get started.
+                No connectors configured yet. Click <strong>+ Connect</strong> to get started.
               </div>
             )}
           </div>
@@ -6515,6 +6700,77 @@ export default function ProjectSetupPage({ tab }) {
           if (prerequisiteModal.targetTab === 'Pages') setShowAddPages(true);
         }}
       />
+      <Modal
+        open={showAddOutreach}
+        onClose={() => {
+          setShowAddOutreach(false);
+          setOutreachError('');
+          setNewOutreachLink('');
+        }}
+        title="Add Outreach Domain"
+        footer={<>
+          <Btn variant="primary" onClick={handleAddOutreachLink}>Add Domain</Btn>
+          <Btn variant="outline" onClick={() => {
+            setShowAddOutreach(false);
+            setOutreachError('');
+            setNewOutreachLink('');
+          }} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
+        </>}
+      >
+        {outreachError && (
+          <div style={{
+            background: '#fef2f2',
+            border: '1px solid #f87171',
+            color: '#dc2626',
+            borderRadius: 6,
+            padding: '10px 14px',
+            fontSize: 13,
+            fontWeight: 500,
+            marginBottom: 16
+          }}>
+            {outreachError}
+          </div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+            Outreach Domain *
+          </label>
+          <input
+            type="text"
+            value={newOutreachLink}
+            onChange={(e) => { setNewOutreachLink(e.target.value); setOutreachError(''); }}
+            style={{
+              width: '100%',
+              padding: '10px 14px',
+              fontSize: 13.5,
+              background: 'var(--surface)',
+              border: '1.5px solid var(--border)',
+              borderRadius: 8,
+              color: 'var(--text-primary)',
+              outline: 'none'
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleAddOutreachLink();
+            }}
+          />
+          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+            Supports full URLs and plain domains (e.g. google.com)
+          </span>
+        </div>
+      </Modal>
+      {deletingOutreachLink && (
+        <Modal open={true} onClose={() => setDeletingOutreachLink(null)} title="Delete Outreach Domain"
+          footer={<>
+            <button onClick={() => setDeletingOutreachLink(null)} style={{ padding: '8px 16px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+            <button onClick={() => { handleDeleteOutreachLink(deletingOutreachLink.id); setDeletingOutreachLink(null); }} style={{ padding: '8px 18px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              Delete Domain
+            </button>
+          </>}>
+          <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-secondary)' }}>
+            Are you sure you want to delete the outreach domain <strong>{deletingOutreachLink.url}</strong>? This action cannot be undone.
+          </p>
+        </Modal>
+      )}
     </div>
   );
 }

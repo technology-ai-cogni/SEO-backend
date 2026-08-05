@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Search, Eye, EyeOff, Lock, Mail, ShieldCheck } from 'lucide-react';
+import { Search, Eye, EyeOff, Lock, Mail, ShieldCheck, Briefcase } from 'lucide-react';
 
 export default function LoginPage({ onNavigate, initialAdminMode = false, user = null, onLoginSuccess = null, onLogout = null }) {
-  const [isAdmin, setIsAdmin] = useState(initialAdminMode);
+  const [selectedRole, setSelectedRole] = useState(initialAdminMode ? 'ADMIN' : 'USER');
+  const isAdmin = selectedRole === 'ADMIN';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -22,53 +23,55 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
 
     setIsLoading(true);
 
+    let loggedInUser = null;
+
     try {
-      let loggedInUser = null;
-      try {
-        const response = await fetch('http://localhost:5000/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: email.trim(),
-            password: password
-          })
-        });
+      // 1) Attempt production REST API login first
+      const res = await fetch('http://localhost:8000/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password: password.trim() })
+      });
 
-        if (response.ok) {
-          const data = await response.json();
-          loggedInUser = data.user || { email: email.trim(), name: email.split('@')[0] };
+      if (res.ok) {
+        const data = await res.json();
+        let dbUser = data.user;
+        
+        // Enforce role check if DB user has assigned role
+        if (dbUser && dbUser.role && dbUser.role.toUpperCase() !== selectedRole.toUpperCase()) {
+          setErrorMsg(`Access Denied: Only ${selectedRole} accounts are authorized to log in using this card.`);
+          setIsLoading(false);
+          return;
         }
-      } catch (e) {
-        // Backend auth not running or unwired
-      }
 
-      if (!loggedInUser) {
-        loggedInUser = { email: email.trim(), name: email.split('@')[0] };
+        loggedInUser = dbUser || { email: email.trim(), name: email.split('@')[0], role: selectedRole };
+      } else {
+        const errData = await res.json().catch(() => null);
+        setErrorMsg(errData?.detail || 'Invalid email or password.');
+        setIsLoading(false);
+        return;
       }
-
-      if (onLoginSuccess) {
-        onLoginSuccess(loggedInUser);
-      }
-
-      setSubmittedMessage(`Welcome back, ${loggedInUser.name}! Redirecting to workspace...`);
-      setTimeout(() => {
-        onNavigate('search-visibility/position-analysis');
-      }, 500);
     } catch (err) {
-      setErrorMsg('Login failed. Please try again.');
-    } finally {
-      setIsLoading(false);
+      // Fallback for offline mode if backend is unreachable
+      loggedInUser = { email: email.trim(), name: email.split('@')[0], role: selectedRole };
+    }
+
+    setIsLoading(false);
+    setSubmittedMessage(`Login successful! Logged in as ${selectedRole}.`);
+
+    if (onLoginSuccess && loggedInUser) {
+      onLoginSuccess(loggedInUser);
     }
   };
 
   return (
     <div style={{
-      minHeight: 'calc(100vh - var(--topbar-h) - 40px)',
+      minHeight: '100vh',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '32px 16px',
-      background: 'var(--bg)'
+      background: 'var(--bg)',
+      padding: 24
     }}>
       <div style={{
         width: '100%',
@@ -84,16 +87,18 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
           <div style={{
             width: 44,
             height: 44,
-            background: isAdmin ? 'var(--amber-bg)' : 'var(--accent-light)',
-            border: `1px solid ${isAdmin ? 'var(--amber)' : 'var(--accent)'}`,
+            background: selectedRole === 'ADMIN' ? 'var(--amber-bg)' : selectedRole === 'VENDOR' ? 'var(--red-bg)' : 'var(--accent-light)',
+            border: `1px solid ${selectedRole === 'ADMIN' ? 'var(--amber)' : selectedRole === 'VENDOR' ? 'var(--red)' : 'var(--accent)'}`,
             borderRadius: 12,
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
             marginBottom: 12
           }}>
-            {isAdmin ? (
+            {selectedRole === 'ADMIN' ? (
               <ShieldCheck size={22} color="var(--amber)" />
+            ) : selectedRole === 'VENDOR' ? (
+              <Briefcase size={22} color="var(--red)" />
             ) : (
               <Search size={22} color="var(--accent)" />
             )}
@@ -107,7 +112,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
             lineHeight: 1.3,
             marginBottom: 6
           }}>
-            {isAdmin ? 'Admin Login' : 'User Login'}
+            {selectedRole === 'ADMIN' ? 'Admin Login' : selectedRole === 'VENDOR' ? 'Vendor Login' : 'User Login'}
           </h2>
 
           <p style={{
@@ -115,8 +120,10 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
             color: 'var(--text-muted)',
             lineHeight: 1.4
           }}>
-            {isAdmin
+            {selectedRole === 'ADMIN'
               ? 'Enter administrative credentials to manage settings'
+              : selectedRole === 'VENDOR'
+              ? 'Enter vendor credentials to manage assigned projects'
               : 'Welcome back! Log in to access your SEO workspace'}
           </p>
         </div>
@@ -327,7 +334,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
             type="submit"
             style={{
               marginTop: 6,
-              background: isAdmin ? 'var(--amber)' : 'var(--accent)',
+              background: selectedRole === 'ADMIN' ? 'var(--amber)' : selectedRole === 'VENDOR' ? 'var(--red)' : 'var(--accent)',
               color: '#ffffff',
               border: 'none',
               borderRadius: 'var(--radius-sm)',
@@ -342,7 +349,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
             onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
             onMouseLeave={e => e.currentTarget.style.opacity = '1'}
           >
-            {isAdmin ? 'Log in as Admin' : 'Log in'}
+            {selectedRole === 'ADMIN' ? 'Log in as Admin' : selectedRole === 'VENDOR' ? 'Log in as Vendor' : 'Log in'}
           </button>
         </form>
 
@@ -380,32 +387,48 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
             </button>
           </div>
 
-          {/* Admin Mode Toggle Link */}
-          <div>
-            <button
-              onClick={() => setIsAdmin(!isAdmin)}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: '4px 8px',
-                color: 'var(--text-muted)',
-                fontWeight: 500,
-                cursor: 'pointer',
-                fontFamily: 'var(--font-body)',
-                fontSize: 12.5,
-                borderRadius: 'var(--radius-sm)'
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.color = 'var(--text-primary)';
-                e.currentTarget.style.background = 'var(--surface-2)';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.color = 'var(--text-muted)';
-                e.currentTarget.style.background = 'none';
-              }}
-            >
-              {isAdmin ? 'Switch to User Login' : 'Login as Admin'}
-            </button>
+          {/* Role Mode Toggle Links */}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+            {['USER', 'VENDOR', 'ADMIN'].map((r) => {
+              const isSelected = selectedRole === r;
+              const activeBg = r === 'ADMIN' ? 'var(--amber-bg)' : r === 'VENDOR' ? 'var(--red-bg)' : 'var(--accent-light)';
+              const activeColor = r === 'ADMIN' ? 'var(--amber)' : r === 'VENDOR' ? 'var(--red)' : 'var(--accent)';
+              const activeBorder = r === 'ADMIN' ? '1px solid var(--amber)' : r === 'VENDOR' ? '1px solid var(--red)' : '1px solid var(--accent)';
+
+              return (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setSelectedRole(r)}
+                  style={{
+                    background: isSelected ? activeBg : 'none',
+                    border: isSelected ? activeBorder : '1px solid transparent',
+                    padding: '5px 10px',
+                    color: isSelected ? activeColor : 'var(--text-muted)',
+                    fontWeight: isSelected ? 600 : 500,
+                    cursor: 'pointer',
+                    fontFamily: 'var(--font-body)',
+                    fontSize: 12.5,
+                    borderRadius: 'var(--radius-sm)',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={e => {
+                    if (!isSelected) {
+                      e.currentTarget.style.color = 'var(--text-primary)';
+                      e.currentTarget.style.background = 'var(--surface-2)';
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (!isSelected) {
+                      e.currentTarget.style.color = 'var(--text-muted)';
+                      e.currentTarget.style.background = 'none';
+                    }
+                  }}
+                >
+                  {r === 'USER' ? 'Login as User' : r === 'VENDOR' ? 'Login as Vendor' : 'Login as Admin'}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>

@@ -213,14 +213,19 @@ export async function fetchDomainRows() {
     }
   }
 
-  const { data: domains, error: domainsError } = await supabase
-    .from('domains')
-    .select('*')
-    .order('created_at', { ascending: false });
+  const [{ data: activeProjects, error: projectsError }, { data: domains, error: domainsError }] = await Promise.all([
+    supabase.from('projects').select('slug').is('deleted_at', null),
+    supabase.from('domains').select('*').order('created_at', { ascending: false })
+  ]);
 
+  if (projectsError) throw projectsError;
   if (domainsError) throw domainsError;
+
+  const activeSlugs = new Set((activeProjects || []).map(p => p.slug));
+  const filteredDomains = (domains || []).filter(d => activeSlugs.has(d.project_slug));
+
   const counts = aggregateKwCounts(allKwRows);
-  return (domains || []).map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
+  return filteredDomains.map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
 }
 
 export async function createProject({ name, domain, regions, platforms, da, users }) {
@@ -372,7 +377,7 @@ export async function fetchKwProjects() {
   }
 
   const [{ data: projects, error: projectsError }, { data: domains, error: domainsError }, { data: kwRows, error: kwError }] = await Promise.all([
-    supabase.from('projects').select('*'),
+    supabase.from('projects').select('*').is('deleted_at', null),
     supabase.from('domains').select('*'),
     supabase.from('keyword_categories').select('project_name, subtype, target_type'),
   ]);
@@ -625,64 +630,34 @@ const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://54.196.75.9:8
 // category_cluster_map/pages aren't exposed to the frontend's
 // RLS-restricted anon key, only the backend's direct Postgres connection
 // can touch them.
-export async function deleteKwProject(slug) {
+export async function deleteKwProject(slug, userEmail = null) {
   if (isLocalMode) {
-    const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
-    localStorage.setItem('seo_domains', JSON.stringify(domains.filter(d => d.project_slug !== slug)));
-
     const projects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
-    localStorage.setItem('seo_projects', JSON.stringify(projects.filter(p => p.slug !== slug)));
-
-    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
-    localStorage.setItem('seo_keyword_categories', JSON.stringify(kwRows.filter(r => r.project_name !== slug)));
-
-    const pageRows = JSON.parse(localStorage.getItem('seo_pages') || '[]');
-    localStorage.setItem('seo_pages', JSON.stringify(pageRows.filter(r => r.project_name !== slug)));
+    const index = projects.findIndex(p => p.slug === slug);
+    if (index !== -1) {
+      projects[index].deleted_at = new Date().toISOString();
+      localStorage.setItem('seo_projects', JSON.stringify(projects));
+    }
     return;
   }
 
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}`, { method: 'DELETE' });
+  const endpoint = userEmail
+    ? `${CATEGORY_API_BASE}/projects/${slug}?user_email=${encodeURIComponent(userEmail)}`
+    : `${CATEGORY_API_BASE}/projects/${slug}`;
+
+  const res = await fetch(endpoint, { method: 'DELETE' });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail || 'Failed to delete project.');
   }
 }
 
-// Removes just this project's KW Cluster data (keyword_categories,
-// categories, clusters, category_cluster_map) -- leaves the project, its
-// domain registration, and its pages intact, so it still shows up on the
-// Domain and Pages tabs afterward. This is what the KW Cluster tab's
-// delete button calls.
-export async function deleteKwClusterData(slug) {
-  if (isLocalMode) {
-    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
-    localStorage.setItem('seo_keyword_categories', JSON.stringify(kwRows.filter(r => r.project_name !== slug)));
-    return;
-  }
-
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/kw-data`, { method: 'DELETE' });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail || 'Failed to delete keyword data.');
-  }
+export async function deleteKwClusterData(slug, userEmail = null) {
+  return deleteKwProject(slug, userEmail);
 }
 
-// Removes just this project's page rows (Add Pages uploads) -- leaves the
-// project, its domain registration, and its KW Cluster data intact, so it
-// still shows up on the Domain and KW Cluster tabs afterward. This is
-// what the Pages tab's delete button calls.
-export async function deletePagesData(slug) {
-  if (isLocalMode) {
-    const pageRows = JSON.parse(localStorage.getItem('seo_pages') || '[]');
-    localStorage.setItem('seo_pages', JSON.stringify(pageRows.filter(r => r.project_name !== slug)));
-    return;
-  }
-
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/pages`, { method: 'DELETE' });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail || 'Failed to delete pages.');
-  }
+export async function deletePagesData(slug, userEmail = null) {
+  return deleteKwProject(slug, userEmail);
 }
 
 // ─── Pages tab ──────────────────────────────────────────────────────────────
@@ -1053,17 +1028,7 @@ export async function deleteCompetitor(id) {
 }
 
 export async function deleteCompetitorProjectData(slug) {
-  if (isLocalMode) {
-    const rows = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
-    localStorage.setItem('seo_competitors', JSON.stringify(rows.filter(r => r.projectSlug !== slug)));
-    return;
-  }
-
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/competitors`, { method: 'DELETE' });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail || 'Failed to delete competitor project data.');
-  }
+  return deleteKwProject(slug);
 }
 
 // Runs the comp_analysis SERP-discovery pipeline (backend scripts/comp_analysis.py)
@@ -1198,5 +1163,75 @@ export async function classifyCompetitorUrls(urls, keyword = '') {
   }
   const data = await res.json();
   return data.results || [];
+}
+
+// ─── System Audit Logs API ──────────────────────────────────────────────────
+
+export async function fetchAuditLogsApi(search = '', statusFilter = 'All') {
+  if (isLocalMode) {
+    const saved = localStorage.getItem('seo_system_logs');
+    let logs = saved ? JSON.parse(saved) : [];
+    if (statusFilter && statusFilter !== 'All') {
+      logs = logs.filter(l => l.status === statusFilter);
+    }
+    if (search) {
+      const query = search.toLowerCase();
+      logs = logs.filter(l => (l.user || '').toLowerCase().includes(query) || (l.action || '').toLowerCase().includes(query));
+    }
+    return logs;
+  }
+
+  const params = new URLSearchParams();
+  if (search) params.append('search', search);
+  if (statusFilter && statusFilter !== 'All') params.append('status', statusFilter);
+
+  const res = await fetch(`${CATEGORY_API_BASE}/audit-logs?${params.toString()}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to fetch audit logs.');
+  }
+  const data = await res.json();
+  return data.logs || [];
+}
+
+export async function createAuditLogApi({ user_email = 'system', action, status = 'Success' }) {
+  if (isLocalMode) {
+    const saved = localStorage.getItem('seo_system_logs');
+    let logs = saved ? JSON.parse(saved) : [];
+    const now = new Date();
+    const formatted = now.getFullYear() + '-' +
+      String(now.getMonth() + 1).padStart(2, '0') + '-' +
+      String(now.getDate()).padStart(2, '0') + ' ' +
+      now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const newLog = { id: Date.now(), timestamp: formatted, user: user_email, action, status };
+    logs = [newLog, ...logs];
+    localStorage.setItem('seo_system_logs', JSON.stringify(logs));
+    return newLog;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/audit-logs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_email, action, status }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to create audit log.');
+  }
+  const data = await res.json();
+  return data.log;
+}
+
+export async function clearAuditLogsApi() {
+  if (isLocalMode) {
+    localStorage.setItem('seo_system_logs', JSON.stringify([]));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/audit-logs`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to clear audit logs.');
+  }
 }
 

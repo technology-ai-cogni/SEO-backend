@@ -31,9 +31,9 @@ export default function LandingPage({ activeTab, onNavigate, user, onLoginSucces
           background: #ffffff;
           display: flex;
           flex-direction: column;
-          justify-content: center;
+          justify-content: flex-start;
           align-items: center;
-          padding: 60px 40px;
+          padding: 40px 40px 30px;
           overflow-y: auto;
           position: relative;
         }
@@ -121,32 +121,11 @@ export default function LandingPage({ activeTab, onNavigate, user, onLoginSucces
 
       {/* Right Column (Authentication Column) */}
       <div className="right-panel">
-        {/* Brand header at the top of the right panel */}
-        <div style={{
-          width: '100%',
-          maxWidth: currentTab === 'signup' ? 440 : 420,
-          marginBottom: 40,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10
-        }}>
-          <Search size={28} color="var(--accent)" strokeWidth={3} style={{ marginLeft: -4 }} />
-          <span style={{
-            fontFamily: 'var(--font-display)',
-            fontWeight: 800,
-            fontSize: 20,
-            color: 'var(--text-primary)',
-            letterSpacing: '-0.4px'
-          }}>
-            SEO<span style={{ color: 'var(--accent)' }}>Vision</span>
-          </span>
-        </div>
-
         {/* Welcome Back / Create Account Header */}
         <div style={{
           width: '100%',
           maxWidth: currentTab === 'signup' ? 440 : 420,
-          marginBottom: 24
+          marginBottom: 14
         }}>
           <h2 style={{
             fontFamily: 'var(--font-display)',
@@ -166,13 +145,13 @@ export default function LandingPage({ activeTab, onNavigate, user, onLoginSucces
           width: '100%',
           maxWidth: currentTab === 'signup' ? 440 : 420,
           borderBottom: '1px solid var(--border)',
-          marginBottom: 28,
+          marginBottom: 16,
           gap: 40
         }}>
           <button
             onClick={() => onNavigate('login')}
             style={{
-              padding: '10px 16px',
+              padding: '8px 16px',
               border: 'none',
               background: 'transparent',
               color: currentTab === 'login' || currentTab === 'admin-login' ? 'var(--accent)' : 'var(--text-muted)',
@@ -190,7 +169,7 @@ export default function LandingPage({ activeTab, onNavigate, user, onLoginSucces
           <button
             onClick={() => onNavigate('signup')}
             style={{
-              padding: '10px 16px',
+              padding: '8px 16px',
               border: 'none',
               background: 'transparent',
               color: currentTab === 'signup' ? 'var(--accent)' : 'var(--text-muted)',
@@ -225,77 +204,6 @@ export default function LandingPage({ activeTab, onNavigate, user, onLoginSucces
             />
           )}
         </div>
-
-        {/* Admin Login Toggle Button (instead of Google button) */}
-        {currentTab !== 'signup' && (
-          <div style={{
-            width: '100%',
-            maxWidth: 420,
-            marginTop: 20,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center'
-          }}>
-            {/* Separator OR */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              width: '100%',
-              margin: '12px 0 20px',
-              color: 'var(--text-muted)',
-              fontSize: '12px',
-              fontWeight: 600,
-              letterSpacing: '0.5px'
-            }}>
-              <div style={{ flex: 1, height: '1px', background: 'var(--border)' }}></div>
-              <span style={{ padding: '0 12px' }}>OR</span>
-              <div style={{ flex: 1, height: '1px', background: 'var(--border)' }}></div>
-            </div>
-
-            {/* Login as Admin / User Button */}
-            <button
-              onClick={() => onNavigate(currentTab === 'admin-login' ? 'login' : 'admin-login')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 10,
-                width: '100%',
-                padding: '11px 16px',
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-sm)',
-                color: 'var(--text-primary)',
-                fontSize: '13.5px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: 'var(--font-body)',
-                boxShadow: 'var(--shadow)',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.background = 'var(--surface-2)';
-                e.currentTarget.style.borderColor = 'var(--border-hover)';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.background = 'var(--surface)';
-                e.currentTarget.style.borderColor = 'var(--border)';
-              }}
-            >
-              {currentTab === 'admin-login' ? (
-                <>
-                  <span style={{ fontSize: '15px', display: 'flex', alignItems: 'center' }}>👤</span>
-                  <span>Login as Standard User</span>
-                </>
-              ) : (
-                <>
-                  <span style={{ fontSize: '15px', display: 'flex', alignItems: 'center' }}>🛡️</span>
-                  <span>Login as Admin</span>
-                </>
-              )}
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );

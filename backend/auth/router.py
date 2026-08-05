@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, status
 from auth.schemas import SignupRequest, LoginRequest, UpdateProfileRequest, ChangePasswordRequest, AuthResponse, UserResponse
 from auth.security import hash_password, verify_password
 from auth.db import get_user_by_email, create_user, update_user_name, update_user_password
+from core.db import insert_audit_log
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -17,6 +18,7 @@ def signup(payload: SignupRequest):
     # Check if email already exists
     existing_user = get_user_by_email(clean_email)
     if existing_user:
+        insert_audit_log(user_email=clean_email, action="User Registration Failed (Email Exists)", status="Warning")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User with this email already exists."
@@ -32,6 +34,8 @@ def signup(payload: SignupRequest):
         password_hash=pwd_hash
     )
 
+    insert_audit_log(user_email=clean_email, action="User Registered", status="Success")
+
     return AuthResponse(
         status="success",
         message="User registered successfully.",
@@ -39,6 +43,7 @@ def signup(payload: SignupRequest):
             id=new_user["id"],
             name=new_user["name"],
             email=new_user["email"],
+            role=new_user["role"],
             created_at=new_user.get("created_at")
         )
     )
@@ -55,6 +60,7 @@ def login(payload: LoginRequest):
     # Find user by email
     user = get_user_by_email(clean_email)
     if not user:
+        insert_audit_log(user_email=clean_email, action="Failed Login Attempt (User Not Found)", status="Warning")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credentials are wrong. Please try again."
@@ -62,10 +68,13 @@ def login(payload: LoginRequest):
 
     # Verify password hash
     if not verify_password(payload.password, user["password_hash"]):
+        insert_audit_log(user_email=clean_email, action="Failed Login Attempt (Incorrect Password)", status="Warning")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credentials are wrong. Please try again."
         )
+
+    insert_audit_log(user_email=clean_email, action="User Login", status="Success")
 
     return AuthResponse(
         status="success",
@@ -74,6 +83,7 @@ def login(payload: LoginRequest):
             id=user["id"],
             name=user["name"],
             email=user["email"],
+            role=user["role"],
             created_at=user.get("created_at")
         )
     )
@@ -101,6 +111,8 @@ def update_profile(payload: UpdateProfileRequest):
             detail="Failed to update profile name."
         )
 
+    insert_audit_log(user_email=clean_email, action="Profile Updated", status="Success")
+
     return AuthResponse(
         status="success",
         message="Profile updated successfully.",
@@ -108,6 +120,7 @@ def update_profile(payload: UpdateProfileRequest):
             id=updated_user["id"],
             name=updated_user["name"],
             email=updated_user["email"],
+            role=updated_user["role"],
             created_at=updated_user.get("created_at")
         )
     )
@@ -130,6 +143,7 @@ def change_password(payload: ChangePasswordRequest):
 
     # Verify current password
     if not verify_password(payload.current_password, user["password_hash"]):
+        insert_audit_log(user_email=clean_email, action="Failed Password Change Attempt", status="Warning")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Current password is incorrect."
@@ -143,6 +157,8 @@ def change_password(payload: ChangePasswordRequest):
             detail="Failed to update password."
         )
 
+    insert_audit_log(user_email=clean_email, action="Password Changed", status="Success")
+
     return AuthResponse(
         status="success",
         message="Password changed successfully.",
@@ -150,6 +166,7 @@ def change_password(payload: ChangePasswordRequest):
             id=user["id"],
             name=user["name"],
             email=user["email"],
+            role=user["role"],
             created_at=user.get("created_at")
         )
     )

@@ -113,10 +113,12 @@ load_dotenv()  # must happen before importing core.db
 
 import io
 import csv
+import threading
+import time
 from typing import List, Optional
 
 import pandas as pd
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -143,13 +145,29 @@ app.add_middleware(
 app.include_router(auth_router)
 
 
+def start_expired_projects_cleanup_loop():
+    def loop():
+        # Wait a short duration after startup before the first run
+        time.sleep(10)
+        while True:
+            try:
+                db.purge_expired_projects()
+            except Exception as e:
+                print(f"[Cleanup Error] {e}", flush=True)
+            time.sleep(24 * 60 * 60)
+
+    thread = threading.Thread(target=loop, daemon=True)
+    thread.start()
+
+
 @app.on_event("startup")
-def _run_migrations():
+def _startup_event():
     """CREATE TABLE/COLUMN IF NOT EXISTS only (see db.init_db()) -- safe to
     run on every boot, so a fresh table/column added here shows up in
     production on the next deploy without a manual `python -m core.db`
     step."""
     db.init_db()
+    start_expired_projects_cleanup_loop()
 
 
 class DomainUser(BaseModel):
@@ -290,10 +308,11 @@ def _parse_upload(df):
     return rows
 
 
-def _resolve_project_or_404(project_param):
+def _resolve_project_or_404(project_param, include_deleted=False):
     """`project_param` can be either the exact display name or the slug --
     try both. 404s if neither matches anything that's ever been created."""
-    proj = db.get_project_by_name(project_param) or db.get_project_by_slug(project_param)
+    proj = db.get_project_by_name(project_param, include_deleted=include_deleted) or \
+           db.get_project_by_slug(project_param, include_deleted=include_deleted)
     if proj is None:
         raise HTTPException(404, f"Project '{project_param}' not found.")
     return proj
@@ -331,25 +350,62 @@ def list_domains_endpoint():
 
 
 @app.get("/projects")
-def get_projects():
-    """Every project that has ever been created."""
-    return {"projects": db.list_projects()}
+def get_projects(only_deleted: bool = False):
+    """Every project that has ever been created, optionally listing only deleted ones."""
+    return {"projects": db.list_projects(only_deleted=only_deleted)}
+
+
+class AuditLogRequest(BaseModel):
+    user_email: Optional[str] = "system"
+    action: str
+    status: Optional[str] = "Success"
+
+
+@app.get("/audit-logs")
+def get_audit_logs_endpoint(search: Optional[str] = None, status: Optional[str] = None):
+    """Retrieves logs stored in the PostgreSQL audit_logs table."""
+    logs = db.get_audit_logs(limit=300, status_filter=status, search_query=search)
+    return {"logs": logs}
+
+
+@app.post("/audit-logs")
+def create_audit_log_endpoint(payload: AuditLogRequest):
+    """Inserts a new log entry into the audit_logs PostgreSQL table."""
+    inserted = db.insert_audit_log(
+        user_email=payload.user_email,
+        action=payload.action,
+        status=payload.status
+    )
+    return {"log": inserted}
+
+
+@app.delete("/audit-logs")
+def clear_audit_logs_endpoint():
+    """Clears all audit logs from PostgreSQL table."""
+    db.clear_audit_logs()
+    return {"cleared": True}
 
 
 @app.delete("/projects/{project}")
-def delete_project_endpoint(project: str):
-    """Deletes a project and everything scoped to it (domains,
-    keyword_categories, categories, clusters, category_cluster_map, pages)
-    in one transaction. Not currently called by any tab's delete button --
-    the Domain tab deletes just its `domains` row directly via Supabase,
-    and the KW Cluster/Pages tabs each only delete their own slice (see
-    delete_project_kw_data_endpoint/delete_project_pages_endpoint below),
-    so deleting from one tab doesn't make a project vanish from the
-    others. Kept as a full-teardown capability for if/when that's
-    actually wanted from the UI."""
+def delete_project_endpoint(project: str, user_email: Optional[str] = None):
+    """Soft-deletes a project by setting deleted_at to the current timestamp.
+    All data remains in the database for 30 days and can be restored. After
+    30 days, a background worker permanently purges it."""
     proj = _resolve_project_or_404(project)
-    db.delete_project(proj["slug"])
-    return {"deleted": proj["slug"]}
+    db.soft_delete_project(proj["slug"])
+    acting_user = user_email if user_email else "system"
+    db.insert_audit_log(user_email=acting_user, action=f"Project Deleted: {proj['name']}", status="Warning")
+    return {"deleted": proj["slug"], "soft_deleted": True}
+
+
+@app.post("/projects/{project}/restore")
+def restore_project_endpoint(project: str, user_email: Optional[str] = None):
+    """Restores a soft-deleted project, making it active again."""
+    proj = _resolve_project_or_404(project, include_deleted=True)
+    db.restore_project(proj["slug"])
+    acting_user = user_email if user_email else "system"
+    db.insert_audit_log(user_email=acting_user, action=f"Project Restored: {proj['name']}", status="Success")
+    return {"restored": proj["slug"]}
 
 
 @app.delete("/projects/{project}/kw-data")
