@@ -769,13 +769,22 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
 
 // ─── Add Pages Modal ─────────────────────────────────────────────────────────
 
-function AddPagesModal({ open, onClose, projects, onImportPages, lockedProject }) {
+function AddPagesModal({ open, onClose, projects, onImportPages, lockedProject, onCheckPrerequisites }) {
   const [project, setProject] = useState('');
   const [share, setShare] = useState(false);
   const [csvRows, setCsvRows] = useState([]);
   const [fileName, setFileName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [apiError, setApiError] = useState('');
+
+  const handleSelectProject = (slug) => {
+    const proj = (projects || []).find(p => p.slug === slug);
+    if (proj && onCheckPrerequisites && !onCheckPrerequisites(proj, 'Pages')) {
+      onClose();
+      return;
+    }
+    setProject(slug);
+  };
 
   const projectOptions = projects
     .filter(p => p.name)
@@ -911,7 +920,7 @@ function AddPagesModal({ open, onClose, projects, onImportPages, lockedProject }
           label="Choose Project"
           placeholder="Select a project"
           value={project}
-          onChange={setProject}
+          onChange={handleSelectProject}
           options={projectOptions}
         />
       )}
@@ -1185,7 +1194,7 @@ function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedPro
 
 // ─── Add Competitors Modal ───────────────────────────────────────────────────
 
-function ChooseProjectModal({ open, onClose, onApply, projects, mode = 'findCompetitors' }) {
+function ChooseProjectModal({ open, onClose, onApply, projects, mode = 'findCompetitors', onCheckPrerequisites }) {
   const [projectSlug, setProjectSlug] = useState('');
   const [treeData, setTreeData] = useState([]);
   const [loadingTree, setLoadingTree] = useState(false);
@@ -1193,6 +1202,15 @@ function ChooseProjectModal({ open, onClose, onApply, projects, mode = 'findComp
   const [selectedCategories, setSelectedCategories] = useState(new Set());
 
   const showTree = mode === 'findCompetitors';
+
+  const handleSelectProjectSlug = (slug) => {
+    const proj = (projects || []).find(p => p.slug === slug);
+    if (proj && onCheckPrerequisites && !onCheckPrerequisites(proj, 'Competitors')) {
+      handleClose();
+      return;
+    }
+    setProjectSlug(slug);
+  };
 
   useEffect(() => {
     if (!projectSlug || !showTree) {
@@ -1297,6 +1315,11 @@ function ChooseProjectModal({ open, onClose, onApply, projects, mode = 'findComp
     const project = projects.find(p => p.slug === projectSlug);
     if (!project) return;
 
+    if (onCheckPrerequisites && !onCheckPrerequisites(project, 'Competitors')) {
+      handleClose();
+      return;
+    }
+
     if (showTree) {
       const chosenCategories = Array.from(selectedCategories).map(k => k.split('::')[1]);
       const chosenClusters = treeData
@@ -1335,7 +1358,7 @@ function ChooseProjectModal({ open, onClose, onApply, projects, mode = 'findComp
         label="Choose Project"
         placeholder={projects?.length ? 'Select a project' : 'No projects yet — add one in the Domain tab'}
         value={projectSlug}
-        onChange={setProjectSlug}
+        onChange={handleSelectProjectSlug}
         options={(projects || []).map(p => ({ value: p.slug, label: p.name || p.domain }))}
       />
 
@@ -1606,7 +1629,7 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
   );
 }
 
-function DomainTab({ projects, filter, onUpdateProject, onDeleteProject, loading, error, search }) {
+function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteProject, loading, error, search }) {
   const [expandedRows, setExpandedRows] = useState(new Set());
   const [editingProject, setEditingProject] = useState(null);
 
@@ -1617,7 +1640,69 @@ function DomainTab({ projects, filter, onUpdateProject, onDeleteProject, loading
   });
 
   const visibleProjects = projects.filter(p => {
-    if (filter && !(p.targetPlatforms || ALL_PLATFORMS).includes(filter)) return false;
+    if (!p.domain || !String(p.domain).trim()) return false;
+
+    // Platform filter (from filter pills or dropdown)
+    const activePlat = filter || domainFilters?.platform;
+    if (activePlat) {
+      const projPlats = (p.targetPlatforms || p.platforms || ALL_PLATFORMS).map(x => String(x).toLowerCase());
+      if (!projPlats.includes(String(activePlat).toLowerCase())) return false;
+    }
+
+    // Location filter
+    if (domainFilters?.location) {
+      const locTarget = String(domainFilters.location).toLowerCase();
+      const projLoc = String(p.location || '').toLowerCase();
+      const projRegs = (p.regions || p.target_regions || []).map(x => String(x).toLowerCase());
+      if (projLoc !== locTarget && !projRegs.includes(locTarget)) return false;
+    }
+
+    // DA range filter
+    const projDa = p.da !== null && p.da !== undefined && p.da !== '' ? Number(p.da) : NaN;
+    if (domainFilters?.daMin !== '' && domainFilters?.daMin != null) {
+      if (isNaN(projDa) || projDa < Number(domainFilters.daMin)) return false;
+    }
+    if (domainFilters?.daMax !== '' && domainFilters?.daMax != null) {
+      if (isNaN(projDa) || projDa > Number(domainFilters.daMax)) return false;
+    }
+
+    // Traffic range filter
+    const projTraffic = p.traffic !== null && p.traffic !== undefined && p.traffic !== '' ? Number(p.traffic) : NaN;
+    if (domainFilters?.trafficMin !== '' && domainFilters?.trafficMin != null) {
+      if (isNaN(projTraffic) || projTraffic < Number(domainFilters.trafficMin)) return false;
+    }
+    if (domainFilters?.trafficMax !== '' && domainFilters?.trafficMax != null) {
+      if (isNaN(projTraffic) || projTraffic > Number(domainFilters.trafficMax)) return false;
+    }
+
+    // Keywords range filter
+    const projKw = p.keywords !== null && p.keywords !== undefined && p.keywords !== '' ? Number(p.keywords) : NaN;
+    if (domainFilters?.keywordsMin !== '' && domainFilters?.keywordsMin != null) {
+      if (isNaN(projKw) || projKw < Number(domainFilters.keywordsMin)) return false;
+    }
+    if (domainFilters?.keywordsMax !== '' && domainFilters?.keywordsMax != null) {
+      if (isNaN(projKw) || projKw > Number(domainFilters.keywordsMax)) return false;
+    }
+
+    // Target Pages range filter
+    const projTarget = p.targetPages !== null && p.targetPages !== undefined && p.targetPages !== '' ? Number(p.targetPages) : NaN;
+    if (domainFilters?.targetPagesMin !== '' && domainFilters?.targetPagesMin != null) {
+      if (isNaN(projTarget) || projTarget < Number(domainFilters.targetPagesMin)) return false;
+    }
+    if (domainFilters?.targetPagesMax !== '' && domainFilters?.targetPagesMax != null) {
+      if (isNaN(projTarget) || projTarget > Number(domainFilters.targetPagesMax)) return false;
+    }
+
+    // Blog Pages range filter
+    const projBlog = p.blogPages !== null && p.blogPages !== undefined && p.blogPages !== '' ? Number(p.blogPages) : NaN;
+    if (domainFilters?.blogPagesMin !== '' && domainFilters?.blogPagesMin != null) {
+      if (isNaN(projBlog) || projBlog < Number(domainFilters.blogPagesMin)) return false;
+    }
+    if (domainFilters?.blogPagesMax !== '' && domainFilters?.blogPagesMax != null) {
+      if (isNaN(projBlog) || projBlog > Number(domainFilters.blogPagesMax)) return false;
+    }
+
+    // Search query
     if (search && search.trim()) {
       const q = search.trim().toLowerCase();
       const n = (p.name || '').toLowerCase();
@@ -2300,7 +2385,6 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
         <div style={{ height: 20, width: 1, background: 'var(--border)' }} />
         <div>
           <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{project.name}</span>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>{project.domain}</span>
         </div>
         <button
           onClick={handleRefresh}
@@ -2468,6 +2552,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
   const [showExcludeDropdown, setShowExcludeDropdown] = useState(false);
   const [excludePos, setExcludePos] = useState({ top: 0, right: 0 });
   const excludeBtnRef = useRef(null);
+  const excludePanelRef = useRef(null);
 
   useEffect(() => {
     if (!showExcludeDropdown) return;
@@ -2476,12 +2561,22 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
       const rect = excludeBtnRef.current.getBoundingClientRect();
       setExcludePos({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
     };
+    const handleClickOutside = (e) => {
+      if (
+        excludeBtnRef.current && !excludeBtnRef.current.contains(e.target) &&
+        excludePanelRef.current && !excludePanelRef.current.contains(e.target)
+      ) {
+        setShowExcludeDropdown(false);
+      }
+    };
     updatePos();
     window.addEventListener('resize', updatePos);
     window.addEventListener('scroll', updatePos, true);
+    document.addEventListener('mousedown', handleClickOutside);
     return () => {
       window.removeEventListener('resize', updatePos);
       window.removeEventListener('scroll', updatePos, true);
+      document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showExcludeDropdown]);
 
@@ -3010,7 +3105,6 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
         <div>
           <div>
             <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{project.name}</span>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>{project.domain}</span>
           </div>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             {filteredIndices.length} keyword{filteredIndices.length !== 1 ? 's' : ''}
@@ -3032,28 +3126,32 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
           <RefreshCw size={14} className={refreshing ? 'spin-icon' : ''} />
         </button>
 
-        <TableFilterDropdown
-          filters={kwFilterConfigs}
-          rows={rows}
-          activeFilters={tableFilters}
-          onFiltersChange={setTableFilters}
-        />
+        {rows.length > 0 && (
+          <>
+            <TableFilterDropdown
+              filters={kwFilterConfigs}
+              rows={rows}
+              activeFilters={tableFilters}
+              onFiltersChange={setTableFilters}
+            />
 
-        <button
-          onClick={() => downloadCSV(`${project?.name || 'keywords'}_clusters`, visibleRows)}
-          title="Download CSV"
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'var(--surface-2)', color: 'var(--text-secondary)',
-            border: '1px solid var(--border)', borderRadius: 8,
-            padding: '7px 10px', cursor: 'pointer',
-            fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-          }}
-          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-        >
-          <Download size={14} />
-        </button>
+            <button
+              onClick={() => downloadCSV(`${project?.name || 'keywords'}_clusters`, visibleRows)}
+              title="Download CSV"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--surface-2)', color: 'var(--text-secondary)',
+                border: '1px solid var(--border)', borderRadius: 8,
+                padding: '7px 10px', cursor: 'pointer',
+                fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+            >
+              <Download size={14} />
+            </button>
+          </>
+        )}
 
         <div style={{ flex: 1 }} />
         {saveError && (
@@ -3066,7 +3164,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
           <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{clusterError}</span>
         )}
 
-        {selectedRows.size === 0 && (
+        {rows.length > 0 && selectedRows.size === 0 && (
           <>
             {/* Check initial ranking button -- visible ONLY when ALL keywords have both cluster and category */}
             {rows.length > 0 && rows.every(r => Boolean(r.cluster && String(r.cluster).trim()) && Boolean(r.category && String(r.category).trim())) && (
@@ -3102,7 +3200,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
               </button>
 
               {showExcludeDropdown && createPortal(
-                <div style={{
+                <div ref={excludePanelRef} style={{
                   position: 'fixed', top: excludePos.top, right: excludePos.right, width: 320,
                   background: '#fff', border: '1px solid var(--border)', borderRadius: 8,
                   boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
@@ -3250,32 +3348,36 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
           </>
         )}
 
-        <ActionsDropdown
-          selectedCount={selectedRows.size}
-          onBulkEdit={() => setShowBulkEdit(true)}
-          onBulkDelete={() => setShowBulkDelete(true)}
-        />
+        {rows.length > 0 && (
+          <>
+            <ActionsDropdown
+              selectedCount={selectedRows.size}
+              onBulkEdit={() => setShowBulkEdit(true)}
+              onBulkDelete={() => setShowBulkDelete(true)}
+            />
 
-        {/* Robot Face AI Cluster Button */}
-        <button
-          onClick={handleRunClustering}
-          disabled={clustering}
-          style={{
-            background: 'linear-gradient(135deg, var(--accent), var(--accent-hover))',
-            border: 'none', cursor: clustering ? 'default' : 'pointer',
-            display: 'flex', alignItems: 'center', gap: 3,
-            padding: '7px 16px 7px 10px', borderRadius: 999, transition: 'transform 0.15s, box-shadow 0.15s',
-            opacity: clustering ? 0.75 : 1,
-            boxShadow: '0 2px 10px rgba(92, 74, 242, 0.35)',
-          }}
-          onMouseEnter={e => { if (!clustering) { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(92, 74, 242, 0.45)'; } }}
-          onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 2px 10px rgba(92, 74, 242, 0.35)'; }}
-        >
-          <RobotClusterIcon busy={clustering} size={24} />
-          <span style={{ fontSize: 13.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>
-            {clustering ? 'Clustering keywords…' : '   AI-Clustering'}
-          </span>
-        </button>
+            {/* Robot Face AI Cluster Button */}
+            <button
+              onClick={handleRunClustering}
+              disabled={clustering}
+              style={{
+                background: 'linear-gradient(135deg, var(--accent), var(--accent-hover))',
+                border: 'none', cursor: clustering ? 'default' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: 3,
+                padding: '7px 16px 7px 10px', borderRadius: 999, transition: 'transform 0.15s, box-shadow 0.15s',
+                opacity: clustering ? 0.75 : 1,
+                boxShadow: '0 2px 10px rgba(92, 74, 242, 0.35)',
+              }}
+              onMouseEnter={e => { if (!clustering) { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(92, 74, 242, 0.45)'; } }}
+              onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 2px 10px rgba(92, 74, 242, 0.35)'; }}
+            >
+              <RobotClusterIcon busy={clustering} size={24} />
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>
+                {clustering ? 'Clustering keywords…' : '   AI-Clustering'}
+              </span>
+            </button>
+          </>
+        )}
 
         {(hasPendingChanges || saving) && (
           <button
@@ -3524,7 +3626,6 @@ function CompetitorDetailView({ competitor, onBack }) {
         <div style={{ height: 20, width: 1, background: 'var(--border)' }} />
         <div>
           <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
-          {competitor.domain && competitor.name && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>{competitor.domain}</span>}
         </div>
         <button
           onClick={() => {
@@ -3906,6 +4007,7 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
       };
     })
     .filter(p => {
+      if (!p.domain || !String(p.domain).trim()) return false;
       if (p.competitorCount <= 0) return false;
       if (search && search.trim()) {
         const q = search.trim().toLowerCase();
@@ -5516,11 +5618,84 @@ export default function ProjectSetupPage({ tab, user }) {
   const [top3KwLoading, setTop3KwLoading] = useState(false);
   const [selectedKwDetail, setSelectedKwDetail] = useState(null);
   const [prerequisiteModal, setPrerequisiteModal] = useState({ open: false, title: '', message: '', targetTab: '' });
+  const [domainFilters, setDomainFilters] = useState({
+    platform: '', location: '', daMin: '', daMax: '', trafficMin: '', trafficMax: '',
+    keywordsMin: '', keywordsMax: '', targetPagesMin: '', targetPagesMax: '', blogPagesMin: '', blogPagesMax: '',
+  });
+  const [showDomainFilterDropdown, setShowDomainFilterDropdown] = useState(false);
+  const activeDomainFilterCount = [
+    domainFilters.platform, domainFilters.location, domainFilters.daMin, domainFilters.daMax, domainFilters.trafficMin, domainFilters.trafficMax,
+    domainFilters.keywordsMin, domainFilters.keywordsMax, domainFilters.targetPagesMin, domainFilters.targetPagesMax, domainFilters.blogPagesMin, domainFilters.blogPagesMax,
+  ].filter(Boolean).length;
+  const domainFilterRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (domainFilterRef.current && !domainFilterRef.current.contains(e.target)) {
+        setShowDomainFilterDropdown(false);
+      }
+    };
+    if (showDomainFilterDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showDomainFilterDropdown]);
   const hasCompetitorPendingChanges = competitorPendingUpdates.size > 0 || competitorPendingDeleteIds.size > 0;
 
+  const checkProjectPrerequisites = (project, targetTab) => {
+    if (!project) return true;
+    const slug = (project.slug || project.project_slug || '').toLowerCase();
+    const projName = project.name || project.project_name || 'this project';
+
+    // 1. Check Domain
+    const domainRow = projects.find(p => (p.slug || p.project_slug || '').toLowerCase() === slug);
+    const hasDomain = domainRow && domainRow.domain && String(domainRow.domain).trim() !== '';
+    if (!hasDomain) {
+      setPrerequisiteModal({
+        open: true,
+        title: 'Domain Not Set',
+        message: `Please set the domain first for "${projName}" before proceeding.`,
+        targetTab: 'Domain'
+      });
+      return false;
+    }
+
+    // 2. Check Intent (Category & Cluster) for this project
+    const kwProj = kwClusters.find(k => (k.slug || k.project_slug || '').toLowerCase() === slug);
+    const hasIntent = Boolean(kwProj && (kwProj.totalPages > 0 || kwProj.keywords > 0 || (kwProj.detailKeywords && kwProj.detailKeywords.length > 0)));
+    if (targetTab === 'Pages' || targetTab === 'Competitors') {
+      if (!hasIntent) {
+        setPrerequisiteModal({
+          open: true,
+          title: 'Intent Not Set',
+          message: `Please set the intent (category & cluster) first for "${projName}".`,
+          targetTab: 'Intent'
+        });
+        return false;
+      }
+    }
+
+    // 3. Check Pages for this project
+    const pageCount = pagesCounts[slug] ?? pagesCounts[project.slug] ?? 0;
+    const hasPages = pageCount > 0 || pages.some(p => (p.slug || p.project_slug || '').toLowerCase() === slug && (p.totalPages > 0 || (p.detailPages && p.detailPages.length > 0)));
+    if (targetTab === 'Competitors') {
+      if (!hasPages) {
+        setPrerequisiteModal({
+          open: true,
+          title: 'Pages Not Set',
+          message: `Please set the pages first for "${projName}".`,
+          targetTab: 'Pages'
+        });
+        return false;
+      }
+    }
+
+    return true;
+  };
+
   const checkPrerequisites = (targetTab) => {
-    const hasDomain = projects && projects.length > 0;
-    const hasIntent = kwClusters && kwClusters.length > 0;
+    const hasDomain = projects && projects.some(p => p.domain && String(p.domain).trim() !== '');
+    const hasIntent = kwClusters && kwClusters.some(k => k.totalPages > 0 || k.keywords > 0);
     const totalPages = (pages && pages.length > 0)
       ? pages.length
       : Object.values(pagesCounts || {}).reduce((sum, count) => sum + (Number(count) || 0), 0);
@@ -5798,7 +5973,7 @@ export default function ProjectSetupPage({ tab, user }) {
     setPages(prev => {
       const bySlug = new Map(prev.map(p => [p.slug, p]));
       return projects
-        .filter(proj => (pagesCounts[proj.slug] ?? 0) > 0)
+        .filter(proj => proj.domain && String(proj.domain).trim() !== '' && (pagesCounts[proj.slug] ?? 0) > 0)
         .map(proj => {
           const kwProject = kwClusters.find(k => k.slug === proj.slug);
           const stats = pagesStats[proj.slug] ?? { total: pagesCounts[proj.slug] ?? 0, commercial: 0, blog: 0 };
@@ -5914,6 +6089,7 @@ export default function ProjectSetupPage({ tab, user }) {
   }, [selectedCompetitorProject?.slug]);
 
   const handleChooseProjectApply = async ({ project, cluster, clusters, categories }) => {
+    if (!checkProjectPrerequisites(project, 'Competitors')) return;
     // Navigate to the selected project's competitor list
     setSelectedCompetitorProject(project);
     setSelectedCategoriesFilter(categories && categories.length > 0 ? categories : null);
@@ -6303,18 +6479,204 @@ export default function ProjectSetupPage({ tab, user }) {
             />
           </div>
 
-          {/* Filter pills — Domain tab only */}
+          {/* Filter button & pills — Domain tab only */}
           {activeTab === 'Domain' && (
-            <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-              {filterTabs.map(f => (
-                <button key={f} onClick={() => setFilter(prev => prev === f ? null : f)} style={{
-                  padding: '7px 16px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500,
-                  fontFamily: 'var(--font-body)', transition: 'all 0.15s',
-                  background: filter === f ? '#0f1523' : '#fff',
-                  color: filter === f ? '#fff' : 'var(--text-secondary)',
-                  borderRight: f !== 'Gemini' ? '1px solid var(--border)' : 'none',
-                }}>{f}</button>
-              ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ position: 'relative' }} ref={domainFilterRef}>
+                <button
+                  onClick={() => setShowDomainFilterDropdown(!showDomainFilterDropdown)}
+                  title="Filter"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+                    background: activeDomainFilterCount > 0 ? '#f5f3ff' : 'none',
+                    border: activeDomainFilterCount > 0 ? '1.5px solid #7c3aed' : '1.5px solid var(--border)',
+                    borderRadius: 8, padding: 8,
+                    cursor: 'pointer', color: activeDomainFilterCount > 0 ? '#7c3aed' : 'var(--text-muted)',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = activeDomainFilterCount > 0 ? '#7c3aed' : 'var(--border-hover)'; e.currentTarget.style.color = activeDomainFilterCount > 0 ? '#7c3aed' : 'var(--text-primary)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = activeDomainFilterCount > 0 ? '#7c3aed' : 'var(--border)'; e.currentTarget.style.color = activeDomainFilterCount > 0 ? '#7c3aed' : 'var(--text-muted)'; }}
+                >
+                  <Filter size={14} />
+                  {activeDomainFilterCount > 0 && (
+                    <span style={{
+                      position: 'absolute', top: -6, right: -6,
+                      background: '#7c3aed', color: '#fff', fontSize: 10, fontWeight: 700,
+                      width: 16, height: 16, borderRadius: '50%',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>{activeDomainFilterCount}</span>
+                  )}
+                </button>
+
+                {showDomainFilterDropdown && (
+                  <div style={{
+                    position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 1000,
+                    background: '#fff', border: '1px solid var(--border)', borderRadius: 10,
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05)',
+                    padding: 16, width: 280, display: 'flex', flexDirection: 'column', gap: 12
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>Domain Filters</span>
+                      <button onClick={() => setShowDomainFilterDropdown(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                        <X size={14} />
+                      </button>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>Platform</label>
+                      <select
+                        value={domainFilters.platform}
+                        onChange={e => setDomainFilters(prev => ({ ...prev, platform: e.target.value }))}
+                        style={{ width: '100%', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12.5, outline: 'none' }}
+                      >
+                        <option value="">All Platforms</option>
+                        {ALL_PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>Location</label>
+                      <select
+                        value={domainFilters.location}
+                        onChange={e => setDomainFilters(prev => ({ ...prev, location: e.target.value }))}
+                        style={{ width: '100%', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12.5, outline: 'none' }}
+                      >
+                        <option value="">All Locations</option>
+                        {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>Domain Authority (DA)</label>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="number"
+                          placeholder="Min DA"
+                          value={domainFilters.daMin}
+                          onChange={e => setDomainFilters(prev => ({ ...prev, daMin: e.target.value }))}
+                          style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
+                        />
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>-</span>
+                        <input
+                          type="number"
+                          placeholder="Max DA"
+                          value={domainFilters.daMax}
+                          onChange={e => setDomainFilters(prev => ({ ...prev, daMax: e.target.value }))}
+                          style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>Traffic Range</label>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="number"
+                          placeholder="Min Traffic"
+                          value={domainFilters.trafficMin}
+                          onChange={e => setDomainFilters(prev => ({ ...prev, trafficMin: e.target.value }))}
+                          style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
+                        />
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>-</span>
+                        <input
+                          type="number"
+                          placeholder="Max Traffic"
+                          value={domainFilters.trafficMax}
+                          onChange={e => setDomainFilters(prev => ({ ...prev, trafficMax: e.target.value }))}
+                          style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>Keywords Range</label>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="number"
+                          placeholder="Min KW"
+                          value={domainFilters.keywordsMin}
+                          onChange={e => setDomainFilters(prev => ({ ...prev, keywordsMin: e.target.value }))}
+                          style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
+                        />
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>-</span>
+                        <input
+                          type="number"
+                          placeholder="Max KW"
+                          value={domainFilters.keywordsMax}
+                          onChange={e => setDomainFilters(prev => ({ ...prev, keywordsMax: e.target.value }))}
+                          style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>Target Pages Range</label>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="number"
+                          placeholder="Min Pages"
+                          value={domainFilters.targetPagesMin}
+                          onChange={e => setDomainFilters(prev => ({ ...prev, targetPagesMin: e.target.value }))}
+                          style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
+                        />
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>-</span>
+                        <input
+                          type="number"
+                          placeholder="Max Pages"
+                          value={domainFilters.targetPagesMax}
+                          onChange={e => setDomainFilters(prev => ({ ...prev, targetPagesMax: e.target.value }))}
+                          style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>Blog Pages Range</label>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="number"
+                          placeholder="Min Blogs"
+                          value={domainFilters.blogPagesMin}
+                          onChange={e => setDomainFilters(prev => ({ ...prev, blogPagesMin: e.target.value }))}
+                          style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
+                        />
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>-</span>
+                        <input
+                          type="number"
+                          placeholder="Max Blogs"
+                          value={domainFilters.blogPagesMax}
+                          onChange={e => setDomainFilters(prev => ({ ...prev, blogPagesMax: e.target.value }))}
+                          style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+                      <button
+                        onClick={() => setDomainFilters({
+                          platform: '', location: '', daMin: '', daMax: '', trafficMin: '', trafficMax: '',
+                          keywordsMin: '', keywordsMax: '', targetPagesMin: '', targetPagesMax: '', blogPagesMin: '', blogPagesMax: '',
+                        })}
+                        style={{ background: 'none', border: 'none', fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer', textDecoration: 'underline' }}
+                      >
+                        Reset Filters
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                {filterTabs.map(f => (
+                  <button key={f} onClick={() => setFilter(prev => prev === f ? null : f)} style={{
+                    padding: '7px 16px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500,
+                    fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+                    background: filter === f ? '#0f1523' : '#fff',
+                    color: filter === f ? '#fff' : 'var(--text-secondary)',
+                    borderRight: f !== 'Gemini' ? '1px solid var(--border)' : 'none',
+                  }}>{f}</button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -6445,15 +6807,15 @@ export default function ProjectSetupPage({ tab, user }) {
           />
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} search={search} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} />}
+            {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} domainFilters={domainFilters} search={search} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} />}
             {activeTab === 'Intent' && <PagesTab pages={kwClusters} search={search} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's Intent data (keywords, categories, clusters)" />}
-            {activeTab === 'Pages' && <PagesTab pages={pages} search={search} onSelectProject={setSelectedPageProject} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" />}
+            {activeTab === 'Pages' && <PagesTab pages={pages} search={search} onSelectProject={(i) => { const proj = pages[i]; if (!checkProjectPrerequisites(proj, 'Pages')) return; setSelectedPageProject(i); }} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" />}
             {activeTab === 'Competitors' && selectedCompetitorProject === null && (
               <CompetitorProjectsTab
                 projects={projects}
                 competitors={competitors}
                 search={search}
-                onSelectProject={(p) => { setSelectedCompetitorProject(p); setFindCompetitorsMessage(''); }}
+                onSelectProject={(p) => { if (!checkProjectPrerequisites(p, 'Competitors')) return; setSelectedCompetitorProject(p); setFindCompetitorsMessage(''); }}
                 onDeleteProject={handleDeleteCompetitorProject}
                 loading={competitorsLoading}
                 error={competitorsError}
@@ -6646,6 +7008,7 @@ export default function ProjectSetupPage({ tab, user }) {
         onClose={() => setShowAddPages(false)}
         projects={projects}
         onImportPages={handleImportPages}
+        onCheckPrerequisites={checkProjectPrerequisites}
         lockedProject={
           activeTab === 'Competitors' && selectedCompetitorProject !== null
             ? { slug: selectedCompetitorProject.slug, name: selectedCompetitorProject.name, domain: selectedCompetitorProject.domain }
@@ -6667,7 +7030,7 @@ export default function ProjectSetupPage({ tab, user }) {
             : null
         }
       />
-      <ChooseProjectModal open={showChooseProject} onClose={() => setShowChooseProject(false)} onApply={handleChooseProjectApply} projects={projects} mode={chooseProjectMode} />
+      <ChooseProjectModal open={showChooseProject} onClose={() => setShowChooseProject(false)} onApply={handleChooseProjectApply} projects={projects} mode={chooseProjectMode} onCheckPrerequisites={checkProjectPrerequisites} />
       <AddCompetitorModal
         open={showAddCompetitor}
         onClose={() => setShowAddCompetitor(false)}

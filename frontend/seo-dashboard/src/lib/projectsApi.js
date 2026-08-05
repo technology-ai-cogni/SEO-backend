@@ -42,21 +42,61 @@ const EMPTY_KW_COUNTS = { total: 0, commercial: 0, landingPages: 0, blogPages: 0
 
 function aggregateKwCounts(kwRows) {
   const counts = new Map();
+
+  const getOrCreate = (key) => {
+    const k = String(key || '').trim().toLowerCase();
+    if (!k) return null;
+    let c = counts.get(k);
+    if (!c) {
+      c = { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
+      counts.set(k, c);
+    }
+    return c;
+  };
+
   (kwRows || []).forEach(r => {
-    const c = counts.get(r.project_name) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
-    c.total += 1;
-    if (r.subtype === 'Commercial') c.commercial += 1;
-    if (r.target_type === 'Landing Page') c.landingPages += 1;
-    if (r.target_type === 'Blog Page') c.blogPages += 1;
-    counts.set(r.project_name, c);
+    const rawKey = r.project_name || r.project_slug;
+    if (!rawKey) return;
+
+    const k1 = String(rawKey).trim().toLowerCase();
+    const k2 = k1.replace(/[^a-z0-9]/g, '');
+
+    const c1 = getOrCreate(k1);
+    const c2 = k2 && k2 !== k1 ? getOrCreate(k2) : null;
+
+    [c1, c2].forEach(c => {
+      if (!c) return;
+      c.total += 1;
+
+      const sub = String(r.subtype || r.sub_type || '').trim().toLowerCase();
+      if (sub.includes('commercial')) {
+        c.commercial += 1;
+      }
+
+      const tt = String(r.target_type || r.targetType || r.type || '').trim().toLowerCase();
+      if (tt.includes('landing') || tt.includes('page')) {
+        c.landingPages += 1;
+      } else if (tt.includes('blog')) {
+        c.blogPages += 1;
+      }
+    });
   });
-  return counts;
+
+  return {
+    get(projKey) {
+      if (!projKey) return EMPTY_KW_COUNTS;
+      const k1 = String(projKey).trim().toLowerCase();
+      const k2 = k1.replace(/[^a-z0-9]/g, '');
+      return counts.get(k1) || counts.get(k2) || EMPTY_KW_COUNTS;
+    }
+  };
 }
 
 async function fetchKwCountsForSlug(slug) {
+  if (!slug) return EMPTY_KW_COUNTS;
   if (isLocalMode) {
     const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
-    return aggregateKwCounts(kwRows.filter(r => r.project_name === slug)).get(slug) || EMPTY_KW_COUNTS;
+    return aggregateKwCounts(kwRows).get(slug);
   }
   let allRows = [];
   let page = 0;
@@ -67,7 +107,7 @@ async function fetchKwCountsForSlug(slug) {
     const { data, error } = await supabase
       .from('keyword_categories')
       .select('project_name, subtype, target_type')
-      .eq('project_name', slug)
+      .or(`project_name.ilike.${slug}`)
       .range(page * pageSize, (page + 1) * pageSize - 1);
 
     if (error) throw error;
@@ -79,11 +119,12 @@ async function fetchKwCountsForSlug(slug) {
       hasMore = false;
     }
   }
-  return aggregateKwCounts(allRows).get(slug) || EMPTY_KW_COUNTS;
+  return aggregateKwCounts(allRows).get(slug);
 }
 
 function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
   const targetPlatforms = row.platforms || [];
+  const landingCount = kwCounts.landingPages > 0 ? kwCounts.landingPages : Math.max(0, kwCounts.total - kwCounts.blogPages);
   return {
     id: row.id,
     slug: row.project_slug,
@@ -96,7 +137,7 @@ function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
     da: row.domain_authority,
     keywords: kwCounts.total,
     keywordsDir: null,
-    targetPages: kwCounts.landingPages,
+    targetPages: landingCount,
     targetDir: null,
     blogPages: kwCounts.blogPages,
     updated: timeAgo(row.updated_at),
@@ -189,7 +230,9 @@ export async function fetchDomainRows() {
     const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
     const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
     const counts = aggregateKwCounts(kwRows);
-    return domains.map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
+    return (domains || [])
+      .filter(d => d && d.domain && String(d.domain).trim() !== '')
+      .map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
   }
 
   let allKwRows = [];
@@ -323,16 +366,22 @@ export async function updateDomainRow(id, updates) {
   return domainRowToProject(data, kwCounts);
 }
 
-export async function deleteDomainRow(id) {
+export async function deleteDomainRow(id, slug) {
   if (isLocalMode) {
     const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
-    const updated = domains.filter(d => String(d.id) !== String(id));
-    localStorage.setItem('seo_domains', JSON.stringify(updated));
+    const projects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
+    localStorage.setItem('seo_domains', JSON.stringify(domains.filter(d => String(d.id) !== String(id) && (slug ? d.project_slug !== slug : true))));
+    localStorage.setItem('seo_projects', JSON.stringify(projects.filter(p => slug ? p.slug !== slug : true)));
     return;
   }
 
-  const { error } = await supabase.from('domains').delete().eq('id', id);
-  if (error) throw error;
+  if (id) {
+    await supabase.from('domains').delete().eq('id', id).catch(() => {});
+  }
+  if (slug) {
+    await supabase.from('domains').delete().eq('project_slug', slug).catch(() => {});
+    await supabase.from('projects').delete().eq('slug', slug).catch(() => {});
+  }
 }
 
 // ─── KW Cluster tab ─────────────────────────────────────────────────────────
@@ -346,34 +395,31 @@ export async function fetchKwProjects() {
     const domainBySlug = new Map();
     (domains || []).forEach(d => { if (!domainBySlug.has(d.project_slug)) domainBySlug.set(d.project_slug, d); });
 
-    const counts = new Map();
-    (kwRows || []).forEach(r => {
-      const c = counts.get(r.project_name) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
-      c.total += 1;
-      if (r.subtype === 'Commercial') c.commercial += 1;
-      if (r.target_type === 'Landing Page') c.landingPages += 1;
-      if (r.target_type === 'Blog Page') c.blogPages += 1;
-      counts.set(r.project_name, c);
-    });
+    const counts = aggregateKwCounts(kwRows);
 
-    return (projects || []).map(p => {
-      const domainRow = domainBySlug.get(p.slug);
-      const c = counts.get(p.slug) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
-      return {
-        slug: p.slug,
-        name: p.name,
-        domain: domainRow?.domain || '',
-        locationIcon: iconForPlatforms(domainRow?.platforms),
-        location: domainRow?.target_regions?.[0] || 'Global',
-        totalPages: c.total,
-        commercialPct: `${c.commercial}/${c.total}`,
-        blogPages: c.blogPages,
-        blogDir: null,
-        keywords: c.landingPages,
-        keywordsDir: null,
-        updated: timeAgo(domainRow?.updated_at || p.created_at),
-      };
-    });
+    return (projects || [])
+      .filter(p => {
+        const domainRow = domainBySlug.get(p.slug);
+        return domainRow && domainRow.domain && String(domainRow.domain).trim() !== '';
+      })
+      .map(p => {
+        const domainRow = domainBySlug.get(p.slug);
+        const c = counts.get(p.slug) || counts.get(p.name);
+        return {
+          slug: p.slug,
+          name: p.name,
+          domain: domainRow?.domain || '',
+          locationIcon: iconForPlatforms(domainRow?.platforms),
+          location: domainRow?.target_regions?.[0] || 'Global',
+          totalPages: c.total,
+          commercialPct: `${c.commercial}/${c.total}`,
+          blogPages: c.blogPages,
+          blogDir: null,
+          keywords: c.landingPages,
+          keywordsDir: null,
+          updated: timeAgo(domainRow?.updated_at || p.created_at),
+        };
+      });
   }
 
   const [{ data: projects, error: projectsError }, { data: domains, error: domainsError }, { data: kwRows, error: kwError }] = await Promise.all([
@@ -388,34 +434,32 @@ export async function fetchKwProjects() {
   const domainBySlug = new Map();
   (domains || []).forEach(d => { if (!domainBySlug.has(d.project_slug)) domainBySlug.set(d.project_slug, d); });
 
-  const counts = new Map();
-  (kwRows || []).forEach(r => {
-    const c = counts.get(r.project_name) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
-    c.total += 1;
-    if (r.subtype === 'Commercial') c.commercial += 1;
-    if (r.target_type === 'Landing Page') c.landingPages += 1;
-    if (r.target_type === 'Blog Page') c.blogPages += 1;
-    counts.set(r.project_name, c);
-  });
+  const counts = aggregateKwCounts(kwRows);
 
-  return (projects || []).map(p => {
-    const domainRow = domainBySlug.get(p.slug);
-    const c = counts.get(p.slug) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
-    return {
-      slug: p.slug,
-      name: p.name,
-      domain: domainRow?.domain || '',
-      locationIcon: iconForPlatforms(domainRow?.platforms),
-      location: domainRow?.target_regions?.[0] || 'Global',
-      totalPages: c.total,
-      commercialPct: `${c.commercial}/${c.total}`,
-      blogPages: c.blogPages,
-      blogDir: null,
-      keywords: c.landingPages,
-      keywordsDir: null,
-      updated: timeAgo(domainRow?.updated_at || p.created_at),
-    };
-  });
+  return (projects || [])
+    .filter(p => {
+      const domainRow = domainBySlug.get(p.slug);
+      return domainRow && domainRow.domain && String(domainRow.domain).trim() !== '';
+    })
+    .map(p => {
+      const domainRow = domainBySlug.get(p.slug) || domainBySlug.get(p.name);
+      const c = counts.get(p.slug) || counts.get(p.name);
+      const landingCount = c.landingPages > 0 ? c.landingPages : Math.max(0, c.total - c.blogPages);
+      return {
+        slug: p.slug,
+        name: p.name,
+        domain: domainRow?.domain || '',
+        locationIcon: iconForPlatforms(domainRow?.platforms),
+        location: domainRow?.target_regions?.[0] || 'Global',
+        totalPages: c.total,
+        commercialPct: `${c.commercial}/${c.total}`,
+        blogPages: c.blogPages,
+        blogDir: null,
+        keywords: landingCount,
+        keywordsDir: null,
+        updated: timeAgo(domainRow?.updated_at || p.created_at),
+      };
+    });
 }
 
 function kwRowToUi(row) {
