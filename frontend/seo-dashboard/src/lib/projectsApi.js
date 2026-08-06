@@ -734,12 +734,18 @@ export async function fetchPagesCounts() {
     const counts = {};
     const stats = {};
     pageRows.forEach(r => {
-      counts[r.project_name] = (counts[r.project_name] || 0) + 1;
-      const s = stats[r.project_name] || { total: 0, commercial: 0, blog: 0 };
-      s.total += 1;
-      if (r.targetType === 'Commercial') s.commercial += 1;
-      if (r.targetCategory === 'Blogs') s.blog += 1;
-      stats[r.project_name] = s;
+      const pKey = r.project_name || r.project_slug;
+      if (!pKey) return;
+      const k1 = String(pKey).trim().toLowerCase();
+      const k2 = k1.replace(/[^a-z0-9]/g, '');
+      [pKey, k1, k2].forEach(k => {
+        counts[k] = (counts[k] || 0) + 1;
+        const s = stats[k] || { total: 0, commercial: 0, blog: 0 };
+        s.total += 1;
+        if (r.targetType === 'Commercial') s.commercial += 1;
+        if (r.targetCategory === 'Blogs') s.blog += 1;
+        stats[k] = s;
+      });
     });
     return { counts, stats };
   }
@@ -750,7 +756,24 @@ export async function fetchPagesCounts() {
     throw new Error(body?.detail || 'Failed to load page counts.');
   }
   const data = await res.json();
-  return { counts: data.counts || {}, stats: data.stats || {} };
+  const rawCounts = data.counts || {};
+  const rawStats = data.stats || {};
+  const counts = {};
+  const stats = {};
+
+  Object.keys(rawCounts).forEach(k => {
+    const cnt = rawCounts[k];
+    const st = rawStats[k] || { total: cnt, commercial: 0, blog: 0 };
+    const k1 = String(k).trim().toLowerCase();
+    const k2 = k1.replace(/[^a-z0-9]/g, '');
+
+    [k, k1, k2].forEach(key => {
+      counts[key] = cnt;
+      stats[key] = st;
+    });
+  });
+
+  return { counts, stats };
 }
 
 export async function fetchPageRows(slug) {

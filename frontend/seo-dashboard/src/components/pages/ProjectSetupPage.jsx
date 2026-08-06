@@ -5973,10 +5973,27 @@ export default function ProjectSetupPage({ tab, user }) {
     setPages(prev => {
       const bySlug = new Map(prev.map(p => [p.slug, p]));
       return projects
-        .filter(proj => proj.domain && String(proj.domain).trim() !== '' && (pagesCounts[proj.slug] ?? 0) > 0)
+        .filter(proj => {
+          if (!proj.domain || String(proj.domain).trim() === '') return false;
+          const s1 = String(proj.slug || '').trim().toLowerCase();
+          const s2 = s1.replace(/[^a-z0-9]/g, '');
+          const n1 = String(proj.name || '').trim().toLowerCase();
+          const n2 = n1.replace(/[^a-z0-9]/g, '');
+          const count = pagesCounts[proj.slug] ?? pagesCounts[proj.name] ?? pagesCounts[s1] ?? pagesCounts[s2] ?? pagesCounts[n1] ?? pagesCounts[n2] ?? 0;
+          return count > 0;
+        })
         .map(proj => {
-          const kwProject = kwClusters.find(k => k.slug === proj.slug);
-          const stats = pagesStats[proj.slug] ?? { total: pagesCounts[proj.slug] ?? 0, commercial: 0, blog: 0 };
+          const s1 = String(proj.slug || '').trim().toLowerCase();
+          const s2 = s1.replace(/[^a-z0-9]/g, '');
+          const n1 = String(proj.name || '').trim().toLowerCase();
+          const n2 = n1.replace(/[^a-z0-9]/g, '');
+          const count = pagesCounts[proj.slug] ?? pagesCounts[proj.name] ?? pagesCounts[s1] ?? pagesCounts[s2] ?? pagesCounts[n1] ?? pagesCounts[n2] ?? 0;
+          const stats = pagesStats[proj.slug] ?? pagesStats[proj.name] ?? pagesStats[s1] ?? pagesStats[s2] ?? pagesStats[n1] ?? pagesStats[n2] ?? { total: count, commercial: 0, blog: 0 };
+          const kwProject = kwClusters.find(k => {
+            const ks = String(k.slug || k.name || '').trim().toLowerCase();
+            const ks2 = ks.replace(/[^a-z0-9]/g, '');
+            return ks === s1 || ks2 === s2 || ks === n1 || ks2 === n2;
+          });
           const existing = bySlug.get(proj.slug);
           return {
             ...existing,
@@ -5985,7 +6002,7 @@ export default function ProjectSetupPage({ tab, user }) {
             domain: proj.domain,
             locationIcon: proj.locationIcon,
             location: proj.location,
-            totalPages: pagesCounts[proj.slug] ?? 0,
+            totalPages: count,
             commercialPct: `${stats.commercial}/${stats.total}`,
             blogPages: stats.blog,
             blogDir: null,
