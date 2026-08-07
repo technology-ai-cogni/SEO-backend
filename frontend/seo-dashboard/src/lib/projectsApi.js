@@ -582,8 +582,9 @@ export async function fetchKwProjects() {
         return domainRow && domainRow.domain && String(domainRow.domain).trim() !== '';
       })
       .map(p => {
-        const domainRow = domainBySlug.get(p.slug);
+        const domainRow = domainBySlug.get(p.slug) || domainBySlug.get(p.name);
         const c = counts.get(p.slug) || counts.get(p.name);
+        const landingCount = c.landingPages > 0 ? c.landingPages : Math.max(0, c.total - c.blogPages);
         return {
           slug: p.slug,
           name: p.name,
@@ -591,24 +592,49 @@ export async function fetchKwProjects() {
           locationIcon: iconForPlatforms(domainRow?.platforms),
           location: domainRow?.target_regions?.[0] || 'Global',
           totalPages: c.total,
+          totalKw: c.total,
           commercialPct: `${c.commercial}/${c.total}`,
           blogPages: c.blogPages,
           blogDir: null,
-          keywords: c.landingPages,
+          keywords: landingCount,
+          targetPages: landingCount,
           keywordsDir: null,
           updated: timeAgo(domainRow?.updated_at || p.created_at),
         };
       });
   }
 
-  const [{ data: projects, error: projectsError }, { data: domains, error: domainsError }, { data: kwRows, error: kwError }] = await Promise.all([
+  const [{ data: projects, error: projectsError }, { data: domains, error: domainsError }] = await Promise.all([
     supabase.from('projects').select('*').is('deleted_at', null),
     supabase.from('domains').select('*'),
-    supabase.from('keyword_categories').select('project_name, subtype, target_type'),
   ]);
   if (projectsError) throw projectsError;
   if (domainsError) throw domainsError;
-  if (kwError) throw kwError;
+
+  let kwRows = [];
+  try {
+    let page = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data: rows, error: kwError } = await supabase
+        .from('keyword_categories')
+        .select('project_name, subtype, target_type')
+        .range(page * pageSize, (page + 1) * pageSize - 1);
+
+      if (kwError) break;
+      if (rows && rows.length > 0) {
+        kwRows = kwRows.concat(rows);
+        if (rows.length < pageSize) hasMore = false;
+        else page++;
+      } else {
+        hasMore = false;
+      }
+    }
+  } catch (e) {
+    console.warn('[fetchKwProjects] kw query error:', e);
+  }
 
   const domainBySlug = new Map();
   (domains || []).forEach(d => { if (!domainBySlug.has(d.project_slug)) domainBySlug.set(d.project_slug, d); });
@@ -631,10 +657,12 @@ export async function fetchKwProjects() {
         locationIcon: iconForPlatforms(domainRow?.platforms),
         location: domainRow?.target_regions?.[0] || 'Global',
         totalPages: c.total,
+        totalKw: c.total,
         commercialPct: `${c.commercial}/${c.total}`,
         blogPages: c.blogPages,
         blogDir: null,
         keywords: landingCount,
+        targetPages: landingCount,
         keywordsDir: null,
         updated: timeAgo(domainRow?.updated_at || p.created_at),
       };

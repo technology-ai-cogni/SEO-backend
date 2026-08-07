@@ -41,7 +41,7 @@ export const NAV_STRUCTURE = [
         type: 'section',
         items: [
           { id: 'link-outreach', label: 'Link Outreach', path: 'search-visibility/link-outreach' },
-          { id: 'off-page-scheduler', label: 'Off-Page Scheduler', path: 'search-visibility/off-page-scheduler' },
+          { id: 'off-page-scheduler', label: 'Monthly Operations', path: 'search-visibility/off-page-scheduler' },
           { id: 'on-page', label: 'On-Page', path: 'search-visibility/on-page' },
           { id: 'competitors', label: 'Competitors', path: 'search-visibility/competitors' },
         ],

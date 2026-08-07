@@ -1904,7 +1904,7 @@ function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, tot
                     {p.location}
                   </div>
                 </td>
-                <td style={{ padding: '14px 16px', textAlign: 'right', color: 'var(--text-muted)', fontSize: 13 }}>{p.totalPages ?? ''}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'right', color: 'var(--text-muted)', fontSize: 13 }}>{p.totalKw ?? p.totalPages ?? ''}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right' }}>
                   <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)' }}>{p.commercialPct}</span>
                 </td>
@@ -1915,7 +1915,7 @@ function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, tot
                 </td>
                 <td style={{ padding: '14px 16px', textAlign: 'right' }}>
                   <span style={{ fontSize: 13.5, fontWeight: 600, color: p.keywordsDir === 'down' ? 'var(--red)' : 'var(--text-muted)' }}>
-                    {p.keywordsDir === 'down' ? `↓${p.keywords}` : p.keywords}
+                    {p.keywordsDir === 'down' ? `↓${p.targetPages ?? p.keywords}` : (p.targetPages ?? p.keywords)}
                   </span>
                 </td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
