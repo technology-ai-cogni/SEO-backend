@@ -483,11 +483,6 @@ export default function OffPageSchedulerPage() {
 
     return (
       <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 0 }}>
-        {/* Breadcrumb */}
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span>Home</span><span>›</span><span>SEO</span><span>›</span><span>Off-Page Scheduler</span><span>›</span><span style={{ color: 'var(--text-primary)' }}>Dataset Detail</span>
-        </div>
-
         {/* Back Link */}
         <div style={{ marginBottom: 16 }}>
           <button 
@@ -666,16 +661,11 @@ export default function OffPageSchedulerPage() {
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 0 }}>
-      {/* Breadcrumb */}
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span>Home</span><span>›</span><span>SEO</span><span>›</span><span style={{ color: 'var(--text-primary)' }}>Off-Page Scheduler</span>
-      </div>
-
       {/* Header Panel with Title & Top-Right Button */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
           <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 6 }}>
-            Off-Page Scheduler
+            Monthly Operations
           </h1>
           <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: 0 }}>
             Automate audits, import data sheets, and schedule link outreach actions.

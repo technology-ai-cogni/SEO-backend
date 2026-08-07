@@ -44,7 +44,7 @@ const PAGE_TITLES = {
   'search-visibility/top-pages': { title: 'Top Pages', subtitle: 'Best performing pages by organic traffic' },
   'search-visibility/sales-pipeline': { title: 'Sales Pipeline', subtitle: 'Track keyword-to-conversion funnel' },
   'search-visibility/link-outreach': { title: 'Link Outreach', subtitle: 'Manage backlink acquisition campaigns' },
-  'search-visibility/off-page-scheduler': { title: 'Off-Page Scheduler', subtitle: 'Schedule off-page SEO activities' },
+  'search-visibility/off-page-scheduler': { title: 'Monthly Operations', subtitle: 'Schedule off-page SEO activities' },
   'search-visibility/on-page': { title: 'On-Page Optimization', subtitle: 'On-page SEO recommendations' },
   'search-visibility/competitors': { title: 'Project', subtitle: 'Competitor SEO intelligence' },
   'search-visibility/search/overview': { title: 'Search Overview', subtitle: 'High-level search performance summary' },
