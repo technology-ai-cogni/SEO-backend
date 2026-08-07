@@ -12,6 +12,7 @@ import ContentEnginePage from './components/pages/ContentEnginePage';
 import ProjectSetupPage from './components/pages/ProjectSetupPage';
 import CompetitorsPage from './components/pages/CompetitorsPage';
 import PlaceholderPage from './components/pages/PlaceholderPage';
+import OffPageSchedulerPage from './components/pages/OffPageSchedulerPage';
 import LoginPage from './components/pages/LoginPage';
 import SignUpPage from './components/pages/SignUpPage';
 import ProfilePage from './components/pages/ProfilePage';
@@ -95,8 +96,9 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
     case 'dashboard': return <DashboardPage 
       activeProject={mockProject}
       keywords={topKeywords}
+      user={user}
     />;
-    case 'project-setup': return <ProjectSetupPage />;
+    case 'project-setup': return <ProjectSetupPage user={user} />;
     case 'search-visibility/position-analysis': return <PositionAnalysisPage onNavigate={onNavigate} />;
     case 'search-visibility/ai-analysis': return <AiAnalysisPage />;
     case 'search-visibility/keywords': return <KeywordsPage />;
@@ -106,6 +108,7 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
     case 'ai-visibility/overview':
     case 'ai-visibility/brand-performance':
     case 'ai-visibility/competitor-insights': return <AIVisibilityPage />;
+    case 'search-visibility/off-page-scheduler': return <OffPageSchedulerPage />;
     case 'content-engine': return <ContentEnginePage />;
     default: {
       const info = PAGE_TITLES[path];

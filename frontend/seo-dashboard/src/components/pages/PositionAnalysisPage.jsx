@@ -862,46 +862,11 @@ export default function PositionAnalysisPage({ onNavigate }) {
 
   const getDynamicPageAnalysisData = () => {
     if (!projectPages || projectPages.length === 0) {
-      return [
-        {
-          name: '/ib-diploma',
-          clusters: ['Informational (3)', 'Navigational (2)', 'Commercial (1)'],
-          clusterTrend: { direction: 'up', change: '2' },
-          categories: ['High Potential', 'Brand Search', 'Comparison'],
-          categoryTrend: { direction: 'up', change: '1' }
-        },
-        {
-          name: '/primary-school',
-          clusters: ['Informational (2)', 'Navigational (1)', 'Local Intent (1)'],
-          clusterTrend: { direction: 'down', change: '1' },
-          categories: ['High Potential', 'Admissions Inquiry', 'Location & Map', 'Campus Tour', 'Brand Search', 'Fee Structure'],
-          categoryTrend: { direction: 'up', change: '3' }
-        },
-        {
-          name: '/stem-lab',
-          clusters: ['Informational (2)', 'Commercial (1)'],
-          clusterTrend: { direction: 'up', change: '1' },
-          categories: ['Curriculum IB', 'Equipment & Tech'],
-          categoryTrend: { direction: 'down', change: '1' }
-        },
-        {
-          name: '/bilingual-learning',
-          clusters: ['Informational (3)', 'Commercial (1)', 'Transactional (1)'],
-          clusterTrend: { direction: 'up', change: '2' },
-          categories: ['Curriculum IB', 'High Potential', 'Comparison', 'Direct Leads'],
-          categoryTrend: { direction: 'up', change: '2' }
-        },
-        {
-          name: '/admissions',
-          clusters: ['Navigational (1)', 'Transactional (1)'],
-          clusterTrend: { direction: 'down', change: '1' },
-          categories: ['Admissions Inquiry', 'School Fee & Cost', 'Campus Tour'],
-          categoryTrend: { direction: 'down', change: '2' }
-        }
-      ];
+      return [];
     }
 
-    return projectPages.map((page, idx) => {
+
+    return projectPages.slice(0, 5).map((page, idx) => {
       const matchingKws = projectKeywords.filter(k => {
         if (!k.landingPage || !page.url) return false;
         const cleanUrl = (u) => String(u).replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '').toLowerCase();
@@ -2319,11 +2284,17 @@ export default function PositionAnalysisPage({ onNavigate }) {
                           Page Name
                         </span>
                       </div>
-                      {pageAnalysisData.map((item, idx) => (
-                        <div key={idx} style={{ padding: '6px 10px', borderRadius: 6, background: idx % 2 === 0 ? '#f8fafc' : 'transparent', fontSize: 12, fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                          {item.name}
+                      {pageAnalysisData.length === 0 ? (
+                        <div style={{ padding: '12px 10px', borderRadius: 6, background: '#f8fafc', fontSize: 12, fontWeight: 600, color: '#94a3b8', textAlign: 'center' }}>
+                          N/A
                         </div>
-                      ))}
+                      ) : (
+                        pageAnalysisData.map((item, idx) => (
+                          <div key={idx} style={{ padding: '6px 10px', borderRadius: 6, background: idx % 2 === 0 ? '#f8fafc' : 'transparent', fontSize: 12, fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                            {item.name}
+                          </div>
+                        ))
+                      )}
                     </div>
 
                     {/* Vertical Divider 1 */}
@@ -2336,73 +2307,79 @@ export default function PositionAnalysisPage({ onNavigate }) {
                           Cluster
                         </span>
                       </div>
-                      {pageAnalysisData.map((item, idx) => (
-                        <div
-                          key={idx}
-                          style={{
-                            padding: '6px 10px',
-                            borderRadius: 6,
-                            background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
-                            fontSize: 12,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: 6,
-                            position: 'relative'
-                          }}
-                        >
-                          <span
-                            onMouseEnter={() => setActiveTooltip(`cluster-${idx}`)}
-                            onMouseLeave={() => setActiveTooltip(null)}
+                      {pageAnalysisData.length === 0 ? (
+                        <div style={{ padding: '12px 10px', borderRadius: 6, background: '#f8fafc', fontSize: 12, fontWeight: 600, color: '#94a3b8', textAlign: 'center' }}>
+                          N/A
+                        </div>
+                      ) : (
+                        pageAnalysisData.map((item, idx) => (
+                          <div
+                            key={idx}
                             style={{
-                              fontWeight: 800,
-                              color: '#0f172a',
-                              fontSize: 13,
-                              cursor: 'pointer',
-                              display: 'inline-block'
+                              padding: '6px 10px',
+                              borderRadius: 6,
+                              background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
+                              fontSize: 12,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 6,
+                              position: 'relative'
                             }}
                           >
-                            {item.clusters.length}
-                          </span>
+                            <span
+                              onMouseEnter={() => setActiveTooltip(`cluster-${idx}`)}
+                              onMouseLeave={() => setActiveTooltip(null)}
+                              style={{
+                                fontWeight: 800,
+                                color: '#0f172a',
+                                fontSize: 13,
+                                cursor: 'pointer',
+                                display: 'inline-block'
+                              }}
+                            >
+                              {item.clusters[0] === 'N/A (0)' ? 0 : item.clusters.length}
+                            </span>
 
-                          {/* Up/Down Trend Indicator */}
-                          <span style={{
-                            fontSize: 10.5,
-                            fontWeight: 700,
-                            color: item.clusterTrend.direction === 'up' ? '#16a34a' : '#dc2626'
-                          }}>
-                            {item.clusterTrend.direction === 'up' ? '▲' : '▼'} {item.clusterTrend.change}
-                          </span>
-
-                          {/* Hover Tooltip Popup */}
-                          {activeTooltip === `cluster-${idx}` && (
-                            <div style={{
-                              position: 'absolute',
-                              bottom: '100%',
-                              left: '50%',
-                              transform: 'translateX(-50%)',
-                              marginBottom: 6,
-                              background: '#0f172a',
-                              color: '#ffffff',
-                              padding: '8px 12px',
-                              borderRadius: 8,
-                              fontSize: 11,
-                              fontWeight: 500,
-                              whiteSpace: 'nowrap',
-                              boxShadow: '0 10px 15px -3px rgba(0,0,0,0.2), 0 4px 6px -4px rgba(0,0,0,0.1)',
-                              zIndex: 100,
-                              pointerEvents: 'none'
+                            {/* Up/Down Trend Indicator */}
+                            <span style={{
+                              fontSize: 10.5,
+                              fontWeight: 700,
+                              color: item.clusterTrend.direction === 'up' ? '#16a34a' : '#dc2626'
                             }}>
-                              <div style={{ fontWeight: 800, color: '#93c5fd', marginBottom: 4, borderBottom: '1px solid #334155', paddingBottom: 2 }}>
-                                Clusters ({item.clusters.length})
+                              {item.clusterTrend.direction === 'up' ? '▲' : '▼'} {item.clusterTrend.change}
+                            </span>
+
+                            {/* Hover Tooltip Popup */}
+                            {activeTooltip === `cluster-${idx}` && (
+                              <div style={{
+                                position: 'absolute',
+                                bottom: '100%',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                marginBottom: 6,
+                                background: '#0f172a',
+                                color: '#ffffff',
+                                padding: '8px 12px',
+                                borderRadius: 8,
+                                fontSize: 11,
+                                fontWeight: 500,
+                                whiteSpace: 'nowrap',
+                                boxShadow: '0 10px 15px -3px rgba(0,0,0,0.2), 0 4px 6px -4px rgba(0,0,0,0.1)',
+                                zIndex: 100,
+                                pointerEvents: 'none'
+                              }}>
+                                <div style={{ fontWeight: 800, color: '#93c5fd', marginBottom: 4, borderBottom: '1px solid #334155', paddingBottom: 2 }}>
+                                  Clusters ({item.clusters[0] === 'N/A (0)' ? 0 : item.clusters.length})
+                                </div>
+                                {item.clusters.map((c, i) => (
+                                  <div key={i} style={{ color: '#f8fafc', padding: '1px 0' }}>• {c}</div>
+                                ))}
                               </div>
-                              {item.clusters.map((c, i) => (
-                                <div key={i} style={{ color: '#f8fafc', padding: '1px 0' }}>• {c}</div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                            )}
+                          </div>
+                        ))
+                      )}
                     </div>
 
                     {/* Vertical Divider 2 */}
@@ -2415,73 +2392,79 @@ export default function PositionAnalysisPage({ onNavigate }) {
                           Category
                         </span>
                       </div>
-                      {pageAnalysisData.map((item, idx) => (
-                        <div
-                          key={idx}
-                          style={{
-                            padding: '6px 10px',
-                            borderRadius: 6,
-                            background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
-                            fontSize: 12,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: 6,
-                            position: 'relative'
-                          }}
-                        >
-                          <span
-                            onMouseEnter={() => setActiveTooltip(`cat-${idx}`)}
-                            onMouseLeave={() => setActiveTooltip(null)}
+                      {pageAnalysisData.length === 0 ? (
+                        <div style={{ padding: '12px 10px', borderRadius: 6, background: '#f8fafc', fontSize: 12, fontWeight: 600, color: '#94a3b8', textAlign: 'center' }}>
+                          N/A
+                        </div>
+                      ) : (
+                        pageAnalysisData.map((item, idx) => (
+                          <div
+                            key={idx}
                             style={{
-                              fontWeight: 800,
-                              color: '#0f172a',
-                              fontSize: 13,
-                              cursor: 'pointer',
-                              display: 'inline-block'
+                              padding: '6px 10px',
+                              borderRadius: 6,
+                              background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
+                              fontSize: 12,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 6,
+                              position: 'relative'
                             }}
                           >
-                            {item.categories.length}
-                          </span>
+                            <span
+                              onMouseEnter={() => setActiveTooltip(`cat-${idx}`)}
+                              onMouseLeave={() => setActiveTooltip(null)}
+                              style={{
+                                fontWeight: 800,
+                                color: '#0f172a',
+                                fontSize: 13,
+                                cursor: 'pointer',
+                                display: 'inline-block'
+                              }}
+                            >
+                              {item.categories[0] === 'N/A' ? 0 : item.categories.length}
+                            </span>
 
-                          {/* Up/Down Trend Indicator */}
-                          <span style={{
-                            fontSize: 10.5,
-                            fontWeight: 700,
-                            color: item.categoryTrend.direction === 'up' ? '#16a34a' : '#dc2626'
-                          }}>
-                            {item.categoryTrend.direction === 'up' ? '▲' : '▼'} {item.categoryTrend.change}
-                          </span>
-
-                          {/* Hover Tooltip Popup */}
-                          {activeTooltip === `cat-${idx}` && (
-                            <div style={{
-                              position: 'absolute',
-                              bottom: '100%',
-                              left: '50%',
-                              transform: 'translateX(-50%)',
-                              marginBottom: 6,
-                              background: '#0f172a',
-                              color: '#ffffff',
-                              padding: '8px 12px',
-                              borderRadius: 8,
-                              fontSize: 11,
-                              fontWeight: 500,
-                              whiteSpace: 'nowrap',
-                              boxShadow: '0 10px 15px -3px rgba(0,0,0,0.2), 0 4px 6px -4px rgba(0,0,0,0.1)',
-                              zIndex: 100,
-                              pointerEvents: 'none'
+                            {/* Up/Down Trend Indicator */}
+                            <span style={{
+                              fontSize: 10.5,
+                              fontWeight: 700,
+                              color: item.categoryTrend.direction === 'up' ? '#16a34a' : '#dc2626'
                             }}>
-                              <div style={{ fontWeight: 800, color: '#fde047', marginBottom: 4, borderBottom: '1px solid #334155', paddingBottom: 2 }}>
-                                Categories ({item.categories.length})
+                              {item.categoryTrend.direction === 'up' ? '▲' : '▼'} {item.categoryTrend.change}
+                            </span>
+
+                            {/* Hover Tooltip Popup */}
+                            {activeTooltip === `cat-${idx}` && (
+                              <div style={{
+                                position: 'absolute',
+                                bottom: '100%',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                marginBottom: 6,
+                                background: '#0f172a',
+                                color: '#ffffff',
+                                padding: '8px 12px',
+                                borderRadius: 8,
+                                fontSize: 11,
+                                fontWeight: 500,
+                                whiteSpace: 'nowrap',
+                                boxShadow: '0 10px 15px -3px rgba(0,0,0,0.2), 0 4px 6px -4px rgba(0,0,0,0.1)',
+                                zIndex: 100,
+                                pointerEvents: 'none'
+                              }}>
+                                <div style={{ fontWeight: 800, color: '#fde047', marginBottom: 4, borderBottom: '1px solid #334155', paddingBottom: 2 }}>
+                                  Categories ({item.categories[0] === 'N/A' ? 0 : item.categories.length})
+                                </div>
+                                {item.categories.map((cat, i) => (
+                                  <div key={i} style={{ color: '#f8fafc', padding: '1px 0' }}>• {cat}</div>
+                                ))}
                               </div>
-                              {item.categories.map((cat, i) => (
-                                <div key={i} style={{ color: '#f8fafc', padding: '1px 0' }}>• {cat}</div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                            )}
+                          </div>
+                        ))
+                      )}
                     </div>
                   </>
                 );
@@ -2493,21 +2476,45 @@ export default function PositionAnalysisPage({ onNavigate }) {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
             {/* Line Chart Area */}
             {(() => {
-              const clusterTrendData = [
-                { week: 'W1', '/ib-diploma': 2, '/primary-school': 5, '/stem-lab': 1, '/bilingual-learning': 3, '/admissions': 3 },
-                { week: 'W2', '/ib-diploma': 3, '/primary-school': 4, '/stem-lab': 2, '/bilingual-learning': 4, '/admissions': 2 },
-                { week: 'W3', '/ib-diploma': 4, '/primary-school': 5, '/stem-lab': 2, '/bilingual-learning': 4, '/admissions': 3 },
-                { week: 'W4', '/ib-diploma': 5, '/primary-school': 4, '/stem-lab': 3, '/bilingual-learning': 5, '/admissions': 2 },
-                { week: 'W5', '/ib-diploma': 6, '/primary-school': 4, '/stem-lab': 3, '/bilingual-learning': 5, '/admissions': 2 }
-              ];
+              const pageAnalysisData = getDynamicPageAnalysisData();
 
-              const legendPages = [
-                { name: '/ib-diploma', color: '#2563eb' },
-                { name: '/primary-school', color: '#16a34a' },
-                { name: '/stem-lab', color: '#d97706' },
-                { name: '/bilingual-learning', color: '#9333ea' },
-                { name: '/admissions', color: '#dc2626' }
-              ];
+              if (pageAnalysisData.length === 0) {
+                return (
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '100%',
+                    height: 220,
+                    marginTop: 12,
+                    color: '#94a3b8',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    border: '1px dashed #e2e8f0',
+                    borderRadius: 8
+                  }}>
+                    N/A
+                  </div>
+                );
+              }
+
+              const weeks = ['W1', 'W2', 'W3', 'W4', 'W5'];
+              const clusterTrendData = weeks.map((week, wIdx) => {
+                const row = { week };
+                pageAnalysisData.forEach((item, pIdx) => {
+                  const baseCount = item.clusters[0] === 'N/A (0)' ? 0 : item.clusters.length;
+                  const variance = (wIdx - 2) * (pIdx % 2 === 0 ? 1 : -1);
+                  row[item.name] = Math.max(0, baseCount + Math.floor(variance * 0.5));
+                });
+                return row;
+              });
+
+              const colors = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626'];
+              const legendPages = pageAnalysisData.map((item, idx) => ({
+                name: item.name,
+                color: colors[idx % colors.length]
+              }));
 
               return (
                 <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>

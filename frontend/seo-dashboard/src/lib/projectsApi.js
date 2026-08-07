@@ -42,21 +42,61 @@ const EMPTY_KW_COUNTS = { total: 0, commercial: 0, landingPages: 0, blogPages: 0
 
 function aggregateKwCounts(kwRows) {
   const counts = new Map();
+
+  const getOrCreate = (key) => {
+    const k = String(key || '').trim().toLowerCase();
+    if (!k) return null;
+    let c = counts.get(k);
+    if (!c) {
+      c = { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
+      counts.set(k, c);
+    }
+    return c;
+  };
+
   (kwRows || []).forEach(r => {
-    const c = counts.get(r.project_name) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
-    c.total += 1;
-    if (r.subtype === 'Commercial') c.commercial += 1;
-    if (r.target_type === 'Landing Page') c.landingPages += 1;
-    if (r.target_type === 'Blog Page') c.blogPages += 1;
-    counts.set(r.project_name, c);
+    const rawKey = r.project_name || r.project_slug;
+    if (!rawKey) return;
+
+    const k1 = String(rawKey).trim().toLowerCase();
+    const k2 = k1.replace(/[^a-z0-9]/g, '');
+
+    const c1 = getOrCreate(k1);
+    const c2 = k2 && k2 !== k1 ? getOrCreate(k2) : null;
+
+    [c1, c2].forEach(c => {
+      if (!c) return;
+      c.total += 1;
+
+      const sub = String(r.subtype || r.sub_type || '').trim().toLowerCase();
+      if (sub.includes('commercial')) {
+        c.commercial += 1;
+      }
+
+      const tt = String(r.target_type || r.targetType || r.type || '').trim().toLowerCase();
+      if (tt.includes('landing') || tt.includes('page')) {
+        c.landingPages += 1;
+      } else if (tt.includes('blog')) {
+        c.blogPages += 1;
+      }
+    });
   });
-  return counts;
+
+  return {
+    get(projKey) {
+      if (!projKey) return EMPTY_KW_COUNTS;
+      const k1 = String(projKey).trim().toLowerCase();
+      const k2 = k1.replace(/[^a-z0-9]/g, '');
+      return counts.get(k1) || counts.get(k2) || EMPTY_KW_COUNTS;
+    }
+  };
 }
 
 async function fetchKwCountsForSlug(slug) {
+  if (!slug) return EMPTY_KW_COUNTS;
   if (isLocalMode) {
     const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
-    return aggregateKwCounts(kwRows.filter(r => r.project_name === slug)).get(slug) || EMPTY_KW_COUNTS;
+    return aggregateKwCounts(kwRows).get(slug);
   }
   let allRows = [];
   let page = 0;
@@ -67,7 +107,7 @@ async function fetchKwCountsForSlug(slug) {
     const { data, error } = await supabase
       .from('keyword_categories')
       .select('project_name, subtype, target_type')
-      .eq('project_name', slug)
+      .or(`project_name.ilike.${slug}`)
       .range(page * pageSize, (page + 1) * pageSize - 1);
 
     if (error) throw error;
@@ -79,11 +119,12 @@ async function fetchKwCountsForSlug(slug) {
       hasMore = false;
     }
   }
-  return aggregateKwCounts(allRows).get(slug) || EMPTY_KW_COUNTS;
+  return aggregateKwCounts(allRows).get(slug);
 }
 
 function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
   const targetPlatforms = row.platforms || [];
+  const landingCount = kwCounts.landingPages > 0 ? kwCounts.landingPages : Math.max(0, kwCounts.total - kwCounts.blogPages);
   return {
     id: row.id,
     slug: row.project_slug,
@@ -96,7 +137,7 @@ function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
     da: row.domain_authority,
     keywords: kwCounts.total,
     keywordsDir: null,
-    targetPages: kwCounts.landingPages,
+    targetPages: landingCount,
     targetDir: null,
     blogPages: kwCounts.blogPages,
     updated: timeAgo(row.updated_at),
@@ -189,7 +230,9 @@ export async function fetchDomainRows() {
     const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
     const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
     const counts = aggregateKwCounts(kwRows);
-    return domains.map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
+    return (domains || [])
+      .filter(d => d && d.domain && String(d.domain).trim() !== '')
+      .map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
   }
 
   let allKwRows = [];
@@ -213,14 +256,19 @@ export async function fetchDomainRows() {
     }
   }
 
-  const { data: domains, error: domainsError } = await supabase
-    .from('domains')
-    .select('*')
-    .order('created_at', { ascending: false });
+  const [{ data: activeProjects, error: projectsError }, { data: domains, error: domainsError }] = await Promise.all([
+    supabase.from('projects').select('slug').is('deleted_at', null),
+    supabase.from('domains').select('*').order('created_at', { ascending: false })
+  ]);
 
+  if (projectsError) throw projectsError;
   if (domainsError) throw domainsError;
+
+  const activeSlugs = new Set((activeProjects || []).map(p => p.slug));
+  const filteredDomains = (domains || []).filter(d => activeSlugs.has(d.project_slug));
+
   const counts = aggregateKwCounts(allKwRows);
-  return (domains || []).map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
+  return filteredDomains.map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
 }
 
 export async function createProject({ name, domain, regions, platforms, da, users }) {
@@ -318,16 +366,22 @@ export async function updateDomainRow(id, updates) {
   return domainRowToProject(data, kwCounts);
 }
 
-export async function deleteDomainRow(id) {
+export async function deleteDomainRow(id, slug) {
   if (isLocalMode) {
     const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
-    const updated = domains.filter(d => String(d.id) !== String(id));
-    localStorage.setItem('seo_domains', JSON.stringify(updated));
+    const projects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
+    localStorage.setItem('seo_domains', JSON.stringify(domains.filter(d => String(d.id) !== String(id) && (slug ? d.project_slug !== slug : true))));
+    localStorage.setItem('seo_projects', JSON.stringify(projects.filter(p => slug ? p.slug !== slug : true)));
     return;
   }
 
-  const { error } = await supabase.from('domains').delete().eq('id', id);
-  if (error) throw error;
+  if (id) {
+    await supabase.from('domains').delete().eq('id', id).catch(() => {});
+  }
+  if (slug) {
+    await supabase.from('domains').delete().eq('project_slug', slug).catch(() => {});
+    await supabase.from('projects').delete().eq('slug', slug).catch(() => {});
+  }
 }
 
 // ─── KW Cluster tab ─────────────────────────────────────────────────────────
@@ -341,38 +395,35 @@ export async function fetchKwProjects() {
     const domainBySlug = new Map();
     (domains || []).forEach(d => { if (!domainBySlug.has(d.project_slug)) domainBySlug.set(d.project_slug, d); });
 
-    const counts = new Map();
-    (kwRows || []).forEach(r => {
-      const c = counts.get(r.project_name) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
-      c.total += 1;
-      if (r.subtype === 'Commercial') c.commercial += 1;
-      if (r.target_type === 'Landing Page') c.landingPages += 1;
-      if (r.target_type === 'Blog Page') c.blogPages += 1;
-      counts.set(r.project_name, c);
-    });
+    const counts = aggregateKwCounts(kwRows);
 
-    return (projects || []).map(p => {
-      const domainRow = domainBySlug.get(p.slug);
-      const c = counts.get(p.slug) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
-      return {
-        slug: p.slug,
-        name: p.name,
-        domain: domainRow?.domain || '',
-        locationIcon: iconForPlatforms(domainRow?.platforms),
-        location: domainRow?.target_regions?.[0] || 'Global',
-        totalPages: c.total,
-        commercialPct: `${c.commercial}/${c.total}`,
-        blogPages: c.blogPages,
-        blogDir: null,
-        keywords: c.landingPages,
-        keywordsDir: null,
-        updated: timeAgo(domainRow?.updated_at || p.created_at),
-      };
-    });
+    return (projects || [])
+      .filter(p => {
+        const domainRow = domainBySlug.get(p.slug);
+        return domainRow && domainRow.domain && String(domainRow.domain).trim() !== '';
+      })
+      .map(p => {
+        const domainRow = domainBySlug.get(p.slug);
+        const c = counts.get(p.slug) || counts.get(p.name);
+        return {
+          slug: p.slug,
+          name: p.name,
+          domain: domainRow?.domain || '',
+          locationIcon: iconForPlatforms(domainRow?.platforms),
+          location: domainRow?.target_regions?.[0] || 'Global',
+          totalPages: c.total,
+          commercialPct: `${c.commercial}/${c.total}`,
+          blogPages: c.blogPages,
+          blogDir: null,
+          keywords: c.landingPages,
+          keywordsDir: null,
+          updated: timeAgo(domainRow?.updated_at || p.created_at),
+        };
+      });
   }
 
   const [{ data: projects, error: projectsError }, { data: domains, error: domainsError }, { data: kwRows, error: kwError }] = await Promise.all([
-    supabase.from('projects').select('*'),
+    supabase.from('projects').select('*').is('deleted_at', null),
     supabase.from('domains').select('*'),
     supabase.from('keyword_categories').select('project_name, subtype, target_type'),
   ]);
@@ -383,34 +434,32 @@ export async function fetchKwProjects() {
   const domainBySlug = new Map();
   (domains || []).forEach(d => { if (!domainBySlug.has(d.project_slug)) domainBySlug.set(d.project_slug, d); });
 
-  const counts = new Map();
-  (kwRows || []).forEach(r => {
-    const c = counts.get(r.project_name) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
-    c.total += 1;
-    if (r.subtype === 'Commercial') c.commercial += 1;
-    if (r.target_type === 'Landing Page') c.landingPages += 1;
-    if (r.target_type === 'Blog Page') c.blogPages += 1;
-    counts.set(r.project_name, c);
-  });
+  const counts = aggregateKwCounts(kwRows);
 
-  return (projects || []).map(p => {
-    const domainRow = domainBySlug.get(p.slug);
-    const c = counts.get(p.slug) || { total: 0, commercial: 0, landingPages: 0, blogPages: 0 };
-    return {
-      slug: p.slug,
-      name: p.name,
-      domain: domainRow?.domain || '',
-      locationIcon: iconForPlatforms(domainRow?.platforms),
-      location: domainRow?.target_regions?.[0] || 'Global',
-      totalPages: c.total,
-      commercialPct: `${c.commercial}/${c.total}`,
-      blogPages: c.blogPages,
-      blogDir: null,
-      keywords: c.landingPages,
-      keywordsDir: null,
-      updated: timeAgo(domainRow?.updated_at || p.created_at),
-    };
-  });
+  return (projects || [])
+    .filter(p => {
+      const domainRow = domainBySlug.get(p.slug);
+      return domainRow && domainRow.domain && String(domainRow.domain).trim() !== '';
+    })
+    .map(p => {
+      const domainRow = domainBySlug.get(p.slug) || domainBySlug.get(p.name);
+      const c = counts.get(p.slug) || counts.get(p.name);
+      const landingCount = c.landingPages > 0 ? c.landingPages : Math.max(0, c.total - c.blogPages);
+      return {
+        slug: p.slug,
+        name: p.name,
+        domain: domainRow?.domain || '',
+        locationIcon: iconForPlatforms(domainRow?.platforms),
+        location: domainRow?.target_regions?.[0] || 'Global',
+        totalPages: c.total,
+        commercialPct: `${c.commercial}/${c.total}`,
+        blogPages: c.blogPages,
+        blogDir: null,
+        keywords: landingCount,
+        keywordsDir: null,
+        updated: timeAgo(domainRow?.updated_at || p.created_at),
+      };
+    });
 }
 
 function kwRowToUi(row) {
@@ -625,64 +674,34 @@ const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://54.196.75.9:8
 // category_cluster_map/pages aren't exposed to the frontend's
 // RLS-restricted anon key, only the backend's direct Postgres connection
 // can touch them.
-export async function deleteKwProject(slug) {
+export async function deleteKwProject(slug, userEmail = null) {
   if (isLocalMode) {
-    const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
-    localStorage.setItem('seo_domains', JSON.stringify(domains.filter(d => d.project_slug !== slug)));
-
     const projects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
-    localStorage.setItem('seo_projects', JSON.stringify(projects.filter(p => p.slug !== slug)));
-
-    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
-    localStorage.setItem('seo_keyword_categories', JSON.stringify(kwRows.filter(r => r.project_name !== slug)));
-
-    const pageRows = JSON.parse(localStorage.getItem('seo_pages') || '[]');
-    localStorage.setItem('seo_pages', JSON.stringify(pageRows.filter(r => r.project_name !== slug)));
+    const index = projects.findIndex(p => p.slug === slug);
+    if (index !== -1) {
+      projects[index].deleted_at = new Date().toISOString();
+      localStorage.setItem('seo_projects', JSON.stringify(projects));
+    }
     return;
   }
 
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}`, { method: 'DELETE' });
+  const endpoint = userEmail
+    ? `${CATEGORY_API_BASE}/projects/${slug}?user_email=${encodeURIComponent(userEmail)}`
+    : `${CATEGORY_API_BASE}/projects/${slug}`;
+
+  const res = await fetch(endpoint, { method: 'DELETE' });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail || 'Failed to delete project.');
   }
 }
 
-// Removes just this project's KW Cluster data (keyword_categories,
-// categories, clusters, category_cluster_map) -- leaves the project, its
-// domain registration, and its pages intact, so it still shows up on the
-// Domain and Pages tabs afterward. This is what the KW Cluster tab's
-// delete button calls.
-export async function deleteKwClusterData(slug) {
-  if (isLocalMode) {
-    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
-    localStorage.setItem('seo_keyword_categories', JSON.stringify(kwRows.filter(r => r.project_name !== slug)));
-    return;
-  }
-
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/kw-data`, { method: 'DELETE' });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail || 'Failed to delete keyword data.');
-  }
+export async function deleteKwClusterData(slug, userEmail = null) {
+  return deleteKwProject(slug, userEmail);
 }
 
-// Removes just this project's page rows (Add Pages uploads) -- leaves the
-// project, its domain registration, and its KW Cluster data intact, so it
-// still shows up on the Domain and KW Cluster tabs afterward. This is
-// what the Pages tab's delete button calls.
-export async function deletePagesData(slug) {
-  if (isLocalMode) {
-    const pageRows = JSON.parse(localStorage.getItem('seo_pages') || '[]');
-    localStorage.setItem('seo_pages', JSON.stringify(pageRows.filter(r => r.project_name !== slug)));
-    return;
-  }
-
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/pages`, { method: 'DELETE' });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail || 'Failed to delete pages.');
-  }
+export async function deletePagesData(slug, userEmail = null) {
+  return deleteKwProject(slug, userEmail);
 }
 
 // ─── Pages tab ──────────────────────────────────────────────────────────────
@@ -715,12 +734,18 @@ export async function fetchPagesCounts() {
     const counts = {};
     const stats = {};
     pageRows.forEach(r => {
-      counts[r.project_name] = (counts[r.project_name] || 0) + 1;
-      const s = stats[r.project_name] || { total: 0, commercial: 0, blog: 0 };
-      s.total += 1;
-      if (r.targetType === 'Commercial') s.commercial += 1;
-      if (r.targetCategory === 'Blogs') s.blog += 1;
-      stats[r.project_name] = s;
+      const pKey = r.project_name || r.project_slug;
+      if (!pKey) return;
+      const k1 = String(pKey).trim().toLowerCase();
+      const k2 = k1.replace(/[^a-z0-9]/g, '');
+      [pKey, k1, k2].forEach(k => {
+        counts[k] = (counts[k] || 0) + 1;
+        const s = stats[k] || { total: 0, commercial: 0, blog: 0 };
+        s.total += 1;
+        if (r.targetType === 'Commercial') s.commercial += 1;
+        if (r.targetCategory === 'Blogs') s.blog += 1;
+        stats[k] = s;
+      });
     });
     return { counts, stats };
   }
@@ -731,7 +756,24 @@ export async function fetchPagesCounts() {
     throw new Error(body?.detail || 'Failed to load page counts.');
   }
   const data = await res.json();
-  return { counts: data.counts || {}, stats: data.stats || {} };
+  const rawCounts = data.counts || {};
+  const rawStats = data.stats || {};
+  const counts = {};
+  const stats = {};
+
+  Object.keys(rawCounts).forEach(k => {
+    const cnt = rawCounts[k];
+    const st = rawStats[k] || { total: cnt, commercial: 0, blog: 0 };
+    const k1 = String(k).trim().toLowerCase();
+    const k2 = k1.replace(/[^a-z0-9]/g, '');
+
+    [k, k1, k2].forEach(key => {
+      counts[key] = cnt;
+      stats[key] = st;
+    });
+  });
+
+  return { counts, stats };
 }
 
 export async function fetchPageRows(slug) {
@@ -1053,17 +1095,7 @@ export async function deleteCompetitor(id) {
 }
 
 export async function deleteCompetitorProjectData(slug) {
-  if (isLocalMode) {
-    const rows = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
-    localStorage.setItem('seo_competitors', JSON.stringify(rows.filter(r => r.projectSlug !== slug)));
-    return;
-  }
-
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/competitors`, { method: 'DELETE' });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail || 'Failed to delete competitor project data.');
-  }
+  return deleteKwProject(slug);
 }
 
 // Runs the comp_analysis SERP-discovery pipeline (backend scripts/comp_analysis.py)
@@ -1198,5 +1230,75 @@ export async function classifyCompetitorUrls(urls, keyword = '') {
   }
   const data = await res.json();
   return data.results || [];
+}
+
+// ─── System Audit Logs API ──────────────────────────────────────────────────
+
+export async function fetchAuditLogsApi(search = '', statusFilter = 'All') {
+  if (isLocalMode) {
+    const saved = localStorage.getItem('seo_system_logs');
+    let logs = saved ? JSON.parse(saved) : [];
+    if (statusFilter && statusFilter !== 'All') {
+      logs = logs.filter(l => l.status === statusFilter);
+    }
+    if (search) {
+      const query = search.toLowerCase();
+      logs = logs.filter(l => (l.user || '').toLowerCase().includes(query) || (l.action || '').toLowerCase().includes(query));
+    }
+    return logs;
+  }
+
+  const params = new URLSearchParams();
+  if (search) params.append('search', search);
+  if (statusFilter && statusFilter !== 'All') params.append('status', statusFilter);
+
+  const res = await fetch(`${CATEGORY_API_BASE}/audit-logs?${params.toString()}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to fetch audit logs.');
+  }
+  const data = await res.json();
+  return data.logs || [];
+}
+
+export async function createAuditLogApi({ user_email = 'system', action, status = 'Success' }) {
+  if (isLocalMode) {
+    const saved = localStorage.getItem('seo_system_logs');
+    let logs = saved ? JSON.parse(saved) : [];
+    const now = new Date();
+    const formatted = now.getFullYear() + '-' +
+      String(now.getMonth() + 1).padStart(2, '0') + '-' +
+      String(now.getDate()).padStart(2, '0') + ' ' +
+      now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const newLog = { id: Date.now(), timestamp: formatted, user: user_email, action, status };
+    logs = [newLog, ...logs];
+    localStorage.setItem('seo_system_logs', JSON.stringify(logs));
+    return newLog;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/audit-logs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_email, action, status }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to create audit log.');
+  }
+  const data = await res.json();
+  return data.log;
+}
+
+export async function clearAuditLogsApi() {
+  if (isLocalMode) {
+    localStorage.setItem('seo_system_logs', JSON.stringify([]));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/audit-logs`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to clear audit logs.');
+  }
 }
 

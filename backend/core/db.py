@@ -177,19 +177,34 @@ def init_db():
                 name TEXT NOT NULL,
                 email TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'USER',
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'USER'"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_users_email ON users (LOWER(email))"))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id BIGSERIAL PRIMARY KEY,
+                timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
+                user_email TEXT NOT NULL,
+                action TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'Success',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS projects (
                 id BIGSERIAL PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
                 slug TEXT NOT NULL UNIQUE,
+                deleted_at TIMESTAMPTZ,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
+        conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ"))
 
         # --- Domains registry: the "Create Project" form -----------------
         conn.execute(text("""
@@ -398,8 +413,10 @@ def get_or_create_project(name):
         raise ValueError("Project name cannot be empty.")
 
     with engine.begin() as conn:
-        row = conn.execute(text("SELECT slug FROM projects WHERE name = :name"), {"name": name}).fetchone()
+        row = conn.execute(text("SELECT slug, deleted_at FROM projects WHERE name = :name"), {"name": name}).fetchone()
         if row:
+            if row.deleted_at is not None:
+                conn.execute(text("UPDATE projects SET deleted_at = NULL WHERE name = :name"), {"name": name})
             return row.slug
 
         base_slug = _slugify_project_name(name)
@@ -415,22 +432,46 @@ def get_or_create_project(name):
     return slug
 
 
-def get_project_by_name(name):
+def get_project_by_name(name, include_deleted=False):
     with engine.begin() as conn:
-        row = conn.execute(text("SELECT * FROM projects WHERE name = :name"), {"name": name}).mappings().fetchone()
+        sql = "SELECT * FROM projects WHERE name = :name"
+        if not include_deleted:
+            sql += " AND deleted_at IS NULL"
+        row = conn.execute(text(sql), {"name": name}).mappings().fetchone()
         return dict(row) if row else None
 
 
-def get_project_by_slug(slug):
+def get_project_by_slug(slug, include_deleted=False):
     with engine.begin() as conn:
-        row = conn.execute(text("SELECT * FROM projects WHERE slug = :slug"), {"slug": slug}).mappings().fetchone()
+        sql = "SELECT * FROM projects WHERE slug = :slug"
+        if not include_deleted:
+            sql += " AND deleted_at IS NULL"
+        row = conn.execute(text(sql), {"slug": slug}).mappings().fetchone()
         return dict(row) if row else None
 
 
-def list_projects():
+def list_projects(include_deleted=False, only_deleted=False):
     with engine.begin() as conn:
-        rows = conn.execute(text("SELECT * FROM projects ORDER BY created_at DESC")).mappings().fetchall()
+        sql = "SELECT * FROM projects"
+        if only_deleted:
+            sql += " WHERE deleted_at IS NOT NULL"
+        elif not include_deleted:
+            sql += " WHERE deleted_at IS NULL"
+        sql += " ORDER BY created_at DESC"
+        rows = conn.execute(text(sql)).mappings().fetchall()
         return [dict(r) for r in rows]
+
+
+def soft_delete_project(slug):
+    """Marks a project as deleted by setting deleted_at = now()"""
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE projects SET deleted_at = now() WHERE slug = :slug"), {"slug": slug})
+
+
+def restore_project(slug):
+    """Restores a soft-deleted project by setting deleted_at = NULL"""
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE projects SET deleted_at = NULL WHERE slug = :slug"), {"slug": slug})
 
 
 def delete_project(slug):
@@ -454,6 +495,26 @@ def delete_project(slug):
         conn.execute(text("DELETE FROM pages WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM competitor_pages WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM projects WHERE slug = :slug"), {"slug": slug})
+
+
+def purge_expired_projects():
+    """Finds all projects soft-deleted more than 30 days ago and deletes them permanently."""
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT slug FROM projects 
+            WHERE deleted_at IS NOT NULL 
+              AND deleted_at < now() - INTERVAL '30 days'
+        """)).fetchall()
+        for r in rows:
+            slug = r.slug
+            print(f"[Purge] Hard-deleting project {slug} (older than 30 days)", flush=True)
+            conn.execute(text("DELETE FROM keyword_categories WHERE project_name = :slug"), {"slug": slug})
+            conn.execute(text("DELETE FROM domains WHERE project_slug = :slug"), {"slug": slug})
+            conn.execute(text("DELETE FROM categories WHERE project_name = :slug"), {"slug": slug})
+            conn.execute(text("DELETE FROM clusters WHERE project_name = :slug"), {"slug": slug})
+            conn.execute(text("DELETE FROM category_cluster_map WHERE project_name = :slug"), {"slug": slug})
+            conn.execute(text("DELETE FROM pages WHERE project_name = :slug"), {"slug": slug})
+            conn.execute(text("DELETE FROM projects WHERE slug = :slug"), {"slug": slug})
 
 
 def delete_project_kw_data(slug):
@@ -523,13 +584,22 @@ def create_domain(domain, project_name=None, target_regions=None, platforms=None
 
 def get_domain_record(domain):
     with engine.begin() as conn:
-        row = conn.execute(text("SELECT * FROM domains WHERE domain = :domain"), {"domain": domain}).mappings().fetchone()
+        row = conn.execute(text("""
+            SELECT d.* FROM domains d
+            JOIN projects p ON d.project_slug = p.slug
+            WHERE d.domain = :domain AND p.deleted_at IS NULL
+        """), {"domain": domain}).mappings().fetchone()
         return dict(row) if row else None
 
 
 def list_domain_records():
     with engine.begin() as conn:
-        rows = conn.execute(text("SELECT * FROM domains ORDER BY created_at DESC")).mappings().fetchall()
+        rows = conn.execute(text("""
+            SELECT d.* FROM domains d
+            JOIN projects p ON d.project_slug = p.slug
+            WHERE p.deleted_at IS NULL
+            ORDER BY d.created_at DESC
+        """)).mappings().fetchall()
         return [dict(r) for r in rows]
 
 
@@ -872,31 +942,34 @@ def get_page_rows(project_slug):
 
 
 def get_pages_counts():
-    """{project_slug: page_count} for every project that currently has at
+    """{project_slug: page_count} for every active project that currently has at
     least one page row -- lets the Pages tab know upfront (without
     fetching each project's full page list) which projects to list, so a
-    project whose pages were all deleted stops showing up there without
-    needing a per-row 'hidden' flag anywhere."""
+    project whose pages were deleted/soft-deleted stops showing up there."""
     with engine.begin() as conn:
         rows = conn.execute(text("""
-            SELECT project_name, COUNT(*) AS count FROM pages GROUP BY project_name
+            SELECT p.project_name, COUNT(*) AS count
+            FROM pages p
+            JOIN projects pr ON p.project_name = pr.slug
+            WHERE pr.deleted_at IS NULL
+            GROUP BY p.project_name
         """)).mappings().fetchall()
         return {r["project_name"]: r["count"] for r in rows}
 
 
 def get_pages_stats():
     """Per-project {total, commercial, blog} counts computed from the pages
-    table's own target_type/target_category columns (set via the Pages
-    detail view's dropdowns or Bulk Edit) -- lets the Pages tab list show
-    Commercial vs Others / Blog Pages sourced from actual page rows instead
-    of KW Cluster's keyword counts."""
+    table's own target_type/target_category columns -- excluding soft-deleted projects."""
     with engine.begin() as conn:
         rows = conn.execute(text("""
-            SELECT project_name,
+            SELECT p.project_name,
                    COUNT(*) AS total,
-                   COUNT(*) FILTER (WHERE target_type = 'Commercial') AS commercial,
-                   COUNT(*) FILTER (WHERE target_category = 'Blogs') AS blog
-            FROM pages GROUP BY project_name
+                   COUNT(*) FILTER (WHERE p.target_type = 'Commercial') AS commercial,
+                   COUNT(*) FILTER (WHERE p.target_category = 'Blogs') AS blog
+            FROM pages p
+            JOIN projects pr ON p.project_name = pr.slug
+            WHERE pr.deleted_at IS NULL
+            GROUP BY p.project_name
         """)).mappings().fetchall()
         return {r["project_name"]: {"total": r["total"], "commercial": r["commercial"], "blog": r["blog"]} for r in rows}
 
@@ -1014,11 +1087,23 @@ def get_competitors(project_slug=None):
     with engine.begin() as conn:
         if project_slug:
             rows = conn.execute(
-                text("SELECT * FROM competitors WHERE project_slug = :project_slug ORDER BY created_at DESC"),
+                text("""
+                    SELECT c.* FROM competitors c
+                    LEFT JOIN projects p ON c.project_slug = p.slug
+                    WHERE c.project_slug = :project_slug AND (p.deleted_at IS NULL OR p.slug IS NULL)
+                    ORDER BY c.created_at DESC
+                """),
                 {"project_slug": project_slug},
             ).mappings().fetchall()
         else:
-            rows = conn.execute(text("SELECT * FROM competitors ORDER BY created_at DESC")).mappings().fetchall()
+            rows = conn.execute(
+                text("""
+                    SELECT c.* FROM competitors c
+                    LEFT JOIN projects p ON c.project_slug = p.slug
+                    WHERE (p.deleted_at IS NULL OR p.slug IS NULL)
+                    ORDER BY c.created_at DESC
+                """)
+            ).mappings().fetchall()
         return [dict(r) for r in rows]
 
 
@@ -1588,6 +1673,55 @@ def _migrate_one_project_to_shared(slug):
 
         print(f"[{slug}] migrated {len(cat_rows)} categories, {len(clus_rows)} clusters, "
               f"{len(map_rows)} category->cluster mappings, {len(kw_rows)} keyword rows.")
+
+
+# --- System Audit Logs Helpers ----------------------------------------------
+
+def insert_audit_log(user_email, action, status='Success'):
+    with engine.begin() as conn:
+        row = conn.execute(text("""
+            INSERT INTO audit_logs (user_email, action, status)
+            VALUES (:user_email, :action, :status)
+            RETURNING id, timestamp, user_email AS user, action, status
+        """), {
+            "user_email": user_email or 'system',
+            "action": action,
+            "status": status or 'Success'
+        }).mappings().fetchone()
+        res = dict(row)
+        if res.get('timestamp'):
+            res['timestamp'] = res['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
+        return res
+
+
+def get_audit_logs(limit=200, status_filter=None, search_query=None):
+    with engine.begin() as conn:
+        sql = "SELECT id, timestamp, user_email AS user, action, status FROM audit_logs WHERE 1=1"
+        params = {"limit": limit}
+
+        if status_filter and status_filter.lower() != 'all':
+            sql += " AND LOWER(status) = LOWER(:status)"
+            params["status"] = status_filter
+
+        if search_query:
+            sql += " AND (LOWER(user_email) LIKE :search OR LOWER(action) LIKE :search)"
+            params["search"] = f"%{search_query.lower()}%"
+
+        sql += " ORDER BY id DESC LIMIT :limit"
+
+        rows = conn.execute(text(sql), params).mappings().fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d.get('timestamp'):
+                d['timestamp'] = d['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
+            result.append(d)
+        return result
+
+
+def clear_audit_logs():
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM audit_logs"))
 
 
 if __name__ == "__main__":

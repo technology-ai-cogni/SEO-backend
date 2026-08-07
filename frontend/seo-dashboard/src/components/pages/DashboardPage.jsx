@@ -1,6 +1,7 @@
 import { Card, CardHeader, MetricCard, Badge, Table } from '../ui/Card';
 import { SparkLine } from '../ui/MiniChart';
 import { TrendingUp, TrendingDown, Info, AlertTriangle, CheckCircle, Zap, FolderOpen } from 'lucide-react';
+import { ROLES } from '../../lib/permissions';
 
 const alertIcons = { info: Info, success: CheckCircle, warning: AlertTriangle, tip: Zap };
 const alertColors = { info: 'var(--blue)', success: 'var(--green)', warning: 'var(--amber)', tip: 'var(--accent)' };
@@ -15,7 +16,7 @@ function getIntentVariant(intent) {
   return 'default';
 }
 
-export default function DashboardPage({ activeProject, keywords = [], loadingKeywords = false }) {
+export default function DashboardPage({ activeProject, keywords = [], loadingKeywords = false, user = null }) {
   if (loadingKeywords) {
     return (
       <div style={{ padding: 32, display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh', color: 'var(--text-muted)' }}>
@@ -133,9 +134,12 @@ export default function DashboardPage({ activeProject, keywords = [], loadingKey
   }
 
   // 4. Sorted Keywords (by volume descending)
+  const isUser = !user || user.role === ROLES.USER;
+  const topKeywordsLimit = isUser ? 5 : 20;
+
   const topKeywordsList = [...keywords]
     .sort((a, b) => (Number(b.sv) || 0) - (Number(a.sv) || 0))
-    .slice(0, 20);
+    .slice(0, topKeywordsLimit);
 
   // Sparkline data generation (simple placeholder values for visual chart)
   const sparklineData = [12, 14, 13, 16, 18, 17, 21, 23, 22, 25];
@@ -153,6 +157,9 @@ export default function DashboardPage({ activeProject, keywords = [], loadingKey
           </h2>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Badge variant={user?.role === 'ADMIN' ? 'accent' : user?.role === 'VENDOR' ? 'info' : 'default'}>
+            Role: {user?.role || 'USER'}
+          </Badge>
           <Badge variant="default">Keywords: {totalKeywords.toLocaleString()}</Badge>
           <Badge variant="info">Clusters: {uniqueClustersCount}</Badge>
         </div>
@@ -166,13 +173,21 @@ export default function DashboardPage({ activeProject, keywords = [], loadingKey
         <MetricCard label="Estimated Monthly Traffic" value={estTraffic.toLocaleString()} change={0} potential="CTR-weighted search volume">
           <SparkLine data={sparklineData} color="#16a34a" />
         </MetricCard>
-        <MetricCard label="Average Position" value={avgPosition} change={0} potential="For ranked keywords">
-          <SparkLine data={sparklineData} color="#d97706" />
-        </MetricCard>
+        {isUser ? (
+          <MetricCard label="Average Position" value="Restricted" change={0} potential="Upgrade to VENDOR/ADMIN to view">
+            <div style={{ display: 'flex', alignItems: 'center', height: 24, fontSize: 11.5, color: 'var(--text-muted)' }}>
+              Restricted data
+            </div>
+          </MetricCard>
+        ) : (
+          <MetricCard label="Average Position" value={avgPosition} change={0} potential="For ranked keywords">
+            <SparkLine data={sparklineData} color="#d97706" />
+          </MetricCard>
+        )}
       </div>
 
       {/* K/D Distribution + Summary */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isUser ? '1fr' : '1fr 1.4fr', gap: 16 }}>
         {/* K/D Distribution */}
         <Card>
           <CardHeader title="Keyword Difficulty Distribution" />
@@ -203,25 +218,30 @@ export default function DashboardPage({ activeProject, keywords = [], loadingKey
         </Card>
 
         {/* Summary */}
-        <Card>
-          <CardHeader title="Summary" subtitle={`${activeProject.name} Workspace Status`} />
-          <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {summaryAlerts.map((alert, i) => {
-              const Icon = alertIcons[alert.type];
-              return (
-                <div key={i} style={{ display: 'flex', gap: 10, padding: '10px 12px', background: alertBgs[alert.type], borderRadius: 'var(--radius-sm)', border: `1px solid ${alertColors[alert.type]}22` }}>
-                  <Icon size={14} color={alertColors[alert.type]} style={{ marginTop: 1, flexShrink: 0 }} />
-                  <p style={{ fontSize: 12.5, color: 'var(--text-primary)', lineHeight: 1.5 }}>{alert.message}</p>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
+        {!isUser && (
+          <Card>
+            <CardHeader title="Summary" subtitle={`${activeProject.name} Workspace Status`} />
+            <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {summaryAlerts.map((alert, i) => {
+                const Icon = alertIcons[alert.type];
+                return (
+                  <div key={i} style={{ display: 'flex', gap: 10, padding: '10px 12px', background: alertBgs[alert.type], borderRadius: 'var(--radius-sm)', border: `1px solid ${alertColors[alert.type]}22` }}>
+                    <Icon size={14} color={alertColors[alert.type]} style={{ marginTop: 1, flexShrink: 0 }} />
+                    <p style={{ fontSize: 12.5, color: 'var(--text-primary)', lineHeight: 1.5 }}>{alert.message}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
       </div>
 
       {/* Top keywords by volume */}
       <Card>
-        <CardHeader title="Top Keywords by Search Volume" subtitle="Sorted by highest monthly search volume" />
+        <CardHeader 
+          title="Top Keywords by Search Volume" 
+          subtitle={isUser ? "Showing top 5 keywords (Upgrade to VENDOR/ADMIN to see full list)" : "Sorted by highest monthly search volume"} 
+        />
         <Table
           headers={['Keyword', 'Intent/Type', 'Volume', 'K/D', 'Cluster', 'Rank']}
           rows={topKeywordsList.map(k => [

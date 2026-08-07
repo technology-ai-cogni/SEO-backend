@@ -7,7 +7,7 @@ def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     """Fetch user record by email (case-insensitive) from Supabase PostgreSQL."""
     with engine.connect() as conn:
         result = conn.execute(
-            text("SELECT id, name, email, password_hash, created_at FROM users WHERE LOWER(email) = LOWER(:email)"),
+            text("SELECT id, name, email, password_hash, role, created_at FROM users WHERE LOWER(email) = LOWER(:email)"),
             {"email": email.strip()}
         ).mappings().first()
         if result:
@@ -20,9 +20,9 @@ def create_user(name: str, email: str, password_hash: str) -> Dict[str, Any]:
     with engine.begin() as conn:
         result = conn.execute(
             text("""
-                INSERT INTO users (name, email, password_hash, created_at)
-                VALUES (:name, LOWER(:email), :password_hash, NOW())
-                RETURNING id, name, email, created_at
+                INSERT INTO users (name, email, password_hash, role, created_at)
+                VALUES (:name, LOWER(:email), :password_hash, 'USER', NOW())
+                RETURNING id, name, email, role, created_at
             """),
             {
                 "name": name.strip(),
@@ -41,7 +41,7 @@ def update_user_name(email: str, name: str) -> Optional[Dict[str, Any]]:
                 UPDATE users
                 SET name = :name
                 WHERE LOWER(email) = LOWER(:email)
-                RETURNING id, name, email, created_at
+                RETURNING id, name, email, role, created_at
             """),
             {
                 "name": name.strip(),
