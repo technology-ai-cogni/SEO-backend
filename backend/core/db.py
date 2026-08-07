@@ -377,11 +377,11 @@ def init_db():
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_competitor_snapshots_competitor ON competitor_snapshots (competitor_id, created_at DESC)"))
-        # {keyword: position} this competitor ranked at in this run -- lets
-        # the detail view show which specific keywords it's ranking on, not
-        # just the aggregate ranking_keywords count.
-        conn.execute(text("ALTER TABLE competitor_snapshots ADD COLUMN IF NOT EXISTS keyword_positions JSONB"))
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_competitor_snapshots_competitor ON competitor_snapshots (competitor_id, created_at DESC)"))
+            conn.execute(text("ALTER TABLE competitor_snapshots ADD COLUMN IF NOT EXISTS keyword_positions JSONB"))
+        except Exception as idx_err:
+            print(f"[DB Init] Notice during startup migration: {idx_err}")
 
 
 # --- Projects -------------------------------------------------------------

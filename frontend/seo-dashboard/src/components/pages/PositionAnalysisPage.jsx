@@ -229,20 +229,44 @@ function extractTop2PerCategory(kws) {
   });
 
   const selected = [];
-  Object.keys(groups).forEach(cat => {
+  Object.keys(groups).sort().forEach(cat => {
     const sortedInCat = [...groups[cat]].sort((a, b) => {
-      const svA = Number(String(a.sv || 0).replace(/[^0-9.]/g, '')) || 0;
-      const svB = Number(String(b.sv || 0).replace(/[^0-9.]/g, '')) || 0;
-      return svB - svA;
+      const parseNum = (val) => {
+        if (val == null) return null;
+        const n = Number(String(val).replace(/[^0-9.]/g, ''));
+        return isNaN(n) ? null : n;
+      };
+
+      const svA = parseNum(a.sv ?? a.search_volume ?? a.volume ?? a.searchVolume);
+      const svB = parseNum(b.sv ?? b.search_volume ?? b.volume ?? b.searchVolume);
+
+      // 1. If SV is present for both or either, prioritize higher SV
+      if (svA !== null || svB !== null) {
+        const valA = svA ?? -1;
+        const valB = svB ?? -1;
+        if (valA !== valB) return valB - valA;
+      }
+
+      // 2. If SV is not present or equal, sort deterministically by rank (ascending)
+      const rankA = parseNum(a.rank) ?? 999;
+      const rankB = parseNum(b.rank) ?? 999;
+      if (rankA !== rankB) return rankA - rankB;
+
+      // 3. Fallback to alphabetical text sorting
+      const textA = String(a.kw || a.keyword || '');
+      const textB = String(b.kw || b.keyword || '');
+      return textA.localeCompare(textB);
     });
+
     const top2 = sortedInCat.slice(0, 2);
     top2.forEach(item => {
-      const keywordStr = item.kw || item.keyword;
+      const keywordStr = String(item.kw || item.keyword || '').trim();
       if (keywordStr && !selected.includes(keywordStr)) {
         selected.push(keywordStr);
       }
     });
   });
+
   return selected;
 }
 
@@ -300,6 +324,60 @@ const COUNTRY_OPTIONS = [
   { code: 'US', flag: '🇺🇸', name: 'United States' },
   { code: 'VN', flag: '🇻🇳', name: 'Vietnam' }
 ];
+
+function RankHoverCell({ count, kwList, title, color }) {
+  const [isHovered, setIsHovered] = useState(false);
+  const list = kwList || [];
+
+  return (
+    <div
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      style={{ position: 'relative', display: 'inline-block', cursor: count > 0 ? 'pointer' : 'default' }}
+    >
+      <span style={{
+        color: color,
+        borderBottom: isHovered && count > 0 ? `1.5px dashed ${color}` : '1.5px solid transparent',
+        transition: 'all 0.15s'
+      }}>
+        {count}
+      </span>
+
+      {isHovered && list.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          bottom: '120%',
+          right: 0,
+          background: '#0f172a',
+          color: '#ffffff',
+          padding: '10px 14px',
+          borderRadius: 8,
+          fontSize: 12,
+          boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
+          zIndex: 9999,
+          whiteSpace: 'nowrap',
+          maxHeight: 220,
+          overflowY: 'auto',
+          minWidth: 200,
+          border: '1px solid #334155',
+          textAlign: 'left'
+        }}>
+          <div style={{ fontWeight: 800, color: '#38bdf8', marginBottom: 6, fontSize: 11.5, borderBottom: '1px solid #334155', paddingBottom: 4 }}>
+            {title} ({list.length})
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {list.map((k, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}>
+                <span style={{ color: '#f8fafc', fontWeight: 600 }}>{k.kw}</span>
+                <span style={{ color: '#a7f3d0', fontWeight: 700 }}>{k.rank}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function PositionAnalysisPage({ onNavigate }) {
   const [projects, setProjects] = useState([]);
@@ -362,11 +440,28 @@ export default function PositionAnalysisPage({ onNavigate }) {
           // Fetch project-specific data if present
           try {
             const kws = await fetchKeywordRows(targetProject.slug);
+            const isBlogItem = (item) => {
+              if (!item) return false;
+              const val = String(
+                item.targetType ||
+                item.target_type ||
+                item.pageType ||
+                item.page_type ||
+                item.type ||
+                item.targetCategory ||
+                item.landing_blog ||
+                item['Target Type'] ||
+                item['TargetType'] ||
+                item['Landing / Blog'] ||
+                item['landing / blog'] ||
+                ''
+              ).toLowerCase().trim();
+              return val.includes('blog');
+            };
+
             if (kws && kws.length > 0 && isMounted) {
               setProjectKeywords(kws);
               setKwCount(kws.length);
-              const blogs = kws.filter(k => k.targetType === 'Blog Page').length;
-              setBlogCount(blogs);
               const clusters = new Set(kws.map(k => k.cluster).filter(Boolean)).size;
               setClusterCount(clusters);
 
@@ -379,20 +474,32 @@ export default function PositionAnalysisPage({ onNavigate }) {
               setTopKeywords(extractTop2PerCategory(kws));
             } else if (isMounted) {
               setKwCount(targetProject.keywords || 0);
-              setBlogCount(targetProject.blogPages || 0);
               setClusterCount(0);
               setNetPotential(0);
             }
+
             const pgs = await fetchPageRows(targetProject.slug);
             if (pgs && pgs.length > 0 && isMounted) {
               setProjectPages(pgs);
               setPageCount(pgs.length);
+              const pgsBlogs = pgs.filter(p => isBlogItem(p)).length;
+              if (pgsBlogs > 0) {
+                setBlogCount(pgsBlogs);
+              } else if (kws && kws.length > 0) {
+                const kwsBlogs = new Set(kws.filter(k => isBlogItem(k)).map(k => k.landingPage || k.url || k.kw).filter(Boolean)).size;
+                setBlogCount(kwsBlogs || (targetProject.blogPages || 0));
+              } else {
+                setBlogCount(targetProject.blogPages || 0);
+              }
             } else if (kws && kws.length > 0 && isMounted) {
               const uniquePages = new Set(kws.map(k => k.landingPage).filter(Boolean)).size;
               setPageCount(uniquePages || kws.length);
+              const kwsBlogs = new Set(kws.filter(k => isBlogItem(k)).map(k => k.landingPage || k.url || k.kw).filter(Boolean)).size;
+              setBlogCount(kwsBlogs || (targetProject.blogPages || 0));
               setProjectPages([]);
             } else if (isMounted) {
               setPageCount(targetProject.targetPages || 0);
+              setBlogCount(targetProject.blogPages || 0);
               setProjectPages([]);
             }
           } catch (e) {
@@ -450,12 +557,29 @@ export default function PositionAnalysisPage({ onNavigate }) {
     if (p) {
       setActiveProject(p);
       try {
+        const isBlogItem = (item) => {
+          if (!item) return false;
+          const val = String(
+            item.targetType ||
+            item.target_type ||
+            item.pageType ||
+            item.page_type ||
+            item.type ||
+            item.targetCategory ||
+            item.landing_blog ||
+            item['Target Type'] ||
+            item['TargetType'] ||
+            item['Landing / Blog'] ||
+            item['landing / blog'] ||
+            ''
+          ).toLowerCase().trim();
+          return val.includes('blog');
+        };
+
         const kws = await fetchKeywordRows(p.slug);
         if (kws && kws.length > 0) {
           setProjectKeywords(kws);
           setKwCount(kws.length);
-          const blogs = kws.filter(k => k.targetType === 'Blog Page').length;
-          setBlogCount(blogs);
           const clusters = new Set(kws.map(k => k.cluster).filter(Boolean)).size;
           setClusterCount(clusters);
 
@@ -468,7 +592,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
           setTopKeywords(extractTop2PerCategory(kws));
         } else {
           setKwCount(p.keywords || 0);
-          setBlogCount(p.blogPages || 0);
           setClusterCount(0);
           setNetPotential(0);
           setProjectKeywords([]);
@@ -479,12 +602,24 @@ export default function PositionAnalysisPage({ onNavigate }) {
         if (pgs && pgs.length > 0) {
           setProjectPages(pgs);
           setPageCount(pgs.length);
+          const pgsBlogs = pgs.filter(p => isBlogItem(p)).length;
+          if (pgsBlogs > 0) {
+            setBlogCount(pgsBlogs);
+          } else if (kws && kws.length > 0) {
+            const kwsBlogs = new Set(kws.filter(k => isBlogItem(k)).map(k => k.landingPage || k.url || k.kw).filter(Boolean)).size;
+            setBlogCount(kwsBlogs || (p.blogPages || 0));
+          } else {
+            setBlogCount(p.blogPages || 0);
+          }
         } else if (kws && kws.length > 0) {
           const uniquePages = new Set(kws.map(k => k.landingPage).filter(Boolean)).size;
           setPageCount(uniquePages || kws.length);
+          const kwsBlogs = new Set(kws.filter(k => isBlogItem(k)).map(k => k.landingPage || k.url || k.kw).filter(Boolean)).size;
+          setBlogCount(kwsBlogs || (p.blogPages || 0));
           setProjectPages([]);
         } else {
           setPageCount(p.targetPages || 0);
+          setBlogCount(p.blogPages || 0);
           setProjectPages([]);
         }
       } catch (e) {
@@ -1309,7 +1444,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
           gap: 10
         }}>
           <button
-            onClick={(e) => handleAiAnalysis(e, { analyzeAll: aiTab.toLowerCase() === 'overview', targetEngine: aiTab.toLowerCase() })}
+            onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
             disabled={Object.values(analyzingTabs).some(Boolean)}
             style={{
               background: '#7c3aed',
@@ -1526,8 +1661,12 @@ export default function PositionAnalysisPage({ onNavigate }) {
 
                         const mList = visibilityData.mentioned_keywords || [];
                         const cList = visibilityData.cited_pages_list || [];
-                        const mentionsVal = visibilityData.mentions ?? mList.length;
-                        const citedVal = visibilityData.cited_pages ?? cList.length;
+                        const mentionsVal = (typeof visibilityData.mentions === 'number' && visibilityData.mentions > 0)
+                          ? visibilityData.mentions
+                          : mList.length;
+                        const citedVal = (typeof visibilityData.cited_pages === 'number' && visibilityData.cited_pages > 0)
+                          ? visibilityData.cited_pages
+                          : cList.length;
 
                         return (
                           <AiVisibilityArcGauge
@@ -1775,22 +1914,44 @@ export default function PositionAnalysisPage({ onNavigate }) {
               };
 
               const calculateRanges = (kwList) => {
-                let top1 = 0;
-                let top2to5 = 0;
-                let top6to10 = 0;
+                const top1Map = new Map();
+                const top5Map = new Map();
+                const top10Map = new Map();
 
                 kwList.forEach(k => {
                   const r = parseRank(k.rank);
+                  const kwName = String(k.kw || k.keyword || '').trim();
+                  if (!kwName || kwName === 'Keyword') return;
+
+                  const lowerKey = kwName.toLowerCase();
+
                   if (r === 1) {
-                    top1++;
+                    if (!top1Map.has(lowerKey)) {
+                      top1Map.set(lowerKey, { kw: kwName, rank: r });
+                    }
                   } else if (r >= 2 && r <= 5) {
-                    top2to5++;
+                    if (!top5Map.has(lowerKey)) {
+                      top5Map.set(lowerKey, { kw: kwName, rank: r });
+                    }
                   } else if (r >= 6 && r <= 10) {
-                    top6to10++;
+                    if (!top10Map.has(lowerKey)) {
+                      top10Map.set(lowerKey, { kw: kwName, rank: r });
+                    }
                   }
                 });
 
-                return { top1, top5: top2to5, top10: top6to10 };
+                const top1Kws = Array.from(top1Map.values());
+                const top5Kws = Array.from(top5Map.values());
+                const top10Kws = Array.from(top10Map.values());
+
+                return {
+                  top1: top1Kws.length,
+                  top1Kws,
+                  top5: top5Kws.length,
+                  top5Kws,
+                  top10: top10Kws.length,
+                  top10Kws
+                };
               };
 
               const kws = projectKeywords || [];
@@ -1810,9 +1971,9 @@ export default function PositionAnalysisPage({ onNavigate }) {
                 return t.includes('shopping');
               });
 
-              const linksCounts = kws.length > 0 ? calculateRanges(linksKws.length > 0 ? linksKws : kws) : { top1: 5, top5: 14, top10: 58 };
-              const localCounts = kws.length > 0 ? calculateRanges(localKws) : { top1: 1, top5: 2, top10: 9 };
-              const shoppingCounts = kws.length > 0 ? calculateRanges(shoppingKws) : { top1: 0, top5: 0, top10: 0 };
+              const linksCounts = kws.length > 0 ? calculateRanges(linksKws.length > 0 ? linksKws : kws) : { top1: 0, top1Kws: [], top5: 0, top5Kws: [], top10: 0, top10Kws: [] };
+              const localCounts = kws.length > 0 ? calculateRanges(localKws) : { top1: 0, top1Kws: [], top5: 0, top5Kws: [], top10: 0, top10Kws: [] };
+              const shoppingCounts = kws.length > 0 ? calculateRanges(shoppingKws) : { top1: 0, top1Kws: [], top5: 0, top5Kws: [], top10: 0, top10Kws: [] };
 
               const rows = [
                 { id: 'links', label: 'Links', ...linksCounts, color: '#16a34a' },
@@ -1856,7 +2017,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                       <span title="Rank 6 - 10">Top 10</span>
                     </div>
 
-                    {/* Row Values for Links, Local, Google Shopping */}
+                    {/* Row Values for Links, Local, Google Shopping with Keyword Hover Tooltips */}
                     {rows.map(row => (
                       <div
                         key={row.id}
@@ -1870,9 +2031,9 @@ export default function PositionAnalysisPage({ onNavigate }) {
                           fontWeight: 800
                         }}
                       >
-                        <span style={{ color: row.color }}>{row.top1}</span>
-                        <span style={{ color: row.color }}>{row.top5}</span>
-                        <span style={{ color: row.color }}>{row.top10}</span>
+                        <RankHoverCell count={row.top1} kwList={row.top1Kws} title={`${row.label} Top 1`} color={row.color} />
+                        <RankHoverCell count={row.top5} kwList={row.top5Kws} title={`${row.label} Top 2–5`} color={row.color} />
+                        <RankHoverCell count={row.top10} kwList={row.top10Kws} title={`${row.label} Top 6–10`} color={row.color} />
                       </div>
                     ))}
                   </div>
@@ -2101,7 +2262,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                       fontSize: 12
                     }}
                   >
-                    <span style={{ fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 130 }}>{item.name}</span>
+                    <span style={{ fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 130 }} title={item.name}>{item.name}</span>
                     <span style={{ fontWeight: 800, color: '#d97706', background: '#fffbeb', padding: '2px 7px', borderRadius: 4, fontSize: 11 }}>
                       {item.count}
                     </span>
@@ -2460,6 +2621,37 @@ export default function PositionAnalysisPage({ onNavigate }) {
               );
             })()}
           </div>
+        </div>
+
+        {/* View all button redirecting to Top Pages tab */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12, paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
+          <button
+            onClick={() => onNavigate && onNavigate('search-visibility/top-pages')}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#f1f5f9';
+              e.currentTarget.style.color = '#7c3aed';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = '#0f172a';
+            }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#0f172a',
+              fontSize: 14.5,
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '6px 12px',
+              borderRadius: 6,
+              transition: 'all 0.15s ease-in-out'
+            }}
+          >
+            View all &gt;
+          </button>
         </div>
       </div>
 

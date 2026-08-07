@@ -117,6 +117,18 @@ export default function AiAnalysisPage() {
       });
     }
 
+    // STRICT DEDUPLICATION: Ensure no duplicate keyword rows exist
+    const seenKwSet = new Set();
+    const uniqueFilteredKws = [];
+    filteredKws.forEach(k => {
+      const kwLower = String(k.kw || '').toLowerCase().trim();
+      if (kwLower && !seenKwSet.has(kwLower)) {
+        seenKwSet.add(kwLower);
+        uniqueFilteredKws.push(k);
+      }
+    });
+    filteredKws = uniqueFilteredKws;
+
     return filteredKws.map(k => {
       const kwLower = String(k.kw || '').toLowerCase().trim();
 
@@ -245,10 +257,21 @@ export default function AiAnalysisPage() {
       });
     });
 
-    // Sort in decreasing order of Total KWs by default
-    citationsList.sort((a, b) => b.totalKws - a.totalKws);
+    // STRICT DEDUPLICATION: Ensure no duplicate URL rows exist
+    const seenUrlSet = new Set();
+    const uniqueCitationsList = [];
+    citationsList.forEach(c => {
+      const cleanUrl = String(c.url || '').toLowerCase().trim().replace(/\/$/, '');
+      if (cleanUrl && !seenUrlSet.has(cleanUrl)) {
+        seenUrlSet.add(cleanUrl);
+        uniqueCitationsList.push(c);
+      }
+    });
 
-    return citationsList;
+    // Sort in decreasing order of Total KWs by default
+    uniqueCitationsList.sort((a, b) => b.totalKws - a.totalKws);
+
+    return uniqueCitationsList;
   };
 
   const mentionsData = getEngineMentions();

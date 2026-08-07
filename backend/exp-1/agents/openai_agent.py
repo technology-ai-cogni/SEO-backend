@@ -272,8 +272,26 @@ class OpenAIAgent(BaseAgent):
                 parsed = json.loads(json_match.group(0))
             else:
                 parsed = json.loads(ai_text)
-            mentions_kws = parsed.get("mentioned_keywords") or []
-            cited_list = parsed.get("cited_pages_list") or []
+            mentions_raw = parsed.get("mentioned_keywords") or []
+            cited_raw = parsed.get("cited_pages_list") or []
+
+            # Deduplicate mentioned keywords preserving order
+            mentions_kws = []
+            seen_m = set()
+            for item in mentions_raw:
+                clean_item = str(item).strip()
+                if clean_item and clean_item.lower() not in seen_m:
+                    seen_m.add(clean_item.lower())
+                    mentions_kws.append(clean_item)
+
+            # Deduplicate cited pages list preserving order
+            cited_list = []
+            seen_c = set()
+            for item in cited_raw:
+                clean_item = str(item).strip()
+                if clean_item and clean_item.lower() not in seen_c:
+                    seen_c.add(clean_item.lower())
+                    cited_list.append(clean_item)
 
             # Ensure counts match exact array lengths in hover popover
             mentions_count = len(mentions_kws) if len(mentions_kws) > 0 else int(parsed.get("mentions", 0))
