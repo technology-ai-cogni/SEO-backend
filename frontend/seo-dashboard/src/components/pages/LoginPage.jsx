@@ -27,7 +27,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
 
     try {
       // 1) Attempt production REST API login first
-      const res = await fetch('http://localhost:8000/auth/login', {
+      const res = await fetch('http://52.44.80.193:8000/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password: password.trim() })
@@ -52,8 +52,9 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
         return;
       }
     } catch (err) {
-      // Fallback for offline mode if backend is unreachable
-      loggedInUser = { email: email.trim(), name: email.split('@')[0], role: selectedRole };
+      setErrorMsg('Unable to connect to authentication server. Please try again.');
+      setIsLoading(false);
+      return;
     }
 
     setIsLoading(false);
