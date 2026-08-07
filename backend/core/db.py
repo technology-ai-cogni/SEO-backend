@@ -196,6 +196,23 @@ def init_db():
         """))
 
         conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS recycle_bin (
+                id BIGSERIAL PRIMARY KEY,
+                item_type TEXT NOT NULL DEFAULT 'project',
+                item_id TEXT,
+                project_slug TEXT NOT NULL,
+                project_name TEXT NOT NULL,
+                item_name TEXT NOT NULL DEFAULT '',
+                deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                data JSONB NOT NULL
+            )
+        """))
+        conn.execute(text("ALTER TABLE recycle_bin ADD COLUMN IF NOT EXISTS item_type TEXT NOT NULL DEFAULT 'project'"))
+        conn.execute(text("ALTER TABLE recycle_bin ADD COLUMN IF NOT EXISTS item_id TEXT"))
+        conn.execute(text("ALTER TABLE recycle_bin ADD COLUMN IF NOT EXISTS item_name TEXT NOT NULL DEFAULT ''"))
+        conn.execute(text("ALTER TABLE recycle_bin DROP CONSTRAINT IF EXISTS recycle_bin_project_slug_key"))
+
+        conn.execute(text("""
             CREATE TABLE IF NOT EXISTS projects (
                 id BIGSERIAL PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
@@ -450,43 +467,103 @@ def get_project_by_slug(slug, include_deleted=False):
         return dict(row) if row else None
 
 
+def get_recycle_bin_project(slug_or_name):
+    with engine.begin() as conn:
+        row = conn.execute(text("""
+            SELECT * FROM recycle_bin
+            WHERE (project_slug = :p OR project_name = :p OR item_id = :p) AND item_type = 'project'
+            LIMIT 1
+        """), {"p": slug_or_name}).mappings().fetchone()
+        return dict(row) if row else None
+
+
 def list_projects(include_deleted=False, only_deleted=False):
     with engine.begin() as conn:
-        sql = "SELECT * FROM projects"
         if only_deleted:
-            sql += " WHERE deleted_at IS NOT NULL"
-        elif not include_deleted:
-            sql += " WHERE deleted_at IS NULL"
-        sql += " ORDER BY created_at DESC"
+            rows = conn.execute(text("""
+                SELECT id, project_slug AS slug, project_name AS name, deleted_at,
+                       COALESCE(data->'domains'->0->>'domain', project_name) AS domain
+                FROM recycle_bin
+                WHERE item_type = 'project'
+                ORDER BY deleted_at DESC
+            """)).mappings().fetchall()
+            return [dict(r) for r in rows]
+
+        sql = "SELECT * FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC"
         rows = conn.execute(text(sql)).mappings().fetchall()
         return [dict(r) for r in rows]
 
 
+def list_recycle_bin_items(item_type=None):
+    with engine.begin() as conn:
+        sql = """
+            SELECT id, item_type, item_id, project_slug, project_name, item_name, deleted_at,
+                   COALESCE(data->'domains'->0->>'domain', data->>'domain', data->>'url', '') AS domain
+            FROM recycle_bin
+        """
+        params = {}
+        if item_type and item_type != 'all':
+            if item_type == 'keyword':
+                sql += " WHERE item_type IN ('keyword', 'keywords')"
+            elif item_type == 'page':
+                sql += " WHERE item_type IN ('page', 'pages')"
+            elif item_type == 'competitor':
+                sql += " WHERE item_type IN ('competitor', 'competitors')"
+            else:
+                sql += " WHERE item_type = :item_type"
+                params["item_type"] = item_type
+        sql += " ORDER BY deleted_at DESC"
+
+        rows = conn.execute(text(sql), params).mappings().fetchall()
+        return [dict(r) for r in rows]
+
+
 def soft_delete_project(slug):
-    """Marks a project as deleted by setting deleted_at = now()"""
+    """Archives a project and all its associated data into the `recycle_bin` table,
+    then purges active records from main tables so creating a new project with the same name starts 100% fresh."""
     with engine.begin() as conn:
-        conn.execute(text("UPDATE projects SET deleted_at = now() WHERE slug = :slug"), {"slug": slug})
+        proj_row = conn.execute(text("SELECT * FROM projects WHERE slug = :slug"), {"slug": slug}).mappings().fetchone()
+        if not proj_row:
+            return
 
+        proj_dict = dict(proj_row)
+        domain_rows = [dict(r) for r in conn.execute(text("SELECT * FROM domains WHERE project_slug = :slug"), {"slug": slug}).mappings().fetchall()]
+        kw_rows = [dict(r) for r in conn.execute(text("SELECT * FROM keyword_categories WHERE project_name = :slug"), {"slug": slug}).mappings().fetchall()]
+        cat_rows = [dict(r) for r in conn.execute(text("SELECT * FROM categories WHERE project_name = :slug"), {"slug": slug}).mappings().fetchall()]
+        cls_rows = [dict(r) for r in conn.execute(text("SELECT * FROM clusters WHERE project_name = :slug"), {"slug": slug}).mappings().fetchall()]
+        map_rows = [dict(r) for r in conn.execute(text("SELECT * FROM category_cluster_map WHERE project_name = :slug"), {"slug": slug}).mappings().fetchall()]
+        page_rows = [dict(r) for r in conn.execute(text("SELECT * FROM pages WHERE project_name = :slug"), {"slug": slug}).mappings().fetchall()]
+        comp_page_rows = [dict(r) for r in conn.execute(text("SELECT * FROM competitor_pages WHERE project_name = :slug"), {"slug": slug}).mappings().fetchall()]
+        comp_rows = [dict(r) for r in conn.execute(text("SELECT * FROM competitors WHERE project_slug = :slug"), {"slug": slug}).mappings().fetchall()]
 
-def restore_project(slug):
-    """Restores a soft-deleted project by setting deleted_at = NULL"""
-    with engine.begin() as conn:
-        conn.execute(text("UPDATE projects SET deleted_at = NULL WHERE slug = :slug"), {"slug": slug})
+        def _clean_json(obj):
+            if isinstance(obj, list):
+                return [_clean_json(i) for i in obj]
+            if isinstance(obj, dict):
+                return {k: (v.isoformat() if hasattr(v, 'isoformat') else str(v) if isinstance(v, uuid.UUID) else v) for k, v in obj.items()}
+            return obj
 
+        archive_data = {
+            "project": _clean_json(proj_dict),
+            "domains": _clean_json(domain_rows),
+            "keywords": _clean_json(kw_rows),
+            "categories": _clean_json(cat_rows),
+            "clusters": _clean_json(cls_rows),
+            "category_cluster_map": _clean_json(map_rows),
+            "pages": _clean_json(page_rows),
+            "competitor_pages": _clean_json(comp_page_rows),
+            "competitors": _clean_json(comp_rows),
+        }
 
-def delete_project(slug):
-    """Removes a project and everything scoped to it in one transaction --
-    domains, keyword_categories, categories, clusters,
-    category_cluster_map, and pages all carry a FK on projects.slug, so
-    they have to go before the projects row itself or the DB rejects the
-    delete.
+        conn.execute(text("""
+            INSERT INTO recycle_bin (item_type, item_id, project_slug, project_name, item_name, deleted_at, data)
+            VALUES ('project', :slug, :slug, :name, :name, now(), CAST(:data AS JSONB))
+        """), {
+            "slug": slug,
+            "name": proj_dict.get("name") or slug,
+            "data": json.dumps(archive_data)
+        })
 
-    Runs over the same direct Postgres connection as the rest of this
-    module, which is why this lives here rather than in the frontend --
-    the frontend's Supabase client is subject to RLS policies that only
-    permit it to touch domains/projects/keyword_categories, not the
-    categories/clusters/category_cluster_map/pages tables."""
-    with engine.begin() as conn:
         conn.execute(text("DELETE FROM keyword_categories WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM domains WHERE project_slug = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM categories WHERE project_name = :slug"), {"slug": slug})
@@ -494,37 +571,138 @@ def delete_project(slug):
         conn.execute(text("DELETE FROM category_cluster_map WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM pages WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM competitor_pages WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM competitors WHERE project_slug = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM projects WHERE slug = :slug"), {"slug": slug})
+
+
+def restore_project(slug):
+    """Restores an archived project from `recycle_bin` back into active database tables."""
+    with engine.begin() as conn:
+        row = conn.execute(text("""
+            SELECT * FROM recycle_bin
+            WHERE (project_slug = :slug OR item_id = :slug) AND item_type = 'project'
+            LIMIT 1
+        """), {"slug": slug}).mappings().fetchone()
+
+        if not row:
+            conn.execute(text("UPDATE projects SET deleted_at = NULL WHERE slug = :slug"), {"slug": slug})
+            return
+
+        archive_data = json.loads(row["data"]) if isinstance(row["data"], str) else row["data"]
+
+        p = archive_data.get("project")
+        if p:
+            conn.execute(text("""
+                INSERT INTO projects (name, slug, created_at)
+                VALUES (:name, :slug, now())
+                ON CONFLICT (slug) DO UPDATE SET deleted_at = NULL
+            """), {"name": p.get("name", slug), "slug": slug})
+
+        for d in archive_data.get("domains", []):
+            conn.execute(text("""
+                INSERT INTO domains (domain, project_name, project_slug, target_regions, platforms, domain_authority, users, traffic, keywords_count, target_pages_count, blog_pages_count)
+                VALUES (:domain, :project_name, :project_slug, :target_regions, :platforms, :domain_authority, CAST(:users AS JSONB), :traffic, :keywords_count, :target_pages_count, :blog_pages_count)
+                ON CONFLICT (domain) DO NOTHING
+            """), {
+                "domain": d.get("domain"),
+                "project_name": d.get("project_name", slug),
+                "project_slug": slug,
+                "target_regions": d.get("target_regions"),
+                "platforms": d.get("platforms"),
+                "domain_authority": d.get("domain_authority"),
+                "users": json.dumps(d.get("users")) if d.get("users") is not None else None,
+                "traffic": d.get("traffic"),
+                "keywords_count": d.get("keywords_count"),
+                "target_pages_count": d.get("target_pages_count"),
+                "blog_pages_count": d.get("blog_pages_count"),
+            })
+
+        for k in archive_data.get("keywords", []):
+            conn.execute(text("""
+                INSERT INTO keyword_categories (project_name, keyword, sv, kw_diff, cluster, category, type, target_type, subtype, target_geo, priority, landing_page_url, rank, rank_checked_at)
+                VALUES (:project_name, :keyword, :sv, :kw_diff, :cluster, :category, :type, :target_type, :subtype, :target_geo, :priority, :landing_page_url, :rank, :rank_checked_at)
+            """), {
+                "project_name": slug, "keyword": k.get("keyword"), "sv": k.get("sv"), "kw_diff": k.get("kw_diff"),
+                "cluster": k.get("cluster"), "category": k.get("category"), "type": k.get("type"),
+                "target_type": k.get("target_type"), "subtype": k.get("subtype"), "target_geo": k.get("target_geo"),
+                "priority": k.get("priority"), "landing_page_url": k.get("landing_page_url"),
+                "rank": k.get("rank"), "rank_checked_at": k.get("rank_checked_at"),
+            })
+
+        for c in archive_data.get("categories", []):
+            conn.execute(text("INSERT INTO categories (project_name, name) VALUES (:project_name, :name) ON CONFLICT DO NOTHING"), {"project_name": slug, "name": c.get("name")})
+        for c in archive_data.get("clusters", []):
+            conn.execute(text("INSERT INTO clusters (project_name, name) VALUES (:project_name, :name) ON CONFLICT DO NOTHING"), {"project_name": slug, "name": c.get("name")})
+        for m in archive_data.get("category_cluster_map", []):
+            conn.execute(text("INSERT INTO category_cluster_map (project_name, category, cluster) VALUES (:project_name, :category, :cluster) ON CONFLICT DO NOTHING"), {"project_name": slug, "category": m.get("category"), "cluster": m.get("cluster")})
+
+        for pg in archive_data.get("pages", []):
+            conn.execute(text("""
+                INSERT INTO pages (project_name, page_name, url, cluster, category, target_category, target_type)
+                VALUES (:project_name, :page_name, :url, :cluster, :category, :target_category, :target_type)
+            """), {
+                "project_name": slug, "page_name": pg.get("page_name"), "url": pg.get("url"),
+                "cluster": pg.get("cluster"), "category": pg.get("category"),
+                "target_category": pg.get("target_category"), "target_type": pg.get("target_type"),
+            })
+
+        for comp in archive_data.get("competitors", []):
+            conn.execute(text("""
+                INSERT INTO competitors (domain, name, da, target_regions, project_slug, category, cluster, type, website_type)
+                VALUES (:domain, :name, :da, :target_regions, :project_slug, :category, :cluster, :type, :website_type)
+                ON CONFLICT (domain, project_slug) DO NOTHING
+            """), {
+                "domain": comp.get("domain"), "name": comp.get("name"), "da": comp.get("da"),
+                "target_regions": comp.get("target_regions"), "project_slug": slug,
+                "category": comp.get("category"), "cluster": comp.get("cluster"),
+                "type": comp.get("type"), "website_type": comp.get("website_type"),
+            })
+
+        conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": row["id"]})
+
+
+def delete_project(slug):
+    """Removes a project completely from both recycle_bin and active tables."""
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM recycle_bin WHERE project_slug = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM keyword_categories WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM domains WHERE project_slug = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM categories WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM clusters WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM category_cluster_map WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM pages WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM competitor_pages WHERE project_name = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM competitors WHERE project_slug = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM projects WHERE slug = :slug"), {"slug": slug})
 
 
 def purge_expired_projects():
-    """Finds all projects soft-deleted more than 30 days ago and deletes them permanently."""
+    """Finds all archived projects in recycle_bin older than 30 days and purges them."""
     with engine.begin() as conn:
-        rows = conn.execute(text("""
-            SELECT slug FROM projects 
-            WHERE deleted_at IS NOT NULL 
-              AND deleted_at < now() - INTERVAL '30 days'
-        """)).fetchall()
-        for r in rows:
-            slug = r.slug
-            print(f"[Purge] Hard-deleting project {slug} (older than 30 days)", flush=True)
-            conn.execute(text("DELETE FROM keyword_categories WHERE project_name = :slug"), {"slug": slug})
-            conn.execute(text("DELETE FROM domains WHERE project_slug = :slug"), {"slug": slug})
-            conn.execute(text("DELETE FROM categories WHERE project_name = :slug"), {"slug": slug})
-            conn.execute(text("DELETE FROM clusters WHERE project_name = :slug"), {"slug": slug})
-            conn.execute(text("DELETE FROM category_cluster_map WHERE project_name = :slug"), {"slug": slug})
-            conn.execute(text("DELETE FROM pages WHERE project_name = :slug"), {"slug": slug})
-            conn.execute(text("DELETE FROM projects WHERE slug = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM recycle_bin WHERE deleted_at < now() - INTERVAL '30 days'"))
 
 
 def delete_project_kw_data(slug):
     """Removes just this project's KW Cluster data (keyword_categories,
     categories, clusters, category_cluster_map) -- leaves the project
     itself, its domain registration, and its pages untouched, so it still
-    shows up on the Domain and Pages tabs afterward. This is what the KW
-    Cluster tab's delete button calls -- unlike delete_project() above,
-    which removes the project everywhere."""
+    shows up on the Domain and Pages tabs afterward."""
     with engine.begin() as conn:
+        rows = conn.execute(text("SELECT * FROM keyword_categories WHERE project_name = :slug"), {"slug": slug}).mappings().fetchall()
+        if rows:
+            def _clean(v):
+                return v.isoformat() if hasattr(v, 'isoformat') else str(v) if isinstance(v, uuid.UUID) else v
+            clean_rows = [{k: _clean(v) for k, v in dict(r).items()} for r in rows]
+            conn.execute(text("""
+                INSERT INTO recycle_bin (item_type, item_id, project_slug, project_name, item_name, deleted_at, data)
+                VALUES ('keywords', :item_id, :project_slug, :project_name, :item_name, now(), CAST(:data AS JSONB))
+            """), {
+                "item_id": f"keywords_{slug}",
+                "project_slug": slug,
+                "project_name": slug,
+                "item_name": f"Keywords dataset of {slug}",
+                "data": json.dumps(clean_rows)
+            })
         conn.execute(text("DELETE FROM keyword_categories WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM categories WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM clusters WHERE project_name = :slug"), {"slug": slug})
@@ -535,8 +713,23 @@ def delete_project_pages(slug):
     """Removes just this project's page rows (Add Pages uploads) -- leaves
     the project, its domain registration, and its KW Cluster data
     untouched, so it still shows up on the Domain and KW Cluster tabs
-    afterward. This is what the Pages tab's delete button calls."""
+    afterward."""
     with engine.begin() as conn:
+        rows = conn.execute(text("SELECT * FROM pages WHERE project_name = :slug"), {"slug": slug}).mappings().fetchall()
+        if rows:
+            def _clean(v):
+                return v.isoformat() if hasattr(v, 'isoformat') else str(v) if isinstance(v, uuid.UUID) else v
+            clean_rows = [{k: _clean(v) for k, v in dict(r).items()} for r in rows]
+            conn.execute(text("""
+                INSERT INTO recycle_bin (item_type, item_id, project_slug, project_name, item_name, deleted_at, data)
+                VALUES ('pages', :item_id, :project_slug, :project_name, :item_name, now(), CAST(:data AS JSONB))
+            """), {
+                "item_id": f"pages_{slug}",
+                "project_slug": slug,
+                "project_name": slug,
+                "item_name": f"Pages dataset of {slug}",
+                "data": json.dumps(clean_rows)
+            })
         conn.execute(text("DELETE FROM pages WHERE project_name = :slug"), {"slug": slug})
 
 
@@ -987,15 +1180,14 @@ def update_page_row(row_id, updates):
 
 
 def delete_page_row(row_id):
-    with engine.begin() as conn:
-        conn.execute(text("DELETE FROM pages WHERE id = :id"), {"id": row_id})
+    archive_and_delete_page(row_id)
 
 
 def bulk_delete_page_rows(ids):
     if not ids:
         return
-    with engine.begin() as conn:
-        conn.execute(text("DELETE FROM pages WHERE id = ANY(:ids)"), {"ids": ids})
+    for page_id in ids:
+        archive_and_delete_page(page_id)
 
 
 # --- Competitor Pages (separate db for Competitors tab Add Pages) ---
@@ -1218,12 +1410,26 @@ def save_url_classification(url: str, website_type: str, is_competitor: str = "N
 
 
 def delete_competitor(competitor_id):
-    with engine.begin() as conn:
-        conn.execute(text("DELETE FROM competitors WHERE id = :id"), {"id": competitor_id})
+    archive_and_delete_competitor(competitor_id)
 
 
 def delete_competitors_by_project(project_slug):
     with engine.begin() as conn:
+        rows = conn.execute(text("SELECT * FROM competitors WHERE project_slug = :project_slug"), {"project_slug": project_slug}).mappings().fetchall()
+        for row in rows:
+            r = dict(row)
+            def _clean(v):
+                return v.isoformat() if hasattr(v, 'isoformat') else str(v) if isinstance(v, uuid.UUID) else v
+            conn.execute(text("""
+                INSERT INTO recycle_bin (item_type, item_id, project_slug, project_name, item_name, deleted_at, data)
+                VALUES ('competitor', :item_id, :project_slug, :project_name, :item_name, now(), CAST(:data AS JSONB))
+            """), {
+                "item_id": str(r.get("id")),
+                "project_slug": project_slug,
+                "project_name": project_slug,
+                "item_name": r.get("domain") or r.get("name") or f"Competitor #{r.get('id')}",
+                "data": json.dumps({k: _clean(v) for k, v in r.items()})
+            })
         conn.execute(text("DELETE FROM competitors WHERE project_slug = :project_slug"), {"project_slug": project_slug})
 
 
@@ -1722,6 +1928,192 @@ def get_audit_logs(limit=200, status_filter=None, search_query=None):
 def clear_audit_logs():
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM audit_logs"))
+
+
+def archive_and_delete_keyword(kw_id):
+    with engine.begin() as conn:
+        row = conn.execute(text("SELECT * FROM keyword_categories WHERE id = :id"), {"id": kw_id}).mappings().fetchone()
+        if row:
+            r = dict(row)
+            def _clean(v):
+                return v.isoformat() if hasattr(v, 'isoformat') else str(v) if isinstance(v, uuid.UUID) else v
+            conn.execute(text("""
+                INSERT INTO recycle_bin (item_type, item_id, project_slug, project_name, item_name, deleted_at, data)
+                VALUES ('keyword', :item_id, :project_slug, :project_name, :item_name, now(), CAST(:data AS JSONB))
+            """), {
+                "item_id": str(kw_id),
+                "project_slug": r.get("project_name", ""),
+                "project_name": r.get("project_name", ""),
+                "item_name": r.get("keyword") or f"Keyword #{kw_id}",
+                "data": json.dumps({k: _clean(v) for k, v in r.items()})
+            })
+            conn.execute(text("DELETE FROM keyword_categories WHERE id = :id"), {"id": kw_id})
+
+
+def archive_and_delete_page(page_id):
+    with engine.begin() as conn:
+        row = conn.execute(text("SELECT * FROM pages WHERE id = :id"), {"id": page_id}).mappings().fetchone()
+        if row:
+            r = dict(row)
+            def _clean(v):
+                return v.isoformat() if hasattr(v, 'isoformat') else str(v) if isinstance(v, uuid.UUID) else v
+            conn.execute(text("""
+                INSERT INTO recycle_bin (item_type, item_id, project_slug, project_name, item_name, deleted_at, data)
+                VALUES ('page', :item_id, :project_slug, :project_name, :item_name, now(), CAST(:data AS JSONB))
+            """), {
+                "item_id": str(page_id),
+                "project_slug": r.get("project_name", ""),
+                "project_name": r.get("project_name", ""),
+                "item_name": r.get("page_name") or r.get("url") or f"Page #{page_id}",
+                "data": json.dumps({k: _clean(v) for k, v in r.items()})
+            })
+            conn.execute(text("DELETE FROM pages WHERE id = :id"), {"id": page_id})
+
+
+def archive_and_delete_competitor(comp_id):
+    with engine.begin() as conn:
+        row = conn.execute(text("SELECT * FROM competitors WHERE id = :id"), {"id": comp_id}).mappings().fetchone()
+        if row:
+            r = dict(row)
+            def _clean(v):
+                return v.isoformat() if hasattr(v, 'isoformat') else str(v) if isinstance(v, uuid.UUID) else v
+            conn.execute(text("""
+                INSERT INTO recycle_bin (item_type, item_id, project_slug, project_name, item_name, deleted_at, data)
+                VALUES ('competitor', :item_id, :project_slug, :project_name, :item_name, now(), CAST(:data AS JSONB))
+            """), {
+                "item_id": str(comp_id),
+                "project_slug": r.get("project_slug", ""),
+                "project_name": r.get("project_slug", ""),
+                "item_name": r.get("domain") or r.get("name") or f"Competitor #{comp_id}",
+                "data": json.dumps({k: _clean(v) for k, v in r.items()})
+            })
+            conn.execute(text("DELETE FROM competitors WHERE id = :id"), {"id": comp_id})
+
+
+def restore_recycle_bin_item(item_identifier):
+    with engine.begin() as conn:
+        row = None
+        if str(item_identifier).isdigit():
+            row = conn.execute(text("SELECT * FROM recycle_bin WHERE id = :id"), {"id": int(item_identifier)}).mappings().fetchone()
+        if not row:
+            row = conn.execute(text("""
+                SELECT * FROM recycle_bin
+                WHERE project_slug = :p OR item_id = :p OR item_name = :p
+                LIMIT 1
+            """), {"p": str(item_identifier)}).mappings().fetchone()
+
+        if not row:
+            return None
+
+        r = dict(row)
+        item_type = r.get("item_type", "project")
+        data = json.loads(r["data"]) if isinstance(r["data"], str) else r["data"]
+
+        if item_type == "project":
+            restore_project(r["project_slug"])
+            return {"restored": r["project_slug"], "type": "project"}
+
+        elif item_type == "page":
+            conn.execute(text("""
+                INSERT INTO pages (project_name, page_name, url, cluster, category, target_category, target_type)
+                VALUES (:project_name, :page_name, :url, :cluster, :category, :target_category, :target_type)
+            """), {
+                "project_name": data.get("project_name"),
+                "page_name": data.get("page_name"),
+                "url": data.get("url"),
+                "cluster": data.get("cluster"),
+                "category": data.get("category"),
+                "target_category": data.get("target_category"),
+                "target_type": data.get("target_type"),
+            })
+            conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": r["id"]})
+            return {"restored": r["item_name"], "type": "page"}
+
+        elif item_type == "pages":
+            for page in data:
+                conn.execute(text("""
+                    INSERT INTO pages (project_name, page_name, url, cluster, category, target_category, target_type)
+                    VALUES (:project_name, :page_name, :url, :cluster, :category, :target_category, :target_type)
+                """), {
+                    "project_name": page.get("project_name"),
+                    "page_name": page.get("page_name"),
+                    "url": page.get("url"),
+                    "cluster": page.get("cluster"),
+                    "category": page.get("category"),
+                    "target_category": page.get("target_category"),
+                    "target_type": page.get("target_type"),
+                })
+            conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": r["id"]})
+            return {"restored": r["item_name"], "type": "pages"}
+
+        elif item_type == "keyword":
+            conn.execute(text("""
+                INSERT INTO keyword_categories (project_name, keyword, sv, kw_diff, cluster, category, type, target_type, subtype, target_geo, priority, landing_page_url, rank)
+                VALUES (:project_name, :keyword, :sv, :kw_diff, :cluster, :category, :type, :target_type, :subtype, :target_geo, :priority, :landing_page_url, :rank)
+            """), {
+                "project_name": data.get("project_name"), "keyword": data.get("keyword"),
+                "sv": data.get("sv"), "kw_diff": data.get("kw_diff"),
+                "cluster": data.get("cluster"), "category": data.get("category"),
+                "type": data.get("type"), "target_type": data.get("target_type"),
+                "subtype": data.get("subtype"), "target_geo": data.get("target_geo"),
+                "priority": data.get("priority"), "landing_page_url": data.get("landing_page_url"),
+                "rank": data.get("rank")
+            })
+            conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": r["id"]})
+            return {"restored": r["item_name"], "type": "keyword"}
+
+        elif item_type == "keywords":
+            for kw in data:
+                conn.execute(text("""
+                    INSERT INTO keyword_categories (project_name, keyword, sv, kw_diff, cluster, category, type, target_type, subtype, target_geo, priority, landing_page_url, rank)
+                    VALUES (:project_name, :keyword, :sv, :kw_diff, :cluster, :category, :type, :target_type, :subtype, :target_geo, :priority, :landing_page_url, :rank)
+                """), {
+                    "project_name": kw.get("project_name"), "keyword": kw.get("keyword"),
+                    "sv": kw.get("sv"), "kw_diff": kw.get("kw_diff"),
+                    "cluster": kw.get("cluster"), "category": kw.get("category"),
+                    "type": kw.get("type"), "target_type": kw.get("target_type"),
+                    "subtype": kw.get("subtype"), "target_geo": kw.get("target_geo"),
+                    "priority": kw.get("priority"), "landing_page_url": kw.get("landing_page_url"),
+                    "rank": kw.get("rank")
+                })
+            conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": r["id"]})
+            return {"restored": r["item_name"], "type": "keywords"}
+
+        elif item_type == "competitor":
+            conn.execute(text("""
+                INSERT INTO competitors (domain, name, da, target_regions, project_slug, category, cluster, type, website_type)
+                VALUES (:domain, :name, :da, :target_regions, :project_slug, :category, :cluster, :type, :website_type)
+            """), {
+                "domain": data.get("domain"), "name": data.get("name"), "da": data.get("da"),
+                "target_regions": data.get("target_regions"), "project_slug": data.get("project_slug"),
+                "category": data.get("category"), "cluster": data.get("cluster"),
+                "type": data.get("type"), "website_type": data.get("website_type"),
+            })
+            conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": r["id"]})
+            return {"restored": r["item_name"], "type": "competitor"}
+
+        elif item_type == "competitors":
+            for comp in data:
+                conn.execute(text("""
+                    INSERT INTO competitors (domain, name, da, target_regions, project_slug, category, cluster, type, website_type)
+                    VALUES (:domain, :name, :da, :target_regions, :project_slug, :category, :cluster, :type, :website_type)
+                """), {
+                    "domain": comp.get("domain"), "name": comp.get("name"), "da": comp.get("da"),
+                    "target_regions": comp.get("target_regions"), "project_slug": comp.get("project_slug"),
+                    "category": comp.get("category"), "cluster": comp.get("cluster"),
+                    "type": comp.get("type"), "website_type": comp.get("website_type"),
+                })
+            conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": r["id"]})
+            return {"restored": r["item_name"], "type": "competitors"}
+
+        return None
+
+
+def delete_recycle_bin_item(item_identifier):
+    with engine.begin() as conn:
+        if str(item_identifier).isdigit():
+            conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": int(item_identifier)})
+        conn.execute(text("DELETE FROM recycle_bin WHERE project_slug = :p OR item_id = :p"), {"p": str(item_identifier)})
 
 
 if __name__ == "__main__":

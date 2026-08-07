@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { User, Lock, Mail, Shield, CheckCircle, AlertCircle, Eye, EyeOff, Save, RotateCcw, Trash2, RefreshCw, FileText } from 'lucide-react';
+import { User, Lock, Mail, Shield, CheckCircle, AlertCircle, Eye, EyeOff, Save, RotateCcw, Trash2, RefreshCw, FileText, AlertTriangle, X } from 'lucide-react';
 import { hasPermission, PERMISSIONS } from '../../lib/permissions';
-import { fetchAuditLogsApi, createAuditLogApi, clearAuditLogsApi } from '../../lib/projectsApi';
+import { fetchAuditLogsApi, createAuditLogApi, clearAuditLogsApi, fetchRecycleBinItemsApi, restoreRecycleBinItemApi, hardDeleteRecycleBinItemApi } from '../../lib/projectsApi';
 
 export default function ProfilePage({ user, onUserUpdate, onNavigate }) {
   const [name, setName] = useState(user?.name || '');
@@ -19,12 +19,14 @@ export default function ProfilePage({ user, onUserUpdate, onNavigate }) {
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
 
-  // --- Project Restoration States ---
-  const [deletedProjects, setDeletedProjects] = useState([]);
-  const [selectedProjectSlug, setSelectedProjectSlug] = useState('');
-  const [restoreMsg, setRestoreMsg] = useState({ type: '', text: '' });
-  const [loadingDeleted, setLoadingDeleted] = useState(false);
+  // --- Recycle Bin States ---
+  const [recycleBinItems, setRecycleBinItems] = useState([]);
+  const [recycleBinTab, setRecycleBinTab] = useState('all');
+  const [loadingRecycleBin, setLoadingRecycleBin] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [restoreMsg, setRestoreMsg] = useState({ type: '', text: '' });
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [showConfirmDeleteModal, setShowConfirmDeleteModal] = useState(false);
 
   // --- Admin Audit Logs States ---
   const [logs, setLogs] = useState([]);
@@ -45,61 +47,66 @@ export default function ProfilePage({ user, onUserUpdate, onNavigate }) {
     }
   };
 
-  // --- Effects ---
-  useEffect(() => {
-    if (user) {
-      fetchDeletedProjects();
-    }
-  }, [user]);
-
-  useEffect(() => {
-    loadAuditLogs();
-  }, [user, logSearch, logFilterSeverity]);
-
-  // --- API Handlers ---
-  const fetchDeletedProjects = async () => {
-    setLoadingDeleted(true);
+  const loadRecycleBin = async (type = 'all') => {
+    setLoadingRecycleBin(true);
     try {
-      const response = await fetch('http://localhost:8000/projects?only_deleted=true');
-      if (response.ok) {
-        const data = await response.json();
-        setDeletedProjects(data.projects || []);
-      }
+      const data = await fetchRecycleBinItemsApi(type);
+      setRecycleBinItems(data);
     } catch (err) {
-      console.error('Failed to fetch deleted projects:', err);
+      console.error('Failed to load recycle bin items:', err);
     } finally {
-      setLoadingDeleted(false);
+      setLoadingRecycleBin(false);
     }
   };
 
-  const handleRestoreProject = async (e) => {
-    e.preventDefault();
-    setRestoreMsg({ type: '', text: '' });
-
-    if (!selectedProjectSlug) {
-      setRestoreMsg({ type: 'error', text: 'Please select a project to restore.' });
-      return;
+  // --- Effects ---
+  useEffect(() => {
+    if (user) {
+      if (hasPermission(user, PERMISSIONS.RESTORE_PROJECT)) {
+        loadRecycleBin(recycleBinTab);
+      }
+      if (hasPermission(user, PERMISSIONS.VIEW_LOGS)) {
+        loadAuditLogs();
+      }
     }
+  }, [user, recycleBinTab, logSearch, logFilterSeverity]);
 
+  // --- API Handlers ---
+  const handleRestoreItem = async (item) => {
     setRestoring(true);
+    setRestoreMsg({ type: '', text: '' });
     try {
       const currentUserEmail = user?.email || 'system';
-      const response = await fetch(`http://localhost:8000/projects/${selectedProjectSlug}/restore?user_email=${encodeURIComponent(currentUserEmail)}`, {
-        method: 'POST'
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setRestoreMsg({ type: 'error', text: data.detail || 'Failed to restore project.' });
-        return;
-      }
-
-      setRestoreMsg({ type: 'success', text: 'Project restored successfully!' });
-      setSelectedProjectSlug('');
-      fetchDeletedProjects();
+      const targetId = item.item_type === 'project' ? item.project_slug : item.id;
+      await restoreRecycleBinItemApi(targetId, currentUserEmail);
+      setRestoreMsg({ type: 'success', text: `Successfully restored ${item.item_type}: "${item.item_name}"` });
+      loadRecycleBin(recycleBinTab);
     } catch (err) {
-      setRestoreMsg({ type: 'error', text: 'Network error. Make sure backend is running.' });
+      setRestoreMsg({ type: 'error', text: err.message || 'Failed to restore item.' });
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const handlePermanentlyDeleteItem = (item) => {
+    setSelectedItem(item);
+    setShowConfirmDeleteModal(true);
+  };
+
+  const confirmPermanentlyDeleteItem = async () => {
+    if (!selectedItem) return;
+    setRestoring(true);
+    setRestoreMsg({ type: '', text: '' });
+    try {
+      const currentUserEmail = user?.email || 'system';
+      const targetId = selectedItem.item_type === 'project' ? selectedItem.project_slug : selectedItem.id;
+      await hardDeleteRecycleBinItemApi(targetId, currentUserEmail);
+      setRestoreMsg({ type: 'success', text: `Permanently deleted "${selectedItem.item_name}" from database.` });
+      setShowConfirmDeleteModal(false);
+      setSelectedItem(null);
+      loadRecycleBin(recycleBinTab);
+    } catch (err) {
+      setRestoreMsg({ type: 'error', text: err.message || 'Failed to permanently delete item.' });
     } finally {
       setRestoring(false);
     }
@@ -583,7 +590,7 @@ export default function ProfilePage({ user, onUserUpdate, onNavigate }) {
           </form>
         </div>
 
-        {/* Restore Projects Card */}
+        {/* System Recycle Bin Card */}
         {hasPermission(user, PERMISSIONS.RESTORE_PROJECT) && (
           <div style={{
             background: 'var(--surface)',
@@ -592,7 +599,7 @@ export default function ProfilePage({ user, onUserUpdate, onNavigate }) {
             boxShadow: 'var(--shadow-sm)',
             padding: 28
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
               <div style={{
                 width: 36,
                 height: 36,
@@ -605,8 +612,8 @@ export default function ProfilePage({ user, onUserUpdate, onNavigate }) {
                 <RotateCcw size={20} color="var(--accent)" />
               </div>
               <div>
-                <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Restore Deleted Projects</h2>
-                <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '2px 0 0 0' }}>Recover projects deleted within the last 30 days</p>
+                <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>System Recycle Bin</h2>
+                <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '2px 0 0 0' }}>Recover deleted projects, keywords/intents, pages, and competitors</p>
               </div>
             </div>
 
@@ -629,74 +636,251 @@ export default function ProfilePage({ user, onUserUpdate, onNavigate }) {
               </div>
             )}
 
-            <form onSubmit={handleRestoreProject} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
-                  Deleted Projects (Saved for 30 days)
-                </label>
-                <div style={{ position: 'relative' }}>
-                  {loadingDeleted ? (
-                    <div style={{ padding: '10px 14px', fontSize: 13.5, color: 'var(--text-muted)' }}>
-                      Loading deleted projects...
+            {/* Recycle Bin Tabs */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 20, borderBottom: '1px solid var(--border)', paddingBottom: 12, flexWrap: 'wrap' }}>
+              {[
+                { id: 'all', label: 'All Items' },
+                { id: 'project', label: 'Projects' },
+                { id: 'keyword', label: 'Keywords & Intents' },
+                { id: 'page', label: 'Pages' },
+                { id: 'competitor', label: 'Competitors' }
+              ].map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setRecycleBinTab(t.id)}
+                  style={{
+                    padding: '6px 14px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    borderRadius: 20,
+                    background: recycleBinTab === t.id ? 'var(--accent)' : 'var(--surface-2)',
+                    color: recycleBinTab === t.id ? '#fff' : 'var(--text-muted)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Recycle Bin Content List */}
+            {loadingRecycleBin ? (
+              <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-muted)' }}>
+                Loading recycle bin items...
+              </div>
+            ) : recycleBinItems.length === 0 ? (
+              <div style={{ padding: '32px 16px', textAlign: 'center', fontSize: 13.5, color: 'var(--text-muted)', background: 'var(--surface-2)', border: '1.5px dashed var(--border)', borderRadius: 12 }}>
+                No deleted items found in this category.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {recycleBinItems.map((item) => (
+                  <div
+                    key={item.id || item.project_slug}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '14px 20px',
+                      background: 'var(--surface-2)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 12,
+                      gap: 16
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          background: item.item_type === 'project' ? 'var(--accent-light)' : '#e2e8f0',
+                          color: item.item_type === 'project' ? 'var(--accent)' : '#475569'
+                        }}>
+                          {item.item_type}
+                        </span>
+                        <strong style={{ fontSize: 14, color: 'var(--text-primary)' }}>
+                          {item.item_name}
+                        </strong>
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        {item.item_type !== 'project' && (
+                          <span style={{ marginRight: 12 }}>Project: {item.project_name}</span>
+                        )}
+                        <span>Deleted on: {new Date(item.deleted_at).toLocaleDateString()}</span>
+                      </div>
                     </div>
-                  ) : deletedProjects.length === 0 ? (
-                    <div style={{ padding: '10px 14px', fontSize: 13.5, color: 'var(--text-muted)', background: 'var(--surface-2)', border: '1.5px solid var(--border)', borderRadius: 8 }}>
-                      No deleted projects to restore.
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        onClick={() => handleRestoreItem(item)}
+                        disabled={restoring}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          background: 'var(--green-bg)',
+                          color: 'var(--green)',
+                          border: '1px solid var(--green)',
+                          borderRadius: 8,
+                          padding: '6px 12px',
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          cursor: restoring ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        <RotateCcw size={13} />
+                        <span>Restore</span>
+                      </button>
+
+                      <button
+                        onClick={() => handlePermanentlyDeleteItem(item)}
+                        disabled={restoring}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          background: '#fef2f2',
+                          color: '#dc2626',
+                          border: '1px solid #fca5a5',
+                          borderRadius: 8,
+                          padding: '6px 12px',
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          cursor: restoring ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        <Trash2 size={13} />
+                        <span>Delete</span>
+                      </button>
                     </div>
-                  ) : (
-                    <select
-                      value={selectedProjectSlug}
-                      onChange={(e) => setSelectedProjectSlug(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        fontSize: 13.5,
-                        background: 'var(--surface)',
-                        border: '1.5px solid var(--border)',
-                        borderRadius: 8,
-                        color: 'var(--text-primary)',
-                        outline: 'none',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <option value="">-- Choose a project to restore --</option>
-                      {deletedProjects.map((p) => (
-                        <option key={p.slug} value={p.slug}>
-                          {p.name} ({p.domain})
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Confirmation Modal Popup for Recycle Bin Permanent Deletion */}
+        {showConfirmDeleteModal && selectedItem && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: 20
+          }}>
+            <div style={{
+              background: '#ffffff',
+              borderRadius: 16,
+              maxWidth: 440,
+              width: '100%',
+              padding: 28,
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2), 0 10px 10px -5px rgba(0,0,0,0.04)',
+              position: 'relative'
+            }}>
+              {/* Close Button */}
+              <button
+                type="button"
+                onClick={() => { setShowConfirmDeleteModal(false); setSelectedItem(null); }}
+                style={{
+                  position: 'absolute',
+                  top: 18,
+                  right: 18,
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: 4,
+                  borderRadius: 6
+                }}
+              >
+                <X size={18} />
+              </button>
+
+              {/* Warning Header Icon */}
+              <div style={{
+                width: 48,
+                height: 48,
+                borderRadius: 12,
+                background: '#fef2f2',
+                border: '1px solid #fecaca',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 16
+              }}>
+                <AlertTriangle size={26} color="#dc2626" />
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+              {/* Modal Title & Message */}
+              <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px 0' }}>
+                Permanently Delete {selectedItem.item_type}?
+              </h3>
+              <p style={{ fontSize: 13.5, color: '#475569', lineHeight: '1.5', margin: '0 0 24px 0' }}>
+                Are you sure you want to permanently delete <strong style={{ color: '#0f172a' }}>"{selectedItem.item_name}"</strong>?
+                <br /><br />
+                This will purge it from the database forever. <span style={{ color: '#dc2626', fontWeight: 600 }}>This action cannot be undone.</span>
+              </p>
+
+              {/* Modal Buttons */}
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
                 <button
-                  type="submit"
-                  disabled={restoring || !selectedProjectSlug}
+                  type="button"
+                  onClick={() => { setShowConfirmDeleteModal(false); setSelectedItem(null); }}
+                  disabled={restoring}
+                  style={{
+                    padding: '9px 18px',
+                    fontSize: 13.5,
+                    fontWeight: 600,
+                    color: '#475569',
+                    background: '#f1f5f9',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 8,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={confirmPermanentlyDeleteItem}
+                  disabled={restoring}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: 8,
-                    background: 'var(--accent)',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 'var(--radius-sm)',
                     padding: '9px 18px',
                     fontSize: 13.5,
                     fontWeight: 600,
-                    cursor: (restoring || !selectedProjectSlug) ? 'not-allowed' : 'pointer',
-                    opacity: (restoring || !selectedProjectSlug) ? 0.7 : 1,
-                    transition: 'background 0.15s'
+                    color: '#ffffff',
+                    background: '#dc2626',
+                    border: 'none',
+                    borderRadius: 8,
+                    cursor: restoring ? 'not-allowed' : 'pointer',
+                    opacity: restoring ? 0.7 : 1
                   }}
                 >
-                  <RotateCcw size={15} />
-                  <span>{restoring ? 'Restoring...' : 'Restore Project'}</span>
+                  <Trash2 size={15} />
+                  <span>{restoring ? 'Deleting...' : 'Yes, Delete Permanently'}</span>
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         )}
+
 
         {/* System Audit Logs Card (Admin Only) */}
         {hasPermission(user, PERMISSIONS.VIEW_LOGS) && (

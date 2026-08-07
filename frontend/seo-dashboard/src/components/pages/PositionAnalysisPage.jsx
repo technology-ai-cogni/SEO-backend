@@ -906,16 +906,14 @@ export default function PositionAnalysisPage({ onNavigate }) {
         change: String((idx % 2) + 1)
       };
 
-      let displayName = page.pageName || page.url;
-      try {
-        const path = new URL(page.url).pathname;
-        if (path && path !== '/') displayName = path;
-      } catch (e) {
-        // fallback
-      }
+      const rawName = page.pageName || page.name || page.title || page.url || '';
+      const displayName = String(rawName).trim();
+      const shortName = displayName.length > 25 ? displayName.slice(0, 23) + '...' : displayName;
 
       return {
-        name: displayName,
+        name: shortName,
+        fullName: displayName,
+        url: page.url,
         clusters: clusters.length > 0 ? clusters : ['N/A (0)'],
         clusterTrend,
         categories: categories.length > 0 ? categories : ['N/A'],
@@ -2290,8 +2288,59 @@ export default function PositionAnalysisPage({ onNavigate }) {
                         </div>
                       ) : (
                         pageAnalysisData.map((item, idx) => (
-                          <div key={idx} style={{ padding: '6px 10px', borderRadius: 6, background: idx % 2 === 0 ? '#f8fafc' : 'transparent', fontSize: 12, fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                            {item.name}
+                          <div key={idx} style={{ padding: '6px 10px', borderRadius: 6, background: idx % 2 === 0 ? '#f8fafc' : 'transparent', fontSize: 12, fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, overflow: 'visible', position: 'relative' }}>
+                            <span
+                              onMouseEnter={() => setActiveTooltip(`page-${idx}`)}
+                              onMouseLeave={() => setActiveTooltip(null)}
+                              style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', flex: 1, cursor: 'pointer' }}
+                              title={item.fullName}
+                            >
+                              {item.name}
+                            </span>
+                            {activeTooltip === `page-${idx}` && (
+                              <div style={{
+                                position: 'absolute',
+                                bottom: '100%',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                marginBottom: 6,
+                                background: '#0f172a',
+                                color: '#ffffff',
+                                padding: '6px 10px',
+                                borderRadius: 6,
+                                fontSize: 11,
+                                fontWeight: 600,
+                                whiteSpace: 'nowrap',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                zIndex: 50,
+                                pointerEvents: 'none'
+                              }}>
+                                {item.fullName}
+                              </div>
+                            )}
+                            {item.url && (
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={`Open ${item.url}`}
+                                style={{
+                                  color: '#3b82f6',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  textDecoration: 'none',
+                                  padding: 2,
+                                  borderRadius: 4,
+                                  flexShrink: 0,
+                                  transition: 'all 0.15s ease'
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.color = '#1d4ed8'}
+                                onMouseLeave={e => e.currentTarget.style.color = '#3b82f6'}
+                              >
+                                <ExternalLink size={13} />
+                              </a>
+                            )}
                           </div>
                         ))
                       )}
@@ -2339,15 +2388,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
                               }}
                             >
                               {item.clusters[0] === 'N/A (0)' ? 0 : item.clusters.length}
-                            </span>
-
-                            {/* Up/Down Trend Indicator */}
-                            <span style={{
-                              fontSize: 10.5,
-                              fontWeight: 700,
-                              color: item.clusterTrend.direction === 'up' ? '#16a34a' : '#dc2626'
-                            }}>
-                              {item.clusterTrend.direction === 'up' ? '▲' : '▼'} {item.clusterTrend.change}
                             </span>
 
                             {/* Hover Tooltip Popup */}
@@ -2424,15 +2464,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
                               }}
                             >
                               {item.categories[0] === 'N/A' ? 0 : item.categories.length}
-                            </span>
-
-                            {/* Up/Down Trend Indicator */}
-                            <span style={{
-                              fontSize: 10.5,
-                              fontWeight: 700,
-                              color: item.categoryTrend.direction === 'up' ? '#16a34a' : '#dc2626'
-                            }}>
-                              {item.categoryTrend.direction === 'up' ? '▲' : '▼'} {item.categoryTrend.change}
                             </span>
 
                             {/* Hover Tooltip Popup */}
@@ -2513,6 +2544,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
               const colors = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626'];
               const legendPages = pageAnalysisData.map((item, idx) => ({
                 name: item.name,
+                url: item.url,
                 color: colors[idx % colors.length]
               }));
 

@@ -1,6 +1,108 @@
 import { supabase } from './supabaseClient';
 import { derivedKeywordClusters, derivedPages } from '../data/mockData';
 
+export async function fetchRecycleBinItemsApi(itemType = null) {
+  if (isLocalMode) {
+    const items = JSON.parse(localStorage.getItem('seo_recycle_bin') || '[]');
+    if (itemType && itemType !== 'all') {
+      return items.filter(i => i.item_type === itemType);
+    }
+    return items;
+  }
+
+  const url = itemType && itemType !== 'all'
+    ? `${CATEGORY_API_BASE}/recycle-bin?item_type=${encodeURIComponent(itemType)}`
+    : `${CATEGORY_API_BASE}/recycle-bin`;
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Failed to fetch recycle bin items.');
+  const data = await res.json();
+  return data.items || [];
+}
+
+export async function restoreRecycleBinItemApi(itemId, userEmail = null) {
+  const email = getActiveUserEmail(userEmail);
+  if (isLocalMode) {
+    const items = JSON.parse(localStorage.getItem('seo_recycle_bin') || '[]');
+    const idx = items.findIndex(i => String(i.item_id) === String(itemId) || i.project_slug === itemId);
+    if (idx !== -1) {
+      const item = items[idx];
+      const type = item.item_type;
+      const data = item.data;
+
+      if (type === 'project') {
+        const projects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
+        const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
+        const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
+        const pages = JSON.parse(localStorage.getItem('seo_pages') || '[]');
+        const competitors = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
+
+        if (data.project) projects.push(data.project);
+        if (data.domains) domains.push(...data.domains);
+        if (data.keywords) kwRows.push(...data.keywords);
+        if (data.pages) pages.push(...data.pages);
+        if (data.competitors) competitors.push(...data.competitors);
+
+        localStorage.setItem('seo_projects', JSON.stringify(projects));
+        localStorage.setItem('seo_domains', JSON.stringify(domains));
+        localStorage.setItem('seo_keyword_categories', JSON.stringify(kwRows));
+        localStorage.setItem('seo_pages', JSON.stringify(pages));
+        localStorage.setItem('seo_competitors', JSON.stringify(competitors));
+      } else if (type === 'keyword') {
+        const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
+        kwRows.push(data);
+        localStorage.setItem('seo_keyword_categories', JSON.stringify(kwRows));
+      } else if (type === 'page') {
+        const pages = JSON.parse(localStorage.getItem('seo_pages') || '[]');
+        pages.push(data);
+        localStorage.setItem('seo_pages', JSON.stringify(pages));
+      } else if (type === 'competitor') {
+        const competitors = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
+        competitors.push(data);
+        localStorage.setItem('seo_competitors', JSON.stringify(competitors));
+      }
+
+      items.splice(idx, 1);
+      localStorage.setItem('seo_recycle_bin', JSON.stringify(items));
+    }
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/recycle-bin/${itemId}/restore?user_email=${encodeURIComponent(email)}`, {
+    method: 'POST'
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to restore item.');
+  }
+}
+
+export async function hardDeleteRecycleBinItemApi(itemId, userEmail = null) {
+  const email = getActiveUserEmail(userEmail);
+  if (isLocalMode) {
+    const items = JSON.parse(localStorage.getItem('seo_recycle_bin') || '[]');
+    const updated = items.filter(i => String(i.item_id) !== String(itemId) && i.project_slug !== itemId);
+    localStorage.setItem('seo_recycle_bin', JSON.stringify(updated));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/recycle-bin/${itemId}?user_email=${encodeURIComponent(email)}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) {
+    throw new Error('Failed to delete item permanently.');
+  }
+}
+
+export function getActiveUserEmail(passedEmail = null) {
+  if (passedEmail) return passedEmail;
+  try {
+    const savedUser = JSON.parse(sessionStorage.getItem('seo_dashboard_user') || '{}');
+    if (savedUser && savedUser.email) return savedUser.email;
+  } catch (e) {}
+  return 'system';
+}
+
 export function slugify(name) {
   return String(name)
     .toLowerCase()
@@ -236,39 +338,75 @@ export async function fetchDomainRows() {
   }
 
   let allKwRows = [];
-  let page = 0;
-  const pageSize = 1000;
-  let hasMore = true;
+  try {
+    let page = 0;
+    const pageSize = 1000;
+    let hasMore = true;
 
-  while (hasMore) {
-    const { data: kwRows, error: kwError } = await supabase
-      .from('keyword_categories')
-      .select('project_name, subtype, target_type')
-      .range(page * pageSize, (page + 1) * pageSize - 1);
+    while (hasMore) {
+      const { data: kwRows, error: kwError } = await supabase
+        .from('keyword_categories')
+        .select('project_name, subtype, target_type')
+        .range(page * pageSize, (page + 1) * pageSize - 1);
 
-    if (kwError) throw kwError;
-    if (kwRows && kwRows.length > 0) {
-      allKwRows = allKwRows.concat(kwRows);
-      if (kwRows.length < pageSize) hasMore = false;
-      else page++;
-    } else {
-      hasMore = false;
+      if (kwError) break;
+      if (kwRows && kwRows.length > 0) {
+        allKwRows = allKwRows.concat(kwRows);
+        if (kwRows.length < pageSize) hasMore = false;
+        else page++;
+      } else {
+        hasMore = false;
+      }
     }
+  } catch (e) {
+    console.warn('[fetchDomainRows] Kw count query skipped:', e);
   }
 
-  const [{ data: activeProjects, error: projectsError }, { data: domains, error: domainsError }] = await Promise.all([
-    supabase.from('projects').select('slug').is('deleted_at', null),
-    supabase.from('domains').select('*').order('created_at', { ascending: false })
-  ]);
-
-  if (projectsError) throw projectsError;
-  if (domainsError) throw domainsError;
-
-  const activeSlugs = new Set((activeProjects || []).map(p => p.slug));
-  const filteredDomains = (domains || []).filter(d => activeSlugs.has(d.project_slug));
-
   const counts = aggregateKwCounts(allKwRows);
-  return filteredDomains.map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
+  const domainMap = new Map();
+
+  // 1. Fetch from FastAPI backend /domains (PostgreSQL)
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/domains`);
+    if (res.ok) {
+      const json = await res.json();
+      (json.domains || []).forEach(d => {
+        const slug = d.project_slug || slugify(d.project_name || d.domain);
+        if (slug) {
+          domainMap.set(slug, {
+            ...d,
+            project_slug: slug,
+            project_name: d.project_name || d.domain
+          });
+        }
+      });
+    }
+  } catch (e) {
+    console.warn('[fetchDomainRows] Backend /domains fetch skipped:', e);
+  }
+
+  // 2. Fetch from Supabase
+  try {
+    const [{ data: activeProjects }, { data: domains }] = await Promise.all([
+      supabase.from('projects').select('slug').is('deleted_at', null),
+      supabase.from('domains').select('*').order('created_at', { ascending: false })
+    ]);
+
+    const activeSlugs = new Set((activeProjects || []).map(p => p.slug));
+
+    (domains || []).forEach(d => {
+      if (d.project_slug && (activeSlugs.has(d.project_slug) || activeSlugs.size === 0)) {
+        if (!domainMap.has(d.project_slug)) {
+          domainMap.set(d.project_slug, d);
+        }
+      }
+    });
+  } catch (e) {
+    console.warn('[fetchDomainRows] Supabase domain fetch skipped:', e);
+  }
+
+  const mergedDomains = Array.from(domainMap.values());
+  return mergedDomains.map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
 }
 
 export async function createProject({ name, domain, regions, platforms, da, users }) {
@@ -308,30 +446,71 @@ export async function createProject({ name, domain, regions, platforms, da, user
     return domainRowToProject(newDomain);
   }
 
-  const { error: projectError } = await supabase
-    .from('projects')
-    .upsert({ name, slug }, { onConflict: 'slug', ignoreDuplicates: true });
-  if (projectError) throw projectError;
+  // 1. Post to FastAPI backend so PostgreSQL database registers the domain & project
+  let backendDomainData = null;
+  try {
+    const backendRes = await fetch(`${CATEGORY_API_BASE}/domains`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        domain,
+        project_name: name,
+        target_regions: regions || [],
+        platforms: (platforms || []).map(v => PLATFORM_LABELS[v] || v),
+        domain_authority: da != null ? String(da) : null,
+        users: users || [],
+      }),
+    });
+    if (backendRes.ok) {
+      backendDomainData = await backendRes.json();
+    }
+  } catch (e) {
+    console.warn('[createProject] FastAPI POST /domains failed:', e);
+  }
 
-  const { data, error } = await supabase
-    .from('domains')
-    .insert({
-      domain,
-      project_name: name,
-      project_slug: slug,
-      target_regions: regions || [],
-      platforms: (platforms || []).map(v => PLATFORM_LABELS[v] || v),
-      domain_authority: da != null ? String(da) : null,
-      users: users || [],
-      traffic: '0',
-      keywords_count: '0',
-      target_pages_count: '0',
-      blog_pages_count: '0',
-    })
-    .select()
-    .single();
-  if (error) throw error;
-  return domainRowToProject(data);
+  // 2. Insert into Supabase for client compatibility
+  let supabaseDomainData = null;
+  try {
+    await supabase
+      .from('projects')
+      .upsert({ name, slug, deleted_at: null }, { onConflict: 'slug' });
+
+    const { data: insertedDomain } = await supabase
+      .from('domains')
+      .insert({
+        domain,
+        project_name: name,
+        project_slug: slug,
+        target_regions: regions || [],
+        platforms: (platforms || []).map(v => PLATFORM_LABELS[v] || v),
+        domain_authority: da != null ? String(da) : null,
+        users: users || [],
+        traffic: '0',
+        keywords_count: '0',
+        target_pages_count: '0',
+        blog_pages_count: '0',
+      })
+      .select()
+      .single();
+    supabaseDomainData = insertedDomain;
+  } catch (e) {
+    console.warn('[createProject] Supabase domain insert failed:', e);
+  }
+
+  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Project Created: ${domain}`, status: 'Success' }).catch(() => {});
+
+  const domainRow = supabaseDomainData || {
+    id: String(Date.now()),
+    domain,
+    project_name: name,
+    project_slug: slug,
+    target_regions: regions || [],
+    platforms: (platforms || []).map(v => PLATFORM_LABELS[v] || v),
+    domain_authority: da != null ? String(da) : null,
+    users: users || [],
+  };
+
+  return domainRowToProject(domainRow);
 }
 
 export async function updateDomainRow(id, updates) {
@@ -509,6 +688,7 @@ export async function insertKeywordRows(projectSlug, rows) {
 
   const { data, error } = await supabase.from('keyword_categories').insert(dbRows).select();
   if (error) throw error;
+  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Keywords Added to Project (${rows?.length || 0} rows): ${projectSlug}`, status: 'Success' }).catch(() => {});
   return (data || []).map(kwRowToUi);
 }
 
@@ -633,6 +813,7 @@ export async function bulkUpdateKeywordRows(ids, field, value) {
 
   const { error } = await supabase.from('keyword_categories').update(kwUpdatesToDb({ [field]: value })).in('id', ids);
   if (error) throw error;
+  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Keyword Category/Cluster Updated (${field}: ${value})`, status: 'Success' }).catch(() => {});
 }
 
 export async function deleteKeywordRow(id) {
@@ -643,8 +824,11 @@ export async function deleteKeywordRow(id) {
     return;
   }
 
-  const { error } = await supabase.from('keyword_categories').delete().eq('id', id);
-  if (error) throw error;
+  const res = await fetch(`${CATEGORY_API_BASE}/keywords/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    throw new Error('Failed to delete keyword.');
+  }
+  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Keyword Deleted from Category/Cluster`, status: 'Warning' }).catch(() => {});
 }
 
 export async function bulkDeleteKeywordRows(ids) {
@@ -656,8 +840,15 @@ export async function bulkDeleteKeywordRows(ids) {
     return;
   }
 
-  const { error } = await supabase.from('keyword_categories').delete().in('id', ids);
-  if (error) throw error;
+  const res = await fetch(`${CATEGORY_API_BASE}/keywords/bulk-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids })
+  });
+  if (!res.ok) {
+    throw new Error('Failed to bulk delete keywords.');
+  }
+  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Bulk Keywords Deleted (${ids?.length || 0} items)`, status: 'Warning' }).catch(() => {});
 }
 
 const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://54.196.75.9:8000';
@@ -677,10 +868,32 @@ const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://54.196.75.9:8
 export async function deleteKwProject(slug, userEmail = null) {
   if (isLocalMode) {
     const projects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
-    const index = projects.findIndex(p => p.slug === slug);
-    if (index !== -1) {
-      projects[index].deleted_at = new Date().toISOString();
-      localStorage.setItem('seo_projects', JSON.stringify(projects));
+    const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
+    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
+    const pages = JSON.parse(localStorage.getItem('seo_pages') || '[]');
+    const competitors = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
+    const recycleBin = JSON.parse(localStorage.getItem('seo_recycle_bin') || '[]');
+
+    const projToDel = projects.find(p => p.slug === slug);
+    if (projToDel) {
+      recycleBin.push({
+        project_slug: slug,
+        project_name: projToDel.name || slug,
+        deleted_at: new Date().toISOString(),
+        data: {
+          project: projToDel,
+          domains: domains.filter(d => d.project_slug === slug),
+          keywords: kwRows.filter(k => k.project_name === slug),
+          pages: pages.filter(p => p.project_name === slug),
+          competitors: competitors.filter(c => c.projectSlug === slug),
+        }
+      });
+      localStorage.setItem('seo_recycle_bin', JSON.stringify(recycleBin));
+      localStorage.setItem('seo_projects', JSON.stringify(projects.filter(p => p.slug !== slug)));
+      localStorage.setItem('seo_domains', JSON.stringify(domains.filter(d => d.project_slug !== slug)));
+      localStorage.setItem('seo_keyword_categories', JSON.stringify(kwRows.filter(k => k.project_name !== slug)));
+      localStorage.setItem('seo_pages', JSON.stringify(pages.filter(p => p.project_name !== slug)));
+      localStorage.setItem('seo_competitors', JSON.stringify(competitors.filter(c => c.projectSlug !== slug)));
     }
     return;
   }
@@ -696,12 +909,72 @@ export async function deleteKwProject(slug, userEmail = null) {
   }
 }
 
+export async function hardDeleteKwProject(slug, userEmail = null) {
+  const email = getActiveUserEmail(userEmail);
+  if (isLocalMode) {
+    const projects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
+    const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
+    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
+    const pages = JSON.parse(localStorage.getItem('seo_pages') || '[]');
+    const competitors = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
+
+    localStorage.setItem('seo_projects', JSON.stringify(projects.filter(p => p.slug !== slug)));
+    localStorage.setItem('seo_domains', JSON.stringify(domains.filter(d => d.project_slug !== slug)));
+    localStorage.setItem('seo_keyword_categories', JSON.stringify(kwRows.filter(k => k.project_name !== slug)));
+    localStorage.setItem('seo_pages', JSON.stringify(pages.filter(p => p.project_name !== slug)));
+    localStorage.setItem('seo_competitors', JSON.stringify(competitors.filter(c => c.projectSlug !== slug)));
+
+    createAuditLogApi({ user_email: email, action: `Project Permanently Deleted: ${slug}`, status: 'Warning' }).catch(() => {});
+    return;
+  }
+
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/hard?user_email=${encodeURIComponent(email)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail || 'Failed to hard delete project from backend.');
+    }
+  } catch (e) {
+    console.warn('[hardDeleteKwProject] Backend delete error:', e);
+  }
+
+  try {
+    await Promise.all([
+      supabase.from('keyword_categories').delete().eq('project_name', slug),
+      supabase.from('domains').delete().eq('project_slug', slug),
+      supabase.from('pages').delete().eq('project_name', slug),
+      supabase.from('competitor_pages').delete().eq('project_name', slug),
+      supabase.from('projects').delete().eq('slug', slug),
+    ]);
+  } catch (e) {
+    console.warn('[hardDeleteKwProject] Supabase hard delete error:', e);
+  }
+
+  createAuditLogApi({ user_email: email, action: `Project Permanently Deleted: ${slug}`, status: 'Warning' }).catch(() => {});
+}
+
 export async function deleteKwClusterData(slug, userEmail = null) {
-  return deleteKwProject(slug, userEmail);
+  if (isLocalMode) {
+    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
+    const updated = kwRows.filter(r => r.project_name !== slug);
+    localStorage.setItem('seo_keyword_categories', JSON.stringify(updated));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/kw-data`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete keyword cluster data.');
 }
 
 export async function deletePagesData(slug, userEmail = null) {
-  return deleteKwProject(slug, userEmail);
+  if (isLocalMode) {
+    const pages = JSON.parse(localStorage.getItem('seo_pages') || '[]');
+    const updated = pages.filter(r => r.project_name !== slug);
+    localStorage.setItem('seo_pages', JSON.stringify(updated));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/pages`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete pages data.');
 }
 
 // ─── Pages tab ──────────────────────────────────────────────────────────────
@@ -819,6 +1092,7 @@ export async function insertPageRows(slug, rows) {
     throw new Error(body?.detail?.[0]?.msg || body?.detail || 'Failed to import pages.');
   }
   const data = await res.json();
+  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Pages Added to Project (${rows?.length || 0} pages): ${slug}`, status: 'Success' }).catch(() => {});
   return (data.pages || []).map(pageRowToUi);
 }
 
@@ -1055,6 +1329,7 @@ export async function insertCompetitor({ domain, name, da, targetRegions, projec
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail?.[0]?.msg || body?.detail || 'Failed to add competitor.');
   }
+  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Competitor Added: ${domain} (Project: ${projectSlug})`, status: 'Success' }).catch(() => {});
   return competitorRowToUi(await res.json());
 }
 
@@ -1092,10 +1367,19 @@ export async function deleteCompetitor(id) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail || 'Failed to delete competitor.');
   }
+  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Competitor Deleted: ID #${id}`, status: 'Warning' }).catch(() => {});
 }
 
 export async function deleteCompetitorProjectData(slug) {
-  return deleteKwProject(slug);
+  if (isLocalMode) {
+    const competitors = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
+    const updated = competitors.filter(r => r.projectSlug !== slug);
+    localStorage.setItem('seo_competitors', JSON.stringify(updated));
+    return;
+  }
+
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/competitors`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete competitor project data.');
 }
 
 // Runs the comp_analysis SERP-discovery pipeline (backend scripts/comp_analysis.py)
@@ -1117,6 +1401,7 @@ export async function findCompetitors(projectSlug, { targetRegions, useAi = true
     throw new Error(body?.detail?.[0]?.msg || body?.detail || 'Failed to find competitors.');
   }
   const data = await res.json();
+  createAuditLogApi({ user_email: getActiveUserEmail(), action: `AI Competitor Discovery Executed: ${projectSlug}`, status: 'Success' }).catch(() => {});
   return { competitors: (data.competitors || []).map(competitorRowToUi), ownDomain: data.ownDomain, message: data.message };
 }
 
@@ -1182,7 +1467,9 @@ export async function runAiAnalysis(projectSlug, keyword, aiMode, domain, countr
     throw new Error(body?.detail || 'Failed to run AI analysis.');
   }
   
-  return await res.json();
+  const result = await res.json();
+  createAuditLogApi({ user_email: getActiveUserEmail(), action: `AI Keyword Analysis Executed: "${keyword}" (${projectSlug})`, status: 'Success' }).catch(() => {});
+  return result;
 }
 
 export async function runAiVisibilityAnalysis(projectSlug, domain, country, keywords, engine = 'chatgpt') {

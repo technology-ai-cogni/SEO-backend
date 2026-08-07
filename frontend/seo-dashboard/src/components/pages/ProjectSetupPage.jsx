@@ -6054,12 +6054,12 @@ export default function ProjectSetupPage({ tab, user }) {
   };
 
   const handleDeleteKwProject = async (project) => {
-    await deleteKwProject(project.slug, currentUserEmail);
+    await deleteKwClusterData(project.slug, currentUserEmail);
     setKwClusters(prev => prev.filter(p => p.slug !== project.slug));
   };
 
   const handleDeletePagesProject = async (project) => {
-    await deleteKwProject(project.slug, currentUserEmail);
+    await deletePagesData(project.slug, currentUserEmail);
     setPagesCounts(prev => { const next = { ...prev }; delete next[project.slug]; return next; });
     setPagesStats(prev => { const next = { ...prev }; delete next[project.slug]; return next; });
     setPages(prev => prev.filter(p => p.slug !== project.slug));
@@ -6067,7 +6067,7 @@ export default function ProjectSetupPage({ tab, user }) {
 
   const handleDeleteCompetitorProject = async (project) => {
     const slug = project.slug;
-    await deleteKwProject(slug, currentUserEmail);
+    await deleteCompetitorProjectData(slug);
     setCompetitors(prev => prev.filter(c => c.projectSlug !== slug));
   };
 

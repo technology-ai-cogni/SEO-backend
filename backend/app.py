@@ -313,9 +313,39 @@ def _resolve_project_or_404(project_param, include_deleted=False):
     try both. 404s if neither matches anything that's ever been created."""
     proj = db.get_project_by_name(project_param, include_deleted=include_deleted) or \
            db.get_project_by_slug(project_param, include_deleted=include_deleted)
+    if proj is None and include_deleted:
+        rb_proj = db.get_recycle_bin_project(project_param)
+        if rb_proj:
+            return {"name": rb_proj["project_name"], "slug": rb_proj["project_slug"]}
     if proj is None:
         raise HTTPException(404, f"Project '{project_param}' not found.")
     return proj
+
+
+@app.get("/recycle-bin")
+def list_recycle_bin_endpoint(item_type: Optional[str] = None):
+    """Every archived item/project in recycle_bin."""
+    return {"items": db.list_recycle_bin_items(item_type=item_type)}
+
+
+@app.post("/recycle-bin/{item_id}/restore")
+def restore_recycle_bin_endpoint(item_id: str, user_email: Optional[str] = None):
+    """Restores an archived project or item from recycle_bin back into active tables."""
+    res = db.restore_recycle_bin_item(item_id)
+    if not res:
+        raise HTTPException(404, "Item not found in recycle bin.")
+    acting_user = user_email if user_email else "system"
+    db.insert_audit_log(user_email=acting_user, action=f"Restored from Recycle Bin: {res.get('restored')}", status="Success")
+    return res
+
+
+@app.delete("/recycle-bin/{item_id}")
+def hard_delete_recycle_bin_endpoint(item_id: str, user_email: Optional[str] = None):
+    """Permanently purges an item or project from recycle_bin."""
+    db.delete_recycle_bin_item(item_id)
+    acting_user = user_email if user_email else "system"
+    db.insert_audit_log(user_email=acting_user, action=f"Permanently Deleted from Recycle Bin: {item_id}", status="Warning")
+    return {"deleted": item_id}
 
 
 @app.get("/health")
@@ -340,6 +370,10 @@ def create_domain(payload: CreateDomainRequest):
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
+    try:
+        db.insert_audit_log(user_email="system", action=f"Project Created: {payload.domain}", status="Success")
+    except Exception:
+        pass
     return {"domain": payload.domain, "project_slug": project_slug}
 
 
@@ -396,6 +430,16 @@ def delete_project_endpoint(project: str, user_email: Optional[str] = None):
     acting_user = user_email if user_email else "system"
     db.insert_audit_log(user_email=acting_user, action=f"Project Deleted: {proj['name']}", status="Warning")
     return {"deleted": proj["slug"], "soft_deleted": True}
+
+
+@app.delete("/projects/{project}/hard")
+def hard_delete_project_endpoint(project: str, user_email: Optional[str] = None):
+    """Permanently purges a project and all associated records from the PostgreSQL database."""
+    proj = _resolve_project_or_404(project, include_deleted=True)
+    db.delete_project(proj["slug"])
+    acting_user = user_email if user_email else "system"
+    db.insert_audit_log(user_email=acting_user, action=f"Project Permanently Deleted: {proj['name']}", status="Warning")
+    return {"deleted": proj["slug"], "hard_deleted": True}
 
 
 @app.post("/projects/{project}/restore")
@@ -464,6 +508,10 @@ def recluster_project(project: str):
     proj = _resolve_project_or_404(project)
     assignment = category_checker.cluster_all_categories(proj["slug"])
     db.replace_domain_clusters(proj["slug"], assignment)
+    try:
+        db.insert_audit_log(user_email="system", action=f"AI Clustering Re-run Executed: {proj['name']}", status="Success")
+    except Exception:
+        pass
     return {"project": proj["name"], "categories_clustered": len(assignment)}
 
 
@@ -530,6 +578,11 @@ async def create_category_job(
 
     run_categorize_job_in_background(job_id, project_slug, rows_for_job, country_code)
 
+    try:
+        db.insert_audit_log(user_email="system", action=f"Keyword Sheet Uploaded & Processed: {filename} ({project_name})", status="Success")
+    except Exception:
+        pass
+
     return {
         "job_id": job_id, "status": "running", "project": project_name, "project_slug": project_slug,
         "country": country, "country_code": country_code,
@@ -594,6 +647,11 @@ def categorize_existing_keywords(project: str, payload: CategorizeExistingReques
     db.set_keyword_rows_job(job_id, [r["id"] for r in rows])
 
     run_categorize_job_in_background(job_id, proj["slug"], rows, country_code)
+
+    try:
+        db.insert_audit_log(user_email="system", action=f"AI Clustering Triggered: {proj['name']} ({len(rows)} keywords)", status="Success")
+    except Exception:
+        pass
 
     return {"job_id": job_id, "project": proj["name"], "keywords_enqueued": len(rows)}
 
@@ -822,6 +880,10 @@ def create_competitor(payload: CompetitorCreateRequest):
         category=payload.category, cluster=payload.cluster,
         type=payload.type or payload.websiteType
     )
+    try:
+        db.insert_audit_log(user_email="system", action=f"Competitor Added: {domain} (Project: {project_slug})", status="Success")
+    except Exception:
+        pass
     return _competitor_to_json(row)
 
 
@@ -836,12 +898,20 @@ def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequ
     }
     updates = {k: v for k, v in updates.items() if v is not None}
     db.update_competitor(competitor_id, updates)
+    try:
+        db.insert_audit_log(user_email="system", action=f"Competitor Updated: {payload.domain or competitor_id}", status="Success")
+    except Exception:
+        pass
     return {"id": competitor_id}
 
 
 @app.delete("/competitors/{competitor_id}")
 def delete_competitor_endpoint(competitor_id: int):
     db.delete_competitor(competitor_id)
+    try:
+        db.insert_audit_log(user_email="system", action=f"Competitor Deleted: ID #{competitor_id}", status="Warning")
+    except Exception:
+        pass
     return {"deleted": competitor_id}
 
 
@@ -897,6 +967,10 @@ def get_project_pages_endpoint(project_slug: str):
 @app.post("/projects/{project_slug}/pages")
 def insert_project_pages_endpoint(project_slug: str, rows: List[PageItem]):
     inserted = db.insert_page_rows(project_slug, [r.dict() for r in rows])
+    try:
+        db.insert_audit_log(user_email="system", action=f"Pages Added: {len(rows)} pages to {project_slug}", status="Success")
+    except Exception:
+        pass
     return {"pages": [_page_to_json(r) for r in inserted]}
 
 @app.patch("/pages/{page_id}")
@@ -908,21 +982,55 @@ def update_page_endpoint(page_id: int, payload: PageUpdateRequest):
     }
     updates = {k: v for k, v in updates.items() if v is not None}
     db.update_page_row(page_id, updates)
+    try:
+        db.insert_audit_log(user_email="system", action=f"Page Updated: ID #{page_id}", status="Success")
+    except Exception:
+        pass
     return {"id": page_id}
 
 @app.delete("/pages/{page_id}")
 def delete_page_endpoint(page_id: int):
     db.delete_page_row(page_id)
+    try:
+        db.insert_audit_log(user_email="system", action=f"Page Deleted: ID #{page_id}", status="Warning")
+    except Exception:
+        pass
     return {"deleted": page_id}
 
-@app.delete("/projects/{project_slug}/pages")
-def delete_project_pages_endpoint(project_slug: str):
-    db.delete_pages_by_project(project_slug)
-    return {"deleted_project": project_slug}
+
+
+
+class BulkDeleteKeywordsRequest(BaseModel):
+    ids: list[int]
+
+
+@app.delete("/keywords/{kw_id}")
+def delete_keyword_endpoint(kw_id: int):
+    db.archive_and_delete_keyword(kw_id)
+    try:
+        db.insert_audit_log(user_email="system", action=f"Keyword Deleted: ID #{kw_id}", status="Warning")
+    except Exception:
+        pass
+    return {"deleted": kw_id}
+
+
+@app.post("/keywords/bulk-delete")
+def bulk_delete_keywords_endpoint(payload: BulkDeleteKeywordsRequest):
+    for kw_id in payload.ids:
+        db.archive_and_delete_keyword(kw_id)
+    try:
+        db.insert_audit_log(user_email="system", action=f"Bulk Keywords Deleted ({len(payload.ids)} items)", status="Warning")
+    except Exception:
+        pass
+    return {"deleted_ids": payload.ids}
 
 @app.post("/pages/bulk-delete")
 def bulk_delete_pages_endpoint(payload: BulkDeletePagesRequest):
     db.bulk_delete_page_rows(payload.ids)
+    try:
+        db.insert_audit_log(user_email="system", action=f"Bulk Pages Deleted ({len(payload.ids)} pages)", status="Warning")
+    except Exception:
+        pass
     return {"deleted_ids": payload.ids}
 
 # --- Competitor Pages Endpoints ---
