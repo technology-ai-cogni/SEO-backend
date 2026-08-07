@@ -35,7 +35,7 @@ BRIGHTDATA_SERP_ZONE = os.environ.get("BRIGHTDATA_SERP_ZONE", "serp_api1")
 BRIGHTDATA_REQUEST_URL = "https://api.brightdata.com/request"
 
 DEFAULT_DOMAIN = os.environ.get("DEFAULT_DOMAIN", "")
-TOP_N = int(os.environ.get("TOP_N", "40"))
+TOP_N = int(os.environ.get("TOP_N", "30"))
 NOT_FOUND_RANK = 101
 RESULTS_PER_PAGE = 10
 
@@ -43,9 +43,9 @@ GOOGLE_DOMAIN = "www.google.com"
 COUNTRY_CODE = os.environ.get("SERP_COUNTRY", "in")
 LANGUAGE_CODE = os.environ.get("SERP_LANGUAGE", "en")
 
-REQUEST_TIMEOUT = 90
-SLEEP_BETWEEN_REQUESTS = 0.5
-MAX_REQUEST_RETRIES = 3
+REQUEST_TIMEOUT = 150
+SLEEP_BETWEEN_REQUESTS = 1
+MAX_REQUEST_RETRIES = 7
 RETRY_BACKOFF_SECONDS = 5
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 
@@ -79,7 +79,7 @@ def get_domain(url):
     return netloc
 
 
-def fetch_serp_page(keyword, start=0, country_code=None):
+def fetch_serp_page(keyword, start=0, country_code=None, num=None):
     """Request one page of Google results through the Bright Data zone.
     Returns HTML or None. `country_code` overrides the .env default
     SERP_COUNTRY for this search -- pass the SAME region the job's
@@ -89,9 +89,10 @@ def fetch_serp_page(keyword, start=0, country_code=None):
         raise RuntimeError("BRIGHTDATA_API_KEY is not set. Fill it in in .env.")
 
     gl = country_code or COUNTRY_CODE
+    num_param = f"&num={num}" if num else ""
     search_url = (
         f"https://{GOOGLE_DOMAIN}/search?q={quote(keyword)}"
-        f"&gl={gl}&hl={LANGUAGE_CODE}&start={start}"
+        f"&gl={gl}&hl={LANGUAGE_CODE}&start={start}{num_param}"
     )
 
     payload = {
@@ -177,31 +178,60 @@ def parse_organic_links_from_html(html):
 
 
 def get_top_n_organic_links(keyword, n=TOP_N, country_code=None):
-    """Fetch up to n organic result links for `keyword`, paginating as needed."""
+    """Fetch up to n organic result links for `keyword` across Google SERP pages (start=0, 10, 20, 30...)."""
     links = []
     seen = set()
-    start = 0
 
-    while len(links) < n:
-        html = fetch_serp_page(keyword, start=start, country_code=country_code)
-        if html is None:
+    # Step 1: Try single request with num=40 first
+    html = fetch_serp_page(keyword, start=0, country_code=country_code, num=max(n, 40))
+    if html:
+        page_links = parse_organic_links_from_html(html)
+        for href in page_links:
+            cleaned = clean_url(href)
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                links.append(href)
+                if len(links) >= n:
+                    return links[:n]
+
+    # Step 2: Step through page offsets (0, 10, 20, 30, 40...) to reach n links
+    max_pages = max(5, (n // 10) + 2)
+    empty_page_count = 0
+
+    for page_idx in range(max_pages):
+        if len(links) >= n:
             break
+
+        start = page_idx * RESULTS_PER_PAGE  # 0, 10, 20, 30, 40...
+
+        # Skip start=0 if we already fetched page 0 in Step 1
+        if start == 0 and len(links) > 0:
+            continue
+
+        html = fetch_serp_page(keyword, start=start, country_code=country_code)
+        if not html:
+            empty_page_count += 1
+            if empty_page_count >= 2:
+                break
+            continue
 
         page_links = parse_organic_links_from_html(html)
-        if not page_links:
-            break
+        added_on_this_page = 0
+        for href in page_links:
+            cleaned = clean_url(href)
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                links.append(href)
+                added_on_this_page += 1
+                if len(links) >= n:
+                    break
 
-        new_links = [href for href in page_links if clean_url(href) not in seen]
-        if not new_links:
-            break
-
-        for href in new_links:
-            seen.add(clean_url(href))
-        links.extend(new_links)
-        start += RESULTS_PER_PAGE
-
-        if start > n * 3:
-            break
+        if added_on_this_page == 0:
+            empty_page_count += 1
+            if empty_page_count >= 2:
+                break
+        else:
+            empty_page_count = 0
 
         time.sleep(SLEEP_BETWEEN_REQUESTS)
 

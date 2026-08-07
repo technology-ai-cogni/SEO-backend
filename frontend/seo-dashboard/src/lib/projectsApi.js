@@ -955,26 +955,38 @@ export async function hardDeleteKwProject(slug, userEmail = null) {
 
 export async function deleteKwClusterData(slug, userEmail = null) {
   if (isLocalMode) {
-    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
-    const updated = kwRows.filter(r => r.project_name !== slug);
-    localStorage.setItem('seo_keyword_categories', JSON.stringify(updated));
+    const keywords = JSON.parse(localStorage.getItem('seo_keywords') || '[]');
+    const s1 = String(slug || '').trim().toLowerCase();
+    const updated = keywords.filter(k => String(k.project_name || k.project_slug || '').trim().toLowerCase() !== s1);
+    localStorage.setItem('seo_keywords', JSON.stringify(updated));
     return;
   }
 
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/kw-data`, { method: 'DELETE' });
-  if (!res.ok) throw new Error('Failed to delete keyword cluster data.');
+  const endpoint = `${CATEGORY_API_BASE}/projects/${slug}/kw-data`;
+  const res = await fetch(endpoint, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete keyword data.');
+  }
+  return res.json();
 }
 
 export async function deletePagesData(slug, userEmail = null) {
   if (isLocalMode) {
     const pages = JSON.parse(localStorage.getItem('seo_pages') || '[]');
-    const updated = pages.filter(r => r.project_name !== slug);
+    const s1 = String(slug || '').trim().toLowerCase();
+    const updated = pages.filter(p => String(p.project_name || p.project_slug || '').trim().toLowerCase() !== s1);
     localStorage.setItem('seo_pages', JSON.stringify(updated));
     return;
   }
 
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${slug}/pages`, { method: 'DELETE' });
-  if (!res.ok) throw new Error('Failed to delete pages data.');
+  const endpoint = `${CATEGORY_API_BASE}/projects/${slug}/pages`;
+  const res = await fetch(endpoint, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete pages data.');
+  }
+  return res.json();
 }
 
 // ─── Pages tab ──────────────────────────────────────────────────────────────
