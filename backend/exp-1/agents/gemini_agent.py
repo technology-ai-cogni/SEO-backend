@@ -313,6 +313,7 @@ class GeminiAgent(BaseAgent):
                 '  "mentions": 25,\n'
                 '  "cited_pages": 30,\n'
                 '  "mentioned_keywords": ["dog dental chews", "dental chews for dogs"],\n'
+                '  "keyword_ai_ranks": {"dog dental chews": 1, "dental chews for dogs": 3},\n'
                 '  "cited_pages_list": ["dog dental chews - https://www.dogseechew.in/product/dental-chews"]\n'
                 "}"
             )
@@ -355,6 +356,7 @@ class GeminiAgent(BaseAgent):
 
             mentions_raw = parsed.get("mentioned_keywords") or []
             cited_raw = parsed.get("cited_pages_list") or []
+            kw_ranks_raw = parsed.get("keyword_ai_ranks") or {}
 
             mentions_kws = []
             seen_m = set()
@@ -363,6 +365,20 @@ class GeminiAgent(BaseAgent):
                 if clean_item and clean_item.lower() not in seen_m:
                     seen_m.add(clean_item.lower())
                     mentions_kws.append(clean_item)
+
+            keyword_ai_ranks = {}
+            if isinstance(kw_ranks_raw, dict):
+                for k_str, r_val in kw_ranks_raw.items():
+                    k_clean = str(k_str).strip().lower()
+                    try:
+                        keyword_ai_ranks[k_clean] = int(r_val)
+                    except (ValueError, TypeError):
+                        keyword_ai_ranks[k_clean] = 1
+
+            for m_kw in mentions_kws:
+                m_clean = m_kw.lower()
+                if m_clean not in keyword_ai_ranks:
+                    keyword_ai_ranks[m_clean] = 1
 
             cited_list = []
             seen_c = set()
@@ -386,6 +402,7 @@ class GeminiAgent(BaseAgent):
                     "mentions": mentions_count,
                     "cited_pages": cited_count,
                     "mentioned_keywords": mentions_kws,
+                    "keyword_ai_ranks": keyword_ai_ranks,
                     "cited_pages_list": cited_list,
                     "domain_rank": domain_rank_val,
                     "others_count": others_count_val,

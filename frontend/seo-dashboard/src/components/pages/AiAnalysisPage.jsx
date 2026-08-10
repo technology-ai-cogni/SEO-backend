@@ -60,6 +60,7 @@ export default function AiAnalysisPage() {
     const kws = projectKeywords || [];
 
     const mentionedKwSet = new Set();
+    let keywordAiRanks = {};
     const engKey = selectedEngine.toLowerCase();
     const candidateKeys = [
       `ai_results_${activeProject.slug}_${engKey}`,
@@ -76,6 +77,10 @@ export default function AiAnalysisPage() {
         const parsed = JSON.parse(item);
         const resObj = Array.isArray(parsed) ? parsed[0] : parsed;
         if (!resObj) continue;
+
+        if (resObj.keyword_ai_ranks && typeof resObj.keyword_ai_ranks === 'object') {
+          keywordAiRanks = resObj.keyword_ai_ranks;
+        }
 
         if (Array.isArray(resObj.mentioned_keywords) && resObj.mentioned_keywords.length > 0) {
           resObj.mentioned_keywords.forEach(kw => {
@@ -140,9 +145,22 @@ export default function AiAnalysisPage() {
         displaySv = !isNaN(parsed) && parsed > 0 ? parsed.toLocaleString() : String(rawSv);
       }
 
-      // Real rank from intent
-      const rankNum = k.rank !== undefined && k.rank !== null && String(k.rank).trim() !== '' ? parseInt(String(k.rank).replace(/[^0-9]/g, ''), 10) : null;
-      const displayRank = rankNum !== null && !isNaN(rankNum) ? `${rankNum}` : (k.rank ? String(k.rank).replace(/^#/, '') : '—');
+      // AI Rank derived from LLM audit results for this engine
+      const aiRankVal = keywordAiRanks[kwLower] ?? keywordAiRanks[String(k.kw || '').trim()];
+      let rankNum = null;
+      let displayRank = '—';
+
+      if (aiRankVal !== undefined && aiRankVal !== null) {
+        rankNum = Number(aiRankVal);
+        displayRank = !isNaN(rankNum) ? `${rankNum}` : String(aiRankVal);
+      } else if (k.rank !== undefined && k.rank !== null && String(k.rank).trim() !== '') {
+        // Fallback to database rank if AI rank not available
+        rankNum = parseInt(String(k.rank).replace(/[^0-9]/g, ''), 10);
+        displayRank = rankNum !== null && !isNaN(rankNum) ? `${rankNum}` : (k.rank ? String(k.rank).replace(/^#/, '') : '—');
+      } else if (mentionedKwSet.has(kwLower)) {
+        rankNum = 1;
+        displayRank = '1';
+      }
 
       const subtype = k.targetSubtype || k.subtype || 'Informational';
       const targetType = k.targetType || 'Landing Page';
@@ -492,7 +510,7 @@ export default function AiAnalysisPage() {
               background: '#ffffff'
             }}
           >
-            <option value="all">All Intent (Info / Comm)</option>
+            <option value="all">All Target Subtypes</option>
             <option value="informational">Informational</option>
             <option value="commercial">Commercial</option>
           </select>
@@ -511,7 +529,7 @@ export default function AiAnalysisPage() {
               background: '#ffffff'
             }}
           >
-            <option value="all">All Types (Landing / Blog)</option>
+            <option value="all">All Target Types</option>
             <option value="landing">Landing Page</option>
             <option value="blog">Blog Page</option>
           </select>
@@ -535,16 +553,15 @@ export default function AiAnalysisPage() {
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Mentions (Keyword)</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>SV</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Position (Rank)</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Info / Comm</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Page URL</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Landing / Blog</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Tentative Rank</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Target Subtype</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Target Type</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredMentions.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
+                    <td colSpan={5} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
                       No mentioned keywords found for {selectedEngine.toUpperCase()}.
                     </td>
                   </tr>
@@ -559,8 +576,8 @@ export default function AiAnalysisPage() {
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         <span style={{
-                          background: row.rankNum && row.rankNum <= 3 ? '#dcfce7' : row.rankNum && row.rankNum <= 10 ? '#fef9c3' : '#f1f5f9',
-                          color: row.rankNum && row.rankNum <= 3 ? '#15803d' : row.rankNum && row.rankNum <= 10 ? '#854d0e' : '#475569',
+                          background: row.rankNum && row.rankNum <= 4 ? '#dcfce7' : row.rankNum && row.rankNum <= 10 ? '#fef9c3' : '#fee2e2',
+                          color: row.rankNum && row.rankNum <= 4 ? '#15803d' : row.rankNum && row.rankNum <= 10 ? '#854d0e' : '#b91c1c',
                           fontWeight: 700,
                           fontSize: 11.5,
                           padding: '2px 8px',
@@ -571,12 +588,6 @@ export default function AiAnalysisPage() {
                       </td>
                       <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
                         {row.intent}
-                      </td>
-                      <td style={{ padding: '12px 16px', color: '#2563eb', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        <a href={row.url} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          {row.url}
-                          <ExternalLink size={11} />
-                        </a>
                       </td>
                       <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
                         {row.targetType}
@@ -598,8 +609,8 @@ export default function AiAnalysisPage() {
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Total KWs</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Category</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Cluster</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Info / Comm</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Landing / Blog</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Target Subtype</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Target Type</th>
                 </tr>
               </thead>
               <tbody>

@@ -235,6 +235,7 @@ class OpenAIAgent(BaseAgent):
                 f"- 'mentions': Total count of keywords out of {len(keywords_slice)} where '{domain_clean}' appears in search recommendations.\n"
                 f"- 'cited_pages': Total count of cited web page URLs for '{domain_clean}'.\n"
                 f"- 'mentioned_keywords': Array of the specific keyword strings where '{domain_clean}' appeared.\n"
+                f"- 'keyword_ai_ranks': Object mapping each target keyword string to its AI recommendation rank position for '{domain_clean}' (e.g. 1 if top recommended, 2, 3, or 101 if not ranked/mentioned).\n"
                 f"- 'cited_pages_list': Array of strings formatted as '[Keyword] - [Page Title/URL]' for cited pages.\n\n"
                 f"JSON schema:\n"
                 "{\n"
@@ -243,6 +244,7 @@ class OpenAIAgent(BaseAgent):
                 '  "mentions": 28,\n'
                 '  "cited_pages": 34,\n'
                 '  "mentioned_keywords": ["dog dental chews", "dental chews for dogs"],\n'
+                '  "keyword_ai_ranks": {"dog dental chews": 1, "dental chews for dogs": 3},\n'
                 '  "cited_pages_list": ["dog dental chews - https://www.dogseechew.in/product/dental-chews"]\n'
                 "}"
             )
@@ -274,6 +276,7 @@ class OpenAIAgent(BaseAgent):
                 parsed = json.loads(ai_text)
             mentions_raw = parsed.get("mentioned_keywords") or []
             cited_raw = parsed.get("cited_pages_list") or []
+            kw_ranks_raw = parsed.get("keyword_ai_ranks") or {}
 
             # Deduplicate mentioned keywords preserving order
             mentions_kws = []
@@ -283,6 +286,22 @@ class OpenAIAgent(BaseAgent):
                 if clean_item and clean_item.lower() not in seen_m:
                     seen_m.add(clean_item.lower())
                     mentions_kws.append(clean_item)
+
+            # Build cleaned keyword_ai_ranks mapping
+            keyword_ai_ranks = {}
+            if isinstance(kw_ranks_raw, dict):
+                for k_str, r_val in kw_ranks_raw.items():
+                    k_clean = str(k_str).strip().lower()
+                    try:
+                        keyword_ai_ranks[k_clean] = int(r_val)
+                    except (ValueError, TypeError):
+                        keyword_ai_ranks[k_clean] = 1
+
+            # Ensure all mentioned keywords have an AI rank entry (default to 1 if not specified)
+            for m_kw in mentions_kws:
+                m_clean = m_kw.lower()
+                if m_clean not in keyword_ai_ranks:
+                    keyword_ai_ranks[m_clean] = 1
 
             # Deduplicate cited pages list preserving order
             cited_list = []
@@ -308,6 +327,7 @@ class OpenAIAgent(BaseAgent):
                 "mentions": mentions_count,
                 "cited_pages": cited_count,
                 "mentioned_keywords": mentions_kws,
+                "keyword_ai_ranks": keyword_ai_ranks,
                 "cited_pages_list": cited_list,
                 "domain_rank": domain_rank_val,
                 "others_count": others_count_val,
