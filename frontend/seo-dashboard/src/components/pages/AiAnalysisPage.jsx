@@ -420,7 +420,16 @@ export default function AiAnalysisPage() {
             ].map((eng, idx, arr) => (
               <button
                 key={eng.id}
-                onClick={() => setSelectedEngine(eng.id)}
+                onClick={() => {
+                  setSelectedEngine(eng.id);
+                  createAuditLogApi({
+                    user_email: getActiveUserEmail(),
+                    action: `AI Engine Selected: ${eng.label}`,
+                    status: 'Success',
+                    project_name: activeProject?.slug || null,
+                    module: 'intent'
+                  }).catch(() => {});
+                }}
                 style={{
                   background: selectedEngine === eng.id ? '#f1f5f9' : '#ffffff',
                   color: selectedEngine === eng.id ? '#0f172a' : '#475569',

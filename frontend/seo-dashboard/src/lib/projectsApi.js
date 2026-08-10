@@ -497,7 +497,13 @@ export async function createProject({ name, domain, regions, platforms, da, user
     console.warn('[createProject] Supabase domain insert failed:', e);
   }
 
-  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Project Created: ${domain}`, status: 'Success' }).catch(() => {});
+  createAuditLogApi({
+    user_email: getActiveUserEmail(),
+    action: `Project Created: ${domain}`,
+    status: 'Success',
+    project_name: slug,
+    module: 'project'
+  }).catch(() => {});
 
   const domainRow = supabaseDomainData || {
     id: String(Date.now()),
@@ -716,7 +722,13 @@ export async function insertKeywordRows(projectSlug, rows) {
 
   const { data, error } = await supabase.from('keyword_categories').insert(dbRows).select();
   if (error) throw error;
-  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Keywords Added to Project (${rows?.length || 0} rows): ${projectSlug}`, status: 'Success' }).catch(() => {});
+  createAuditLogApi({
+    user_email: getActiveUserEmail(),
+    action: `Keywords Added to Project (${rows?.length || 0} rows)`,
+    status: 'Success',
+    project_name: projectSlug,
+    module: 'intent'
+  }).catch(() => {});
   return (data || []).map(kwRowToUi);
 }
 
@@ -841,7 +853,12 @@ export async function bulkUpdateKeywordRows(ids, field, value) {
 
   const { error } = await supabase.from('keyword_categories').update(kwUpdatesToDb({ [field]: value })).in('id', ids);
   if (error) throw error;
-  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Keyword Category/Cluster Updated (${field}: ${value})`, status: 'Success' }).catch(() => {});
+  createAuditLogApi({
+    user_email: getActiveUserEmail(),
+    action: `Keyword Category/Cluster Updated (${field}: ${value})`,
+    status: 'Success',
+    module: 'intent'
+  }).catch(() => {});
 }
 
 export async function deleteKeywordRow(id) {
@@ -856,7 +873,12 @@ export async function deleteKeywordRow(id) {
   if (!res.ok) {
     throw new Error('Failed to delete keyword.');
   }
-  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Keyword Deleted from Category/Cluster`, status: 'Warning' }).catch(() => {});
+  createAuditLogApi({
+    user_email: getActiveUserEmail(),
+    action: `Keyword Deleted from Category/Cluster`,
+    status: 'Warning',
+    module: 'intent'
+  }).catch(() => {});
 }
 
 export async function bulkDeleteKeywordRows(ids) {
@@ -876,7 +898,12 @@ export async function bulkDeleteKeywordRows(ids) {
   if (!res.ok) {
     throw new Error('Failed to bulk delete keywords.');
   }
-  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Bulk Keywords Deleted (${ids?.length || 0} items)`, status: 'Warning' }).catch(() => {});
+  createAuditLogApi({
+    user_email: getActiveUserEmail(),
+    action: `Bulk Keywords Deleted (${ids?.length || 0} items)`,
+    status: 'Warning',
+    module: 'intent'
+  }).catch(() => {});
 }
 
 const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://54.196.75.9:8000';
@@ -952,7 +979,13 @@ export async function hardDeleteKwProject(slug, userEmail = null) {
     localStorage.setItem('seo_pages', JSON.stringify(pages.filter(p => p.project_name !== slug)));
     localStorage.setItem('seo_competitors', JSON.stringify(competitors.filter(c => c.projectSlug !== slug)));
 
-    createAuditLogApi({ user_email: email, action: `Project Permanently Deleted: ${slug}`, status: 'Warning' }).catch(() => {});
+    createAuditLogApi({
+      user_email: email,
+      action: `Project Permanently Deleted: ${slug}`,
+      status: 'Warning',
+      project_name: slug,
+      module: 'project'
+    }).catch(() => {});
     return;
   }
 
@@ -978,7 +1011,13 @@ export async function hardDeleteKwProject(slug, userEmail = null) {
     console.warn('[hardDeleteKwProject] Supabase hard delete error:', e);
   }
 
-  createAuditLogApi({ user_email: email, action: `Project Permanently Deleted: ${slug}`, status: 'Warning' }).catch(() => {});
+  createAuditLogApi({
+    user_email: email,
+    action: `Project Permanently Deleted: ${slug}`,
+    status: 'Warning',
+    project_name: slug,
+    module: 'project'
+  }).catch(() => {});
 }
 
 export async function deleteKwClusterData(slug, userEmail = null) {
@@ -1132,7 +1171,13 @@ export async function insertPageRows(slug, rows) {
     throw new Error(body?.detail?.[0]?.msg || body?.detail || 'Failed to import pages.');
   }
   const data = await res.json();
-  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Pages Added to Project (${rows?.length || 0} pages): ${slug}`, status: 'Success' }).catch(() => {});
+  createAuditLogApi({
+    user_email: getActiveUserEmail(),
+    action: `Pages Added to Project (${rows?.length || 0} pages)`,
+    status: 'Success',
+    project_name: slug,
+    module: 'pages'
+  }).catch(() => {});
   return (data.pages || []).map(pageRowToUi);
 }
 
@@ -1369,7 +1414,13 @@ export async function insertCompetitor({ domain, name, da, targetRegions, projec
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail?.[0]?.msg || body?.detail || 'Failed to add competitor.');
   }
-  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Competitor Added: ${domain} (Project: ${projectSlug})`, status: 'Success' }).catch(() => {});
+  createAuditLogApi({
+    user_email: getActiveUserEmail(),
+    action: `Competitor Added: ${domain}`,
+    status: 'Success',
+    project_name: projectSlug,
+    module: 'competitors'
+  }).catch(() => {});
   return competitorRowToUi(await res.json());
 }
 
@@ -1407,7 +1458,12 @@ export async function deleteCompetitor(id) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail || 'Failed to delete competitor.');
   }
-  createAuditLogApi({ user_email: getActiveUserEmail(), action: `Competitor Deleted: ID #${id}`, status: 'Warning' }).catch(() => {});
+  createAuditLogApi({
+    user_email: getActiveUserEmail(),
+    action: `Competitor Deleted: ID #${id}`,
+    status: 'Warning',
+    module: 'competitors'
+  }).catch(() => {});
 }
 
 export async function deleteCompetitorProjectData(slug) {
@@ -1441,7 +1497,13 @@ export async function findCompetitors(projectSlug, { targetRegions, useAi = true
     throw new Error(body?.detail?.[0]?.msg || body?.detail || 'Failed to find competitors.');
   }
   const data = await res.json();
-  createAuditLogApi({ user_email: getActiveUserEmail(), action: `AI Competitor Discovery Executed: ${projectSlug}`, status: 'Success' }).catch(() => {});
+  createAuditLogApi({
+    user_email: getActiveUserEmail(),
+    action: `AI Competitor Discovery Executed`,
+    status: 'Success',
+    project_name: projectSlug,
+    module: 'competitors'
+  }).catch(() => {});
   return { competitors: (data.competitors || []).map(competitorRowToUi), ownDomain: data.ownDomain, message: data.message };
 }
 
@@ -1508,7 +1570,13 @@ export async function runAiAnalysis(projectSlug, keyword, aiMode, domain, countr
   }
   
   const result = await res.json();
-  createAuditLogApi({ user_email: getActiveUserEmail(), action: `AI Keyword Analysis Executed: "${keyword}" (${projectSlug})`, status: 'Success' }).catch(() => {});
+  createAuditLogApi({
+    user_email: getActiveUserEmail(),
+    action: `AI Keyword Analysis Executed: "${keyword}"`,
+    status: 'Success',
+    project_name: projectSlug,
+    module: 'intent'
+  }).catch(() => {});
   return result;
 }
 
@@ -1588,7 +1656,7 @@ export async function fetchAuditLogsApi(search = '', statusFilter = 'All') {
   return data.logs || [];
 }
 
-export async function createAuditLogApi({ user_email = 'system', action, status = 'Success' }) {
+export async function createAuditLogApi({ user_email = 'system', action, status = 'Success', project_name = null, module = null }) {
   if (isLocalMode) {
     const saved = localStorage.getItem('seo_system_logs');
     let logs = saved ? JSON.parse(saved) : [];
@@ -1597,7 +1665,7 @@ export async function createAuditLogApi({ user_email = 'system', action, status 
       String(now.getMonth() + 1).padStart(2, '0') + '-' +
       String(now.getDate()).padStart(2, '0') + ' ' +
       now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const newLog = { id: Date.now(), timestamp: formatted, user: user_email, action, status };
+    const newLog = { id: Date.now(), timestamp: formatted, user: user_email, action, status, project_name, module };
     logs = [newLog, ...logs];
     localStorage.setItem('seo_system_logs', JSON.stringify(logs));
     return newLog;
@@ -1606,7 +1674,7 @@ export async function createAuditLogApi({ user_email = 'system', action, status 
   const res = await fetch(`${CATEGORY_API_BASE}/audit-logs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_email, action, status }),
+    body: JSON.stringify({ user_email, action, status, project_name, module }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);

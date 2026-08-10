@@ -145,6 +145,15 @@ app.add_middleware(
 app.include_router(auth_router)
 
 
+@app.get("/")
+def read_root():
+    return {
+        "status": "ok",
+        "service": "SEO System API",
+        "docs": "/docs"
+    }
+
+
 def start_expired_projects_cleanup_loop():
     def loop():
         # Wait a short duration after startup before the first run
@@ -335,16 +344,35 @@ def restore_recycle_bin_endpoint(item_id: str, user_email: Optional[str] = None)
     if not res:
         raise HTTPException(404, "Item not found in recycle bin.")
     acting_user = user_email if user_email else "system"
-    db.insert_audit_log(user_email=acting_user, action=f"Restored from Recycle Bin: {res.get('restored')}", status="Success")
+    db.insert_audit_log(
+        user_email=acting_user,
+        action=f"Restored from Recycle Bin: {res.get('restored')}",
+        status="Success",
+        project_name=res.get("project_slug"),
+        module=res.get("type")
+    )
     return res
 
 
 @app.delete("/recycle-bin/{item_id}")
 def hard_delete_recycle_bin_endpoint(item_id: str, user_email: Optional[str] = None):
     """Permanently purges an item or project from recycle_bin."""
+    # Retrieve item type/project slug before deleting
+    with db.engine.begin() as conn:
+        item = conn.execute(db.text("SELECT item_type, project_slug, item_name FROM recycle_bin WHERE id = :id OR item_id = :id LIMIT 1"), {"id": item_id}).mappings().fetchone()
+    project_slug = item.get("project_slug") if item else None
+    module = item.get("item_type") if item else None
+    item_name = item.get("item_name") if item else item_id
+
     db.delete_recycle_bin_item(item_id)
     acting_user = user_email if user_email else "system"
-    db.insert_audit_log(user_email=acting_user, action=f"Permanently Deleted from Recycle Bin: {item_id}", status="Warning")
+    db.insert_audit_log(
+        user_email=acting_user,
+        action=f"Permanently Deleted from Recycle Bin: {item_name}",
+        status="Warning",
+        project_name=project_slug,
+        module=module
+    )
     return {"deleted": item_id}
 
 
@@ -371,7 +399,13 @@ def create_domain(payload: CreateDomainRequest):
     except ValueError as e:
         raise HTTPException(400, str(e))
     try:
-        db.insert_audit_log(user_email="system", action=f"Project Created: {payload.domain}", status="Success")
+        db.insert_audit_log(
+            user_email="system",
+            action=f"Project Created: {payload.domain}",
+            status="Success",
+            project_name=project_slug,
+            module="project"
+        )
     except Exception:
         pass
     return {"domain": payload.domain, "project_slug": project_slug}
@@ -393,6 +427,8 @@ class AuditLogRequest(BaseModel):
     user_email: Optional[str] = "system"
     action: str
     status: Optional[str] = "Success"
+    project_name: Optional[str] = None
+    module: Optional[str] = None
 
 
 @app.get("/audit-logs")
@@ -408,7 +444,9 @@ def create_audit_log_endpoint(payload: AuditLogRequest):
     inserted = db.insert_audit_log(
         user_email=payload.user_email,
         action=payload.action,
-        status=payload.status
+        status=payload.status,
+        project_name=payload.project_name,
+        module=payload.module
     )
     return {"log": inserted}
 
@@ -428,7 +466,13 @@ def delete_project_endpoint(project: str, user_email: Optional[str] = None):
     proj = _resolve_project_or_404(project)
     db.soft_delete_project(proj["slug"])
     acting_user = user_email if user_email else "system"
-    db.insert_audit_log(user_email=acting_user, action=f"Project Deleted: {proj['name']}", status="Warning")
+    db.insert_audit_log(
+        user_email=acting_user,
+        action=f"Project Deleted: {proj['name']}",
+        status="Warning",
+        project_name=proj["slug"],
+        module="project"
+    )
     return {"deleted": proj["slug"], "soft_deleted": True}
 
 
@@ -438,7 +482,13 @@ def hard_delete_project_endpoint(project: str, user_email: Optional[str] = None)
     proj = _resolve_project_or_404(project, include_deleted=True)
     db.delete_project(proj["slug"])
     acting_user = user_email if user_email else "system"
-    db.insert_audit_log(user_email=acting_user, action=f"Project Permanently Deleted: {proj['name']}", status="Warning")
+    db.insert_audit_log(
+        user_email=acting_user,
+        action=f"Project Permanently Deleted: {proj['name']}",
+        status="Warning",
+        project_name=proj["slug"],
+        module="project"
+    )
     return {"deleted": proj["slug"], "hard_deleted": True}
 
 
@@ -448,12 +498,18 @@ def restore_project_endpoint(project: str, user_email: Optional[str] = None):
     proj = _resolve_project_or_404(project, include_deleted=True)
     db.restore_project(proj["slug"])
     acting_user = user_email if user_email else "system"
-    db.insert_audit_log(user_email=acting_user, action=f"Project Restored: {proj['name']}", status="Success")
+    db.insert_audit_log(
+        user_email=acting_user,
+        action=f"Project Restored: {proj['name']}",
+        status="Success",
+        project_name=proj["slug"],
+        module="project"
+    )
     return {"restored": proj["slug"]}
 
 
 @app.delete("/projects/{project}/kw-data")
-def delete_project_kw_data_endpoint(project: str):
+def delete_project_kw_data_endpoint(project: str, user_email: Optional[str] = None):
     """Removes just this project's KW Cluster data (keyword_categories,
     categories, clusters, category_cluster_map) -- leaves the project,
     its domain registration, and its pages intact, so it still shows up
@@ -461,17 +517,39 @@ def delete_project_kw_data_endpoint(project: str):
     tab's delete button calls."""
     proj = _resolve_project_or_404(project)
     db.delete_project_kw_data(proj["slug"])
+    acting_user = user_email if user_email else "system"
+    try:
+        db.insert_audit_log(
+            user_email=acting_user,
+            action="Keywords dataset cleared",
+            status="Warning",
+            project_name=proj["slug"],
+            module="intent"
+        )
+    except Exception:
+        pass
     return {"project": proj["name"], "kw_data_deleted": True}
 
 
 @app.delete("/projects/{project}/pages")
-def delete_project_pages_endpoint(project: str):
+def delete_project_pages_endpoint(project: str, user_email: Optional[str] = None):
     """Removes just this project's page rows (Add Pages uploads) -- leaves
     the project, its domain registration, and its KW Cluster data intact,
     so it still shows up on the Domain and KW Cluster tabs afterward. This
     is what the Pages tab's delete button calls."""
     proj = _resolve_project_or_404(project)
     db.delete_project_pages(proj["slug"])
+    acting_user = user_email if user_email else "system"
+    try:
+        db.insert_audit_log(
+            user_email=acting_user,
+            action="Pages dataset cleared",
+            status="Warning",
+            project_name=proj["slug"],
+            module="pages"
+        )
+    except Exception:
+        pass
     return {"project": proj["name"], "pages_deleted": True}
 
 
@@ -509,7 +587,13 @@ def recluster_project(project: str):
     assignment = category_checker.cluster_all_categories(proj["slug"])
     db.replace_domain_clusters(proj["slug"], assignment)
     try:
-        db.insert_audit_log(user_email="system", action=f"AI Clustering Re-run Executed: {proj['name']}", status="Success")
+        db.insert_audit_log(
+            user_email="system",
+            action=f"AI Clustering Re-run Executed: {proj['name']}",
+            status="Success",
+            project_name=proj["slug"],
+            module="intent"
+        )
     except Exception:
         pass
     return {"project": proj["name"], "categories_clustered": len(assignment)}
@@ -579,7 +663,13 @@ async def create_category_job(
     run_categorize_job_in_background(job_id, project_slug, rows_for_job, country_code)
 
     try:
-        db.insert_audit_log(user_email="system", action=f"Keyword Sheet Uploaded & Processed: {filename} ({project_name})", status="Success")
+        db.insert_audit_log(
+            user_email="system",
+            action=f"Keyword Sheet Uploaded & Processed: {filename} ({project_name})",
+            status="Success",
+            project_name=project_slug,
+            module="intent"
+        )
     except Exception:
         pass
 
@@ -649,7 +739,13 @@ def categorize_existing_keywords(project: str, payload: CategorizeExistingReques
     run_categorize_job_in_background(job_id, proj["slug"], rows, country_code)
 
     try:
-        db.insert_audit_log(user_email="system", action=f"AI Clustering Triggered: {proj['name']} ({len(rows)} keywords)", status="Success")
+        db.insert_audit_log(
+            user_email="system",
+            action=f"AI Clustering Triggered: {proj['name']} ({len(rows)} keywords)",
+            status="Success",
+            project_name=proj["slug"],
+            module="intent"
+        )
     except Exception:
         pass
 
@@ -721,27 +817,66 @@ def create_project_pages(project: str, rows: List[PageRow]):
     if not rows:
         raise HTTPException(400, "No page rows to import.")
     inserted = db.insert_page_rows(proj["slug"], [r.dict() for r in rows])
+    try:
+        db.insert_audit_log(
+            user_email="system",
+            action=f"Pages Added to Project ({len(rows)} pages): {proj['name']}",
+            status="Success",
+            project_name=proj["name"],
+            module="pages"
+        )
+    except Exception:
+        pass
     return {"project": proj["name"], "pages": [_page_row_to_json(r) for r in inserted]}
 
 
 @app.patch("/pages/{page_id}")
 def update_project_page(page_id: int, payload: PageUpdateRequest):
-    """Updates whichever fields are present on a single page row (inline
-    edits and the Target Category/Target Type header dropdowns in the
-    Pages detail view)."""
+    """Updates whichever fields are present on a single page row."""
     updates = {
         "page_name": payload.pageName, "url": payload.url, "cluster": payload.cluster,
         "category": payload.category, "target_category": payload.targetCategory,
         "target_type": payload.targetType,
     }
     updates = {k: v for k, v in updates.items() if v is not None}
+    
+    with db.engine.begin() as conn:
+        page = conn.execute(db.text("SELECT project_name, page_name, url FROM pages WHERE id = :id"), {"id": page_id}).mappings().fetchone()
+    project_slug = page.get("project_name") if page else None
+    page_name = page.get("page_name") or page.get("url") if page else f"ID #{page_id}"
+
     db.update_page_row(page_id, updates)
+    try:
+        db.insert_audit_log(
+            user_email="system",
+            action=f"Page Updated: {page_name}",
+            status="Success",
+            project_name=project_slug,
+            module="pages"
+        )
+    except Exception:
+        pass
     return {"id": page_id}
 
 
 @app.delete("/pages/{page_id}")
 def delete_project_page(page_id: int):
+    with db.engine.begin() as conn:
+        page = conn.execute(db.text("SELECT project_name, page_name, url FROM pages WHERE id = :id"), {"id": page_id}).mappings().fetchone()
+    project_slug = page.get("project_name") if page else None
+    page_name = page.get("page_name") or page.get("url") if page else f"ID #{page_id}"
+
     db.delete_page_row(page_id)
+    try:
+        db.insert_audit_log(
+            user_email="system",
+            action=f"Page Deleted: {page_name}",
+            status="Warning",
+            project_name=project_slug,
+            module="pages"
+        )
+    except Exception:
+        pass
     return {"deleted": page_id}
 
 
@@ -881,7 +1016,13 @@ def create_competitor(payload: CompetitorCreateRequest):
         type=payload.type or payload.websiteType
     )
     try:
-        db.insert_audit_log(user_email="system", action=f"Competitor Added: {domain} (Project: {project_slug})", status="Success")
+        db.insert_audit_log(
+            user_email="system",
+            action=f"Competitor Added: {domain}",
+            status="Success",
+            project_name=project_slug,
+            module="competitors"
+        )
     except Exception:
         pass
     return _competitor_to_json(row)
@@ -898,8 +1039,21 @@ def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequ
     }
     updates = {k: v for k, v in updates.items() if v is not None}
     db.update_competitor(competitor_id, updates)
+    project_slug = updates.get("project_slug")
+    domain = updates.get("domain")
+    if not project_slug or not domain:
+        with db.engine.begin() as conn:
+            comp = conn.execute(db.text("SELECT project_slug, domain FROM competitors WHERE id = :id"), {"id": competitor_id}).mappings().fetchone()
+        project_slug = project_slug or (comp.get("project_slug") if comp else None)
+        domain = domain or (comp.get("domain") if comp else f"ID #{competitor_id}")
     try:
-        db.insert_audit_log(user_email="system", action=f"Competitor Updated: {payload.domain or competitor_id}", status="Success")
+        db.insert_audit_log(
+            user_email="system",
+            action=f"Competitor Updated: {domain}",
+            status="Success",
+            project_name=project_slug,
+            module="competitors"
+        )
     except Exception:
         pass
     return {"id": competitor_id}
@@ -907,17 +1061,39 @@ def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequ
 
 @app.delete("/competitors/{competitor_id}")
 def delete_competitor_endpoint(competitor_id: int):
+    with db.engine.begin() as conn:
+        comp = conn.execute(db.text("SELECT project_slug, domain FROM competitors WHERE id = :id"), {"id": competitor_id}).mappings().fetchone()
+    project_slug = comp.get("project_slug") if comp else None
+    domain = comp.get("domain") if comp else f"ID #{competitor_id}"
+
     db.delete_competitor(competitor_id)
     try:
-        db.insert_audit_log(user_email="system", action=f"Competitor Deleted: ID #{competitor_id}", status="Warning")
+        db.insert_audit_log(
+            user_email="system",
+            action=f"Competitor Deleted: {domain}",
+            status="Warning",
+            project_name=project_slug,
+            module="competitors"
+        )
     except Exception:
         pass
     return {"deleted": competitor_id}
 
 
 @app.delete("/projects/{project_slug}/competitors")
-def delete_project_competitors_endpoint(project_slug: str):
+def delete_project_competitors_endpoint(project_slug: str, user_email: Optional[str] = None):
     db.delete_competitors_by_project(project_slug)
+    acting_user = user_email if user_email else "system"
+    try:
+        db.insert_audit_log(
+            user_email=acting_user,
+            action="Competitors dataset cleared",
+            status="Warning",
+            project_name=project_slug,
+            module="competitors"
+        )
+    except Exception:
+        pass
     return {"deleted_project": project_slug}
 
 
@@ -953,49 +1129,7 @@ def _page_to_json(row):
         "targetType": row.get("target_type") or "",
     }
 
-@app.get("/pages/counts")
-def get_pages_counts_endpoint():
-    counts = db.get_pages_counts()
-    stats = db.get_pages_stats()
-    return {"counts": counts, "stats": stats}
 
-@app.get("/projects/{project_slug}/pages")
-def get_project_pages_endpoint(project_slug: str):
-    rows = db.get_page_rows(project_slug)
-    return {"pages": [_page_to_json(r) for r in rows]}
-
-@app.post("/projects/{project_slug}/pages")
-def insert_project_pages_endpoint(project_slug: str, rows: List[PageItem]):
-    inserted = db.insert_page_rows(project_slug, [r.dict() for r in rows])
-    try:
-        db.insert_audit_log(user_email="system", action=f"Pages Added: {len(rows)} pages to {project_slug}", status="Success")
-    except Exception:
-        pass
-    return {"pages": [_page_to_json(r) for r in inserted]}
-
-@app.patch("/pages/{page_id}")
-def update_page_endpoint(page_id: int, payload: PageUpdateRequest):
-    updates = {
-        "page_name": payload.pageName, "url": payload.url,
-        "cluster": payload.cluster, "category": payload.category,
-        "target_category": payload.targetCategory, "target_type": payload.targetType,
-    }
-    updates = {k: v for k, v in updates.items() if v is not None}
-    db.update_page_row(page_id, updates)
-    try:
-        db.insert_audit_log(user_email="system", action=f"Page Updated: ID #{page_id}", status="Success")
-    except Exception:
-        pass
-    return {"id": page_id}
-
-@app.delete("/pages/{page_id}")
-def delete_page_endpoint(page_id: int):
-    db.delete_page_row(page_id)
-    try:
-        db.insert_audit_log(user_email="system", action=f"Page Deleted: ID #{page_id}", status="Warning")
-    except Exception:
-        pass
-    return {"deleted": page_id}
 
 
 
@@ -1006,9 +1140,20 @@ class BulkDeleteKeywordsRequest(BaseModel):
 
 @app.delete("/keywords/{kw_id}")
 def delete_keyword_endpoint(kw_id: int):
+    with db.engine.begin() as conn:
+        kw = conn.execute(db.text("SELECT project_name, keyword FROM keyword_categories WHERE id = :id"), {"id": kw_id}).mappings().fetchone()
+    project_slug = kw.get("project_name") if kw else None
+    keyword = kw.get("keyword") if kw else f"ID #{kw_id}"
+
     db.archive_and_delete_keyword(kw_id)
     try:
-        db.insert_audit_log(user_email="system", action=f"Keyword Deleted: ID #{kw_id}", status="Warning")
+        db.insert_audit_log(
+            user_email="system",
+            action=f"Keyword Deleted: {keyword}",
+            status="Warning",
+            project_name=project_slug,
+            module="intent"
+        )
     except Exception:
         pass
     return {"deleted": kw_id}
@@ -1016,19 +1161,43 @@ def delete_keyword_endpoint(kw_id: int):
 
 @app.post("/keywords/bulk-delete")
 def bulk_delete_keywords_endpoint(payload: BulkDeleteKeywordsRequest):
+    project_slug = None
+    if payload.ids:
+        with db.engine.begin() as conn:
+            kw = conn.execute(db.text("SELECT project_name FROM keyword_categories WHERE id = :id"), {"id": payload.ids[0]}).mappings().fetchone()
+        project_slug = kw.get("project_name") if kw else None
+
     for kw_id in payload.ids:
         db.archive_and_delete_keyword(kw_id)
     try:
-        db.insert_audit_log(user_email="system", action=f"Bulk Keywords Deleted ({len(payload.ids)} items)", status="Warning")
+        db.insert_audit_log(
+            user_email="system",
+            action=f"Bulk Keywords Deleted ({len(payload.ids)} items)",
+            status="Warning",
+            project_name=project_slug,
+            module="intent"
+        )
     except Exception:
         pass
     return {"deleted_ids": payload.ids}
 
 @app.post("/pages/bulk-delete")
 def bulk_delete_pages_endpoint(payload: BulkDeletePagesRequest):
+    project_slug = None
+    if payload.ids:
+        with db.engine.begin() as conn:
+            page = conn.execute(db.text("SELECT project_name FROM pages WHERE id = :id"), {"id": payload.ids[0]}).mappings().fetchone()
+        project_slug = page.get("project_name") if page else None
+
     db.bulk_delete_page_rows(payload.ids)
     try:
-        db.insert_audit_log(user_email="system", action=f"Bulk Pages Deleted ({len(payload.ids)} pages)", status="Warning")
+        db.insert_audit_log(
+            user_email="system",
+            action=f"Bulk Pages Deleted ({len(payload.ids)} pages)",
+            status="Warning",
+            project_name=project_slug,
+            module="pages"
+        )
     except Exception:
         pass
     return {"deleted_ids": payload.ids}

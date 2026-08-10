@@ -194,6 +194,8 @@ def init_db():
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
+        conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS project_name TEXT"))
+        conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS module TEXT"))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS recycle_bin (
@@ -1883,16 +1885,18 @@ def _migrate_one_project_to_shared(slug):
 
 # --- System Audit Logs Helpers ----------------------------------------------
 
-def insert_audit_log(user_email, action, status='Success'):
+def insert_audit_log(user_email, action, status='Success', project_name=None, module=None):
     with engine.begin() as conn:
         row = conn.execute(text("""
-            INSERT INTO audit_logs (user_email, action, status)
-            VALUES (:user_email, :action, :status)
-            RETURNING id, timestamp, user_email AS user, action, status
+            INSERT INTO audit_logs (user_email, action, status, project_name, module)
+            VALUES (:user_email, :action, :status, :project_name, :module)
+            RETURNING id, timestamp, user_email AS user, action, status, project_name, module
         """), {
             "user_email": user_email or 'system',
             "action": action,
-            "status": status or 'Success'
+            "status": status or 'Success',
+            "project_name": project_name,
+            "module": module
         }).mappings().fetchone()
         res = dict(row)
         if res.get('timestamp'):
@@ -1902,18 +1906,24 @@ def insert_audit_log(user_email, action, status='Success'):
 
 def get_audit_logs(limit=200, status_filter=None, search_query=None):
     with engine.begin() as conn:
-        sql = "SELECT id, timestamp, user_email AS user, action, status FROM audit_logs WHERE 1=1"
+        sql = """
+            SELECT a.id, a.timestamp, a.user_email AS user, COALESCE(u.name, '') AS user_name,
+                   a.action, a.status, a.project_name, a.module
+            FROM audit_logs a
+            LEFT JOIN users u ON LOWER(a.user_email) = LOWER(u.email)
+            WHERE LOWER(a.user_email) != 'system'
+        """
         params = {"limit": limit}
 
         if status_filter and status_filter.lower() != 'all':
-            sql += " AND LOWER(status) = LOWER(:status)"
+            sql += " AND LOWER(a.status) = LOWER(:status)"
             params["status"] = status_filter
 
         if search_query:
-            sql += " AND (LOWER(user_email) LIKE :search OR LOWER(action) LIKE :search)"
+            sql += " AND (LOWER(a.user_email) LIKE :search OR LOWER(u.name) LIKE :search OR LOWER(a.action) LIKE :search OR LOWER(a.project_name) LIKE :search OR LOWER(a.module) LIKE :search)"
             params["search"] = f"%{search_query.lower()}%"
 
-        sql += " ORDER BY id DESC LIMIT :limit"
+        sql += " ORDER BY a.id DESC LIMIT :limit"
 
         rows = conn.execute(text(sql), params).mappings().fetchall()
         result = []
@@ -2011,7 +2021,7 @@ def restore_recycle_bin_item(item_identifier):
 
         if item_type == "project":
             restore_project(r["project_slug"])
-            return {"restored": r["project_slug"], "type": "project"}
+            return {"restored": r["project_slug"], "type": "project", "project_slug": r["project_slug"]}
 
         elif item_type == "page":
             conn.execute(text("""
@@ -2027,7 +2037,7 @@ def restore_recycle_bin_item(item_identifier):
                 "target_type": data.get("target_type"),
             })
             conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": r["id"]})
-            return {"restored": r["item_name"], "type": "page"}
+            return {"restored": r["item_name"], "type": "page", "project_slug": r["project_slug"]}
 
         elif item_type == "pages":
             for page in data:
@@ -2044,7 +2054,7 @@ def restore_recycle_bin_item(item_identifier):
                     "target_type": page.get("target_type"),
                 })
             conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": r["id"]})
-            return {"restored": r["item_name"], "type": "pages"}
+            return {"restored": r["item_name"], "type": "pages", "project_slug": r["project_slug"]}
 
         elif item_type == "keyword":
             conn.execute(text("""
@@ -2060,7 +2070,7 @@ def restore_recycle_bin_item(item_identifier):
                 "rank": data.get("rank")
             })
             conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": r["id"]})
-            return {"restored": r["item_name"], "type": "keyword"}
+            return {"restored": r["item_name"], "type": "keyword", "project_slug": r["project_slug"]}
 
         elif item_type == "keywords":
             for kw in data:
@@ -2077,7 +2087,7 @@ def restore_recycle_bin_item(item_identifier):
                     "rank": kw.get("rank")
                 })
             conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": r["id"]})
-            return {"restored": r["item_name"], "type": "keywords"}
+            return {"restored": r["item_name"], "type": "keywords", "project_slug": r["project_slug"]}
 
         elif item_type == "competitor":
             conn.execute(text("""
@@ -2090,7 +2100,7 @@ def restore_recycle_bin_item(item_identifier):
                 "type": data.get("type"), "website_type": data.get("website_type"),
             })
             conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": r["id"]})
-            return {"restored": r["item_name"], "type": "competitor"}
+            return {"restored": r["item_name"], "type": "competitor", "project_slug": r["project_slug"]}
 
         elif item_type == "competitors":
             for comp in data:
@@ -2104,7 +2114,7 @@ def restore_recycle_bin_item(item_identifier):
                     "type": comp.get("type"), "website_type": comp.get("website_type"),
                 })
             conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": r["id"]})
-            return {"restored": r["item_name"], "type": "competitors"}
+            return {"restored": r["item_name"], "type": "competitors", "project_slug": r["project_slug"]}
 
         return None
 

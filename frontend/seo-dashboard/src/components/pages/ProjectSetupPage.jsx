@@ -11,6 +11,7 @@ import {
   fetchCompetitorPageRows, insertCompetitorPageRows, updateCompetitorPageRow, deleteCompetitorPageRow,
   fetchCompetitors, insertCompetitor, updateCompetitor, deleteCompetitor, deleteCompetitorProjectData,
   findCompetitors, fetchCompetitorSnapshots, classifyCompetitorUrls,
+  createAuditLogApi, getActiveUserEmail,
 } from '../../lib/projectsApi';
 
 // ─── shared tiny components ────────────────────────────────────────────────
@@ -2763,12 +2764,26 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
         if (job?.status === 'completed') {
           await refreshCategorizationFromDb();
           setClustering(false);
+          createAuditLogApi({
+            user_email: getActiveUserEmail(),
+            action: `AI Categorization Completed for Project: ${project.name || project.slug}`,
+            status: 'Success',
+            project_name: project.slug,
+            module: 'intent'
+          }).catch(() => {});
           return;
         }
         if (job?.status === 'failed' || job?.error) {
           await refreshCategorizationFromDb();
           setClustering(false);
           setClusterError(job?.error || 'Categorization job failed.');
+          createAuditLogApi({
+            user_email: getActiveUserEmail(),
+            action: `AI Categorization Failed for Project: ${project.name || project.slug}`,
+            status: 'Warning',
+            project_name: project.slug,
+            module: 'intent'
+          }).catch(() => {});
           return;
         }
         if (attempt >= MAX_ATTEMPTS) {
@@ -2788,6 +2803,13 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
   const runClusteringJob = async (recluster) => {
     setClustering(true);
     setClusterError('');
+    createAuditLogApi({
+      user_email: getActiveUserEmail(),
+      action: `AI Clustering Triggered for Project: ${project.name || project.slug}`,
+      status: 'Success',
+      project_name: project.slug,
+      module: 'intent'
+    }).catch(() => {});
     try {
       const country = project.location && project.location !== 'Global' ? project.location : '';
       // Categorizes keywords ALREADY sitting in this project -- never
@@ -2807,6 +2829,13 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
     } catch (err) {
       setClustering(false);
       setClusterError(err.message || 'Failed to start categorization job.');
+      createAuditLogApi({
+        user_email: getActiveUserEmail(),
+        action: `AI Clustering Failed for Project: ${project.name || project.slug}`,
+        status: 'Warning',
+        project_name: project.slug,
+        module: 'intent'
+      }).catch(() => {});
     }
   };
 
@@ -2868,6 +2897,13 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
         const allChecked = categorized.length > 0 && categorized.every(r => r.rankCheckedAt);
         if (allChecked || attempt >= MAX_ATTEMPTS) {
           setRankChecking(false);
+          createAuditLogApi({
+            user_email: getActiveUserEmail(),
+            action: `AI Rank Check Completed for Project: ${project.name || project.slug}`,
+            status: 'Success',
+            project_name: project.slug,
+            module: 'rank_check'
+          }).catch(() => {});
           return;
         }
       } catch {
@@ -2884,6 +2920,13 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
     setRankCheckError('');
     setRankChecking(true);
     setShowRankColumn(true);
+    createAuditLogApi({
+      user_email: getActiveUserEmail(),
+      action: `AI Rank Check Triggered for Project: ${project.name || project.slug}`,
+      status: 'Success',
+      project_name: project.slug,
+      module: 'rank_check'
+    }).catch(() => {});
     try {
       if (!project.slug) {
         throw new Error("This project is missing its backend project reference -- reload the page and try again.");
@@ -2911,6 +2954,13 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
     } catch (err) {
       setRankChecking(false);
       setRankCheckError(err.message || 'Failed to check ranking.');
+      createAuditLogApi({
+        user_email: getActiveUserEmail(),
+        action: `AI Rank Check Failed for Project: ${project.name || project.slug}`,
+        status: 'Warning',
+        project_name: project.slug,
+        module: 'rank_check'
+      }).catch(() => {});
     }
   };
 
@@ -6247,12 +6297,26 @@ export default function ProjectSetupPage({ tab, user }) {
   const runFindCompetitors = async (project) => {
     setFindingCompetitors(true);
     setFindCompetitorsMessage('');
+    createAuditLogApi({
+      user_email: getActiveUserEmail(),
+      action: `AI Competitor Discovery Triggered for Project: ${project.name || project.slug}`,
+      status: 'Success',
+      project_name: project.slug,
+      module: 'competitors'
+    }).catch(() => {});
     try {
       const { competitors: found, message } = await findCompetitors(project.slug, { useAi: true });
       handleFoundCompetitors(found);
       setFindCompetitorsMessage(found.length === 0 ? (message || '0 competitors found.') : `Found ${found.length} competitor${found.length === 1 ? '' : 's'}.`);
     } catch (err) {
       setFindCompetitorsMessage(err.message || 'Failed to find competitors.');
+      createAuditLogApi({
+        user_email: getActiveUserEmail(),
+        action: `AI Competitor Discovery Failed for Project: ${project.name || project.slug}`,
+        status: 'Warning',
+        project_name: project.slug,
+        module: 'competitors'
+      }).catch(() => {});
     } finally {
       setFindingCompetitors(false);
     }

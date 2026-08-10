@@ -78,10 +78,10 @@ export default function TopPagesPage() {
           id: p.id || normUrl,
           pageName: cleanPageName,
           url: p.url,
-          cluster: p.cluster || p.category || 'General',
+          category: p.category || matchingKws.map(k => k.category).find(Boolean) || 'General',
+          cluster: p.cluster || matchingKws.map(k => k.cluster).find(Boolean) || 'General',
           targetCategory: subtype,
           targetType: targetType,
-          keywords: kwList,
           totalKws: kwList.length
         };
       }).filter(Boolean);
@@ -110,7 +110,8 @@ export default function TopPagesPage() {
     const matchSearch = searchQuery === '' || 
       p.pageName.toLowerCase().includes(searchQuery.toLowerCase()) || 
       p.url.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.keywords.some(kw => kw.toLowerCase().includes(searchQuery.toLowerCase()));
+      p.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.cluster.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchIntent = intentFilter === 'all' || p.targetCategory.toLowerCase().includes(intentFilter.toLowerCase());
     const matchType = typeFilter === 'all' || (typeFilter === 'landing' ? p.targetType.toLowerCase().includes('landing') : p.targetType.toLowerCase().includes('blog'));
@@ -121,7 +122,12 @@ export default function TopPagesPage() {
   // Calculate metrics
   const totalPagesCount = pagesData.length;
   const totalKwsSum = pagesData.reduce((acc, p) => acc + p.totalKws, 0);
-  const avgKwsPerPage = totalPagesCount > 0 ? (totalKwsSum / totalPagesCount).toFixed(1) : 0;
+
+  // Calculate Average Position across tracked page keywords
+  const allRanks = pagesData.flatMap(p => p.ranks || []).filter(r => typeof r === 'number' && r > 0);
+  const avgPosition = allRanks.length > 0 
+    ? (allRanks.reduce((acc, r) => acc + r, 0) / allRanks.length).toFixed(1) 
+    : 0;
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: '#f8fafc', minHeight: '100vh' }}>
@@ -210,7 +216,7 @@ export default function TopPagesPage() {
         {[
           { label: 'Total Pages Tracked', value: totalPagesCount },
           { label: 'Total Mapped Keywords', value: totalKwsSum },
-          { label: 'Avg. Keywords per Page', value: avgKwsPerPage },
+          { label: 'Avg. Position', value: avgPosition },
         ].map(s => (
           <div key={s.label} style={{
             background: '#ffffff',
@@ -241,7 +247,7 @@ export default function TopPagesPage() {
           <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: '#94a3b8' }} />
           <input
             type="text"
-            placeholder="Search pages by name, URL, or keyword..."
+            placeholder="Search pages by name, URL, category, or cluster..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             style={{
@@ -255,7 +261,7 @@ export default function TopPagesPage() {
           />
         </div>
 
-        {/* Intent Filter */}
+        {/* Intent / Subtype Filter */}
         <select
           value={intentFilter}
           onChange={e => setIntentFilter(e.target.value)}
@@ -269,7 +275,7 @@ export default function TopPagesPage() {
             background: '#ffffff'
           }}
         >
-          <option value="all">All Intent (Info / Comm)</option>
+          <option value="all">All Target Subtypes</option>
           <option value="informational">Informational</option>
           <option value="commercial">Commercial</option>
         </select>
@@ -288,7 +294,7 @@ export default function TopPagesPage() {
             background: '#ffffff'
           }}
         >
-          <option value="all">All Types (Landing / Blog)</option>
+          <option value="all">All Target Types</option>
           <option value="landing">Landing Page</option>
           <option value="blog">Blog Page</option>
         </select>
@@ -308,10 +314,10 @@ export default function TopPagesPage() {
               <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>Page Name</th>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>URL</th>
-                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Total KWs</th>
-                <th style={{ padding: '12px 16px', fontWeight: 700, minWidth: 260 }}>Keywords</th>
-                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Info / Comm</th>
-                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Landing / Blog</th>
+                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Category</th>
+                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Cluster</th>
+                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Target Subtype</th>
+                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Target Type</th>
               </tr>
             </thead>
             <tbody>
@@ -344,52 +350,26 @@ export default function TopPagesPage() {
                       </a>
                     </td>
 
-                    {/* TOTAL KWS */}
-                    <td style={{ padding: '12px 16px', fontWeight: 800, color: '#0f172a' }}>
-                      {row.totalKws}
+                    {/* CATEGORY */}
+                    <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
+                      <span style={{ background: '#f1f5f9', color: '#334155', fontSize: 12, fontWeight: 600, padding: '3px 9px', borderRadius: 6 }}>
+                        {row.category}
+                      </span>
                     </td>
 
-                    {/* KEYWORDS */}
-                    <td style={{ padding: '12px 16px' }}>
-                      {row.keywords && row.keywords.length > 0 ? (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 60, overflowY: 'auto' }}>
-                          {row.keywords.slice(0, 4).map((kw, i) => (
-                            <span key={i} style={{
-                              background: '#f1f5f9',
-                              color: '#334155',
-                              fontSize: 11.5,
-                              fontWeight: 600,
-                              padding: '2px 8px',
-                              borderRadius: 4,
-                              whiteSpace: 'nowrap'
-                            }}>
-                              {kw}
-                            </span>
-                          ))}
-                          {row.keywords.length > 4 && (
-                            <span style={{
-                              background: '#e2e8f0',
-                              color: '#64748b',
-                              fontSize: 11,
-                              fontWeight: 700,
-                              padding: '2px 6px',
-                              borderRadius: 4
-                            }} title={row.keywords.slice(4).join(', ')}>
-                              +{row.keywords.length - 4} more
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>
-                      )}
+                    {/* CLUSTER */}
+                    <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
+                      <span style={{ background: '#f5f3ff', color: '#7c3aed', fontSize: 12, fontWeight: 600, padding: '3px 9px', borderRadius: 6 }}>
+                        {row.cluster}
+                      </span>
                     </td>
 
-                    {/* INFO / COMM */}
+                    {/* TARGET SUBTYPE */}
                     <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
                       {row.targetCategory}
                     </td>
 
-                    {/* LANDING / BLOG */}
+                    {/* TARGET TYPE */}
                     <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
                       {row.targetType}
                     </td>

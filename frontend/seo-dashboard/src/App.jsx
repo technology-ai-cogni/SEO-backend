@@ -17,6 +17,8 @@ import LoginPage from './components/pages/LoginPage';
 import SignUpPage from './components/pages/SignUpPage';
 import ProfilePage from './components/pages/ProfilePage';
 import LandingPage from './components/pages/LandingPage';
+import LogsPage from './components/pages/LogsPage';
+import RecycleBinPage from './components/pages/RecycleBinPage';
 import { totalKeywordCount, topKeywords } from './data/mockData';
 
 const mockProject = {
@@ -31,6 +33,10 @@ const PAGE_TITLES = {
   'home': { title: 'Home', subtitle: 'Your SEO workspace overview' },
   'login': { title: 'User Login', subtitle: 'Access your SEO workspace' },
   'profile': { title: 'Account Settings', subtitle: 'Manage your profile and security settings' },
+  'recycle-bin': { title: 'System Recycle Bin', subtitle: 'Recover deleted projects, keywords, pages, and competitors' },
+  'logs': { title: 'Activity Audit Logs', subtitle: 'Monitor system activity, administrative events, and user actions' },
+  'notifications': { title: 'Notifications', subtitle: 'System notifications and workspace alerts' },
+  'help': { title: 'Help & Support', subtitle: 'Documentation, guides, and assistance' },
   'signup': { title: 'Create Account', subtitle: 'Register for a new SEO workspace account' },
   'project-setup': { title: 'Project Setup', subtitle: 'Manage domains, pages, competitors and connectors' },
   'project-setup/domain': { title: 'Project Setup · Domain', subtitle: 'Manage tracked domains' },
@@ -93,6 +99,8 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
     case 'admin-login': return <LoginPage onNavigate={onNavigate} initialAdminMode={true} user={user} onLoginSuccess={onLoginSuccess} onLogout={onLogout} />;
     case 'signup': return <SignUpPage onNavigate={onNavigate} user={user} onLoginSuccess={onLoginSuccess} />;
     case 'profile': return <ProfilePage user={user} onUserUpdate={onLoginSuccess} onNavigate={onNavigate} />;
+    case 'recycle-bin': return <RecycleBinPage user={user} onNavigate={onNavigate} />;
+    case 'logs': return <LogsPage user={user} onNavigate={onNavigate} />;
     case 'dashboard': return <DashboardPage 
       activeProject={mockProject}
       keywords={topKeywords}
@@ -189,7 +197,7 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
-      <Sidebar activePath={activePath} onNavigate={handleNavigate} />
+      <Sidebar activePath={activePath} onNavigate={handleNavigate} user={user} />
       <div style={{ marginLeft: 'var(--sidebar-w)', flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <Topbar
           title={pageInfo.title}
