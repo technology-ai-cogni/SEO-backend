@@ -357,11 +357,15 @@ def restore_recycle_bin_endpoint(item_id: str, user_email: Optional[str] = None)
 @app.delete("/recycle-bin/{item_id}")
 def hard_delete_recycle_bin_endpoint(item_id: str, user_email: Optional[str] = None):
     """Permanently purges an item or project from recycle_bin."""
-    # Retrieve item type/project slug before deleting
     with db.engine.begin() as conn:
-        item = conn.execute(db.text("SELECT item_type, project_slug, item_name FROM recycle_bin WHERE id = :id OR item_id = :id LIMIT 1"), {"id": item_id}).mappings().fetchone()
-    project_slug = item.get("project_slug") if item else None
-    module = item.get("item_type") if item else None
+        item = None
+        if item_id.isdigit():
+            item = conn.execute(db.text("SELECT item_type, project_slug, project_name, item_name FROM recycle_bin WHERE id = :id OR item_id = :s LIMIT 1"), {"id": int(item_id), "s": item_id}).mappings().fetchone()
+        if not item:
+            item = conn.execute(db.text("SELECT item_type, project_slug, project_name, item_name FROM recycle_bin WHERE item_id = :s OR project_slug = :s OR project_name = :s LIMIT 1"), {"s": item_id}).mappings().fetchone()
+
+    project_slug = item.get("project_slug") if item else item_id
+    module = item.get("item_type") if item else "recycle_bin"
     item_name = item.get("item_name") if item else item_id
 
     db.delete_recycle_bin_item(item_id)

@@ -2121,9 +2121,16 @@ def restore_recycle_bin_item(item_identifier):
 
 def delete_recycle_bin_item(item_identifier):
     with engine.begin() as conn:
-        if str(item_identifier).isdigit():
-            conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": int(item_identifier)})
-        conn.execute(text("DELETE FROM recycle_bin WHERE project_slug = :p OR item_id = :p"), {"p": str(item_identifier)})
+        p = str(item_identifier).strip()
+        if p.isdigit():
+            conn.execute(text("DELETE FROM recycle_bin WHERE id = :id OR item_id = :p"), {"id": int(p), "p": p})
+        conn.execute(text("""
+            DELETE FROM recycle_bin 
+            WHERE project_slug = :p 
+               OR project_name = :p 
+               OR item_id = :p 
+               OR item_name = :p
+        """), {"p": p})
 
 
 if __name__ == "__main__":

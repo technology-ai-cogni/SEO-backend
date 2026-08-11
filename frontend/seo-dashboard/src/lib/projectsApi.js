@@ -81,16 +81,23 @@ export async function hardDeleteRecycleBinItemApi(itemId, userEmail = null) {
   const email = getActiveUserEmail(userEmail);
   if (isLocalMode) {
     const items = JSON.parse(localStorage.getItem('seo_recycle_bin') || '[]');
-    const updated = items.filter(i => String(i.item_id) !== String(itemId) && i.project_slug !== itemId);
+    const target = String(itemId);
+    const updated = items.filter(i => 
+      String(i.id) !== target && 
+      String(i.item_id) !== target && 
+      i.project_slug !== target && 
+      i.project_name !== target
+    );
     localStorage.setItem('seo_recycle_bin', JSON.stringify(updated));
     return;
   }
 
-  const res = await fetch(`${CATEGORY_API_BASE}/recycle-bin/${itemId}?user_email=${encodeURIComponent(email)}`, {
+  const res = await fetch(`${CATEGORY_API_BASE}/recycle-bin/${encodeURIComponent(itemId)}?user_email=${encodeURIComponent(email)}`, {
     method: 'DELETE'
   });
   if (!res.ok) {
-    throw new Error('Failed to delete item permanently.');
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete item permanently.');
   }
 }
 

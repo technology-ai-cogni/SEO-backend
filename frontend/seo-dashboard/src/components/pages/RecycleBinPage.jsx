@@ -122,6 +122,38 @@ export default function RecycleBinPage({ user, onNavigate }) {
     }
   };
 
+  const handleRestoreSingleItem = async (item) => {
+    setRestoring(true);
+    setRestoreMsg({ type: '', text: '' });
+    try {
+      const currentUserEmail = user?.email || 'system';
+      const targetId = item.id || item.item_id || item.project_slug;
+      await restoreRecycleBinItemApi(targetId, currentUserEmail);
+      setRestoreMsg({ type: 'success', text: `Successfully restored ${item.item_type}: "${item.item_name}"` });
+      await loadRecycleBin('all');
+    } catch (err) {
+      setRestoreMsg({ type: 'error', text: err.message || 'Failed to restore item.' });
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const handlePermanentlyDeleteSingleItem = async (item) => {
+    setRestoring(true);
+    setRestoreMsg({ type: '', text: '' });
+    try {
+      const currentUserEmail = user?.email || 'system';
+      const targetId = item.id || item.item_id || item.project_slug;
+      await hardDeleteRecycleBinItemApi(targetId, currentUserEmail);
+      setRestoreMsg({ type: 'success', text: `Permanently deleted "${item.item_name}" from database.` });
+      await loadRecycleBin('all');
+    } catch (err) {
+      setRestoreMsg({ type: 'error', text: err.message || 'Failed to delete item.' });
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   const handlePermanentlyDeleteGroup = (group) => {
     setSelectedGroup(group);
     setShowConfirmDeleteModal(true);
@@ -134,23 +166,23 @@ export default function RecycleBinPage({ user, onNavigate }) {
     try {
       const currentUserEmail = user?.email || 'system';
 
-      // Purge all entries under this project slug
+      // Purge all entries under this project slug in one request
       await hardDeleteRecycleBinItemApi(selectedGroup.slug, currentUserEmail);
 
-      // Also clean up any loose item entries for this project
-      const itemDeletes = selectedGroup.items.map(item =>
-        hardDeleteRecycleBinItemApi(item.id, currentUserEmail).catch(() => {})
-      );
-      await Promise.all(itemDeletes);
+      // If project_name differs from slug, ensure cleanup by name as well
+      if (selectedGroup.name && selectedGroup.name !== selectedGroup.slug) {
+        await hardDeleteRecycleBinItemApi(selectedGroup.name, currentUserEmail).catch(() => {});
+      }
 
       setRestoreMsg({
         type: 'success',
-        text: `Permanently deleted project "${selectedGroup.name}" and all deleted data from database.`
+        text: `Permanently deleted project "${selectedGroup.name}" and all associated data from database.`
       });
       setShowConfirmDeleteModal(false);
       setSelectedGroup(null);
-      loadRecycleBin('all');
+      await loadRecycleBin('all');
     } catch (err) {
+      console.error('Failed to permanently delete project group:', err);
       setRestoreMsg({ type: 'error', text: err.message || 'Failed to permanently delete project group.' });
     } finally {
       setRestoring(false);
@@ -565,9 +597,57 @@ export default function RecycleBinPage({ user, onNavigate }) {
                               </span>
                               <strong style={{ color: 'var(--text-primary)' }}>{item.item_name}</strong>
                             </div>
-                            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                              {item.deleted_at ? new Date(item.deleted_at).toLocaleDateString() : ''}
-                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                                {item.deleted_at ? new Date(item.deleted_at).toLocaleDateString() : ''}
+                              </span>
+
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button
+                                  onClick={() => handleRestoreSingleItem(item)}
+                                  disabled={restoring}
+                                  title="Restore single item"
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    background: 'var(--green-bg)',
+                                    color: 'var(--green)',
+                                    border: '1px solid var(--green)',
+                                    borderRadius: 6,
+                                    padding: '4px 8px',
+                                    fontSize: 11.5,
+                                    fontWeight: 600,
+                                    cursor: restoring ? 'not-allowed' : 'pointer'
+                                  }}
+                                >
+                                  <RotateCcw size={11} />
+                                  <span>Restore</span>
+                                </button>
+
+                                <button
+                                  onClick={() => handlePermanentlyDeleteSingleItem(item)}
+                                  disabled={restoring}
+                                  title="Delete single item permanently"
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    background: '#fef2f2',
+                                    color: '#dc2626',
+                                    border: '1px solid #fca5a5',
+                                    borderRadius: 6,
+                                    padding: '4px 8px',
+                                    fontSize: 11.5,
+                                    fontWeight: 600,
+                                    cursor: restoring ? 'not-allowed' : 'pointer'
+                                  }}
+                                >
+                                  <Trash2 size={11} />
+                                  <span>Delete</span>
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         ))}
                       </div>
