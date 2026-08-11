@@ -1346,16 +1346,178 @@ export async function bulkDeleteCompetitorPageRows(ids) {
   }
 }
 
-// ─── Competitors tab ────────────────────────────────────────────────────────
-// Each competitor is tracked against one project (projectSlug) -- routed
-// through the backend (new table, same RLS-not-set-up-yet reasoning as
-// pages) rather than Supabase directly.
+export function formatCleanName(str) {
+  if (!str || typeof str !== 'string') return '—';
+  let clean = str.trim();
+  clean = clean
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '');
+  clean = clean.split('/')[0].split('?')[0].split('#')[0];
+  clean = clean.replace(/\.(com|co\.in|in|org|net|edu\.sg|edu|co|io|ai|gov|ac\.in|org\.in|info|biz|me|app)$/i, '');
+
+  if (!clean) return '—';
+  if (clean === clean.toLowerCase()) {
+    clean = clean.split(/[-_]+/).map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+  }
+  return clean;
+}
+
+export function getDomainHost(str) {
+  if (!str || typeof str !== 'string') return '';
+  let clean = str.trim().toLowerCase();
+  if (clean.startsWith('http://') || clean.startsWith('https://')) {
+    try {
+      const parsed = new URL(clean);
+      let host = parsed.hostname.toLowerCase();
+      if (host.startsWith('www.')) host = host.slice(4);
+      return host;
+    } catch (e) {}
+  }
+  clean = clean.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+  const part = clean.split('/')[0].split('?')[0].split('#')[0].split(':')[0].trim();
+  if (part.includes('.')) {
+    return part;
+  }
+  return '';
+}
+
+export function isSameDomainHost(host1, host2) {
+  if (!host1 || !host2) return false;
+  if (host1 === host2) return true;
+  if (host1.endsWith('.' + host2) || host2.endsWith('.' + host1)) return true;
+  return false;
+}
+
+export function resolveFullCompetitorUrls(rowOrUrl, domain, name) {
+  const rowObj = typeof rowOrUrl === 'object' && rowOrUrl !== null ? rowOrUrl : {};
+  const rawUrl = typeof rowOrUrl === 'string' ? rowOrUrl : (rowObj.url || rowObj.fullUrl || rowObj.full_url || rowObj.page_url || rowObj.pageUrl || rowObj.target_url || rowObj.link || rowObj.href || '');
+  const dom = domain || rowObj.domain || '';
+  const compName = name || rowObj.name || '';
+
+  let targetHost = getDomainHost(dom) || getDomainHost(rawUrl) || getDomainHost(compName);
+
+  const candidateUrls = [];
+
+  // 1. Add any URLs directly present in rowObj
+  if (rowObj.url && typeof rowObj.url === 'string') candidateUrls.push(rowObj.url.trim());
+  if (rowObj.fullUrl && typeof rowObj.fullUrl === 'string') candidateUrls.push(rowObj.fullUrl.trim());
+  if (Array.isArray(rowObj.urls)) {
+    rowObj.urls.forEach(u => typeof u === 'string' && u.trim() && candidateUrls.push(u.trim()));
+  }
+  if (Array.isArray(rowObj.allUrls)) {
+    rowObj.allUrls.forEach(u => typeof u === 'string' && u.trim() && candidateUrls.push(u.trim()));
+  }
+  if (Array.isArray(rowObj.details)) {
+    rowObj.details.forEach(d => {
+      const u = typeof d === 'string' ? d : (d?.url || d?.fullUrl);
+      if (u && typeof u === 'string') candidateUrls.push(u.trim());
+    });
+  }
+
+  const cleanRawUrl = (rawUrl || '').trim();
+  if (cleanRawUrl) {
+    candidateUrls.push(cleanRawUrl.startsWith('http') ? cleanRawUrl : `https://${cleanRawUrl}`);
+  }
+
+  // 2. Search dataset (derivedPages) strictly for URLs matching targetHost
+  if (targetHost && derivedPages && derivedPages.length > 0) {
+    derivedPages.forEach(p => {
+      if (!p.url) return;
+      const pHost = getDomainHost(p.url);
+      if (isSameDomainHost(pHost, targetHost)) {
+        candidateUrls.push(p.url.trim());
+      }
+    });
+  }
+
+  // 3. Filter candidates strictly by targetHost if targetHost is known
+  const matchedUrls = [];
+  candidateUrls.forEach(u => {
+    let formatted = u;
+    if (!formatted.startsWith('http')) {
+      formatted = `https://${formatted}`;
+    }
+    const host = getDomainHost(formatted);
+    if (!targetHost || isSameDomainHost(host, targetHost)) {
+      matchedUrls.push(formatted);
+    }
+  });
+
+  // 4. Deduplicate while maintaining order, prioritizing deep URLs over root domain URLs
+  const uniqueUrls = [];
+  const seen = new Set();
+
+  matchedUrls.forEach(u => {
+    const normalized = u.toLowerCase().replace(/\/$/, '');
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      uniqueUrls.push(u);
+    }
+  });
+
+  uniqueUrls.sort((a, b) => {
+    const aHasPath = /^https?:\/\/[^\/]+\/.+/i.test(a);
+    const bHasPath = /^https?:\/\/[^\/]+\/.+/i.test(b);
+    if (aHasPath && !bHasPath) return -1;
+    if (!aHasPath && bHasPath) return 1;
+    return 0;
+  });
+
+  if (uniqueUrls.length === 0) {
+    if (dom) {
+      const fallback = dom.startsWith('http') ? dom : `https://${dom}`;
+      return [fallback];
+    }
+    return [];
+  }
+
+  return uniqueUrls;
+}
+
+export function resolveFullCompetitorUrl(rowOrUrl, domain, name) {
+  const urls = resolveFullCompetitorUrls(rowOrUrl, domain, name);
+  return urls[0] || '';
+}
 
 function competitorRowToUi(row) {
+  const dbUrls = Array.isArray(row.urls) ? row.urls : (row.urls ? [row.urls] : []);
+  if (row.url && typeof row.url === 'string') {
+    dbUrls.unshift(row.url);
+  }
+  const resolvedUrls = resolveFullCompetitorUrls(row, row.domain, row.name);
+  
+  const combinedUrls = [];
+  const seen = new Set();
+  
+  [...dbUrls, ...resolvedUrls].forEach(u => {
+    if (u && typeof u === 'string' && u.trim()) {
+      let formatted = u.trim();
+      if (!formatted.startsWith('http')) formatted = `https://${formatted}`;
+      const normalized = formatted.toLowerCase().replace(/\/$/, '');
+      if (!seen.has(normalized)) {
+        seen.add(normalized);
+        combinedUrls.push(formatted);
+      }
+    }
+  });
+
+  // Prioritize deep page URLs over root domain URLs
+  combinedUrls.sort((a, b) => {
+    const aHasPath = /^https?:\/\/[^\/]+\/.+/i.test(a);
+    const bHasPath = /^https?:\/\/[^\/]+\/.+/i.test(b);
+    if (aHasPath && !bHasPath) return -1;
+    if (!aHasPath && bHasPath) return 1;
+    return 0;
+  });
+
+  const urlVal = combinedUrls[0] || (row.domain ? (row.domain.startsWith('http') ? row.domain : `https://${row.domain}`) : '');
   return {
     id: row.id,
     domain: row.domain,
     name: row.name,
+    url: urlVal,
+    fullUrl: urlVal,
+    urls: combinedUrls,
     da: row.da,
     websiteType: row.websiteType || row.type || row.website_type || null,
     type: row.type || row.websiteType || row.website_type || null,
@@ -1401,8 +1563,9 @@ export async function insertCompetitor({ domain, name, da, targetRegions, projec
     const rows = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
     const maxId = rows.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
     const now = new Date().toISOString();
+    const urlStr = domain.startsWith('http') ? domain : `https://${domain}`;
     const inserted = {
-      id: maxId + 1, domain, name: name || null, da: da || null, targetRegions: targetRegions || [],
+      id: maxId + 1, domain, name: name || null, url: urlStr, fullUrl: urlStr, da: da || null, targetRegions: targetRegions || [],
       projectSlug: projectSlug || null,
       commonKw: 0, commonKwChange: 0, totalKw: 0, totalKwChange: 0,
       aiCompLevel: 0, aiCompChange: 0, serpCompLevel: 0, compLevel: 0,

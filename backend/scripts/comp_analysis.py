@@ -102,7 +102,7 @@ def aggregate_competitors(
     if len(project_rows) and project_rows["checked_domain"].iloc[0]:
         own_domain = get_domain(str(project_rows["checked_domain"].iloc[0]))
 
-    stats: Dict[str, dict] = defaultdict(lambda: {"keywords": {}, "categories": set(), "clusters": set()})
+    stats: Dict[str, dict] = defaultdict(lambda: {"keywords": {}, "categories": set(), "clusters": set(), "urls": set()})
 
     for _, row in project_rows.iterrows():
         keyword = row["keyword"]
@@ -111,13 +111,18 @@ def aggregate_competitors(
         cls = str(row.get("cluster") or "").strip()
 
         seen_this_keyword = set()
-        for idx, url in enumerate(top_links, start=1):
-            dom = get_domain(url)
+        for idx, item in enumerate(top_links, start=1):
+            url_str = item if isinstance(item, str) else (item.get("url") or item.get("link") or item.get("domain") if isinstance(item, dict) else str(item))
+            if not url_str:
+                continue
+            dom = get_domain(url_str)
             if not dom or dom == own_domain or dom in exclude_domains:
                 continue
             if dom in seen_this_keyword:
                 continue  # only keep best (first) position per domain per keyword
             seen_this_keyword.add(dom)
+            if isinstance(url_str, str) and (url_str.startswith("http://") or url_str.startswith("https://")):
+                stats[dom]["urls"].add(url_str)
             best = stats[dom]["keywords"].get(keyword)
             if best is None or idx < best:
                 stats[dom]["keywords"][keyword] = idx
@@ -156,8 +161,13 @@ def build_competitor_table(stats: dict, total_keywords: int, top_n: Optional[int
         cat_str = ", ".join(c for c in categories if c)
         cls_str = ", ".join(c for c in clusters if c)
 
+        urls_list = sorted(list(data.get("urls", set())))
+        primary_url = urls_list[0] if urls_list else (f"https://{domain}" if domain else "")
+
         rows.append({
             "competitor_domain": domain,
+            "url": primary_url,
+            "urls": urls_list,
             "category": cat_str,
             "cluster": cls_str,
             "total_keywords": total_keywords,
@@ -241,6 +251,48 @@ def ai_comp_levels(
         return {}
 
 
+def select_top_2_keywords_per_group(rows: List[dict]) -> List[dict]:
+    """Selects top 2 keywords per category/cluster based on Search Volume (sv).
+    If no SV, selects top 2 keywords in order."""
+    if not rows:
+        return []
+
+    def parse_sv(r):
+        val = r.get("sv") or r.get("volume") or r.get("search_volume")
+        if val is None or val == "" or str(val).lower() in ("none", "null", "nan", "n/a"):
+            return -1
+        if isinstance(val, (int, float)):
+            return float(val)
+        s = str(val).strip().replace(',', '').lower()
+        if s.endswith('k'):
+            try:
+                return float(s[:-1]) * 1000
+            except ValueError:
+                return -1
+        if s.endswith('m'):
+            try:
+                return float(s[:-1]) * 1000000
+            except ValueError:
+                return -1
+        try:
+            return float(s)
+        except ValueError:
+            return -1
+
+    groups = defaultdict(list)
+    for r in rows:
+        cat = str(r.get("category") or r.get("target_subtype") or "General").strip().lower()
+        cls = str(r.get("cluster") or "General").strip().lower()
+        groups[(cat, cls)].append(r)
+
+    selected = []
+    for key, group_rows in groups.items():
+        sorted_rows = sorted(group_rows, key=parse_sv, reverse=True)
+        selected.extend(sorted_rows[:2])
+
+    return selected
+
+
 def find_competitors_for_rows(
     rows: List[dict],
     project_name: str,
@@ -256,6 +308,7 @@ def find_competitors_for_rows(
     (empty strings if use_ai is False or no API key is configured)."""
     exclude_domains = DEFAULT_EXCLUDE_DOMAINS if exclude_domains is None else exclude_domains
 
+    rows = select_top_2_keywords_per_group(rows)
     df = parse_rank_meta_rows(rows)
     if df.empty:
         return [], ""
@@ -307,6 +360,8 @@ def run(input_csv: str, output_prefix: str, use_ai: bool, top_n: Optional[int],
     all_output_rows = []
 
     for project_name, project_rows in df.groupby("project_name"):
+        filtered_rows = select_top_2_keywords_per_group(project_rows.to_dict("records"))
+        project_rows = parse_rank_meta_rows(filtered_rows)
         total_keywords = project_rows["keyword"].nunique()
         stats, own_domain = aggregate_competitors(project_rows, exclude_domains)
         table = build_competitor_table(stats, total_keywords, top_n=top_n)

@@ -59,9 +59,26 @@ Setup:
 
 import os
 import re
-import json
 import uuid
 import sys
+from decimal import Decimal
+import json
+
+def _clean_for_json(v):
+    if v is None:
+        return None
+    if isinstance(v, Decimal):
+        return float(v) if (v % 1) != 0 else int(v)
+    if hasattr(v, 'isoformat'):
+        return v.isoformat()
+    if isinstance(v, uuid.UUID):
+        return str(v)
+    if isinstance(v, dict):
+        return {k: _clean_for_json(val) for k, val in v.items()}
+    if isinstance(v, (list, tuple, set)):
+        return [_clean_for_json(val) for val in v]
+    return v
+
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
@@ -377,6 +394,8 @@ def init_db():
         conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS type TEXT"))
         conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS category TEXT"))
         conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS cluster TEXT"))
+        conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS url TEXT"))
+        conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS urls TEXT[]"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_competitors_project ON competitors (project_slug)"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS url_classifications (
@@ -1257,22 +1276,22 @@ def delete_pages_by_project(project_slug):
 
 # --- Competitors (each scoped to a project via project_slug) --------------
 
-_COMPETITOR_UPDATABLE_COLUMNS = {"name", "domain", "da", "target_regions", "project_slug", "category", "cluster", "type", "website_type"}
+_COMPETITOR_UPDATABLE_COLUMNS = {"name", "domain", "da", "target_regions", "project_slug", "category", "cluster", "type", "website_type", "url", "urls"}
 
 
-def insert_competitor(domain, name=None, da=None, target_regions=None, project_slug=None, category=None, cluster=None, type=None, website_type=None):
+def insert_competitor(domain, name=None, da=None, target_regions=None, project_slug=None, category=None, cluster=None, type=None, website_type=None, url=None, urls=None):
     wtype = type or website_type
     with engine.begin() as conn:
         row = conn.execute(text("""
             INSERT INTO competitors
-                (domain, name, da, target_regions, project_slug, category, cluster, type, website_type, common_kw, common_kw_change,
+                (domain, name, da, target_regions, project_slug, category, cluster, type, website_type, url, urls, common_kw, common_kw_change,
                  total_kw, total_kw_change, ai_comp_level, ai_comp_change, serp_comp_level, comp_level)
-            VALUES (:domain, :name, :da, :target_regions, :project_slug, :category, :cluster, :type, :website_type, 0, 0, 0, 0, 0, 0, 0, 0)
+            VALUES (:domain, :name, :da, :target_regions, :project_slug, :category, :cluster, :type, :website_type, :url, :urls, 0, 0, 0, 0, 0, 0, 0, 0)
             RETURNING *
         """), {
             "domain": domain, "name": name, "da": da, "target_regions": target_regions or [],
             "project_slug": project_slug, "category": category, "cluster": cluster,
-            "type": wtype, "website_type": wtype
+            "type": wtype, "website_type": wtype, "url": url, "urls": urls or []
         }).mappings().fetchone()
         return dict(row)
 
@@ -1420,8 +1439,6 @@ def delete_competitors_by_project(project_slug):
         rows = conn.execute(text("SELECT * FROM competitors WHERE project_slug = :project_slug"), {"project_slug": project_slug}).mappings().fetchall()
         for row in rows:
             r = dict(row)
-            def _clean(v):
-                return v.isoformat() if hasattr(v, 'isoformat') else str(v) if isinstance(v, uuid.UUID) else v
             conn.execute(text("""
                 INSERT INTO recycle_bin (item_type, item_id, project_slug, project_name, item_name, deleted_at, data)
                 VALUES ('competitor', :item_id, :project_slug, :project_name, :item_name, now(), CAST(:data AS JSONB))
@@ -1430,7 +1447,7 @@ def delete_competitors_by_project(project_slug):
                 "project_slug": project_slug,
                 "project_name": project_slug,
                 "item_name": r.get("domain") or r.get("name") or f"Competitor #{r.get('id')}",
-                "data": json.dumps({k: _clean(v) for k, v in r.items()})
+                "data": json.dumps(_clean_for_json(r))
             })
         conn.execute(text("DELETE FROM competitors WHERE project_slug = :project_slug"), {"project_slug": project_slug})
 
@@ -1945,8 +1962,6 @@ def archive_and_delete_keyword(kw_id):
         row = conn.execute(text("SELECT * FROM keyword_categories WHERE id = :id"), {"id": kw_id}).mappings().fetchone()
         if row:
             r = dict(row)
-            def _clean(v):
-                return v.isoformat() if hasattr(v, 'isoformat') else str(v) if isinstance(v, uuid.UUID) else v
             conn.execute(text("""
                 INSERT INTO recycle_bin (item_type, item_id, project_slug, project_name, item_name, deleted_at, data)
                 VALUES ('keyword', :item_id, :project_slug, :project_name, :item_name, now(), CAST(:data AS JSONB))
@@ -1955,7 +1970,7 @@ def archive_and_delete_keyword(kw_id):
                 "project_slug": r.get("project_name", ""),
                 "project_name": r.get("project_name", ""),
                 "item_name": r.get("keyword") or f"Keyword #{kw_id}",
-                "data": json.dumps({k: _clean(v) for k, v in r.items()})
+                "data": json.dumps(_clean_for_json(r))
             })
             conn.execute(text("DELETE FROM keyword_categories WHERE id = :id"), {"id": kw_id})
 
@@ -1965,8 +1980,6 @@ def archive_and_delete_page(page_id):
         row = conn.execute(text("SELECT * FROM pages WHERE id = :id"), {"id": page_id}).mappings().fetchone()
         if row:
             r = dict(row)
-            def _clean(v):
-                return v.isoformat() if hasattr(v, 'isoformat') else str(v) if isinstance(v, uuid.UUID) else v
             conn.execute(text("""
                 INSERT INTO recycle_bin (item_type, item_id, project_slug, project_name, item_name, deleted_at, data)
                 VALUES ('page', :item_id, :project_slug, :project_name, :item_name, now(), CAST(:data AS JSONB))
@@ -1975,7 +1988,7 @@ def archive_and_delete_page(page_id):
                 "project_slug": r.get("project_name", ""),
                 "project_name": r.get("project_name", ""),
                 "item_name": r.get("page_name") or r.get("url") or f"Page #{page_id}",
-                "data": json.dumps({k: _clean(v) for k, v in r.items()})
+                "data": json.dumps(_clean_for_json(r))
             })
             conn.execute(text("DELETE FROM pages WHERE id = :id"), {"id": page_id})
 
@@ -1985,8 +1998,6 @@ def archive_and_delete_competitor(comp_id):
         row = conn.execute(text("SELECT * FROM competitors WHERE id = :id"), {"id": comp_id}).mappings().fetchone()
         if row:
             r = dict(row)
-            def _clean(v):
-                return v.isoformat() if hasattr(v, 'isoformat') else str(v) if isinstance(v, uuid.UUID) else v
             conn.execute(text("""
                 INSERT INTO recycle_bin (item_type, item_id, project_slug, project_name, item_name, deleted_at, data)
                 VALUES ('competitor', :item_id, :project_slug, :project_name, :item_name, now(), CAST(:data AS JSONB))
@@ -1995,7 +2006,7 @@ def archive_and_delete_competitor(comp_id):
                 "project_slug": r.get("project_slug", ""),
                 "project_name": r.get("project_slug", ""),
                 "item_name": r.get("domain") or r.get("name") or f"Competitor #{comp_id}",
-                "data": json.dumps({k: _clean(v) for k, v in r.items()})
+                "data": json.dumps(_clean_for_json(r))
             })
             conn.execute(text("DELETE FROM competitors WHERE id = :id"), {"id": comp_id})
 

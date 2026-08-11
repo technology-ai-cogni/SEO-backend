@@ -11,7 +11,7 @@ import {
   fetchCompetitorPageRows, insertCompetitorPageRows, updateCompetitorPageRow, deleteCompetitorPageRow,
   fetchCompetitors, insertCompetitor, updateCompetitor, deleteCompetitor, deleteCompetitorProjectData,
   findCompetitors, fetchCompetitorSnapshots, classifyCompetitorUrls,
-  createAuditLogApi, getActiveUserEmail,
+  createAuditLogApi, getActiveUserEmail, resolveFullCompetitorUrl, resolveFullCompetitorUrls, formatCleanName,
 } from '../../lib/projectsApi';
 
 // ─── shared tiny components ────────────────────────────────────────────────
@@ -4431,6 +4431,13 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
     setTypesMap(map);
   }, [keyword, kwObj]);
 
+  const unclassifiedRows = rows.filter(r => {
+    const rawType = typesMap[r.fullUrl] || typesMap[r.displayUrl] || r.websiteType;
+    const typeVal = rawType === 'Platform' ? 'Listing' : rawType;
+    return typeVal !== 'Official Entity' && typeVal !== 'Listing';
+  });
+  const showClassifyAllButton = rows.length > 0 && (classifying || unclassifiedRows.length > 0);
+
   return (
     <>
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -4451,29 +4458,31 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
             Project: {scopedProject.name || scopedProject.domain}
           </span>
         )}
-        <button
-          onClick={handleClassify}
-          disabled={classifying || rows.length === 0}
-          style={{
-            marginLeft: 'auto',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '6px 14px',
-            borderRadius: 6,
-            border: 'none',
-            background: 'var(--accent, #3b82f6)',
-            color: '#fff',
-            fontSize: 12.5,
-            fontWeight: 600,
-            cursor: classifying || rows.length === 0 ? 'not-allowed' : 'pointer',
-            opacity: classifying || rows.length === 0 ? 0.7 : 1,
-            transition: 'all 0.15s ease',
-          }}
-        >
-          <RefreshCw size={14} style={{ animation: classifying ? 'spin 1s linear infinite' : 'none' }} />
-          {classifying ? 'Classifying…' : 'Classify All'}
-        </button>
+        {showClassifyAllButton && (
+          <button
+            onClick={handleClassify}
+            disabled={classifying || rows.length === 0}
+            style={{
+              marginLeft: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 14px',
+              borderRadius: 6,
+              border: 'none',
+              background: 'var(--accent, #3b82f6)',
+              color: '#fff',
+              fontSize: 12.5,
+              fontWeight: 600,
+              cursor: classifying || rows.length === 0 ? 'not-allowed' : 'pointer',
+              opacity: classifying || rows.length === 0 ? 0.7 : 1,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <RefreshCw size={14} style={{ animation: classifying ? 'spin 1s linear infinite' : 'none' }} />
+            {classifying ? 'Classifying…' : 'Classify All'}
+          </button>
+        )}
       </div>
 
       <div style={{ overflowX: 'auto' }}>
@@ -4518,55 +4527,55 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
                         whiteSpace: 'nowrap'
                       }}
                     >
-                      {c.fullUrl ? (
-                        <a
-                          href={c.fullUrl.startsWith('http') ? c.fullUrl : `https://${c.fullUrl}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title={c.fullUrl}
-                          style={{
-                            fontWeight: 600,
-                            fontSize: 12.5,
-                            color: 'var(--text-primary)',
-                            textDecoration: 'none',
-                            cursor: 'pointer',
-                            display: 'block',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap'
-                          }}
-                          onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
-                          onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
-                        >
-                          {c.competitors}
-                        </a>
-                      ) : (
-                        <span title={c.competitors} style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--text-primary)', display: 'block' }}>
-                          {c.competitors}
-                        </span>
-                      )}
-                      {c.displayUrl && (
-                        <a
-                          href={c.fullUrl ? (c.fullUrl.startsWith('http') ? c.fullUrl : `https://${c.fullUrl}`) : '#'}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title={c.fullUrl || c.displayUrl}
-                          style={{
-                            fontSize: 11,
-                            color: 'var(--text-muted)',
-                            display: 'block',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            marginTop: 1,
-                            textDecoration: 'none'
-                          }}
-                          onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
-                          onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
-                        >
-                          {c.displayUrl}
-                        </a>
-                      )}
+                      {(() => {
+                        const cleanTitle = formatCleanName(c.competitors || c.name || c.domain);
+                        const itemUrl = resolveFullCompetitorUrl(c, c.domain, c.competitors || c.name);
+                        const domainUrl = c.domain ? (c.domain.startsWith('http') ? c.domain : `https://${c.domain}`) : (itemUrl ? itemUrl.split('/').slice(0, 3).join('/') : '#');
+                        return (
+                          <div>
+                            <div style={{ marginBottom: 2 }}>
+                              <a
+                                href={domainUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  fontWeight: 600,
+                                  fontSize: 13,
+                                  color: 'var(--text-primary)',
+                                  textDecoration: 'none',
+                                  cursor: 'pointer'
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                                onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                                onClick={e => e.stopPropagation()}
+                              >
+                                {cleanTitle}
+                              </a>
+                            </div>
+                            {itemUrl && (
+                              <a
+                                href={itemUrl.startsWith('http') ? itemUrl : `https://${itemUrl}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={itemUrl}
+                                style={{
+                                  fontSize: 11.5,
+                                  color: 'var(--accent, #3b82f6)',
+                                  display: 'block',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  textDecoration: 'none'
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                                onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                              >
+                                {itemUrl}
+                              </a>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>
                       {c.location}
@@ -5393,28 +5402,42 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
               </span>
             </div>
 
-            <button
-              onClick={handleClassifyCategoryCompetitors}
-              disabled={classifyingCompetitors || paged.length === 0}
-              style={{
-                marginLeft: 'auto',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '6px 14px',
-                borderRadius: 6,
-                border: 'none',
-                background: 'var(--accent, #3b82f6)',
-                color: '#fff',
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: classifyingCompetitors || paged.length === 0 ? 'not-allowed' : 'pointer',
-                opacity: classifyingCompetitors || paged.length === 0 ? 0.7 : 1,
-                transition: 'all 0.15s ease',
-              }}
-            >
-              {classifyingCompetitors ? 'Classifying…' : 'Classify All'}
-            </button>
+            {(() => {
+              const unclassifiedPaged = paged.filter(c => {
+                const rawType = classifiedTypes[c.domain] || classifiedTypes[c.name] || classifiedTypes[c.url] || c.type || c.websiteType;
+                const typeVal = rawType === 'Platform' ? 'Listing' : rawType;
+                return typeVal !== 'Official Entity' && typeVal !== 'Listing';
+              });
+              const showCategoryClassifyAll = paged.length > 0 && (classifyingCompetitors || unclassifiedPaged.length > 0);
+
+              if (!showCategoryClassifyAll) return null;
+
+              return (
+                <button
+                  onClick={handleClassifyCategoryCompetitors}
+                  disabled={classifyingCompetitors || paged.length === 0}
+                  style={{
+                    marginLeft: 'auto',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '6px 14px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: 'var(--accent, #3b82f6)',
+                    color: '#fff',
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    cursor: classifyingCompetitors || paged.length === 0 ? 'not-allowed' : 'pointer',
+                    opacity: classifyingCompetitors || paged.length === 0 ? 0.7 : 1,
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <RefreshCw size={14} style={{ animation: classifyingCompetitors ? 'spin 1s linear infinite' : 'none' }} />
+                  {classifyingCompetitors ? 'Classifying…' : 'Classify All'}
+                </button>
+              );
+            })()}
           </div>
 
           <div style={{ overflowX: 'auto' }}>
@@ -5457,14 +5480,9 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                   const clusList = c.cluster ? c.cluster.split(',').map(s => s.trim()).filter(Boolean) : [];
                   const commonKwVal = Math.round(((c.commonKw ?? 0) / 100) * (c.totalKw || 0));
 
-                  const rawDomain = c.domain || c.name || c.url || '';
-                  const fullUrl = c.url || c.fullUrl || (rawDomain ? (rawDomain.startsWith('http') ? rawDomain : `https://${rawDomain}`) : '');
-                  let cleanName = (c.name || rawDomain)
-                    .replace(/^https?:\/\//i, '')
-                    .replace(/^www\./i, '')
-                    .replace(/\/+$/, '')
-                    .replace(/\.(com|co\.in|in|org|net|edu\.sg|edu|co|io|ai|gov|ac\.in|org\.in|info|biz|me|app)$/i, '');
-                  const displayName = cleanName ? (cleanName.charAt(0).toUpperCase() + cleanName.slice(1)) : '—';
+                  const fullUrl = resolveFullCompetitorUrl(c, c.domain, c.name);
+                  const displayName = formatCleanName(c.name || c.domain || c.url || c.fullUrl);
+                  const domainUrl = c.domain ? (c.domain.startsWith('http') ? c.domain : `https://${c.domain}`) : (fullUrl ? fullUrl.split('/').slice(0, 3).join('/') : '#');
 
                   return (
                     <tr key={c.id || i} style={{ borderBottom: '1px solid var(--border)' }}
@@ -5485,21 +5503,42 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                         </div>
                       </td>
                       <td style={{ padding: '12px 16px' }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>
-                          {displayName || '—'}
-                        </div>
-                        {fullUrl && (
+                        <div style={{ marginBottom: 2 }}>
                           <a
-                            href={fullUrl}
+                            href={domainUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                             style={{
+                              fontSize: 13.5,
+                              fontWeight: 600,
+                              color: 'var(--text-primary)',
+                              textDecoration: 'none',
+                              cursor: 'pointer'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                            onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            {displayName}
+                          </a>
+                        </div>
+                        {fullUrl && (
+                          <a
+                            href={fullUrl.startsWith('http') ? fullUrl : `https://${fullUrl}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={fullUrl}
+                            style={{
                               fontSize: 12,
-                              color: 'var(--accent)',
+                              color: 'var(--accent, #3b82f6)',
                               cursor: 'pointer',
                               textDecoration: 'none',
-                              display: 'inline-block',
-                              wordBreak: 'break-all'
+                              display: 'block',
+                              maxWidth: 250,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              marginTop: 1
                             }}
                             onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
                             onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}

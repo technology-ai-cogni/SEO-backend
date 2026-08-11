@@ -33,7 +33,7 @@ export const NAV_STRUCTURE = [
           { id: 'ai-analysis', label: 'AI Analysis', path: 'search-visibility/ai-analysis' },
           { id: 'keywords', label: 'Keywords', path: 'search-visibility/keywords' },
           { id: 'top-pages', label: 'Top Pages', path: 'search-visibility/top-pages' },
-          { id: 'sales-pipeline', label: 'Sales Pipeline', path: 'search-visibility/sales-pipeline' },
+          { id: 'competitors', label: 'Competitors', path: 'search-visibility/competitors' },
         ],
       },
       {
@@ -43,7 +43,6 @@ export const NAV_STRUCTURE = [
           { id: 'link-outreach', label: 'Link Outreach', path: 'search-visibility/link-outreach' },
           { id: 'off-page-scheduler', label: 'Monthly Operations', path: 'search-visibility/off-page-scheduler' },
           { id: 'on-page', label: 'On-Page', path: 'search-visibility/on-page' },
-          { id: 'competitors', label: 'Competitors', path: 'search-visibility/competitors' },
         ],
       },
       // Search sub-module (col C)

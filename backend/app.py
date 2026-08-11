@@ -977,6 +977,8 @@ def _competitor_to_json(row):
         "id": row["id"],
         "domain": row.get("domain"),
         "name": row.get("name"),
+        "url": row.get("url"),
+        "urls": row.get("urls") or [],
         "da": row.get("da"),
         "websiteType": row.get("website_type") or row.get("type") or None,
         "type": row.get("type") or row.get("website_type") or None,
@@ -1370,12 +1372,15 @@ def find_competitors_endpoint(project: str, payload: FindCompetitorsRequest):
                 "category": category_val,
                 "cluster": cluster_val,
                 "target_regions": payload.targetRegions if payload.targetRegions else None,
+                "url": r.get("url"),
+                "urls": r.get("urls"),
             })
         else:
             inserted = db.insert_competitor(
                 domain=r["competitor_domain"], name=None, da=None,
                 target_regions=payload.targetRegions, project_slug=proj["slug"],
                 category=category_val, cluster=cluster_val,
+                url=r.get("url"), urls=r.get("urls"),
             )
             competitor_id = inserted["id"]
 

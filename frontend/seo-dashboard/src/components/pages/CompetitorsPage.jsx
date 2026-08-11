@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Card, Badge } from '../ui/Card';
 import { Search, Plus, Pencil, Monitor, Globe, Smartphone } from 'lucide-react';
+import { resolveFullCompetitorUrl, formatCleanName } from '../../lib/projectsApi';
 
 const COMPETITORS = [
   {
@@ -258,10 +259,59 @@ export default function CompetitorsPage() {
                 >
                   {/* Competitor name & domain */}
                   <td style={{ padding: '14px 16px' }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>{comp.name}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{comp.domain}</div>
-                    </div>
+                    {(() => {
+                      const cleanName = formatCleanName(comp.name || comp.domain);
+                      const fullUrl = resolveFullCompetitorUrl(comp, comp.domain, comp.name);
+                      const domainUrl = comp.domain ? (comp.domain.startsWith('http') ? comp.domain : `https://${comp.domain}`) : (fullUrl ? fullUrl.split('/').slice(0, 3).join('/') : '#');
+                      return (
+                        <div>
+                          <div style={{ marginBottom: 2 }}>
+                            <a
+                              href={domainUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                fontSize: 13.5,
+                                fontWeight: 600,
+                                color: 'var(--text-primary)',
+                                textDecoration: 'none',
+                                cursor: 'pointer'
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                              onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              {cleanName}
+                            </a>
+                          </div>
+                          {fullUrl && (
+                            <a
+                              href={fullUrl.startsWith('http') ? fullUrl : `https://${fullUrl}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={fullUrl}
+                              style={{
+                                fontSize: 12,
+                                color: 'var(--accent, #3b82f6)',
+                                cursor: 'pointer',
+                                textDecoration: 'none',
+                                display: 'block',
+                                maxWidth: 250,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                marginTop: 1
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                              onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              {fullUrl}
+                            </a>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
 
                   {/* Device & Location */}
