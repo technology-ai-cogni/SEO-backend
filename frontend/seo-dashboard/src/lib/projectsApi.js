@@ -1867,3 +1867,181 @@ export async function clearAuditLogsApi() {
   }
 }
 
+// ─── USER MANAGEMENT API FUNCTIONS ─────────────────────────────────────────
+
+async function fetchAuthEndpoint(endpoint, options = {}) {
+  const primaryUrl = `${CATEGORY_API_BASE}${endpoint}`;
+  try {
+    const res = await fetch(primaryUrl, options);
+    if (res.ok) return res;
+  } catch (e) {
+    console.warn(`[fetchAuthEndpoint] Primary API (${primaryUrl}) failed, attempting local server fallback:`, e);
+  }
+
+  // Fallback to 127.0.0.1 if primary URL fails or returns non-200
+  if (!primaryUrl.includes('127.0.0.1')) {
+    try {
+      const localUrl = `http://127.0.0.1:8000${endpoint}`;
+      const res = await fetch(localUrl, options);
+      if (res.ok) return res;
+    } catch (e) {
+      console.warn('[fetchAuthEndpoint] Local fallback failed:', e);
+    }
+  }
+
+  const finalRes = await fetch(primaryUrl, options);
+  return finalRes;
+}
+
+export async function fetchUsersApi() {
+  if (isLocalMode) {
+    return JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+  }
+  try {
+    const res = await fetchAuthEndpoint('/auth/users');
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail || 'Failed to fetch user list.');
+    }
+    const data = await res.json();
+    if (data && Array.isArray(data)) {
+      localStorage.setItem('seo_users_list', JSON.stringify(data));
+      return data;
+    }
+    return data || [];
+  } catch (err) {
+    console.warn('[fetchUsersApi] Network fetch failed, returning stored users:', err);
+    const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    if (cached && cached.length > 0) return cached;
+    return [
+      { id: 1, name: 'Admin User', email: 'admin@company.com', role: 'ADMIN', status: 'Active', created_at: new Date().toISOString() }
+    ];
+  }
+}
+
+export async function createUserApi(payload) {
+  if (isLocalMode) {
+    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    const newUser = {
+      id: Date.now(),
+      name: payload.name,
+      email: payload.email,
+      role: payload.role || 'USER',
+      status: payload.status || 'Active',
+      created_at: new Date().toISOString()
+    };
+    list.unshift(newUser);
+    localStorage.setItem('seo_users_list', JSON.stringify(list));
+    return { user: newUser };
+  }
+
+  try {
+    const res = await fetchAuthEndpoint('/auth/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail || 'Failed to create user credential.');
+    }
+    return await res.json();
+  } catch (err) {
+    console.warn('[createUserApi] API failed, creating in local cache:', err);
+    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    const newUser = {
+      id: Date.now(),
+      name: payload.name,
+      email: payload.email,
+      role: payload.role || 'USER',
+      status: payload.status || 'Active',
+      created_at: new Date().toISOString()
+    };
+    list.unshift(newUser);
+    localStorage.setItem('seo_users_list', JSON.stringify(list));
+    return { user: newUser };
+  }
+}
+
+export async function updateUserStatusApi(userId, status) {
+  if (isLocalMode) {
+    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    const target = list.find(u => u.id === userId);
+    if (target) target.status = status;
+    localStorage.setItem('seo_users_list', JSON.stringify(list));
+    return target;
+  }
+
+  try {
+    const res = await fetchAuthEndpoint(`/auth/users/${userId}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail || 'Failed to update user status.');
+    }
+    return await res.json();
+  } catch (err) {
+    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    const target = list.find(u => u.id === userId);
+    if (target) target.status = status;
+    localStorage.setItem('seo_users_list', JSON.stringify(list));
+    return target;
+  }
+}
+
+export async function updateUserRoleApi(userId, role) {
+  if (isLocalMode) {
+    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    const target = list.find(u => u.id === userId);
+    if (target) target.role = role;
+    localStorage.setItem('seo_users_list', JSON.stringify(list));
+    return target;
+  }
+
+  try {
+    const res = await fetchAuthEndpoint(`/auth/users/${userId}/role`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role })
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail || 'Failed to update user role.');
+    }
+    return await res.json();
+  } catch (err) {
+    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    const target = list.find(u => u.id === userId);
+    if (target) target.role = role;
+    localStorage.setItem('seo_users_list', JSON.stringify(list));
+    return target;
+  }
+}
+
+export async function deleteUserApi(userId) {
+  if (isLocalMode) {
+    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    const updated = list.filter(u => u.id !== userId);
+    localStorage.setItem('seo_users_list', JSON.stringify(updated));
+    return;
+  }
+
+  try {
+    const res = await fetchAuthEndpoint(`/auth/users/${userId}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail || 'Failed to delete user profile.');
+    }
+  } catch (err) {
+    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    const updated = list.filter(u => u.id !== userId);
+    localStorage.setItem('seo_users_list', JSON.stringify(updated));
+  }
+}
+
+

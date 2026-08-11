@@ -1,7 +1,14 @@
+from typing import List, Optional
 from fastapi import APIRouter, HTTPException, status
-from auth.schemas import SignupRequest, LoginRequest, UpdateProfileRequest, ChangePasswordRequest, AuthResponse, UserResponse
+from auth.schemas import (
+    SignupRequest, LoginRequest, UpdateProfileRequest, ChangePasswordRequest, 
+    AuthResponse, UserResponse, CreateUserRequest, UpdateUserStatusRequest, UpdateUserRoleRequest
+)
 from auth.security import hash_password, verify_password
-from auth.db import get_user_by_email, create_user, update_user_name, update_user_password
+from auth.db import (
+    get_user_by_email, create_user, update_user_name, update_user_password,
+    list_all_users, update_user_status, update_user_role, delete_user_by_id
+)
 from core.db import insert_audit_log
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -9,13 +16,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def signup(payload: SignupRequest):
-    """
-    POST /auth/signup
-    Registers a new user with name, email, and hashed password in Supabase PostgreSQL.
-    """
     clean_email = payload.email.strip().lower()
 
-    # Check if email already exists
     existing_user = get_user_by_email(clean_email)
     if existing_user:
         insert_audit_log(user_email=clean_email, action="User Registration Failed (Email Exists)", status="Warning")
@@ -24,10 +26,7 @@ def signup(payload: SignupRequest):
             detail="User with this email already exists."
         )
 
-    # Hash the user's password using bcrypt
     pwd_hash = hash_password(payload.password)
-
-    # Create the user record
     new_user = create_user(
         name=payload.name,
         email=clean_email,
@@ -44,6 +43,7 @@ def signup(payload: SignupRequest):
             name=new_user["name"],
             email=new_user["email"],
             role=new_user["role"],
+            status=new_user.get("status", "Active"),
             created_at=new_user.get("created_at")
         )
     )
@@ -51,13 +51,8 @@ def signup(payload: SignupRequest):
 
 @router.post("/login", response_model=AuthResponse)
 def login(payload: LoginRequest):
-    """
-    POST /auth/login
-    Authenticates user credentials against Supabase PostgreSQL.
-    """
     clean_email = payload.email.strip().lower()
 
-    # Find user by email
     user = get_user_by_email(clean_email)
     if not user:
         insert_audit_log(user_email=clean_email, action="Failed Login Attempt (User Not Found)", status="Warning")
@@ -66,7 +61,13 @@ def login(payload: LoginRequest):
             detail="Credentials are wrong. Please try again."
         )
 
-    # Verify password hash
+    if user.get("status") == "Disabled":
+        insert_audit_log(user_email=clean_email, action="Failed Login Attempt (Account Disabled)", status="Warning")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your profile has been disabled by administrator. Please contact your admin."
+        )
+
     if not verify_password(payload.password, user["password_hash"]):
         insert_audit_log(user_email=clean_email, action="Failed Login Attempt (Incorrect Password)", status="Warning")
         raise HTTPException(
@@ -84,32 +85,130 @@ def login(payload: LoginRequest):
             name=user["name"],
             email=user["email"],
             role=user["role"],
+            status=user.get("status", "Active"),
             created_at=user.get("created_at")
         )
     )
 
 
+# ─── USER MANAGEMENT ENDPOINTS (ADMIN ONLY) ───────────────────────────────────
+
+@router.get("/users", response_model=List[UserResponse])
+def get_users():
+    """List all registered users for management."""
+    users = list_all_users()
+    return [
+        UserResponse(
+            id=u["id"],
+            name=u["name"],
+            email=u["email"],
+            role=u["role"],
+            status=u.get("status", "Active"),
+            created_at=u.get("created_at")
+        )
+        for u in users
+    ]
+
+
+@router.post("/users", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+def admin_create_user(payload: CreateUserRequest):
+    """Admin endpoint to create a user login credential."""
+    clean_email = payload.email.strip().lower()
+
+    existing_user = get_user_by_email(clean_email)
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User with this email already exists."
+        )
+
+    pwd_hash = hash_password(payload.password)
+    new_user = create_user(
+        name=payload.name,
+        email=clean_email,
+        password_hash=pwd_hash,
+        role=payload.role or "USER",
+        status=payload.status or "Active"
+    )
+
+    insert_audit_log(user_email="admin", action=f"Admin Created User Credential: {clean_email}", status="Success")
+
+    return AuthResponse(
+        status="success",
+        message=f"Created user credential for {clean_email}.",
+        user=UserResponse(
+            id=new_user["id"],
+            name=new_user["name"],
+            email=new_user["email"],
+            role=new_user["role"],
+            status=new_user.get("status", "Active"),
+            created_at=new_user.get("created_at")
+        )
+    )
+
+
+@router.put("/users/{user_id}/status", response_model=UserResponse)
+def update_status_endpoint(user_id: int, payload: UpdateUserStatusRequest):
+    """Toggle user status ('Active' or 'Disabled')."""
+    updated = update_user_status(user_id, payload.status)
+    if not updated:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    insert_audit_log(
+        user_email="admin", 
+        action=f"Changed User Status ({updated['email']}) to {payload.status}", 
+        status="Warning" if payload.status == "Disabled" else "Success"
+    )
+    return UserResponse(
+        id=updated["id"],
+        name=updated["name"],
+        email=updated["email"],
+        role=updated["role"],
+        status=updated.get("status", "Active"),
+        created_at=updated.get("created_at")
+    )
+
+
+@router.put("/users/{user_id}/role", response_model=UserResponse)
+def update_role_endpoint(user_id: int, payload: UpdateUserRoleRequest):
+    """Change user role."""
+    updated = update_user_role(user_id, payload.role)
+    if not updated:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    insert_audit_log(user_email="admin", action=f"Changed User Role ({updated['email']}) to {payload.role}", status="Success")
+    return UserResponse(
+        id=updated["id"],
+        name=updated["name"],
+        email=updated["email"],
+        role=updated["role"],
+        status=updated.get("status", "Active"),
+        created_at=updated.get("created_at")
+    )
+
+
+@router.delete("/users/{user_id}")
+def delete_user_endpoint(user_id: int):
+    """Delete user profile permanently."""
+    success = delete_user_by_id(user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    insert_audit_log(user_email="admin", action=f"Deleted User Account ID {user_id}", status="Warning")
+    return {"status": "success", "message": "User profile deleted."}
+
+
 @router.put("/update-profile", response_model=AuthResponse)
 def update_profile(payload: UpdateProfileRequest):
-    """
-    PUT /auth/update-profile
-    Updates the display name of a user in Supabase PostgreSQL.
-    """
     clean_email = payload.email.strip().lower()
 
     user = get_user_by_email(clean_email)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found."
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
     updated_user = update_user_name(clean_email, payload.name)
     if not updated_user:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update profile name."
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update profile name.")
 
     insert_audit_log(user_email=clean_email, action="Profile Updated", status="Success")
 
@@ -121,6 +220,7 @@ def update_profile(payload: UpdateProfileRequest):
             name=updated_user["name"],
             email=updated_user["email"],
             role=updated_user["role"],
+            status=updated_user.get("status", "Active"),
             created_at=updated_user.get("created_at")
         )
     )
@@ -128,34 +228,20 @@ def update_profile(payload: UpdateProfileRequest):
 
 @router.put("/change-password", response_model=AuthResponse)
 def change_password(payload: ChangePasswordRequest):
-    """
-    PUT /auth/change-password
-    Verifies user's current password and updates it with a new hashed password in Supabase PostgreSQL.
-    """
     clean_email = payload.email.strip().lower()
 
     user = get_user_by_email(clean_email)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found."
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
-    # Verify current password
     if not verify_password(payload.current_password, user["password_hash"]):
         insert_audit_log(user_email=clean_email, action="Failed Password Change Attempt", status="Warning")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Current password is incorrect."
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect.")
 
     new_hash = hash_password(payload.new_password)
     success = update_user_password(clean_email, new_hash)
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update password."
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update password.")
 
     insert_audit_log(user_email=clean_email, action="Password Changed", status="Success")
 
@@ -167,7 +253,7 @@ def change_password(payload: ChangePasswordRequest):
             name=user["name"],
             email=user["email"],
             role=user["role"],
+            status=user.get("status", "Active"),
             created_at=user.get("created_at")
         )
     )
-

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Home, LayoutDashboard, Search, Sparkles, FileText, FolderOpen, ChevronDown, ChevronRight, Settings, HelpCircle, Bell, Trash2 } from 'lucide-react';
+import { Home, LayoutDashboard, Search, Sparkles, FileText, FolderOpen, ChevronDown, ChevronRight, Settings, HelpCircle, Bell, Trash2, Users } from 'lucide-react';
 import { NAV_STRUCTURE } from '../../data/navigation';
 import { hasPermission, PERMISSIONS } from '../../lib/permissions';
 
@@ -18,6 +18,7 @@ export default function Sidebar({ activePath, onNavigate, user }) {
 
   const bottomNavItems = [
     { icon: Bell, label: 'Notifications', path: 'notifications' },
+    { icon: Users, label: 'Users', path: 'users', permission: PERMISSIONS.MANAGE_USERS },
     { icon: Trash2, label: 'Recycle Bin', path: 'recycle-bin', permission: PERMISSIONS.RESTORE_PROJECT },
     { icon: FileText, label: 'Logs', path: 'logs', permission: PERMISSIONS.VIEW_LOGS },
     { icon: Settings, label: 'Settings', path: 'profile' },

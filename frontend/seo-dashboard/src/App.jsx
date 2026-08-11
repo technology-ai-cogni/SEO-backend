@@ -19,7 +19,9 @@ import ProfilePage from './components/pages/ProfilePage';
 import LandingPage from './components/pages/LandingPage';
 import LogsPage from './components/pages/LogsPage';
 import RecycleBinPage from './components/pages/RecycleBinPage';
+import UsersPage from './components/pages/UsersPage';
 import { totalKeywordCount, topKeywords } from './data/mockData';
+import { fetchUsersApi } from './lib/projectsApi';
 
 const mockProject = {
   domain: "owis.org",
@@ -33,6 +35,7 @@ const PAGE_TITLES = {
   'home': { title: 'Home', subtitle: 'Your SEO workspace overview' },
   'login': { title: 'User Login', subtitle: 'Access your SEO workspace' },
   'profile': { title: 'Account Settings', subtitle: 'Manage your profile and security settings' },
+  'users': { title: 'User Management', subtitle: 'Create, manage, and configure user login credentials and profiles' },
   'recycle-bin': { title: 'System Recycle Bin', subtitle: 'Recover deleted projects, keywords, pages, and competitors' },
   'logs': { title: 'Activity Audit Logs', subtitle: 'Monitor system activity, administrative events, and user actions' },
   'notifications': { title: 'Notifications', subtitle: 'System notifications and workspace alerts' },
@@ -98,6 +101,7 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
     case 'admin-login': return <LoginPage onNavigate={onNavigate} initialAdminMode={true} user={user} onLoginSuccess={onLoginSuccess} onLogout={onLogout} />;
     case 'signup': return <SignUpPage onNavigate={onNavigate} user={user} onLoginSuccess={onLoginSuccess} />;
     case 'profile': return <ProfilePage user={user} onUserUpdate={onLoginSuccess} onNavigate={onNavigate} />;
+    case 'users': return <UsersPage user={user} onNavigate={onNavigate} />;
     case 'recycle-bin': return <RecycleBinPage user={user} onNavigate={onNavigate} />;
     case 'logs': return <LogsPage user={user} onNavigate={onNavigate} />;
     case 'dashboard': return <DashboardPage 
@@ -150,6 +154,31 @@ export default function App() {
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+
+  // Periodically & on page navigation, verify logged-in user account status
+  useEffect(() => {
+    if (!user || !user.email) return;
+
+    let isMounted = true;
+    const checkUserStatus = async () => {
+      try {
+        const users = await fetchUsersApi();
+        if (!isMounted) return;
+        const currentRecord = users.find(u => u.email?.toLowerCase() === user.email?.toLowerCase());
+        if (currentRecord && currentRecord.status === 'Disabled') {
+          handleLogout();
+          alert('Your account profile has been disabled by an administrator. You have been logged out.');
+        }
+      } catch (e) {}
+    };
+
+    checkUserStatus();
+    const timer = setInterval(checkUserStatus, 4000);
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, [user, activePath]);
 
   const handleNavigate = (path) => {
     const currentUser = userRef.current;

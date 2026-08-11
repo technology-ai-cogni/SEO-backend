@@ -195,10 +195,12 @@ def init_db():
                 email TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'USER',
+                status TEXT NOT NULL DEFAULT 'Active',
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'USER'"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'Active'"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_users_email ON users (LOWER(email))"))
 
         conn.execute(text("""

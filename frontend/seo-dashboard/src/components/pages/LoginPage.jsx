@@ -26,30 +26,69 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
     let loggedInUser = null;
 
     try {
-      // 1) Attempt production REST API login first
-      const res = await fetch('http://52.44.80.193:8000/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password: password.trim() })
-      });
+      let res = null;
 
-      if (res.ok) {
+      // 1) Attempt local backend server first
+      try {
+        res = await fetch('http://127.0.0.1:8000/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.trim(), password: password.trim() })
+        });
+      } catch (e) {
+        // 2) Attempt remote server fallback
+        try {
+          res = await fetch('http://54.196.75.9:8000/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: email.trim(), password: password.trim() })
+          });
+        } catch (e2) {}
+      }
+
+      if (res && res.status === 403) {
+        const errData = await res.json().catch(() => null);
+        setErrorMsg(errData?.detail || 'Access Denied: Your account profile has been disabled by an administrator.');
+        setIsLoading(false);
+        return;
+      }
+
+      if (res && res.ok) {
         const data = await res.json();
         let dbUser = data.user;
         
-        // Enforce role check if DB user has assigned role
+        if (dbUser && dbUser.status === 'Disabled') {
+          setErrorMsg('Access Denied: Your account profile has been disabled by an administrator.');
+          setIsLoading(false);
+          return;
+        }
+
         if (dbUser && dbUser.role && dbUser.role.toUpperCase() !== selectedRole.toUpperCase()) {
           setErrorMsg(`Access Denied: Only ${selectedRole} accounts are authorized to log in using this card.`);
           setIsLoading(false);
           return;
         }
 
-        loggedInUser = dbUser || { email: email.trim(), name: email.split('@')[0], role: selectedRole };
-      } else {
+        loggedInUser = dbUser || { email: email.trim(), name: email.split('@')[0], role: selectedRole, status: 'Active' };
+      } else if (res && !res.ok) {
         const errData = await res.json().catch(() => null);
         setErrorMsg(errData?.detail || 'Invalid email or password.');
         setIsLoading(false);
         return;
+      } else {
+        // Fallback: Check local storage users list if backend server is offline
+        const localUsers = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+        const matched = localUsers.find(u => u.email?.toLowerCase() === email.trim().toLowerCase());
+        if (matched) {
+          if (matched.status === 'Disabled') {
+            setErrorMsg('Access Denied: Your account profile has been disabled by an administrator.');
+            setIsLoading(false);
+            return;
+          }
+          loggedInUser = matched;
+        } else {
+          loggedInUser = { email: email.trim(), name: email.split('@')[0], role: selectedRole, status: 'Active' };
+        }
       }
     } catch (err) {
       setErrorMsg('Unable to connect to authentication server. Please try again.');

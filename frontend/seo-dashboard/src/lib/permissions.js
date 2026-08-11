@@ -13,6 +13,7 @@ export const PERMISSIONS = {
   FULL_ACCESS: 'full_access',
   RESTORE_PROJECT: 'restore_project',
   VIEW_LOGS: 'view_logs',
+  MANAGE_USERS: 'manage_users',
 };
 
 // Maps roles to their active permissions
@@ -33,7 +34,8 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.MANAGE_ASSIGNED_PROJECTS,
     PERMISSIONS.FULL_ACCESS,
     PERMISSIONS.RESTORE_PROJECT,
-    PERMISSIONS.VIEW_LOGS
+    PERMISSIONS.VIEW_LOGS,
+    PERMISSIONS.MANAGE_USERS
   ]
 };
 
