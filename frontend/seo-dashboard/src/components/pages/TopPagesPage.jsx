@@ -316,8 +316,8 @@ export default function TopPagesPage() {
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>URL</th>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>Category</th>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>Cluster</th>
-                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Target Subtype</th>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>Target Type</th>
+                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Target Subtype</th>
               </tr>
             </thead>
             <tbody>
@@ -364,12 +364,12 @@ export default function TopPagesPage() {
                       </span>
                     </td>
 
-                    {/* TARGET SUBTYPE */}
+                    {/* TARGET TYPE */}
                     <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
                       {row.targetCategory}
                     </td>
 
-                    {/* TARGET TYPE */}
+                    {/* TARGET SUBTYPE */}
                     <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
                       {row.targetType}
                     </td>

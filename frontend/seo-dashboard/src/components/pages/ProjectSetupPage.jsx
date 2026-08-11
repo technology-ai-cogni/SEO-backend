@@ -1973,14 +1973,14 @@ function EditPageModal({ open, onClose, page, onSave }) {
 const PAGE_BULK_FIELDS = [
   { value: 'cluster', label: 'Cluster', type: 'text' },
   { value: 'category', label: 'Category', type: 'text' },
-  { value: 'targetCategory', label: 'Target Category', type: 'select', options: ['Blogs', 'Landing Page'] },
-  { value: 'targetType', label: 'Target Type', type: 'select', options: ['Commercial', 'Informational'] },
+  { value: 'targetCategory', label: 'Target Type', type: 'select', options: ['Blogs', 'Landing Page'] },
+  { value: 'targetType', label: 'Target Subtype', type: 'select', options: ['Commercial', 'Informational'] },
 ];
 
 const KW_BULK_FIELDS = [
   { value: 'cluster', label: 'Cluster', type: 'text' },
   { value: 'category', label: 'Category', type: 'text' },
-  { value: 'type', label: 'Type', type: 'select', options: ['AI Mode', 'AI Overview', 'Google', 'ChatGPT', 'Gemini'] },
+  { value: 'type', label: 'Type', type: 'select', options: ['AI Overview', 'Google', 'ChatGPT', 'Gemini'] },
   { value: 'targetType', label: 'Target Type', type: 'select', options: ['Blogs', 'Landing Page', 'Topical Blogs'] },
   { value: 'targetSubtype', label: 'Target Subtype', type: 'select', options: ['Informational', 'Commercial'] },
   { value: 'targetGeo', label: 'Target Geo', type: 'text' },
@@ -2240,8 +2240,8 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
   const filterConfigs = [
     { key: 'cluster', label: 'Cluster', type: 'select' },
     { key: 'category', label: 'Category', type: 'select' },
-    { key: 'targetCategory', label: 'Target Category', type: 'select', options: ['Blogs', 'Landing Page'] },
-    { key: 'targetType', label: 'Target Type', type: 'select', options: ['Commercial', 'Informational'] },
+    { key: 'targetCategory', label: 'Target Type', type: 'select', options: ['Blogs', 'Landing Page'] },
+    { key: 'targetType', label: 'Target Subtype', type: 'select', options: ['Commercial', 'Informational'] },
   ];
 
   const filteredRows = rows.filter(r => {
@@ -2476,10 +2476,10 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
                 <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
               ))}
               <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-                <HeaderQuickSelect placeholder="Target Category" options={['Blogs', 'Landing Page']} onSet={v => bulkUpdate('targetCategory', v)} />
+                <HeaderQuickSelect placeholder="Target Type" options={['Blogs', 'Landing Page']} onSet={v => bulkUpdate('targetCategory', v)} />
               </th>
               <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-                <HeaderQuickSelect placeholder="Target Type" options={['Commercial', 'Informational']} onSet={v => bulkUpdate('targetType', v)} />
+                <HeaderQuickSelect placeholder="Target Subtype" options={['Commercial', 'Informational']} onSet={v => bulkUpdate('targetType', v)} />
               </th>
               <th style={{ padding: '10px 16px' }}></th>
             </tr>
@@ -2605,7 +2605,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
   const kwFilterConfigs = [
     { key: 'cluster', label: 'Cluster', type: 'select' },
     { key: 'category', label: 'Category', type: 'select' },
-    { key: 'type', label: 'Type', type: 'select', options: ['AI Mode', 'AI Overview', 'Google', 'ChatGPT', 'Gemini'] },
+    { key: 'type', label: 'Type', type: 'select', options: ['AI Overview', 'Google', 'ChatGPT', 'Gemini'] },
     { key: 'targetType', label: 'Target Type', type: 'select', options: ['Blogs', 'Landing Page'] },
     { key: 'targetSubtype', label: 'Target Subtype', type: 'select', options: ['Informational', 'Commercial'] },
     { key: 'priority', label: 'Priority', type: 'select', options: ['P1', 'P2', 'P3', 'P4', 'P5'] },
@@ -2973,7 +2973,12 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
       if (columnFilters.targetSubtype && r.targetSubtype !== columnFilters.targetSubtype) return false;
       if (tableFilters.cluster?.length && !tableFilters.cluster.includes(r.cluster)) return false;
       if (tableFilters.category?.length && !tableFilters.category.includes(r.category)) return false;
-      if (tableFilters.type?.length && !tableFilters.type.includes(r.type)) return false;
+      if (tableFilters.type?.length) {
+        if (!tableFilters.type.includes(r.type)) return false;
+      } else {
+        const isGoogle = !r.type || r.type === 'Google' || r.type?.toLowerCase() === 'google';
+        if (!isGoogle) return false;
+      }
       if (tableFilters.targetType?.length && !tableFilters.targetType.includes(r.targetType)) return false;
       if (tableFilters.targetSubtype?.length && !tableFilters.targetSubtype.includes(r.targetSubtype)) return false;
       if (tableFilters.priority?.length && !tableFilters.priority.includes(r.priority)) return false;
@@ -2986,7 +2991,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
       Keyword: r.kw || r.keyword || '',
       'Search Volume': r.sv ?? r.searchVolume ?? '',
       'KW Difficulty': r.kwDiff ?? r.kd ?? '',
-      Type: r.type || '',
+      Type: r.type || 'Google',
       Cluster: r.cluster || '',
       Category: r.category || '',
       'Target Type': r.targetType || '',
@@ -3482,7 +3487,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
                 <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
               ))}
               <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-                <HeaderQuickSelect placeholder="Type" options={['AI Mode', 'AI Overview', 'Google', 'ChatGPT', 'Gemini']} onSet={v => bulkUpdate('type', v)} />
+                <HeaderQuickSelect placeholder="Type" options={['AI Overview', 'Google', 'ChatGPT', 'Gemini']} onSet={v => bulkUpdate('type', v)} />
               </th>
               <th style={{ padding: '6px 16px', textAlign: 'left' }}>
                 <HeaderQuickSelect placeholder="Target Type" options={['Blogs', 'Landing Page']} value={columnFilters.targetType} onSet={v => setColumnFilters(prev => ({ ...prev, targetType: v }))} />
@@ -3535,7 +3540,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
                   )}
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.cluster || '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.category || '—'}</td>
-                  <td style={{ padding: '10px 16px', fontSize: 13, color: r.type ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.type || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-primary)' }}>{r.type || 'Google'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetType ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetType || '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetSubtype ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetSubtype || '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{project.location || '—'}</td>
@@ -5300,10 +5305,10 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                   <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
                 ))}
                 <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-                  <HeaderQuickSelect placeholder="Target Category" options={['Blogs', 'Landing Page']} value={pageFilterTargetCategory} onSet={setPageFilterTargetCategory} />
+                  <HeaderQuickSelect placeholder="Target Type" options={['Blogs', 'Landing Page']} value={pageFilterTargetCategory} onSet={setPageFilterTargetCategory} />
                 </th>
                 <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-                  <HeaderQuickSelect placeholder="Target Type" options={['Commercial', 'Informational']} value={pageFilterTargetType} onSet={setPageFilterTargetType} />
+                  <HeaderQuickSelect placeholder="Target Subtype" options={['Commercial', 'Informational']} value={pageFilterTargetType} onSet={setPageFilterTargetType} />
                 </th>
                 <th style={{ padding: '10px 16px' }}></th>
               </tr>

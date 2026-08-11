@@ -330,6 +330,11 @@ def init_db():
         # written by scripts/run_pipeline.py. target_type (Landing/Blog Page,
         # from scripts/landing_blog_classifier.py) already has a column above.
         conn.execute(text("ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS subtype TEXT"))
+        try:
+            conn.execute(text("UPDATE keyword_categories SET type = 'Google' WHERE type IS NULL OR TRIM(type) = ''"))
+            conn.execute(text("ALTER TABLE keyword_categories ALTER COLUMN type SET DEFAULT 'Google'"))
+        except Exception as update_type_err:
+            print(f"[DB Init] Notice updating default keyword type: {update_type_err}")
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_keyword_categories_job ON keyword_categories (job_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_keyword_categories_project ON keyword_categories (project_name)"))
 
@@ -1027,8 +1032,8 @@ def insert_keyword_rows(job_id, domain, rows):
                 params[f"project_name{i}"] = domain
                 params[f"keyword{i}"] = r.get("keyword")
                 params[f"sv{i}"] = r.get("sv")
-                params[f"kw_diff{i}"] = r.get("kw_diff")
-                params[f"type{i}"] = r.get("type")
+                type_val = r.get("type")
+                params[f"type{i}"] = type_val if (type_val and str(type_val).strip()) else "Google"
                 params[f"target_type{i}"] = r.get("target_type")
                 params[f"target_subtype{i}"] = r.get("target_subtype")
                 params[f"target_geo{i}"] = r.get("target_geo")
