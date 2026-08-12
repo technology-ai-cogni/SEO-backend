@@ -913,7 +913,18 @@ export async function bulkDeleteKeywordRows(ids) {
   }).catch(() => {});
 }
 
-const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://54.196.75.9:8000';
+export function getApiBaseUrl() {
+  if (typeof window !== 'undefined' && window.location && window.location.hostname) {
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+      return 'http://127.0.0.1:8000';
+    }
+    return `${window.location.protocol}//${host}:8000`;
+  }
+  return import.meta.env.VITE_API_BASE || 'http://52.44.80.193:8000';
+}
+
+const CATEGORY_API_BASE = getApiBaseUrl();
 
 // Removes a project entirely, everywhere -- its domain registration(s),
 // the shared `projects` row, every keyword row filed under its slug, its
@@ -1840,22 +1851,22 @@ export async function clearAuditLogsApi() {
 // ─── USER MANAGEMENT API FUNCTIONS ─────────────────────────────────────────
 
 async function fetchAuthEndpoint(endpoint, options = {}) {
-  const primaryUrl = `${CATEGORY_API_BASE}${endpoint}`;
+  const primaryUrl = `${getApiBaseUrl()}${endpoint}`;
   try {
     const res = await fetch(primaryUrl, options);
     if (res.ok) return res;
   } catch (e) {
-    console.warn(`[fetchAuthEndpoint] Primary API (${primaryUrl}) failed, attempting local server fallback:`, e);
+    console.warn(`[fetchAuthEndpoint] Primary API (${primaryUrl}) failed:`, e);
   }
 
-  // Fallback to 127.0.0.1 if primary URL fails or returns non-200
-  if (!primaryUrl.includes('127.0.0.1')) {
+  // Backup fallback to explicit EC2 IP if domain resolution fails
+  if (!primaryUrl.includes('52.44.80.193')) {
     try {
-      const localUrl = `http://127.0.0.1:8000${endpoint}`;
-      const res = await fetch(localUrl, options);
+      const fallbackUrl = `http://52.44.80.193:8000${endpoint}`;
+      const res = await fetch(fallbackUrl, options);
       if (res.ok) return res;
     } catch (e) {
-      console.warn('[fetchAuthEndpoint] Local fallback failed:', e);
+      console.warn('[fetchAuthEndpoint] Fallback failed:', e);
     }
   }
 

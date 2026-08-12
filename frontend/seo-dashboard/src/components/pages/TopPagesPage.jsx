@@ -123,6 +123,10 @@ export default function TopPagesPage() {
   const totalPagesCount = pagesData.length;
   const totalKwsSum = pagesData.reduce((acc, p) => acc + p.totalKws, 0);
 
+  // Calculate Organic Traffic & Avg Traffic across pages (0 fallback)
+  const totalOrganicTraffic = pagesData.reduce((acc, p) => acc + (Number(p.traffic) || Number(p.organic_traffic) || 0), 0) || Number(activeProject?.traffic) || 0;
+  const avgTraffic = totalPagesCount > 0 ? Math.round(totalOrganicTraffic / totalPagesCount) : 0;
+
   // Calculate Average Position across tracked page keywords
   const allRanks = pagesData.flatMap(p => p.ranks || []).filter(r => typeof r === 'number' && r > 0);
   const avgPosition = allRanks.length > 0 
@@ -226,7 +230,7 @@ export default function TopPagesPage() {
           justifyContent: 'center'
         }}>
           <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>Avg. Traffic</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>0</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>{avgTraffic || '0'}</div>
         </div>
 
         {/* CARD 2: Top Pages in Top 1, Top 3, Top 10 (Column / Row-wise Layout) */}
@@ -398,7 +402,7 @@ export default function TopPagesPage() {
 
                     {/* TRAFFIC */}
                     <td style={{ padding: '12px 16px', color: '#64748b', fontWeight: 600 }}>
-                      Null
+                      {row.traffic || 0}
                     </td>
 
                     {/* CATEGORY */}
@@ -417,12 +421,12 @@ export default function TopPagesPage() {
 
                     {/* TARGET TYPE */}
                     <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
-                      {row.targetCategory}
+                      {row.targetType}
                     </td>
 
                     {/* TARGET SUBTYPE */}
                     <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
-                      {row.targetType}
+                      {row.targetCategory}
                     </td>
 
                   </tr>

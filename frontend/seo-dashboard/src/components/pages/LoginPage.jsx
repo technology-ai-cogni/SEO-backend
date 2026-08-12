@@ -28,22 +28,27 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
     try {
       let res = null;
 
-      // 1) Attempt local backend server first
+      const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      const apiBase = isLocalhost 
+        ? 'http://127.0.0.1:8000' 
+        : (import.meta.env.VITE_API_BASE || `${window.location.protocol}//${window.location.hostname}:8000`);
+
       try {
-        res = await fetch('http://127.0.0.1:8000/auth/login', {
+        res = await fetch(`${apiBase}/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: email.trim(), password: password.trim() })
         });
       } catch (e) {
-        // 2) Attempt remote server fallback
-        try {
-          res = await fetch('http://54.196.75.9:8000/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: email.trim(), password: password.trim() })
-          });
-        } catch (e2) {}
+        if (!apiBase.includes('52.44.80.193')) {
+          try {
+            res = await fetch('http://52.44.80.193:8000/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: email.trim(), password: password.trim() })
+            });
+          } catch (e2) {}
+        }
       }
 
       if (res && res.status === 403) {

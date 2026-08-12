@@ -453,7 +453,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                 setPageCount(summary.page_count || 0);
                 setBlogCount(summary.blog_count || 0);
               }
-              
+
               if (kws && kws.length > 0) {
                 setProjectKeywords(kws);
                 if (!summary || summary.kw_count === 0) {
@@ -791,13 +791,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
 
   const getDynamicCategories = () => {
     if (!projectKeywords || projectKeywords.length === 0) {
-      return [
-        { name: 'School Fee & Cost', count: '34' },
-        { name: 'Curriculum IB', count: '29' },
-        { name: 'Campus Tour', count: '18' },
-        { name: 'Admissions Inquiry', count: '14' },
-        { name: 'Location & Map', count: '9' }
-      ];
+      return [];
     }
 
     const counts = {};
@@ -2467,40 +2461,16 @@ export default function PositionAnalysisPage({ onNavigate }) {
             </div>
           </div>
 
-          {/* Right Section: Cluster Tracking Line Graph */}
+          {/* Right Section: Cluster Tracking Line Graph (Graph revealed with 0 data) */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
-            {/* Line Chart Area */}
             {(() => {
               const pageAnalysisData = getDynamicPageAnalysisData();
 
-              if (pageAnalysisData.length === 0) {
-                return (
-                  <div style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: '100%',
-                    height: 220,
-                    marginTop: 12,
-                    color: '#94a3b8',
-                    fontSize: 14,
-                    fontWeight: 600,
-                    border: '1px dashed #e2e8f0',
-                    borderRadius: 8
-                  }}>
-                    N/A
-                  </div>
-                );
-              }
-
-              const weeks = ['W1', 'W2', 'W3', 'W4', 'W5'];
-              const clusterTrendData = weeks.map((week, wIdx) => {
+              const weeks = ['P1', 'P2', 'P3', 'P4', 'P5'];
+              const clusterTrendData = weeks.map((week) => {
                 const row = { week };
-                pageAnalysisData.forEach((item, pIdx) => {
-                  const baseCount = item.clusters[0] === 'N/A (0)' ? 0 : item.clusters.length;
-                  const variance = (wIdx - 2) * (pIdx % 2 === 0 ? 1 : -1);
-                  row[item.name] = Math.max(0, baseCount + Math.floor(variance * 0.5));
+                pageAnalysisData.forEach((item) => {
+                  row[item.name] = 0; // 0 value, no dummy values
                 });
                 return row;
               });
@@ -2553,7 +2523,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                         >
                           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                           <XAxis dataKey="week" stroke="#94a3b8" fontSize={10.5} tickLine={false} />
-                          <YAxis stroke="#94a3b8" fontSize={10.5} tickLine={false} domain={[0, 8]} />
+                          <YAxis stroke="#94a3b8" fontSize={10.5} tickLine={false} domain={[0, 10]} />
                           <Tooltip
                             content={({ active, payload }) => {
                               if (active && payload && payload.length) {
@@ -2606,7 +2576,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                     </div>
                   </div>
 
-                  {/* Clean Black Text Below Graph - Left Aligned Starting at Red Circle (Right after W2) */}
+                  {/* Clean Text Below Graph */}
                   <div style={{
                     fontSize: 13,
                     fontWeight: 800,
