@@ -280,10 +280,14 @@ def init_db():
                 keywords_count TEXT,
                 target_pages_count TEXT,
                 blog_pages_count TEXT,
+                status TEXT NOT NULL DEFAULT 'Active',
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
+        conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'Active'"))
+        conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE"))
 
         # --- Shared categories/clusters/category_cluster_map/keyword_categories ---
         conn.execute(text("""
@@ -809,8 +813,8 @@ def create_domain(domain, project_name=None, target_regions=None, platforms=None
             raise ValueError(f"Domain '{domain}' already exists.")
 
         conn.execute(text("""
-            INSERT INTO domains (domain, project_name, project_slug, target_regions, platforms, domain_authority, users)
-            VALUES (:domain, :project_name, :project_slug, :target_regions, :platforms, :domain_authority, CAST(:users AS JSONB))
+            INSERT INTO domains (domain, project_name, project_slug, target_regions, platforms, domain_authority, users, status, is_active)
+            VALUES (:domain, :project_name, :project_slug, :target_regions, :platforms, :domain_authority, CAST(:users AS JSONB), 'Active', TRUE)
         """), {
             "domain": domain, "project_name": project_name, "project_slug": project_slug,
             "target_regions": target_regions or [], "platforms": platforms or [],

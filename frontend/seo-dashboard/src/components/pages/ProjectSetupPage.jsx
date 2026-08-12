@@ -1519,6 +1519,7 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
   const [platforms, setPlatforms] = useState([]);
   const [da, setDa] = useState('');
   const [traffic, setTraffic] = useState('');
+  const [status, setStatus] = useState('Active');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [apiError, setApiError] = useState('');
@@ -1530,6 +1531,7 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
       setPlatforms(project.targetPlatforms || ALL_PLATFORMS);
       setDa(project.da ?? '');
       setTraffic(project.traffic ?? '');
+      setStatus(project.status || (project.isActive ? 'Active' : 'Inactive'));
       setConfirmDelete(false);
       setSubmitting(false);
       setApiError('');
@@ -1552,6 +1554,8 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
         targetPlatforms: platforms,
         da: da !== '' ? Number(da) : null,
         traffic: traffic !== '' ? Number(traffic) : 0,
+        status,
+        isActive: status === 'Active',
       });
       handleClose();
     } catch (err) {
@@ -1626,6 +1630,14 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
 
       <Input label="Domain Authority" placeholder="e.g. 42" value={da} onChange={setDa} type="number" />
       <Input label="Traffic" placeholder="e.g. 44.29" value={traffic} onChange={setTraffic} type="number" />
+
+      <Select
+        label="Status"
+        placeholder="Select status"
+        value={status}
+        onChange={setStatus}
+        options={['Active', 'Inactive']}
+      />
     </Modal>
   );
 }
@@ -1719,7 +1731,7 @@ function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteP
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
           <thead>
             <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
-              {['Project', 'Location', 'Target Platforms', 'DA', 'Traffic', 'Keywords', 'Target Pages', 'Blog Pages', 'Updated', ''].map((h, i) => (
+              {['Project', 'Location', 'Target Platforms', 'DA', 'Traffic', 'Keywords', 'Target Pages', 'Blog Pages', 'Status', 'Updated', ''].map((h, i) => (
                 <th key={i} style={{ padding: '10px 16px', textAlign: i <= 2 ? 'left' : 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>
                   {h === 'Project' ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>Project <span style={{ fontSize: 10 }}>⇅</span></div>
@@ -1730,11 +1742,11 @@ function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteP
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading projects…</td></tr>
+              <tr><td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading projects…</td></tr>
             ) : error ? (
-              <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+              <tr><td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
             ) : visibleProjects.length === 0 ? (
-              <tr><td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No projects yet. Click <strong>+ Create project</strong> to get started.</td></tr>
+              <tr><td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No projects yet. Click <strong>+ Create project</strong> to get started.</td></tr>
             ) : visibleProjects.map((p, i) => (
               <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}
                 onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
@@ -1805,6 +1817,39 @@ function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteP
                   </span>
                 </td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{p.blogPages}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'right' }}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const currentSt = p.status || 'Active';
+                      const nextStatus = currentSt === 'Active' ? 'Inactive' : 'Active';
+                      onUpdateProject?.(p, { status: nextStatus, isActive: nextStatus === 'Active' });
+                    }}
+                    title="Click to toggle Active/Inactive"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '3px 10px',
+                      borderRadius: 12,
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      border: (p.status || 'Active') === 'Inactive' ? '1px solid #cbd5e1' : '1px solid #a7f3d0',
+                      background: (p.status || 'Active') === 'Inactive' ? '#f1f5f9' : '#ecfdf5',
+                      color: (p.status || 'Active') === 'Inactive' ? '#64748b' : '#047857',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background: (p.status || 'Active') === 'Inactive' ? '#94a3b8' : '#10b981'
+                    }} />
+                    {p.status || 'Active'}
+                  </button>
+                </td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right' }}>
                   <button
@@ -6982,7 +7027,7 @@ export default function ProjectSetupPage({ tab, user }) {
             {activeTab === 'Outreach' && (
               outreachLinks.length === 0 ? (
                 <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-                  No outreach domains configured yet. Click <strong>+ {cta.label}</strong> to get started.
+                  No outreach sites configured yet. Click <strong>+ {cta.label}</strong> to get started.
                 </div>
               ) : (
                 <div style={{ overflowX: 'auto', padding: '12px 0' }}>
@@ -7195,9 +7240,9 @@ export default function ProjectSetupPage({ tab, user }) {
           setOutreachError('');
           setNewOutreachLink('');
         }}
-        title="Add Outreach Domain"
+        title="Add Outreach Sites"
         footer={<>
-          <Btn variant="primary" onClick={handleAddOutreachLink}>Add Domain</Btn>
+          <Btn variant="primary" onClick={handleAddOutreachLink}>Add Site</Btn>
           <Btn variant="outline" onClick={() => {
             setShowAddOutreach(false);
             setOutreachError('');
@@ -7221,7 +7266,7 @@ export default function ProjectSetupPage({ tab, user }) {
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
-            Outreach Domain *
+            Outreach Site*
           </label>
           <input
             type="text"
@@ -7255,7 +7300,7 @@ export default function ProjectSetupPage({ tab, user }) {
             </button>
           </>}>
           <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-secondary)' }}>
-            Are you sure you want to delete the outreach domain <strong>{deletingOutreachLink.url}</strong>? This action cannot be undone.
+            Are you sure you want to delete the outreach sites <strong>{deletingOutreachLink.url}</strong>? This action cannot be undone.
           </p>
         </Modal>
       )}

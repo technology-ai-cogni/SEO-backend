@@ -9,6 +9,7 @@ export default function TopPagesPage() {
   const [loading, setLoading] = useState(true);
 
   const [pagesData, setPagesData] = useState([]);
+  const [projectKeywords, setProjectKeywords] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [intentFilter, setIntentFilter] = useState('all'); // 'all' | 'informational' | 'commercial'
   const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'landing' | 'blog'
@@ -49,6 +50,7 @@ export default function TopPagesPage() {
 
       const pages = fetchedPages || [];
       const kws = fetchedKws || [];
+      setProjectKeywords(kws);
 
       // Map STRICTLY pages defined in Project Setup
       const combinedPages = pages.map(p => {
@@ -68,7 +70,16 @@ export default function TopPagesPage() {
         });
 
         const kwList = Array.from(new Set(matchingKws.map(k => k.kw).filter(Boolean)));
-        
+
+        // Collect ranks from matching keywords, exclude unranked (101)
+        const pageRanks = matchingKws
+          .map(k => {
+            const raw = k.rank ?? k.position ?? k.rankVal ?? k.rank_meta?.rank;
+            const val = Number(raw);
+            return raw != null && !isNaN(val) && val > 0 && val < 101 ? val : null;
+          })
+          .filter(r => r !== null);
+
         const subtype = p.targetCategory || matchingKws.map(k => k.targetSubtype || k.subtype || k.intent).find(Boolean) || 'Informational';
         const targetType = p.targetType || matchingKws.map(k => k.targetType || k.page_type).find(Boolean) || 'Landing Page';
 
@@ -82,7 +93,8 @@ export default function TopPagesPage() {
           cluster: p.cluster || matchingKws.map(k => k.cluster).find(Boolean) || 'General',
           targetCategory: subtype,
           targetType: targetType,
-          totalKws: kwList.length
+          totalKws: kwList.length,
+          ranks: pageRanks
         };
       }).filter(Boolean);
 
@@ -127,10 +139,22 @@ export default function TopPagesPage() {
   const totalOrganicTraffic = pagesData.reduce((acc, p) => acc + (Number(p.traffic) || Number(p.organic_traffic) || 0), 0) || Number(activeProject?.traffic) || 0;
   const avgTraffic = totalPagesCount > 0 ? Math.round(totalOrganicTraffic / totalPagesCount) : 0;
 
-  // Calculate Average Position across tracked page keywords
-  const allRanks = pagesData.flatMap(p => p.ranks || []).filter(r => typeof r === 'number' && r > 0);
-  const avgPosition = allRanks.length > 0 
-    ? (allRanks.reduce((acc, r) => acc + r, 0) / allRanks.length).toFixed(1) 
+  // Calculate Avg Position: (total keyword position / number of keywords) from intent, excluding rank 101
+  const intentRanks = (projectKeywords || [])
+    .map(k => {
+      const raw = k.rank ?? k.position ?? k.rankVal ?? k.rank_meta?.rank;
+      const val = Number(raw);
+      return raw != null && !isNaN(val) && val > 0 && val < 101 ? val : null;
+    })
+    .filter(r => r !== null);
+
+  const pageRanksList = pagesData.flatMap(p => p.ranks || []).filter(r => typeof r === 'number' && r > 0 && r < 101);
+  const activeRanks = intentRanks.length > 0 ? intentRanks : pageRanksList;
+
+  const totalKeywordPosition = activeRanks.reduce((acc, r) => acc + r, 0);
+  const numberOfKeywords = activeRanks.length;
+  const avgPosition = numberOfKeywords > 0
+    ? (totalKeywordPosition / numberOfKeywords).toFixed(1)
     : 0;
 
   return (

@@ -234,6 +234,7 @@ async function fetchKwCountsForSlug(slug) {
 function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
   const targetPlatforms = row.platforms || [];
   const landingCount = kwCounts.landingPages > 0 ? kwCounts.landingPages : Math.max(0, kwCounts.total - kwCounts.blogPages);
+  const status = row.status || (row.is_active === false ? 'Inactive' : 'Active');
   return {
     id: row.id,
     slug: row.project_slug,
@@ -249,6 +250,8 @@ function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
     targetPages: landingCount,
     targetDir: null,
     blogPages: kwCounts.blogPages,
+    status,
+    isActive: status === 'Active',
     updated: timeAgo(row.updated_at),
     targetPlatforms,
   };
@@ -538,6 +541,13 @@ export async function updateDomainRow(id, updates) {
     if ('targetPlatforms' in updates) dbUpdates.platforms = updates.targetPlatforms;
     if ('da' in updates) dbUpdates.domain_authority = updates.da != null ? String(updates.da) : null;
     if ('traffic' in updates) dbUpdates.traffic = String(updates.traffic);
+    if ('status' in updates) {
+      dbUpdates.status = updates.status;
+      dbUpdates.is_active = updates.status === 'Active';
+    } else if ('isActive' in updates) {
+      dbUpdates.status = updates.isActive ? 'Active' : 'Inactive';
+      dbUpdates.is_active = updates.isActive;
+    }
 
     domains[index] = dbUpdates;
     localStorage.setItem('seo_domains', JSON.stringify(domains));
@@ -551,6 +561,13 @@ export async function updateDomainRow(id, updates) {
   if ('targetPlatforms' in updates) dbUpdates.platforms = updates.targetPlatforms;
   if ('da' in updates) dbUpdates.domain_authority = updates.da != null ? String(updates.da) : null;
   if ('traffic' in updates) dbUpdates.traffic = String(updates.traffic);
+  if ('status' in updates) {
+    dbUpdates.status = updates.status;
+    dbUpdates.is_active = updates.status === 'Active';
+  } else if ('isActive' in updates) {
+    dbUpdates.status = updates.isActive ? 'Active' : 'Inactive';
+    dbUpdates.is_active = updates.isActive;
+  }
 
   const { data, error } = await supabase.from('domains').update(dbUpdates).eq('id', id).select().single();
   if (error) throw error;
@@ -914,6 +931,10 @@ export async function bulkDeleteKeywordRows(ids) {
 }
 
 export function getApiBaseUrl() {
+  // Respect .env VITE_API_BASE first (covers local dev on any port)
+  const envBase = import.meta.env.VITE_API_BASE;
+  if (envBase) return envBase;
+
   if (typeof window !== 'undefined' && window.location && window.location.hostname) {
     const host = window.location.hostname;
     if (host === 'localhost' || host === '127.0.0.1') {
@@ -921,7 +942,7 @@ export function getApiBaseUrl() {
     }
     return `${window.location.protocol}//${host}:8000`;
   }
-  return import.meta.env.VITE_API_BASE || 'http://52.44.80.193:8000';
+  return 'http://52.44.80.193:8000';
 }
 
 const CATEGORY_API_BASE = getApiBaseUrl();
