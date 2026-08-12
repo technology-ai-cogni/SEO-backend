@@ -234,6 +234,24 @@ def init_db():
         conn.execute(text("ALTER TABLE recycle_bin DROP CONSTRAINT IF EXISTS recycle_bin_project_slug_key"))
 
         conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS ai_analysis (
+                id BIGSERIAL PRIMARY KEY,
+                project_slug TEXT NOT NULL,
+                project_name TEXT NOT NULL,
+                domain TEXT,
+                country TEXT DEFAULT 'India',
+                engine TEXT NOT NULL,
+                ai_visibility INT DEFAULT 0,
+                mentions INT DEFAULT 0,
+                cited_pages INT DEFAULT 0,
+                total_keywords INT DEFAULT 0,
+                mentioned_keywords JSONB DEFAULT '[]'::jsonb,
+                cited_pages_list JSONB DEFAULT '[]'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+
+        conn.execute(text("""
             CREATE TABLE IF NOT EXISTS projects (
                 id BIGSERIAL PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
@@ -2149,6 +2167,98 @@ def delete_recycle_bin_item(item_identifier):
                OR item_id = :p 
                OR item_name = :p
         """), {"p": p})
+
+
+def save_ai_analysis_run(
+    project_slug: str,
+    engine_name: str,
+    ai_visibility: int,
+    mentions: int,
+    cited_pages: int,
+    total_keywords: int,
+    mentioned_keywords: list,
+    cited_pages_list: list,
+    domain: str = "",
+    country: str = "India"
+):
+    import json
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO ai_analysis (
+                project_slug, project_name, domain, country, engine,
+                ai_visibility, mentions, cited_pages, total_keywords,
+                mentioned_keywords, cited_pages_list, created_at
+            ) VALUES (
+                :project_slug, :project_name, :domain, :country, :engine,
+                :ai_visibility, :mentions, :cited_pages, :total_keywords,
+                CAST(:mentioned_keywords AS JSONB), CAST(:cited_pages_list AS JSONB), NOW()
+            )
+        """), {
+            "project_slug": project_slug,
+            "project_name": project_slug,
+            "domain": domain,
+            "country": country,
+            "engine": engine_name,
+            "ai_visibility": ai_visibility or 0,
+            "mentions": mentions or 0,
+            "cited_pages": cited_pages or 0,
+            "total_keywords": total_keywords or 0,
+            "mentioned_keywords": json.dumps(mentioned_keywords or []),
+            "cited_pages_list": json.dumps(cited_pages_list or [])
+        })
+
+
+def get_project_summary(project_slug: str):
+    """Fast aggregated SQL summary query for instant dashboard metrics load."""
+    with engine.begin() as conn:
+        # 1. Total Keywords count & SUM of search volume
+        kw_res = conn.execute(text("""
+            SELECT COUNT(*) AS total_kws, COALESCE(SUM(sv), 0) AS total_sv, COUNT(DISTINCT cluster) AS total_clusters
+            FROM keyword_categories
+            WHERE project_slug = :slug
+        """), {"slug": project_slug}).fetchone()
+
+        total_kws = kw_res.total_kws if kw_res else 0
+        total_sv = float(kw_res.total_sv) if kw_res else 0
+        total_clusters = kw_res.total_clusters if kw_res else 0
+
+        # 2. Total pages & blogs count
+        page_res = conn.execute(text("""
+            SELECT COUNT(*) AS total_pgs,
+                   COUNT(CASE WHEN LOWER(target_type) LIKE '%blog%' OR LOWER(landing_page_url) LIKE '%blog%' THEN 1 END) AS total_blogs
+            FROM pages
+            WHERE project_slug = :slug
+        """), {"slug": project_slug}).fetchone()
+
+        total_pgs = page_res.total_pgs if page_res else 0
+        total_blogs = page_res.total_blogs if page_res else 0
+
+        # 3. Latest AI Analysis summary
+        ai_res = conn.execute(text("""
+            SELECT engine, ai_visibility, mentions, cited_pages, created_at
+            FROM ai_analysis
+            WHERE project_slug = :slug
+            ORDER BY created_at DESC
+            LIMIT 5
+        """), {"slug": project_slug}).fetchall()
+
+        ai_history = [{
+            "engine": r.engine,
+            "ai_visibility": r.ai_visibility,
+            "mentions": r.mentions,
+            "cited_pages": r.cited_pages,
+            "created_at": r.created_at.isoformat() if r.created_at else None
+        } for r in ai_res]
+
+        return {
+            "project_slug": project_slug,
+            "kw_count": total_kws,
+            "net_potential": total_sv,
+            "cluster_count": total_clusters,
+            "page_count": total_pgs,
+            "blog_count": total_blogs,
+            "ai_history": ai_history
+        }
 
 
 if __name__ == "__main__":

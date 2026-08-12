@@ -213,22 +213,67 @@ export default function TopPagesPage() {
 
       {/* ─── SUMMARY CARDS ─────────────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
-        {[
-          { label: 'Total Pages Tracked', value: totalPagesCount },
-          { label: 'Total Mapped Keywords', value: totalKwsSum },
-          { label: 'Avg. Position', value: avgPosition },
-        ].map(s => (
-          <div key={s.label} style={{
-            background: '#ffffff',
-            border: '1px solid #e2e8f0',
-            borderRadius: 10,
-            padding: '16px 20px',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
-          }}>
-            <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 4 }}>{s.label}</div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>{s.value}</div>
+        
+        {/* CARD 1: Avg. Traffic */}
+        <div style={{
+          background: '#ffffff',
+          border: '1px solid #e2e8f0',
+          borderRadius: 10,
+          padding: '16px 20px',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center'
+        }}>
+          <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>Avg. Traffic</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>0</div>
+        </div>
+
+        {/* CARD 2: Top Pages in Top 1, Top 3, Top 10 (Column / Row-wise Layout) */}
+        <div style={{
+          background: '#ffffff',
+          border: '1px solid #e2e8f0',
+          borderRadius: 10,
+          padding: '14px 20px',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between'
+        }}>
+          <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>
+            Top Pages
           </div>
-        ))}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, alignItems: 'center' }}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Top 1</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>0</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #e2e8f0', paddingLeft: 10 }}>
+              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Top 3</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>0</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #e2e8f0', paddingLeft: 10 }}>
+              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Top 10</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>0</span>
+            </div>
+          </div>
+        </div>
+
+        {/* CARD 3: Avg. Position */}
+        <div style={{
+          background: '#ffffff',
+          border: '1px solid #e2e8f0',
+          borderRadius: 10,
+          padding: '16px 20px',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center'
+        }}>
+          <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>Avg. Position</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>{avgPosition || '0'}</div>
+        </div>
+
       </div>
 
       {/* ─── SEARCH & FILTERS BAR ───────────────────────────────────────────── */}
@@ -314,6 +359,7 @@ export default function TopPagesPage() {
               <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>Page Name</th>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>URL</th>
+                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Traffic</th>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>Category</th>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>Cluster</th>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>Target Type</th>
@@ -323,13 +369,13 @@ export default function TopPagesPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
+                  <td colSpan={7} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
                     Loading pages for {activeProject?.domain || activeProject?.name}...
                   </td>
                 </tr>
               ) : filteredPages.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
+                  <td colSpan={7} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
                     No pages found under Project Setup for {activeProject?.domain || activeProject?.name}.
                   </td>
                 </tr>
@@ -343,11 +389,16 @@ export default function TopPagesPage() {
                     </td>
 
                     {/* URL */}
-                    <td style={{ padding: '12px 16px', color: '#2563eb', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '12px 16px', color: '#2563eb', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       <a href={row.url} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         {row.url}
                         <ExternalLink size={11} />
                       </a>
+                    </td>
+
+                    {/* TRAFFIC */}
+                    <td style={{ padding: '12px 16px', color: '#64748b', fontWeight: 600 }}>
+                      Null
                     </td>
 
                     {/* CATEGORY */}

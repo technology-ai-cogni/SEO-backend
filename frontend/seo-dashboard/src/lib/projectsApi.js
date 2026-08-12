@@ -1750,37 +1750,7 @@ export async function runAiAnalysis(projectSlug, keyword, aiMode, domain, countr
   return result;
 }
 
-export async function runAiVisibilityAnalysis(projectSlug, domain, country, keywords, engine = 'chatgpt') {
-  const apiBase = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000').replace('0.0.0.0', '127.0.0.1');
 
-  try {
-    const res = await fetch(`${apiBase}/projects/${projectSlug}/ai-visibility-analysis`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ domain, country, keywords, engine }),
-    });
-
-    if (res.ok) {
-      return await res.json();
-    }
-  } catch (e) {
-    console.warn('[runAiVisibilityAnalysis] Backend fetch failed, using fallback metrics:', e);
-  }
-
-  return {
-    project: projectSlug,
-    result: {
-      ai_visibility: 0,
-      mentions: 0,
-      cited_pages: 0,
-      mentioned_keywords: [],
-      cited_pages_list: [],
-      total_keywords: keywords ? keywords.length : 0,
-      domain: domain || 'dogseechew.in',
-      status: 'error'
-    }
-  };
-}
 
 export async function classifyCompetitorUrls(urls, keyword = '') {
   if (!urls || urls.length === 0) return [];
@@ -2044,4 +2014,121 @@ export async function deleteUserApi(userId) {
   }
 }
 
+// ─── AI Analysis & Supabase API ─────────────────────────────────────────────
 
+export async function fetchProjectSummaryApi(projectSlug) {
+  const apiBase = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000').replace('0.0.0.0', '127.0.0.1');
+  try {
+    const res = await fetch(`${apiBase}/projects/${encodeURIComponent(projectSlug)}/summary`);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('[fetchProjectSummaryApi] Backend fetch warning:', e);
+  }
+  return null;
+}
+
+export async function runAiVisibilityAnalysis(projectSlug, domain, country, keywords, engine = 'chatgpt') {
+  const apiBase = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000').replace('0.0.0.0', '127.0.0.1');
+
+  let resultData = null;
+
+  try {
+    const res = await fetch(`${apiBase}/projects/${projectSlug}/ai-visibility-analysis`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain, country, keywords, engine }),
+    });
+
+    if (res.ok) {
+      resultData = await res.json();
+    }
+  } catch (e) {
+    console.warn('[runAiVisibilityAnalysis] Backend fetch failed, using fallback metrics:', e);
+  }
+
+  if (!resultData) {
+    resultData = {
+      project: projectSlug,
+      result: {
+        ai_visibility: 0,
+        mentions: 0,
+        cited_pages: 0,
+        mentioned_keywords: [],
+        cited_pages_list: [],
+        total_keywords: keywords ? keywords.length : 0,
+        domain: domain || '',
+        status: 'error'
+      }
+    };
+  }
+
+  // Direct write to Supabase table `ai_analysis` if client connected
+  if (supabase) {
+    try {
+      const resObj = resultData?.result || {};
+      const { data: sbData, error: sbErr } = await supabase.from('ai_analysis').insert([{
+        project_slug: projectSlug,
+        project_name: projectSlug,
+        domain: domain || resObj.domain || '',
+        country: country || 'India',
+        engine: engine || 'chatgpt',
+        ai_visibility: resObj.ai_visibility || 0,
+        mentions: resObj.mentions || 0,
+        cited_pages: resObj.cited_pages || 0,
+        total_keywords: resObj.total_keywords || (keywords ? keywords.length : 0),
+        mentioned_keywords: resObj.mentioned_keywords || [],
+        cited_pages_list: resObj.cited_pages_list || []
+      }]).select();
+
+      if (sbErr) {
+        console.warn('[runAiVisibilityAnalysis] Supabase insert error:', sbErr);
+      } else {
+        console.log('[runAiVisibilityAnalysis] Saved to Supabase successfully:', sbData);
+      }
+    } catch (sbErr) {
+      console.warn('[runAiVisibilityAnalysis] Supabase direct insert notice:', sbErr);
+    }
+  }
+
+  return resultData;
+}
+
+export async function fetchAiAnalysisHistory(projectSlug, engine = '') {
+  if (supabase) {
+    try {
+      let query = supabase
+        .from('ai_analysis')
+        .select('*')
+        .or(`project_slug.eq.${projectSlug},project_name.eq.${projectSlug}`)
+        .order('created_at', { ascending: false });
+
+      if (engine && engine.trim()) {
+        query = query.ilike('engine', `%${engine.trim()}%`);
+      }
+
+      const { data, error } = await query.limit(50);
+      if (!error && data && data.length > 0) {
+        return data;
+      }
+    } catch (sbErr) {
+      console.warn('[fetchAiAnalysisHistory] Supabase query warning:', sbErr);
+    }
+  }
+
+  const apiBase = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000').replace('0.0.0.0', '127.0.0.1');
+  try {
+    const url = new URL(`${apiBase}/projects/${encodeURIComponent(projectSlug)}/ai-analysis-history`);
+    if (engine) url.searchParams.append('engine', engine);
+    const res = await fetch(url.toString());
+    if (res.ok) {
+      const json = await res.json();
+      return json.history || [];
+    }
+  } catch (e) {
+    console.warn('[fetchAiAnalysisHistory] Backend query notice:', e);
+  }
+
+  return [];
+}

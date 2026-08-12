@@ -1598,6 +1598,25 @@ def run_ai_visibility_analysis_endpoint(project_slug: str, req: AiVisibilityRequ
 
         agent = AgentClass()
         result = agent.analyze_ai_visibility(kws, client_domain=client_domain, country=req.country or "India")
+
+        # Automatically insert row into `ai_analysis` database table!
+        try:
+            db.save_ai_analysis_run(
+                project_slug=project_slug,
+                engine_name=engine,
+                ai_visibility=result.get("ai_visibility", 0),
+                mentions=result.get("mentions", 0),
+                cited_pages=result.get("cited_pages", 0),
+                total_keywords=result.get("total_keywords", len(kws)),
+                mentioned_keywords=result.get("mentioned_keywords", []),
+                cited_pages_list=result.get("cited_pages_list", []),
+                domain=client_domain,
+                country=req.country or "India"
+            )
+            print(f"[app] Successfully saved ai_analysis row into database for project: {project_slug}, engine: {engine}")
+        except Exception as save_err:
+            print(f"[app] Notice during saving ai_analysis DB row: {save_err}", file=sys.stderr, flush=True)
+
         return {"project": project_slug, "engine": engine, "result": result}
     except Exception as e:
         print(f"[app] Error during AI Visibility endpoint ({engine}): {e}", file=sys.stderr, flush=True)
@@ -1616,6 +1635,24 @@ def run_ai_visibility_analysis_endpoint(project_slug: str, req: AiVisibilityRequ
                 "domain": client_domain,
                 "status": "ok"
             }
+        }
+
+
+@app.get("/projects/{project_slug}/summary")
+def get_project_summary_endpoint(project_slug: str):
+    """Fast aggregated project summary metrics endpoint for instant UI load (< 50ms)."""
+    try:
+        return db.get_project_summary(project_slug)
+    except Exception as e:
+        print(f"[app] Notice in get_project_summary_endpoint: {e}", file=sys.stderr, flush=True)
+        return {
+            "project_slug": project_slug,
+            "kw_count": 0,
+            "net_potential": 0,
+            "cluster_count": 0,
+            "page_count": 0,
+            "blog_count": 0,
+            "ai_history": []
         }
 
 

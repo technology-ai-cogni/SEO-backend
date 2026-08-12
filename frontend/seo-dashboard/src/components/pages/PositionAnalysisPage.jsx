@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ExternalLink, Search, ChevronDown, CheckCircle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis } from '../../lib/projectsApi';
+import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi } from '../../lib/projectsApi';
 
 function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 100, projectTotalKeywords = 514 }) {
   const [hoverType, setHoverType] = useState(null); // null | 'mentions' | 'cited'
@@ -437,73 +437,43 @@ export default function PositionAnalysisPage({ onNavigate }) {
           setSelectedSlug(targetProject.slug);
           setActiveProject(targetProject);
 
-          // Fetch project-specific data if present
+          // Fast Parallel Fetch (Fix #1 & Fix #2)
           try {
-            const kws = await fetchKeywordRows(targetProject.slug);
-            const isBlogItem = (item) => {
-              if (!item) return false;
-              const val = String(
-                item.targetType ||
-                item.target_type ||
-                item.pageType ||
-                item.page_type ||
-                item.type ||
-                item.targetCategory ||
-                item.landing_blog ||
-                item['Target Type'] ||
-                item['TargetType'] ||
-                item['Landing / Blog'] ||
-                item['landing / blog'] ||
-                ''
-              ).toLowerCase().trim();
-              return val.includes('blog');
-            };
+            const [summary, kws, pgs] = await Promise.all([
+              fetchProjectSummaryApi(targetProject.slug),
+              fetchKeywordRows(targetProject.slug),
+              fetchPageRows(targetProject.slug)
+            ]);
 
-            if (kws && kws.length > 0 && isMounted) {
-              setProjectKeywords(kws);
-              setKwCount(kws.length);
-              const clusters = new Set(kws.map(k => k.cluster).filter(Boolean)).size;
-              setClusterCount(clusters);
-
-              const svSum = kws.reduce((acc, k) => {
-                const val = Number(String(k.sv || 0).replace(/[^0-9.]/g, '')) || 0;
-                return acc + val;
-              }, 0);
-              setNetPotential(svSum);
-
-              setTopKeywords(extractTop2PerCategory(kws));
-            } else if (isMounted) {
-              setKwCount(targetProject.keywords || 0);
-              setClusterCount(0);
-              setNetPotential(0);
-            }
-
-            const pgs = await fetchPageRows(targetProject.slug);
-            if (pgs && pgs.length > 0 && isMounted) {
-              setProjectPages(pgs);
-              setPageCount(pgs.length);
-              const pgsBlogs = pgs.filter(p => isBlogItem(p)).length;
-              if (pgsBlogs > 0) {
-                setBlogCount(pgsBlogs);
-              } else if (kws && kws.length > 0) {
-                const kwsBlogs = new Set(kws.filter(k => isBlogItem(k)).map(k => k.landingPage || k.url || k.kw).filter(Boolean)).size;
-                setBlogCount(kwsBlogs || (targetProject.blogPages || 0));
-              } else {
-                setBlogCount(targetProject.blogPages || 0);
+            if (isMounted) {
+              if (summary && summary.kw_count > 0) {
+                setKwCount(summary.kw_count);
+                setNetPotential(summary.net_potential || 0);
+                setClusterCount(summary.cluster_count || 0);
+                setPageCount(summary.page_count || 0);
+                setBlogCount(summary.blog_count || 0);
               }
-            } else if (kws && kws.length > 0 && isMounted) {
-              const uniquePages = new Set(kws.map(k => k.landingPage).filter(Boolean)).size;
-              setPageCount(uniquePages || kws.length);
-              const kwsBlogs = new Set(kws.filter(k => isBlogItem(k)).map(k => k.landingPage || k.url || k.kw).filter(Boolean)).size;
-              setBlogCount(kwsBlogs || (targetProject.blogPages || 0));
-              setProjectPages([]);
-            } else if (isMounted) {
-              setPageCount(targetProject.targetPages || 0);
-              setBlogCount(targetProject.blogPages || 0);
-              setProjectPages([]);
+              
+              if (kws && kws.length > 0) {
+                setProjectKeywords(kws);
+                if (!summary || summary.kw_count === 0) {
+                  setKwCount(kws.length);
+                  setClusterCount(new Set(kws.map(k => k.cluster).filter(Boolean)).size);
+                  const svSum = kws.reduce((acc, k) => acc + (Number(String(k.sv || 0).replace(/[^0-9.]/g, '')) || 0), 0);
+                  setNetPotential(svSum);
+                }
+                setTopKeywords(extractTop2PerCategory(kws));
+              }
+
+              if (pgs && pgs.length > 0) {
+                setProjectPages(pgs);
+                if (!summary || summary.page_count === 0) {
+                  setPageCount(pgs.length);
+                }
+              }
             }
           } catch (e) {
-            // keep fallbacks
+            console.warn('[PositionAnalysisPage] Parallel load notice:', e);
           }
         }
       } catch (err) {
@@ -659,7 +629,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
     if (!activeProject) return;
 
     const { targetEngine = null, analyzeAll = false } = options;
-    const domain = activeProject.domain || activeProject.name || 'dogseechew.in';
+    const domain = activeProject.domain || activeProject.name || '';
     const countryObj = COUNTRY_OPTIONS.find(c => c.code === selectedRegion);
     const countryName = countryObj ? countryObj.name : selectedRegion || 'India';
 
@@ -787,18 +757,12 @@ export default function PositionAnalysisPage({ onNavigate }) {
     }
   };
 
-  const domainDisplay = activeProject?.domain || activeProject?.name || 'ittisa.org';
+  const domainDisplay = activeProject?.domain || activeProject?.name || (projects && projects[0] ? projects[0].domain || projects[0].name : '');
   const locationDisplay = activeProject?.location || 'India (Google)';
 
   const getDynamicClusters = () => {
     if (!projectKeywords || projectKeywords.length === 0) {
-      return [
-        { name: 'Informational', share: '312' },
-        { name: 'Navigational', share: '169' },
-        { name: 'Commercial', share: '104' },
-        { name: 'Transactional', share: '45' },
-        { name: 'Local Intent', share: '20' }
-      ];
+      return [];
     }
 
     const counts = {};
@@ -1595,7 +1559,7 @@ export default function PositionAnalysisPage({ onNavigate }) {
                             return first;
                           }
                           // Fallback calculation for old single-keyword format array [{ keyword, results: [...] }]
-                          const cleanDomain = (activeProject?.domain || activeProject?.name || 'dogseechew.in').replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].trim().toLowerCase();
+                          const cleanDomain = (activeProject?.domain || activeProject?.name || '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].trim().toLowerCase();
                           let mentionsCount = 0;
                           let citedCount = 0;
                           const mentionedKws = [];
