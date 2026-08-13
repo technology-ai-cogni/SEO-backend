@@ -43,6 +43,7 @@ def signup(payload: SignupRequest):
             name=new_user["name"],
             email=new_user["email"],
             role=new_user["role"],
+            category=new_user.get("category", "Internal"),
             status=new_user.get("status", "Active"),
             created_at=new_user.get("created_at")
         )
@@ -85,7 +86,10 @@ def login(payload: LoginRequest):
             name=user["name"],
             email=user["email"],
             role=user["role"],
+            category=user.get("category", "Internal"),
             status=user.get("status", "Active"),
+            section_access=user.get("section_access", "Default"),
+            permissions=user.get("permissions", "Default"),
             created_at=user.get("created_at")
         )
     )
@@ -103,7 +107,10 @@ def get_users():
             name=u["name"],
             email=u["email"],
             role=u["role"],
+            category=u.get("category", "Internal"),
             status=u.get("status", "Active"),
+            section_access=u.get("section_access", "Default"),
+            permissions=u.get("permissions", "Default"),
             created_at=u.get("created_at")
         )
         for u in users
@@ -127,8 +134,11 @@ def admin_create_user(payload: CreateUserRequest):
         name=payload.name,
         email=clean_email,
         password_hash=pwd_hash,
-        role=payload.role or "USER",
-        status=payload.status or "Active"
+        role=payload.role or "INTERNAL_ASSOCIATE",
+        category=payload.category or "Internal",
+        status=payload.status or "Active",
+        section_access=payload.section_access or "Default",
+        permissions=payload.permissions or "Default"
     )
 
     insert_audit_log(user_email="admin", action=f"Admin Created User Credential: {clean_email}", status="Success")
@@ -141,7 +151,10 @@ def admin_create_user(payload: CreateUserRequest):
             name=new_user["name"],
             email=new_user["email"],
             role=new_user["role"],
+            category=new_user.get("category", "Internal"),
             status=new_user.get("status", "Active"),
+            section_access=new_user.get("section_access", "Default"),
+            permissions=new_user.get("permissions", "Default"),
             created_at=new_user.get("created_at")
         )
     )
@@ -164,25 +177,37 @@ def update_status_endpoint(user_id: int, payload: UpdateUserStatusRequest):
         name=updated["name"],
         email=updated["email"],
         role=updated["role"],
+        category=updated.get("category", "Internal"),
         status=updated.get("status", "Active"),
+        section_access=updated.get("section_access", "Default"),
+        permissions=updated.get("permissions", "Default"),
         created_at=updated.get("created_at")
     )
 
 
 @router.put("/users/{user_id}/role", response_model=UserResponse)
 def update_role_endpoint(user_id: int, payload: UpdateUserRoleRequest):
-    """Change user role."""
-    updated = update_user_role(user_id, payload.role)
+    """Change user role, category, section_access, and permissions."""
+    updated = update_user_role(
+        user_id, 
+        payload.role, 
+        payload.category, 
+        payload.section_access, 
+        payload.permissions
+    )
     if not updated:
         raise HTTPException(status_code=404, detail="User not found.")
     
-    insert_audit_log(user_email="admin", action=f"Changed User Role ({updated['email']}) to {payload.role}", status="Success")
+    insert_audit_log(user_email="admin", action=f"Updated User Settings ({updated['email']})", status="Success")
     return UserResponse(
         id=updated["id"],
         name=updated["name"],
         email=updated["email"],
         role=updated["role"],
+        category=updated.get("category", "Internal"),
         status=updated.get("status", "Active"),
+        section_access=updated.get("section_access", "Default"),
+        permissions=updated.get("permissions", "Default"),
         created_at=updated.get("created_at")
     )
 

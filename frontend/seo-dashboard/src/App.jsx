@@ -20,8 +20,10 @@ import LandingPage from './components/pages/LandingPage';
 import LogsPage from './components/pages/LogsPage';
 import RecycleBinPage from './components/pages/RecycleBinPage';
 import UsersPage from './components/pages/UsersPage';
+import { Lock } from 'lucide-react';
 import { totalKeywordCount, topKeywords } from './data/mockData';
 import { fetchUsersApi } from './lib/projectsApi';
+import { canAccessRoute } from './lib/permissions';
 
 const mockProject = {
   domain: "owis.org",
@@ -90,6 +92,45 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
     );
   }
 
+  if (!canAccessRoute(user, path)) {
+    const isVendor = user?.role?.toUpperCase() === 'VENDOR';
+    return (
+      <div style={{ padding: 40, textAlign: 'center', background: '#f8fafc', minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{
+          maxWidth: 480,
+          background: '#ffffff',
+          padding: 36,
+          borderRadius: 16,
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+        }}>
+          <div style={{ width: 52, height: 52, borderRadius: 14, background: '#fef2f2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto', border: '1px solid #fca5a5' }}>
+            <Lock size={26} />
+          </div>
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>Section Access Restricted</h2>
+          <p style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.5, margin: '0 0 20px 0' }}>
+            Your account profile ({user?.role || 'User'}) does not have permission to view or change this section. Access is restricted by default unless explicitly granted by your system Administrator.
+          </p>
+          <button
+            onClick={() => onNavigate(isVendor ? 'search-visibility/off-page-scheduler' : 'home')}
+            style={{
+              padding: '9px 20px',
+              fontSize: 13,
+              fontWeight: 600,
+              color: '#ffffff',
+              background: 'var(--accent)',
+              border: 'none',
+              borderRadius: 8,
+              cursor: 'pointer'
+            }}
+          >
+            {isVendor ? 'Go to Monthly Operations' : 'Return to Home'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   switch (path) {
     case 'home': return <HomePage 
       onNavigate={onNavigate} 
@@ -110,16 +151,16 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
       user={user}
     />;
     case 'project-setup': return <ProjectSetupPage user={user} />;
-    case 'search-visibility/position-analysis': return <PositionAnalysisPage onNavigate={onNavigate} />;
-    case 'search-visibility/ai-analysis': return <AiAnalysisPage />;
-    case 'search-visibility/keywords': return <KeywordsPage />;
-    case 'search-visibility/top-pages': return <TopPagesPage />;
-    case 'search-visibility/competitors': return <CompetitorsPage />;
+    case 'search-visibility/position-analysis': return <PositionAnalysisPage onNavigate={onNavigate} user={user} />;
+    case 'search-visibility/ai-analysis': return <AiAnalysisPage user={user} />;
+    case 'search-visibility/keywords': return <KeywordsPage user={user} />;
+    case 'search-visibility/top-pages': return <TopPagesPage user={user} />;
+    case 'search-visibility/competitors': return <CompetitorsPage user={user} />;
     case 'ai-visibility':
     case 'ai-visibility/overview':
     case 'ai-visibility/brand-performance':
     case 'ai-visibility/competitor-insights': return <AIVisibilityPage />;
-    case 'search-visibility/off-page-scheduler': return <OffPageSchedulerPage />;
+    case 'search-visibility/off-page-scheduler': return <OffPageSchedulerPage user={user} />;
     case 'content-engine': return <ContentEnginePage />;
     default: {
       const info = PAGE_TITLES[path];
@@ -141,7 +182,14 @@ export default function App() {
   const [activePath, setActivePath] = useState(() => {
     try {
       const saved = sessionStorage.getItem('seo_dashboard_user');
-      return saved ? 'search-visibility/position-analysis' : 'landing';
+      if (saved) {
+        const uData = JSON.parse(saved);
+        if (uData?.role?.toUpperCase() === 'VENDOR') {
+          return 'search-visibility/off-page-scheduler';
+        }
+        return 'search-visibility/position-analysis';
+      }
+      return 'landing';
     } catch (e) {
       return 'landing';
     }
@@ -153,9 +201,12 @@ export default function App() {
 
   useEffect(() => {
     userRef.current = user;
+    if (user?.role?.toUpperCase() === 'VENDOR' && activePath !== 'search-visibility/off-page-scheduler' && activePath !== 'profile') {
+      setActivePath('search-visibility/off-page-scheduler');
+    }
   }, [user]);
 
-  // Periodically & on page navigation, verify logged-in user account status
+  // Periodically & on page navigation, verify logged-in user account status & sync live permissions
   useEffect(() => {
     if (!user || !user.email) return;
 
@@ -165,15 +216,40 @@ export default function App() {
         const users = await fetchUsersApi();
         if (!isMounted) return;
         const currentRecord = users.find(u => u.email?.toLowerCase() === user.email?.toLowerCase());
-        if (currentRecord && currentRecord.status === 'Disabled') {
-          handleLogout();
-          alert('Your account profile has been disabled by an administrator. You have been logged out.');
+        if (currentRecord) {
+          if (currentRecord.status === 'Disabled') {
+            handleLogout();
+            alert('Your account profile has been disabled by an administrator. You have been logged out.');
+            return;
+          }
+
+          const freshRole = currentRecord.role || user.role;
+          const freshCategory = currentRecord.category || user.category;
+          const freshSec = currentRecord.section_access || user.section_access || 'Default';
+          const freshPerm = currentRecord.permissions || user.permissions || 'Default';
+
+          if (
+            user.role !== freshRole ||
+            user.category !== freshCategory ||
+            user.section_access !== freshSec ||
+            user.permissions !== freshPerm
+          ) {
+            const updatedUser = {
+              ...user,
+              role: freshRole,
+              category: freshCategory,
+              section_access: freshSec,
+              permissions: freshPerm
+            };
+            setUser(updatedUser);
+            sessionStorage.setItem('seo_dashboard_user', JSON.stringify(updatedUser));
+          }
         }
       } catch (e) {}
     };
 
     checkUserStatus();
-    const timer = setInterval(checkUserStatus, 4000);
+    const timer = setInterval(checkUserStatus, 3000);
     return () => {
       isMounted = false;
       clearInterval(timer);
@@ -182,14 +258,19 @@ export default function App() {
 
   const handleNavigate = (path) => {
     const currentUser = userRef.current;
+    if (currentUser?.role?.toUpperCase() === 'VENDOR' && path !== 'profile' && path !== 'notifications' && path !== 'help') {
+      setActivePath('search-visibility/off-page-scheduler');
+      return;
+    }
+
     if (currentUser && (path === 'landing' || path === 'login' || path === 'signup' || path === 'admin-login')) {
-      setActivePath('search-visibility/position-analysis');
+      setActivePath(currentUser?.role?.toUpperCase() === 'VENDOR' ? 'search-visibility/off-page-scheduler' : 'search-visibility/position-analysis');
     } else if (currentUser && path === 'home') {
       if (justLoggedInRef.current) {
         justLoggedInRef.current = false;
-        setActivePath('search-visibility/position-analysis');
+        setActivePath(currentUser?.role?.toUpperCase() === 'VENDOR' ? 'search-visibility/off-page-scheduler' : 'search-visibility/position-analysis');
       } else {
-        setActivePath('home');
+        setActivePath(currentUser?.role?.toUpperCase() === 'VENDOR' ? 'search-visibility/off-page-scheduler' : 'home');
       }
     } else if (!currentUser && (path !== 'landing' && path !== 'login' && path !== 'signup' && path !== 'admin-login')) {
       setActivePath('landing');
@@ -204,7 +285,23 @@ export default function App() {
     try {
       sessionStorage.setItem('seo_dashboard_user', JSON.stringify(userData));
     } catch (e) {}
-    setActivePath('search-visibility/position-analysis');
+
+    const role = userData?.role?.toUpperCase();
+    const secAccess = userData?.section_access;
+
+    if (role === 'VENDOR') {
+      setActivePath('search-visibility/off-page-scheduler');
+    } else if (secAccess === 'Project Setup') {
+      setActivePath('project-setup');
+    } else if (secAccess === 'Search Visibility') {
+      setActivePath('search-visibility/position-analysis');
+    } else if (secAccess === 'AI Visibility') {
+      setActivePath('ai-visibility/overview');
+    } else if (secAccess === 'Content Engine') {
+      setActivePath('content-engine');
+    } else {
+      setActivePath('search-visibility/position-analysis');
+    }
   };
 
   const handleLogout = () => {

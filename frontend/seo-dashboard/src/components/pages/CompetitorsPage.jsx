@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Card, Badge } from '../ui/Card';
 import { Search, Plus, Pencil, Monitor, Globe, Smartphone } from 'lucide-react';
 import { resolveFullCompetitorUrl, formatCleanName } from '../../lib/projectsApi';
+import { canEdit } from '../../lib/permissions';
 
 const COMPETITORS = [
   {
@@ -150,7 +151,8 @@ const ChangeIndicator = ({ value, showSign = true }) => {
   );
 };
 
-export default function CompetitorsPage() {
+export default function CompetitorsPage({ user }) {
+  const userCanEdit = canEdit(user);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('AI Mode');
 
@@ -204,28 +206,30 @@ export default function CompetitorsPage() {
           </div>
 
           {/* Add button */}
-          <button style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 12.5,
-            fontWeight: 600,
-            color: '#fff',
-            background: 'var(--accent)',
-            border: 'none',
-            borderRadius: 'var(--radius-sm)',
-            padding: '8px 16px',
-            cursor: 'pointer',
-            fontFamily: 'var(--font-body)',
-            whiteSpace: 'nowrap',
-            transition: 'background 0.15s',
-          }}
-            onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-hover)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'var(--accent)'}
-          >
-            <Plus size={14} />
-            Choose Project
-          </button>
+          {userCanEdit && (
+            <button style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12.5,
+              fontWeight: 600,
+              color: '#fff',
+              background: 'var(--accent)',
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              padding: '8px 16px',
+              cursor: 'pointer',
+              fontFamily: 'var(--font-body)',
+              whiteSpace: 'nowrap',
+              transition: 'background 0.15s',
+            }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-hover)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'var(--accent)'}
+            >
+              <Plus size={14} />
+              Choose Project
+            </button>
+          )}
         </div>
 
         {/* Table */}

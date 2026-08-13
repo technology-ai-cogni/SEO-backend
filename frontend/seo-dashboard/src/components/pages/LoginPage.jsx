@@ -1,7 +1,28 @@
 import { useState } from 'react';
-import { Search, Eye, EyeOff, Lock, Mail, ShieldCheck, Briefcase } from 'lucide-react';
+import { Search, Eye, EyeOff, Lock, Mail, ShieldCheck, Briefcase, HelpCircle, Loader2 } from 'lucide-react';
 
-export default function LoginPage({ onNavigate, initialAdminMode = false, user = null, onLoginSuccess = null, onLogout = null }) {
+function isRoleAllowedForLoginCard(userRole, selectedCard) {
+  if (!userRole) return true;
+  const role = userRole.toUpperCase();
+  const card = selectedCard.toUpperCase();
+
+  if (card === 'ADMIN') {
+    return role === 'ADMIN';
+  }
+
+  if (card === 'VENDOR') {
+    return role === 'VENDOR';
+  }
+
+  if (card === 'USER') {
+    // User login card allows all Team Leads, Sr. Associates, Associates, and standard users!
+    return role !== 'ADMIN' && role !== 'VENDOR';
+  }
+
+  return true;
+}
+
+export default function LoginPage({ onNavigate, initialAdminMode = false, user = null, onLoginSuccess = null, onLogout = null, isEmbedded = false }) {
   const [selectedRole, setSelectedRole] = useState(initialAdminMode ? 'ADMIN' : 'USER');
   const isAdmin = selectedRole === 'ADMIN';
   const [email, setEmail] = useState('');
@@ -10,6 +31,11 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
   const [errorMsg, setErrorMsg] = useState('');
   const [submittedMessage, setSubmittedMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [focusedField, setFocusedField] = useState(null);
+
+  const activeColor = selectedRole === 'ADMIN' ? '#d97706' : selectedRole === 'VENDOR' ? '#dc2626' : 'var(--accent, #7c3aed)';
+  const activeGlow = selectedRole === 'ADMIN' ? 'rgba(217, 119, 6, 0.15)' : selectedRole === 'VENDOR' ? 'rgba(220, 38, 38, 0.15)' : 'rgba(124, 58, 237, 0.15)';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -29,8 +55,8 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
       let res = null;
 
       const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-      const apiBase = isLocalhost 
-        ? 'http://127.0.0.1:8000' 
+      const apiBase = isLocalhost
+        ? 'http://127.0.0.1:8000'
         : (import.meta.env.VITE_API_BASE || `${window.location.protocol}//${window.location.hostname}:8000`);
 
       try {
@@ -47,7 +73,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ email: email.trim(), password: password.trim() })
             });
-          } catch (e2) {}
+          } catch (e2) { }
         }
       }
 
@@ -61,14 +87,14 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
       if (res && res.ok) {
         const data = await res.json();
         let dbUser = data.user;
-        
+
         if (dbUser && dbUser.status === 'Disabled') {
           setErrorMsg('Access Denied: Your account profile has been disabled by an administrator.');
           setIsLoading(false);
           return;
         }
 
-        if (dbUser && dbUser.role && dbUser.role.toUpperCase() !== selectedRole.toUpperCase()) {
+        if (dbUser && dbUser.role && !isRoleAllowedForLoginCard(dbUser.role, selectedRole)) {
           setErrorMsg(`Access Denied: Only ${selectedRole} accounts are authorized to log in using this card.`);
           setIsLoading(false);
           return;
@@ -109,374 +135,442 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
     }
   };
 
-  return (
+  const loginCard = (
     <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: 'var(--bg)',
-      padding: 24
+      width: '100%',
+      maxWidth: 430,
+      background: '#ffffff',
+      border: '1px solid rgba(226, 232, 240, 0.9)',
+      borderTop: `3.5px solid ${activeColor}`,
+      borderRadius: 20,
+      boxShadow: '0 20px 40px -15px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.04)',
+      padding: '34px 30px',
+      transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+      position: 'relative'
     }}>
+      {/* Role Mode Segmented Control */}
       <div style={{
-        width: '100%',
-        maxWidth: 420,
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius)',
-        boxShadow: 'var(--shadow-md)',
-        padding: '36px 32px'
+        display: 'flex',
+        background: '#f1f5f9',
+        borderRadius: 12,
+        padding: 4,
+        marginBottom: 24,
+        gap: 4
       }}>
-        {/* Header Icon & Brand */}
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{
-            width: 44,
-            height: 44,
-            background: selectedRole === 'ADMIN' ? 'var(--amber-bg)' : selectedRole === 'VENDOR' ? 'var(--red-bg)' : 'var(--accent-light)',
-            border: `1px solid ${selectedRole === 'ADMIN' ? 'var(--amber)' : selectedRole === 'VENDOR' ? 'var(--red)' : 'var(--accent)'}`,
-            borderRadius: 12,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 12
-          }}>
-            {selectedRole === 'ADMIN' ? (
-              <ShieldCheck size={22} color="var(--amber)" />
-            ) : selectedRole === 'VENDOR' ? (
-              <Briefcase size={22} color="var(--red)" />
-            ) : (
-              <Search size={22} color="var(--accent)" />
-            )}
-          </div>
+        {[
+          { key: 'USER', label: 'User Login' },
+          { key: 'VENDOR', label: 'Vendor' },
+          { key: 'ADMIN', label: 'Admin' }
+        ].map(rItem => {
+          const isSel = selectedRole === rItem.key;
+          const rColor = rItem.key === 'ADMIN' ? '#d97706' : rItem.key === 'VENDOR' ? '#dc2626' : 'var(--accent)';
+          return (
+            <button
+              key={rItem.key}
+              type="button"
+              onClick={() => setSelectedRole(rItem.key)}
+              style={{
+                flex: 1,
+                padding: '7px 10px',
+                border: 'none',
+                borderRadius: 8,
+                background: isSel ? '#ffffff' : 'transparent',
+                color: isSel ? rColor : '#64748b',
+                fontWeight: isSel ? 700 : 500,
+                fontSize: 12.5,
+                fontFamily: 'var(--font-body)',
+                cursor: 'pointer',
+                boxShadow: isSel ? '0 2px 5px rgba(0,0,0,0.06)' : 'none',
+                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+              }}
+            >
+              {rItem.label}
+            </button>
+          );
+        })}
+      </div>
 
-          <h2 style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: 22,
-            fontWeight: 700,
-            color: 'var(--text-primary)',
-            lineHeight: 1.3,
-            marginBottom: 6
-          }}>
-            {selectedRole === 'ADMIN' ? 'Admin Login' : selectedRole === 'VENDOR' ? 'Vendor Login' : 'User Login'}
-          </h2>
-
-          <p style={{
-            fontSize: 13,
-            color: 'var(--text-muted)',
-            lineHeight: 1.4
-          }}>
-            {selectedRole === 'ADMIN'
-              ? 'Enter administrative credentials to manage settings'
-              : selectedRole === 'VENDOR'
-              ? 'Enter vendor credentials to manage assigned projects'
-              : 'Welcome back! Log in to access your SEO workspace'}
-          </p>
+      {/* Header Icon & Brand */}
+      <div style={{ textAlign: 'center', marginBottom: 24 }}>
+        <div style={{
+          width: 48,
+          height: 48,
+          background: selectedRole === 'ADMIN' ? '#fef3c7' : selectedRole === 'VENDOR' ? '#fef2f2' : '#f5f3ff',
+          border: `1.5px solid ${selectedRole === 'ADMIN' ? '#fde68a' : selectedRole === 'VENDOR' ? '#fca5a5' : '#ddd6fe'}`,
+          borderRadius: 14,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: 12,
+          transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)'
+        }}>
+          {selectedRole === 'ADMIN' ? (
+            <ShieldCheck size={24} color="#d97706" />
+          ) : selectedRole === 'VENDOR' ? (
+            <Briefcase size={24} color="#dc2626" />
+          ) : (
+            <Search size={24} color="var(--accent)" />
+          )}
         </div>
 
-        {/* Already logged in Banner */}
-        {user && (
-          <div style={{
-            background: 'var(--accent-light)',
-            border: '1px solid var(--accent)',
-            borderRadius: 'var(--radius-sm)',
-            padding: '14px 16px',
-            marginBottom: 20,
-            textAlign: 'center'
-          }}>
-            <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)', marginBottom: 8 }}>
-              Currently logged in as {user.name || user.email}
-            </p>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-              <button
-                type="button"
-                onClick={() => onNavigate('home')}
-                style={{
-                  background: 'var(--accent)',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 'var(--radius-sm)',
-                  padding: '6px 14px',
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
-              >
-                Go to Workspace
-              </button>
-              <button
-                type="button"
-                onClick={onLogout}
-                style={{
-                  background: 'var(--surface)',
-                  color: 'var(--text-secondary)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)',
-                  padding: '6px 14px',
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
-              >
-                Log Out
-              </button>
-            </div>
-          </div>
-        )}
+        <h2 style={{
+          fontFamily: 'var(--font-display)',
+          fontSize: 22,
+          fontWeight: 800,
+          color: '#0f172a',
+          lineHeight: 1.3,
+          marginBottom: 6,
+          letterSpacing: '-0.3px',
+          transition: 'color 0.2s ease'
+        }}>
+          {selectedRole === 'ADMIN' ? 'Admin Access' : selectedRole === 'VENDOR' ? 'Vendor Portal' : 'Welcome Back'}
+        </h2>
 
-        {/* Error Alert */}
-        {errorMsg && (
-          <div style={{
-            background: '#fef2f2',
-            border: '1px solid #f87171',
-            color: '#dc2626',
-            borderRadius: 'var(--radius-sm)',
-            padding: '10px 14px',
+        <p style={{
+          fontSize: 13,
+          color: '#64748b',
+          lineHeight: 1.45,
+          margin: 0,
+          transition: 'color 0.2s ease'
+        }}>
+          {selectedRole === 'ADMIN'
+            ? 'Enter administrative credentials to manage settings'
+            : selectedRole === 'VENDOR'
+              ? 'Enter vendor credentials to manage assigned projects'
+              : 'Log in to access your SEO workspace'}
+        </p>
+      </div>
+
+      {/* Already logged in Banner */}
+      {user && (
+        <div style={{
+          background: '#f5f3ff',
+          border: '1px solid #ddd6fe',
+          borderRadius: 10,
+          padding: '14px 16px',
+          marginBottom: 20,
+          textAlign: 'center'
+        }}>
+          <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)', marginBottom: 8 }}>
+            Currently logged in as {user.name || user.email}
+          </p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+            <button
+              type="button"
+              onClick={() => onNavigate('home')}
+              style={{
+                background: 'var(--accent)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                padding: '6px 14px',
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              Go to Workspace
+            </button>
+            <button
+              type="button"
+              onClick={onLogout}
+              style={{
+                background: '#ffffff',
+                color: '#475569',
+                border: '1px solid #cbd5e1',
+                borderRadius: 8,
+                padding: '6px 14px',
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              Log Out
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Error Alert */}
+      {errorMsg && (
+        <div style={{
+          background: '#fef2f2',
+          border: '1px solid #f87171',
+          color: '#dc2626',
+          borderRadius: 10,
+          padding: '10px 14px',
+          fontSize: 13,
+          fontWeight: 500,
+          marginBottom: 20,
+          textAlign: 'center',
+          transition: 'all 0.2s ease'
+        }}>
+          {errorMsg}
+        </div>
+      )}
+
+      {/* Feedback Alert */}
+      {submittedMessage && (
+        <div style={{
+          background: '#f0fdf4',
+          border: '1px solid #86efac',
+          color: '#166534',
+          borderRadius: 10,
+          padding: '10px 14px',
+          fontSize: 13,
+          fontWeight: 500,
+          marginBottom: 20,
+          textAlign: 'center',
+          transition: 'all 0.2s ease'
+        }}>
+          {submittedMessage}
+        </div>
+      )}
+
+      {/* Form */}
+      <form onSubmit={handleSubmit} autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        {/* Email input */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <label style={{
             fontSize: 13,
-            fontWeight: 500,
-            marginBottom: 20,
-            textAlign: 'center'
+            fontWeight: 700,
+            color: '#334155',
+            fontFamily: 'var(--font-body)'
           }}>
-            {errorMsg}
-          </div>
-        )}
-
-        {/* Feedback Alert */}
-        {submittedMessage && (
+            Email address
+          </label>
           <div style={{
-            background: 'var(--green-bg)',
-            border: '1px solid var(--green)',
-            color: 'var(--green)',
-            borderRadius: 'var(--radius-sm)',
-            padding: '10px 14px',
-            fontSize: 13,
-            fontWeight: 500,
-            marginBottom: 20,
-            textAlign: 'center'
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            background: '#f8fafc',
+            border: `1.5px solid ${focusedField === 'email' ? activeColor : '#e2e8f0'}`,
+            borderRadius: 10,
+            padding: '9px 13px',
+            boxShadow: focusedField === 'email' ? `0 0 0 3.5px ${activeGlow}` : 'none',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
           }}>
-            {submittedMessage}
+            <Mail size={16} color={focusedField === 'email' ? activeColor : "#94a3b8"} style={{ transition: 'color 0.2s' }} />
+            <input
+              type="email"
+              required
+              autoComplete="off"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onFocus={() => setFocusedField('email')}
+              onBlur={() => setFocusedField(null)}
+              placeholder="Email@company.com"
+              style={{
+                border: 'none',
+                background: 'transparent',
+                outline: 'none',
+                fontSize: 13.5,
+                color: '#0f172a',
+                fontFamily: 'var(--font-body)',
+                width: '100%'
+              }}
+            />
           </div>
-        )}
+        </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-          {/* Email input */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {/* Password input */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <label style={{
               fontSize: 13,
-              fontWeight: 600,
-              color: 'var(--text-primary)',
+              fontWeight: 700,
+              color: '#334155',
               fontFamily: 'var(--font-body)'
             }}>
-              Email address
+              Password
             </label>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              background: 'var(--surface-2)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '8px 12px',
-              transition: 'border-color 0.15s'
-            }}>
-              <Mail size={16} color="var(--text-muted)" />
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@company.com"
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  outline: 'none',
-                  fontSize: 14,
-                  color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-body)',
-                  width: '100%'
-                }}
-              />
-            </div>
-          </div>
-
-          {/* Password input */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: 'var(--text-primary)',
-                fontFamily: 'var(--font-body)'
-              }}>
-                Password
-              </label>
-              <a
-                href="#forgot-password"
-                onClick={(e) => {
-                  e.preventDefault();
-                  alert('Password reset link sent (UI Demo)');
-                }}
-                style={{
-                  fontSize: 12.5,
-                  fontWeight: 500,
-                  color: 'var(--accent)',
-                  textDecoration: 'none'
-                }}
-                onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
-                onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
-              >
-                Forgot your password?
-              </a>
-            </div>
-
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              background: 'var(--surface-2)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '8px 12px',
-              transition: 'border-color 0.15s'
-            }}>
-              <Lock size={16} color="var(--text-muted)" />
-              <input
-                type={showPassword ? 'text' : 'password'}
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  outline: 'none',
-                  fontSize: 14,
-                  color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-body)',
-                  width: '100%'
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: 0,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  color: 'var(--text-muted)'
-                }}
-              >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </div>
-
-          {/* Submit Button */}
-          <button
-            type="submit"
-            style={{
-              marginTop: 6,
-              background: selectedRole === 'ADMIN' ? 'var(--amber)' : selectedRole === 'VENDOR' ? 'var(--red)' : 'var(--accent)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: 'var(--radius-sm)',
-              padding: '11px 16px',
-              fontSize: 14,
-              fontWeight: 600,
-              fontFamily: 'var(--font-body)',
-              cursor: 'pointer',
-              transition: 'opacity 0.15s ease',
-              boxShadow: '0 2px 6px rgba(0,0,0,0.08)'
-            }}
-            onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
-            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-          >
-            {selectedRole === 'ADMIN' ? 'Log in as Admin' : selectedRole === 'VENDOR' ? 'Log in as Vendor' : 'Log in'}
-          </button>
-        </form>
-
-        {/* Footer links */}
-        <div style={{
-          marginTop: 24,
-          paddingTop: 20,
-          borderTop: '1px solid var(--border)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 12,
-          fontSize: 13,
-          color: 'var(--text-secondary)'
-        }}>
-          {/* Sign Up Link */}
-          <div>
-            Don't have an account?{' '}
-            <button
-              onClick={() => onNavigate('signup')}
+            <a
+              href="#forgot-password"
+              onClick={(e) => {
+                e.preventDefault();
+                setShowForgotModal(true);
+              }}
               style={{
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                color: 'var(--accent)',
+                fontSize: 12.5,
                 fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: 'var(--font-body)',
-                fontSize: 13
+                color: activeColor,
+                textDecoration: 'none',
+                transition: 'color 0.2s'
               }}
               onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
               onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
             >
-              Sign Up
+              Forgot your password?
+            </a>
+          </div>
+
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            background: '#f8fafc',
+            border: `1.5px solid ${focusedField === 'password' ? activeColor : '#e2e8f0'}`,
+            borderRadius: 10,
+            padding: '9px 13px',
+            boxShadow: focusedField === 'password' ? `0 0 0 3.5px ${activeGlow}` : 'none',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+          }}>
+            <Lock size={16} color={focusedField === 'password' ? activeColor : "#94a3b8"} style={{ transition: 'color 0.2s' }} />
+            <input
+              type={showPassword ? 'text' : 'password'}
+              required
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onFocus={() => setFocusedField('password')}
+              onBlur={() => setFocusedField(null)}
+              placeholder="••••••••"
+              style={{
+                border: 'none',
+                background: 'transparent',
+                outline: 'none',
+                fontSize: 13.5,
+                color: '#0f172a',
+                fontFamily: 'var(--font-body)',
+                width: '100%'
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                color: '#94a3b8',
+                transition: 'color 0.15s'
+              }}
+            >
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
+        </div>
 
-          {/* Role Mode Toggle Links */}
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-            {['USER', 'VENDOR', 'ADMIN'].map((r) => {
-              const isSelected = selectedRole === r;
-              const activeBg = r === 'ADMIN' ? 'var(--amber-bg)' : r === 'VENDOR' ? 'var(--red-bg)' : 'var(--accent-light)';
-              const activeColor = r === 'ADMIN' ? 'var(--amber)' : r === 'VENDOR' ? 'var(--red)' : 'var(--accent)';
-              const activeBorder = r === 'ADMIN' ? '1px solid var(--amber)' : r === 'VENDOR' ? '1px solid var(--red)' : '1px solid var(--accent)';
+        {/* Submit Button */}
+        <button
+          type="submit"
+          disabled={isLoading}
+          style={{
+            marginTop: 6,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            background: activeColor,
+            color: '#ffffff',
+            border: 'none',
+            borderRadius: 10,
+            padding: '12px 16px',
+            fontSize: 14,
+            fontWeight: 700,
+            fontFamily: 'var(--font-body)',
+            cursor: isLoading ? 'not-allowed' : 'pointer',
+            opacity: isLoading ? 0.8 : 1,
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            boxShadow: `0 4px 12px ${activeGlow}`
+          }}
+          onMouseEnter={e => { if (!isLoading) e.currentTarget.style.transform = 'translateY(-1px)'; }}
+          onMouseLeave={e => { if (!isLoading) e.currentTarget.style.transform = 'translateY(0)'; }}
+        >
+          {isLoading ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              <span>Authenticating...</span>
+            </>
+          ) : (
+            <span>{selectedRole === 'ADMIN' ? 'Log in as Admin' : selectedRole === 'VENDOR' ? 'Log in as Vendor' : 'Log in'}</span>
+          )}
+        </button>
+      </form>
+    </div>
+  );
 
-              return (
-                <button
-                  key={r}
-                  type="button"
-                  onClick={() => setSelectedRole(r)}
-                  style={{
-                    background: isSelected ? activeBg : 'none',
-                    border: isSelected ? activeBorder : '1px solid transparent',
-                    padding: '5px 10px',
-                    color: isSelected ? activeColor : 'var(--text-muted)',
-                    fontWeight: isSelected ? 600 : 500,
-                    cursor: 'pointer',
-                    fontFamily: 'var(--font-body)',
-                    fontSize: 12.5,
-                    borderRadius: 'var(--radius-sm)',
-                    transition: 'all 0.15s ease'
-                  }}
-                  onMouseEnter={e => {
-                    if (!isSelected) {
-                      e.currentTarget.style.color = 'var(--text-primary)';
-                      e.currentTarget.style.background = 'var(--surface-2)';
-                    }
-                  }}
-                  onMouseLeave={e => {
-                    if (!isSelected) {
-                      e.currentTarget.style.color = 'var(--text-muted)';
-                      e.currentTarget.style.background = 'none';
-                    }
-                  }}
-                >
-                  {r === 'USER' ? 'Login as User' : r === 'VENDOR' ? 'Login as Vendor' : 'Login as Admin'}
-                </button>
-              );
-            })}
+  return (
+    <>
+      {isEmbedded ? (
+        loginCard
+      ) : (
+        <div style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'var(--bg)',
+          padding: 24
+        }}>
+          {loginCard}
+        </div>
+      )}
+
+      {/* Forgot Password Modal Popup */}
+      {showForgotModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(15, 23, 42, 0.65)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: 20
+        }}>
+          <div style={{
+            width: '100%',
+            maxWidth: 400,
+            background: '#ffffff',
+            borderRadius: 16,
+            padding: '28px 24px',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+            textAlign: 'center'
+          }}>
+            <div style={{
+              width: 48,
+              height: 48,
+              borderRadius: 12,
+              background: '#fef3c7',
+              color: '#d97706',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 16px auto',
+              border: '1px solid #fde68a'
+            }}>
+              <HelpCircle size={24} />
+            </div>
+            <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px 0' }}>
+              Password Reset Assistance
+            </h3>
+            <p style={{ fontSize: 13.5, color: '#475569', lineHeight: 1.5, margin: '0 0 20px 0' }}>
+              Please contact your system Administrator to reset your password or update your account credentials.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowForgotModal(false)}
+              style={{
+                width: '100%',
+                padding: '10px 16px',
+                fontSize: 13.5,
+                fontWeight: 700,
+                color: '#ffffff',
+                background: 'var(--accent)',
+                border: 'none',
+                borderRadius: 8,
+                cursor: 'pointer'
+              }}
+            >
+              Got It
+            </button>
           </div>
         </div>
-      </div>
-    </div>
+      )}
+    </>
   );
 }

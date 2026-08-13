@@ -1,21 +1,201 @@
-import { useState, useEffect, useMemo } from 'react';
-import { 
-  Users, UserPlus, Shield, CheckCircle, AlertCircle, RefreshCw, X, Search, 
-  Trash2, Eye, EyeOff, UserCheck, UserX, Key, Mail, User
+import { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  Users, UserPlus, Shield, CheckCircle, AlertCircle, RefreshCw, X, Search,
+  Trash2, Eye, EyeOff, UserCheck, UserX, Key, Mail, User, Save, Layers, Lock, ChevronDown
 } from 'lucide-react';
-import { hasPermission, PERMISSIONS } from '../../lib/permissions';
+import {
+  hasPermission, PERMISSIONS, CATEGORIES, ROLES, ROLE_DISPLAY_NAMES, CATEGORY_ROLES_MAP
+} from '../../lib/permissions';
 import { fetchUsersApi, createUserApi, updateUserStatusApi, updateUserRoleApi, deleteUserApi } from '../../lib/projectsApi';
+
+const SECTION_ACCESS_OPTIONS = [
+  'Default',
+  'Performance',
+  'Operations',
+  'Project Setup',
+  'AI Visibility',
+  'Content Engine',
+  'Access All',
+];
+
+const PERMISSION_OPTIONS = [
+  'Default',
+  'View Only',
+  'View + Edit',
+  'View + Edit + Update',
+  'Full Control (View, Edit, Update, Delete, Analyze)',
+  'Recycle Bin Access',
+  'Logs Access',
+];
+
+function ModuleAccessMultiSelect({ value = 'Default', onChange }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  const MODULE_OPTIONS = [
+    'Default',
+    'Performance',
+    'Operations',
+    'Project Setup',
+    'AI Visibility',
+    'Content Engine',
+    'Access All'
+  ];
+
+  const currentList = useMemo(() => {
+    if (!value || value === 'Default') return ['Default'];
+    return value.split(',').map(s => s.trim()).filter(Boolean);
+  }, [value]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    if (open) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  const toggleOption = (opt) => {
+    if (opt === 'Default') {
+      onChange('Default');
+      return;
+    }
+
+    if (opt === 'Access All') {
+      onChange('Access All');
+      return;
+    }
+
+    let nextList = currentList.filter(item => item !== 'Default' && item !== 'Access All');
+
+    if (nextList.includes(opt)) {
+      nextList = nextList.filter(item => item !== opt);
+    } else {
+      nextList.push(opt);
+    }
+
+    if (nextList.length === 0) {
+      onChange('Default');
+    } else {
+      onChange(nextList.join(', '));
+    }
+  };
+
+  const displayLabel = useMemo(() => {
+    if (currentList.length === 0 || (currentList.length === 1 && currentList[0] === 'Default')) {
+      return 'Default';
+    }
+    if (currentList.length === 1) {
+      return currentList[0];
+    }
+    return `${currentList.length} Modules Selected`;
+  }, [currentList]);
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 6,
+          padding: '6px 10px',
+          fontSize: 12,
+          fontWeight: 600,
+          borderRadius: 6,
+          border: '1px solid #cbd5e1',
+          background: '#ffffff',
+          color: '#0f172a',
+          cursor: 'pointer',
+          outline: 'none',
+          minWidth: 150
+        }}
+      >
+        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 130 }} title={value}>
+          {displayLabel}
+        </span>
+        <ChevronDown size={13} color="#64748b" />
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute',
+          top: '110%',
+          left: 0,
+          zIndex: 999,
+          background: '#ffffff',
+          border: '1px solid #cbd5e1',
+          borderRadius: 8,
+          boxShadow: '0 10px 25px rgba(0,0,0,0.12)',
+          padding: '6px 0',
+          minWidth: 180
+        }}>
+          {MODULE_OPTIONS.map(opt => {
+            const isChecked = currentList.includes(opt);
+            return (
+              <div
+                key={opt}
+                onClick={() => toggleOption(opt)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '7px 12px',
+                  fontSize: 12,
+                  fontWeight: isChecked ? 700 : 500,
+                  color: isChecked ? '#7c3aed' : '#334155',
+                  background: isChecked ? '#f5f3ff' : 'transparent',
+                  cursor: 'pointer',
+                  userSelect: 'none'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={() => { }}
+                  style={{ cursor: 'pointer', accentColor: '#7c3aed' }}
+                />
+                <span>{opt}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function deriveCategoryFromRole(role, category) {
+  if (!role) return category || CATEGORIES.INTERNAL;
+  const r = role.toUpperCase();
+  if (r === 'ADMIN') return CATEGORIES.ADMIN;
+  if (r === 'VENDOR') return CATEGORIES.VENDOR;
+  if (r.startsWith('CLIENT')) return CATEGORIES.CLIENT_ACCESS;
+  if (r.startsWith('INTERNAL')) return CATEGORIES.INTERNAL;
+  return category || CATEGORIES.INTERNAL;
+}
 
 export default function UsersPage({ user, onNavigate }) {
   const [usersList, setUsersList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [savingUserId, setSavingUserId] = useState(null);
   const [alertMsg, setAlertMsg] = useState({ type: '', text: '' });
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
   const [roleFilter, setRoleFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+
+  // Inline User Edits Map { userId: { category, role, section_access, permissions, isDirty } }
+  const [editedUsers, setEditedUsers] = useState({});
 
   // Modal State
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -27,12 +207,16 @@ export default function UsersPage({ user, onNavigate }) {
     name: '',
     email: '',
     password: '',
-    role: 'USER',
+    category: CATEGORIES.INTERNAL,
+    role: ROLES.INTERNAL_ASSOCIATE,
+    section_access: 'Default',
+    permissions: 'Default',
     status: 'Active'
   });
   const [showPassword, setShowPassword] = useState(false);
 
-  const canManageUsers = hasPermission(user, PERMISSIONS.MANAGE_USERS) || user?.role?.toUpperCase() === 'ADMIN';
+  const isAdmin = user?.role?.toUpperCase() === 'ADMIN';
+  const canManageUsers = hasPermission(user, PERMISSIONS.MANAGE_USERS) || isAdmin;
 
   const loadUsers = async () => {
     if (!canManageUsers) return;
@@ -40,6 +224,21 @@ export default function UsersPage({ user, onNavigate }) {
     try {
       const data = await fetchUsersApi();
       setUsersList(data || []);
+
+      // Initialize inline edit map for each user
+      const map = {};
+      (data || []).forEach(u => {
+        const uRole = u.role?.toUpperCase() || ROLES.INTERNAL_ASSOCIATE;
+        const uCat = deriveCategoryFromRole(uRole, u.category);
+        map[u.id] = {
+          category: uCat,
+          role: uRole,
+          section_access: u.section_access || 'Default',
+          permissions: u.permissions || 'Default',
+          isDirty: false
+        };
+      });
+      setEditedUsers(map);
     } catch (err) {
       console.error('Failed to load users:', err);
       setAlertMsg({ type: 'error', text: err.message || 'Failed to load user accounts.' });
@@ -54,19 +253,225 @@ export default function UsersPage({ user, onNavigate }) {
     }
   }, [user]);
 
-  // Filtered Users
+  // Dynamic available roles for form category
+  const availableFormRoles = useMemo(() => {
+    return CATEGORY_ROLES_MAP[formData.category] || [ROLES.INTERNAL_ASSOCIATE];
+  }, [formData.category]);
+
+  const handleFormCategoryChange = (newCategory) => {
+    const rolesForCategory = CATEGORY_ROLES_MAP[newCategory] || [ROLES.INTERNAL_ASSOCIATE];
+    setFormData(prev => ({
+      ...prev,
+      category: newCategory,
+      role: rolesForCategory[0],
+      section_access: 'Default',
+      permissions: 'Default'
+    }));
+  };
+
+  // Inline Edit Handlers for Admin User Table (Auto-Saves Instantly into Database)
+  const handleInlineCategoryChange = async (userId, newCategory) => {
+    const rolesForCategory = CATEGORY_ROLES_MAP[newCategory] || [ROLES.INTERNAL_ASSOCIATE];
+    const targetUser = usersList.find(u => u.id === userId);
+    const current = editedUsers[userId] || (targetUser ? {
+      category: targetUser.category || 'Internal',
+      role: targetUser.role || 'INTERNAL_ASSOCIATE',
+      section_access: targetUser.section_access || 'Default',
+      permissions: targetUser.permissions || 'Default'
+    } : {});
+
+    const newRole = rolesForCategory[0];
+    const newSec = current.section_access || targetUser?.section_access || 'Default';
+    const newPerm = current.permissions || targetUser?.permissions || 'Default';
+
+    // 1. Instant local UI update
+    setEditedUsers(prev => ({
+      ...prev,
+      [userId]: {
+        ...prev[userId],
+        category: newCategory,
+        role: newRole,
+        section_access: newSec,
+        permissions: newPerm,
+        isDirty: false
+      }
+    }));
+
+    setUsersList(prev => prev.map(u => u.id === userId ? {
+      ...u,
+      category: newCategory,
+      role: newRole,
+      section_access: newSec,
+      permissions: newPerm
+    } : u));
+
+    // 2. Local storage cache sync
+    const cachedList = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    const cachedUser = cachedList.find(u => u.id === userId || u.email?.toLowerCase() === targetUser?.email?.toLowerCase());
+    if (cachedUser) {
+      cachedUser.category = newCategory;
+      cachedUser.role = newRole;
+      cachedUser.section_access = newSec;
+      cachedUser.permissions = newPerm;
+      localStorage.setItem('seo_users_list', JSON.stringify(cachedList));
+    }
+
+    // 3. Active session sync if target user is logged in
+    const activeSessionUser = JSON.parse(sessionStorage.getItem('seo_dashboard_user') || 'null');
+    if (activeSessionUser && targetUser && activeSessionUser.email?.toLowerCase() === targetUser.email?.toLowerCase()) {
+      sessionStorage.setItem('seo_dashboard_user', JSON.stringify({
+        ...activeSessionUser,
+        category: newCategory,
+        role: newRole,
+        section_access: newSec,
+        permissions: newPerm
+      }));
+    }
+
+    // 4. Persist to API / Database
+    setSavingUserId(userId);
+    try {
+      const dbResponse = await updateUserRoleApi(userId, newRole, newCategory, newSec, newPerm);
+      if (dbResponse) {
+        const dbSec = dbResponse.section_access || newSec;
+        const dbPerm = dbResponse.permissions || newPerm;
+        const dbRole = dbResponse.role || newRole;
+        const dbCat = dbResponse.category || newCategory;
+
+        setUsersList(prev => prev.map(u => u.id === userId ? {
+          ...u,
+          category: dbCat,
+          role: dbRole,
+          section_access: dbSec,
+          permissions: dbPerm
+        } : u));
+
+        setEditedUsers(prev => ({
+          ...prev,
+          [userId]: {
+            category: dbCat,
+            role: dbRole,
+            section_access: dbSec,
+            permissions: dbPerm,
+            isDirty: false
+          }
+        }));
+      }
+      setAlertMsg({ type: 'success', text: `Saved to database: Category = "${newCategory}".` });
+    } catch (err) {
+      setAlertMsg({ type: 'error', text: err.message || 'Failed to update category in DB.' });
+    } finally {
+      setSavingUserId(null);
+    }
+  };
+
+  const handleInlineFieldChange = (userId, field, value) => {
+    const targetUser = usersList.find(u => u.id === userId);
+    const current = editedUsers[userId] || (targetUser ? {
+      category: targetUser.category || 'Internal',
+      role: targetUser.role || 'INTERNAL_ASSOCIATE',
+      section_access: targetUser.section_access || 'Default',
+      permissions: targetUser.permissions || 'Default'
+    } : {});
+
+    const updated = {
+      category: current.category || 'Internal',
+      role: current.role || 'INTERNAL_ASSOCIATE',
+      section_access: current.section_access || 'Default',
+      permissions: current.permissions || 'Default',
+      [field]: value,
+      isDirty: true
+    };
+
+    setEditedUsers(prev => ({
+      ...prev,
+      [userId]: updated
+    }));
+  };
+
+  const handleSaveUserSettings = async (targetUser) => {
+    const edits = editedUsers[targetUser.id];
+    if (!edits || !edits.isDirty) return;
+
+    setSavingUserId(targetUser.id);
+    setAlertMsg({ type: '', text: '' });
+    try {
+      const updatedUser = await updateUserRoleApi(targetUser.id, edits.role, edits.category, edits.section_access, edits.permissions);
+
+      const newSec = updatedUser?.section_access || edits.section_access || 'Default';
+      const newPerm = updatedUser?.permissions || edits.permissions || 'Default';
+      const newCat = updatedUser?.category || edits.category || 'Internal';
+      const newRole = updatedUser?.role || edits.role || 'INTERNAL_ASSOCIATE';
+
+      // 1. Local storage cache sync
+      const cachedList = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+      const cachedUser = cachedList.find(u => u.id === targetUser.id || u.email?.toLowerCase() === targetUser?.email?.toLowerCase());
+      if (cachedUser) {
+        cachedUser.category = newCat;
+        cachedUser.role = newRole;
+        cachedUser.section_access = newSec;
+        cachedUser.permissions = newPerm;
+        localStorage.setItem('seo_users_list', JSON.stringify(cachedList));
+      }
+
+      // 2. Active session sync if target user is logged in
+      const activeSessionUser = JSON.parse(sessionStorage.getItem('seo_dashboard_user') || 'null');
+      if (activeSessionUser && targetUser && activeSessionUser.email?.toLowerCase() === targetUser.email?.toLowerCase()) {
+        sessionStorage.setItem('seo_dashboard_user', JSON.stringify({
+          ...activeSessionUser,
+          category: newCat,
+          role: newRole,
+          section_access: newSec,
+          permissions: newPerm
+        }));
+      }
+
+      // 3. Update main active users state
+      setUsersList(prev => prev.map(u => u.id === targetUser.id ? {
+        ...u,
+        category: newCat,
+        role: newRole,
+        section_access: newSec,
+        permissions: newPerm
+      } : u));
+
+      setEditedUsers(prev => ({
+        ...prev,
+        [targetUser.id]: {
+          category: newCat,
+          role: newRole,
+          section_access: newSec,
+          permissions: newPerm,
+          isDirty: false
+        }
+      }));
+
+      setAlertMsg({
+        type: 'success',
+        text: 'Saved'
+      });
+    } catch (err) {
+      setAlertMsg({ type: 'error', text: err.message || 'Failed to update user settings in database.' });
+    } finally {
+      setSavingUserId(null);
+    }
+  };
+
+  // Filtered Users list
   const filteredUsers = useMemo(() => {
     return usersList.filter(u => {
       const matchSearch = searchQuery === '' ||
         u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         u.email.toLowerCase().includes(searchQuery.toLowerCase());
-      
-      const matchRole = roleFilter === 'all' || u.role.toUpperCase() === roleFilter.toUpperCase();
+
+      const userCat = editedUsers[u.id]?.category || u.category || (u.role?.toUpperCase() === 'ADMIN' ? 'Admin' : 'Internal');
+      const matchCategory = categoryFilter === 'all' || userCat.toLowerCase() === categoryFilter.toLowerCase();
+      const matchRole = roleFilter === 'all' || u.role?.toUpperCase() === roleFilter.toUpperCase();
       const matchStatus = statusFilter === 'all' || (u.status || 'Active').toLowerCase() === statusFilter.toLowerCase();
 
-      return matchSearch && matchRole && matchStatus;
+      return matchSearch && matchCategory && matchRole && matchStatus;
     });
-  }, [usersList, searchQuery, roleFilter, statusFilter]);
+  }, [usersList, editedUsers, searchQuery, categoryFilter, roleFilter, statusFilter]);
 
   // Summary Metrics
   const totalUsers = usersList.length;
@@ -74,7 +479,6 @@ export default function UsersPage({ user, onNavigate }) {
   const disabledCount = usersList.filter(u => u.status === 'Disabled').length;
   const adminCount = usersList.filter(u => u.role?.toUpperCase() === 'ADMIN').length;
 
-  // Handlers
   const handleToggleStatus = async (targetUser) => {
     const nextStatus = (targetUser.status || 'Active') === 'Active' ? 'Disabled' : 'Active';
     setActionLoading(true);
@@ -88,20 +492,6 @@ export default function UsersPage({ user, onNavigate }) {
       await loadUsers();
     } catch (err) {
       setAlertMsg({ type: 'error', text: err.message || 'Failed to update user status.' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleChangeRole = async (userId, newRole) => {
-    setActionLoading(true);
-    setAlertMsg({ type: '', text: '' });
-    try {
-      await updateUserRoleApi(userId, newRole);
-      setAlertMsg({ type: 'success', text: `Updated user role to ${newRole}.` });
-      await loadUsers();
-    } catch (err) {
-      setAlertMsg({ type: 'error', text: err.message || 'Failed to update user role.' });
     } finally {
       setActionLoading(false);
     }
@@ -123,7 +513,16 @@ export default function UsersPage({ user, onNavigate }) {
         text: `Created user login credentials for "${formData.email}".`
       });
       setShowCreateModal(false);
-      setFormData({ name: '', email: '', password: '', role: 'USER', status: 'Active' });
+      setFormData({
+        name: '',
+        email: '',
+        password: '',
+        category: CATEGORIES.INTERNAL,
+        role: ROLES.INTERNAL_ASSOCIATE,
+        section_access: 'All Sections (Full Access)',
+        permissions: 'View Only',
+        status: 'Active'
+      });
       await loadUsers();
     } catch (err) {
       setAlertMsg({ type: 'error', text: err.message || 'Failed to create user credential.' });
@@ -154,48 +553,35 @@ export default function UsersPage({ user, onNavigate }) {
 
   if (!canManageUsers) {
     return (
-      <div style={{ padding: 32, maxWidth: 1200, margin: '0 auto' }}>
+      <div style={{ padding: 40, textAlign: 'center', background: '#f8fafc', minHeight: '100vh' }}>
         <div style={{
-          background: 'var(--surface)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)',
-          padding: 40,
-          textAlign: 'center',
-          boxShadow: 'var(--shadow-sm)'
+          maxWidth: 450,
+          margin: '40px auto',
+          background: '#ffffff',
+          padding: 32,
+          borderRadius: 16,
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)'
         }}>
-          <div style={{
-            width: 56,
-            height: 56,
-            borderRadius: 16,
-            background: '#fef2f2',
-            color: '#dc2626',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '0 auto 16px'
-          }}>
-            <Shield size={28} />
-          </div>
-          <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 8px' }}>
-            Access Restricted
-          </h2>
-          <p style={{ fontSize: 14, color: 'var(--text-muted)', maxWidth: 460, margin: '0 auto 20px', lineHeight: 1.5 }}>
-            You do not have permission to manage User Profiles. Only system administrators can create login credentials and configure user roles.
+          <Shield size={48} color="#dc2626" style={{ marginBottom: 16 }} />
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>Access Denied</h2>
+          <p style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.5, margin: '0 0 20px 0' }}>
+            User management table is reserved strictly for Administrator accounts.
           </p>
           <button
-            onClick={() => onNavigate?.('home')}
+            onClick={() => onNavigate && onNavigate('search-visibility/position-analysis')}
             style={{
-              padding: '8px 18px',
-              fontSize: 13.5,
+              padding: '9px 18px',
+              fontSize: 13,
               fontWeight: 600,
               color: '#ffffff',
-              background: 'var(--accent)',
+              background: '#7c3aed',
               border: 'none',
               borderRadius: 8,
               cursor: 'pointer'
             }}
           >
-            Return to Home
+            Return to Dashboard
           </button>
         </div>
       </div>
@@ -203,82 +589,45 @@ export default function UsersPage({ user, onNavigate }) {
   }
 
   return (
-    <div style={{ padding: 28, maxWidth: 1280, margin: '0 auto' }}>
-      {/* Notification Banner */}
-      {alertMsg.text && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '12px 16px',
-          borderRadius: 8,
-          marginBottom: 20,
-          background: alertMsg.type === 'success' ? 'var(--green-bg)' : '#fef2f2',
-          border: `1px solid ${alertMsg.type === 'success' ? 'var(--green)' : '#f87171'}`,
-          color: alertMsg.type === 'success' ? 'var(--green)' : '#dc2626',
-          fontSize: 13.5,
-          fontWeight: 500
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {alertMsg.type === 'success' ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
-            <span>{alertMsg.text}</span>
-          </div>
-          <button
-            onClick={() => setAlertMsg({ type: '', text: '' })}
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 700 }}
-          >
-            ✕
-          </button>
-        </div>
-      )}
+    <div style={{ padding: 24, background: '#f8fafc', minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-      {/* Main Container */}
+      {/* Container */}
       <div style={{
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius)',
-        boxShadow: 'var(--shadow-sm)',
-        padding: 28
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: 14,
+        padding: 24,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
       }}>
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <div style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              background: 'var(--accent-light)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--accent)'
-            }}>
-              <Users size={22} />
+
+        {/* Header Title & Actions */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 20 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                background: 'var(--accent-light)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--accent)'
+              }}>
+                <Shield size={20} />
+              </div>
+              <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                Admin User Access Control Table
+              </h1>
             </div>
-            <div>
-              <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
-                User Management
-                <span style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  background: 'var(--surface-2)',
-                  color: 'var(--text-secondary)',
-                  padding: '2px 9px',
-                  borderRadius: 12,
-                  border: '1px solid var(--border)'
-                }}>
-                  {totalUsers} {totalUsers === 1 ? 'User' : 'Users'}
-                </span>
-              </h2>
-              <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '3px 0 0 0' }}>
-                Create login credentials, configure access roles, and enable or disable user profiles.
-              </p>
-            </div>
+            <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0 46px' }}>
+              Manage username, email, category, role, section access (Project Setup access), and action permissions for platform users.
+            </p>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button
-              onClick={() => loadUsers()}
+              onClick={loadUsers}
               disabled={loading}
               style={{
                 display: 'flex',
@@ -287,11 +636,11 @@ export default function UsersPage({ user, onNavigate }) {
                 padding: '8px 14px',
                 fontSize: 13,
                 fontWeight: 600,
-                color: 'var(--text-secondary)',
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
+                color: '#475569',
+                background: '#f1f5f9',
+                border: '1px solid #cbd5e1',
                 borderRadius: 8,
-                cursor: loading ? 'not-allowed' : 'pointer'
+                cursor: 'pointer'
               }}
             >
               <RefreshCw size={14} className={loading ? 'spin' : ''} />
@@ -299,7 +648,19 @@ export default function UsersPage({ user, onNavigate }) {
             </button>
 
             <button
-              onClick={() => setShowCreateModal(true)}
+              onClick={() => {
+                setFormData({
+                  name: '',
+                  email: '',
+                  password: '',
+                  category: CATEGORIES.INTERNAL,
+                  role: ROLES.INTERNAL_ASSOCIATE,
+                  section_access: 'Default',
+                  permissions: 'Default',
+                  status: 'Active'
+                });
+                setShowCreateModal(true);
+              }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -321,6 +682,29 @@ export default function UsersPage({ user, onNavigate }) {
           </div>
         </div>
 
+        {/* System Alert Notification */}
+        {alertMsg.text && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '12px 16px',
+            borderRadius: 8,
+            marginBottom: 20,
+            fontSize: 13,
+            fontWeight: 600,
+            background: alertMsg.type === 'error' ? '#fef2f2' : '#f0fdf4',
+            color: alertMsg.type === 'error' ? '#dc2626' : '#166534',
+            border: `1px solid ${alertMsg.type === 'error' ? '#fca5a5' : '#bbf7d0'}`
+          }}>
+            {alertMsg.type === 'error' ? <AlertCircle size={16} /> : <CheckCircle size={16} />}
+            <span style={{ flex: 1 }}>{alertMsg.text}</span>
+            <button onClick={() => setAlertMsg({ type: '', text: '' })} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'inherit' }}>
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {/* Summary Metric Cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 24 }}>
           {[
@@ -341,7 +725,7 @@ export default function UsersPage({ user, onNavigate }) {
           ))}
         </div>
 
-        {/* Search & Filters */}
+        {/* Search & Category/Role/Status Filters */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -353,11 +737,11 @@ export default function UsersPage({ user, onNavigate }) {
           borderRadius: 10,
           border: '1px solid var(--border)'
         }}>
-          <div style={{ position: 'relative', flex: 1, minWidth: 220 }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--text-muted)' }} />
             <input
               type="text"
-              placeholder="Search user by name or email..."
+              placeholder="Search user by username or email..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               style={{
@@ -373,6 +757,53 @@ export default function UsersPage({ user, onNavigate }) {
             />
           </div>
 
+          {/* Category Filter */}
+          <select
+            value={categoryFilter}
+            onChange={e => setCategoryFilter(e.target.value)}
+            style={{
+              padding: '7px 12px',
+              fontSize: 12.5,
+              fontWeight: 600,
+              borderRadius: 6,
+              border: '1px solid var(--border)',
+              background: 'var(--surface)',
+              color: 'var(--text-secondary)'
+            }}
+          >
+            <option value="all">All Categories</option>
+            <option value="Internal">Internal</option>
+            <option value="Client Access">Client Access</option>
+            <option value="Vendor">Vendor</option>
+            <option value="Admin">Admin</option>
+          </select>
+
+          {/* Role Filter */}
+          <select
+            value={roleFilter}
+            onChange={e => setRoleFilter(e.target.value)}
+            style={{
+              padding: '7px 12px',
+              fontSize: 12.5,
+              fontWeight: 600,
+              borderRadius: 6,
+              border: '1px solid var(--border)',
+              background: 'var(--surface)',
+              color: 'var(--text-secondary)'
+            }}
+          >
+            <option value="all">All Roles</option>
+            <option value="ADMIN">Admin</option>
+            <option value="INTERNAL_TEAM_LEAD">Internal Team Lead</option>
+            <option value="INTERNAL_SR_ASSOCIATE">Internal Sr. Associate</option>
+            <option value="INTERNAL_ASSOCIATE">Internal Associate</option>
+            <option value="CLIENT_TEAM_LEAD">Client Team Lead</option>
+            <option value="CLIENT_SR_ASSOCIATE">Client Sr. Associate</option>
+            <option value="CLIENT_ASSOCIATE">Client Associate</option>
+            <option value="VENDOR">Vendor</option>
+          </select>
+
+          {/* Status Filter */}
           <select
             value={statusFilter}
             onChange={e => setStatusFilter(e.target.value)}
@@ -392,7 +823,7 @@ export default function UsersPage({ user, onNavigate }) {
           </select>
         </div>
 
-        {/* User Data Table */}
+        {/* ─── ADMIN USER ACCESS CONTROL TABLE ───────────────────────────────── */}
         {loading ? (
           <div style={{ padding: '36px 0', textAlign: 'center', fontSize: 13.5, color: 'var(--text-muted)' }}>
             Loading user profiles...
@@ -406,11 +837,12 @@ export default function UsersPage({ user, onNavigate }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>User Profile</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Username</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Email Address</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Category</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Role</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Status</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Created Date</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Module Access</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Permissions</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700, textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
@@ -419,23 +851,39 @@ export default function UsersPage({ user, onNavigate }) {
                   const isActive = (u.status || 'Active') === 'Active';
                   const initials = u.name ? u.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'U';
 
+                  const uRole = u.role || 'INTERNAL_ASSOCIATE';
+                  const uCat = deriveCategoryFromRole(uRole, u.category);
+
+                  const currentEdit = editedUsers[u.id] || {
+                    category: uCat,
+                    role: uRole,
+                    section_access: u.section_access || 'Default',
+                    permissions: u.permissions || 'Default',
+                    isDirty: false
+                  };
+
+                  const effectiveCategory = deriveCategoryFromRole(currentEdit.role, currentEdit.category);
+                  const availableRoles = CATEGORY_ROLES_MAP[effectiveCategory] || [ROLES.INTERNAL_ASSOCIATE];
+                  const isSaving = savingUserId === u.id;
+
                   return (
-                    <tr key={u.id} style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
-                      {/* Name & Avatar */}
+                    <tr key={u.id} style={{ borderBottom: '1px solid var(--border)', background: currentEdit.isDirty ? '#fffbeb' : 'var(--surface)' }}>
+
+                      {/* USERNAME */}
                       <td style={{ padding: '12px 16px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <div style={{
-                            width: 36,
-                            height: 36,
+                            width: 34,
+                            height: 34,
                             borderRadius: '50%',
-                            background: u.role?.toUpperCase() === 'ADMIN' ? '#f5f3ff' : '#f0f9ff',
-                            color: u.role?.toUpperCase() === 'ADMIN' ? '#7c3aed' : '#0284c7',
-                            border: `1px solid ${u.role?.toUpperCase() === 'ADMIN' ? '#ddd6fe' : '#bae6fd'}`,
+                            background: currentEdit.role === 'ADMIN' ? '#f5f3ff' : '#f0f9ff',
+                            color: currentEdit.role === 'ADMIN' ? '#7c3aed' : '#0284c7',
+                            border: `1px solid ${currentEdit.role === 'ADMIN' ? '#ddd6fe' : '#bae6fd'}`,
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             fontWeight: 800,
-                            fontSize: 13,
+                            fontSize: 12.5,
                             position: 'relative'
                           }}>
                             {initials}
@@ -443,8 +891,8 @@ export default function UsersPage({ user, onNavigate }) {
                               position: 'absolute',
                               bottom: 0,
                               right: 0,
-                              width: 10,
-                              height: 10,
+                              width: 9,
+                              height: 9,
                               borderRadius: '50%',
                               background: isActive ? '#16a34a' : '#dc2626',
                               border: '2px solid #ffffff'
@@ -459,49 +907,122 @@ export default function UsersPage({ user, onNavigate }) {
                         </div>
                       </td>
 
-                      {/* Email */}
-                      <td style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontWeight: 500 }}>
+                      {/* EMAIL ADDRESS */}
+                      <td style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontWeight: 500, fontSize: 12.5 }}>
                         {u.email}
                       </td>
 
-                      {/* Role Badge */}
+                      {/* CATEGORY DROPDOWN */}
                       <td style={{ padding: '12px 16px' }}>
-                        <span style={{
-                          fontSize: 11.5,
-                          fontWeight: 700,
-                          padding: '3px 10px',
-                          borderRadius: 6,
-                          background: u.role?.toUpperCase() === 'ADMIN' ? '#fef3c7' : '#f1f5f9',
-                          color: u.role?.toUpperCase() === 'ADMIN' ? '#b45309' : '#334155',
-                          border: `1px solid ${u.role?.toUpperCase() === 'ADMIN' ? '#fde68a' : '#cbd5e1'}`
-                        }}>
-                          {u.role?.toUpperCase() || 'USER'}
-                        </span>
+                        <select
+                          value={currentEdit.category}
+                          onChange={e => handleInlineCategoryChange(u.id, e.target.value)}
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            borderRadius: 6,
+                            border: '1px solid #cbd5e1',
+                            background: currentEdit.category === 'Admin' ? '#fef3c7' : currentEdit.category === 'Client Access' ? '#ccfbf1' : currentEdit.category === 'Vendor' ? '#ffedd5' : '#e0e7ff',
+                            color: currentEdit.category === 'Admin' ? '#b45309' : currentEdit.category === 'Client Access' ? '#0f766e' : currentEdit.category === 'Vendor' ? '#c2410c' : '#3730a3',
+                            cursor: 'pointer',
+                            outline: 'none'
+                          }}
+                        >
+                          <option value={CATEGORIES.INTERNAL}>Internal</option>
+                          <option value={CATEGORIES.CLIENT_ACCESS}>Client Access</option>
+                          <option value={CATEGORIES.VENDOR}>Vendor</option>
+                          <option value={CATEGORIES.ADMIN}>Admin</option>
+                        </select>
                       </td>
 
-                      {/* Status Pill */}
+                      {/* ROLE DROPDOWN */}
                       <td style={{ padding: '12px 16px' }}>
-                        <span style={{
-                          fontSize: 11.5,
-                          fontWeight: 700,
-                          padding: '3px 10px',
-                          borderRadius: 12,
-                          background: isActive ? '#dcfce7' : '#fee2e2',
-                          color: isActive ? '#15803d' : '#b91c1c',
-                          border: `1px solid ${isActive ? '#86efac' : '#fca5a5'}`
-                        }}>
-                          {isActive ? 'Active' : 'Disabled'}
-                        </span>
+                        <select
+                          value={currentEdit.role}
+                          onChange={e => handleInlineFieldChange(u.id, 'role', e.target.value)}
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            borderRadius: 6,
+                            border: '1px solid #cbd5e1',
+                            background: '#ffffff',
+                            color: '#334155',
+                            cursor: 'pointer',
+                            outline: 'none'
+                          }}
+                        >
+                          {availableRoles.map(rKey => (
+                            <option key={rKey} value={rKey}>
+                              {ROLE_DISPLAY_NAMES[rKey] || rKey}
+                            </option>
+                          ))}
+                        </select>
                       </td>
 
-                      {/* Created Date */}
-                      <td style={{ padding: '12px 16px', color: 'var(--text-muted)', fontSize: 12.5 }}>
-                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : 'Recently'}
+                      {/* MODULE ACCESS MULTI-SELECT */}
+                      <td style={{ padding: '12px 16px' }}>
+                        <ModuleAccessMultiSelect
+                          value={currentEdit.section_access}
+                          onChange={val => handleInlineFieldChange(u.id, 'section_access', val)}
+                        />
                       </td>
 
-                      {/* Actions: Enable/Disable Toggle + Delete */}
+                      {/* PERMISSIONS DROPDOWN */}
+                      <td style={{ padding: '12px 16px' }}>
+                        <select
+                          value={currentEdit.permissions}
+                          onChange={e => handleInlineFieldChange(u.id, 'permissions', e.target.value)}
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            borderRadius: 6,
+                            border: '1px solid #cbd5e1',
+                            background: '#ffffff',
+                            color: '#0f172a',
+                            cursor: 'pointer',
+                            outline: 'none'
+                          }}
+                        >
+                          {PERMISSION_OPTIONS.map(opt => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                      </td>
+
+                      {/* ACTIONS */}
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+
+                          {/* SAVE BUTTON */}
+                          <button
+                            onClick={() => handleSaveUserSettings(u)}
+                            disabled={isSaving}
+                            title="Save User Settings & Permissions to Database"
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              padding: '5px 10px',
+                              fontSize: 11.5,
+                              fontWeight: 700,
+                              borderRadius: 6,
+                              cursor: isSaving ? 'not-allowed' : 'pointer',
+                              background: currentEdit.isDirty ? 'var(--accent, #7c3aed)' : '#64748b',
+                              color: '#ffffff',
+                              border: 'none',
+                              opacity: isSaving ? 0.7 : 1,
+                              boxShadow: currentEdit.isDirty ? '0 2px 5px rgba(124, 58, 237, 0.3)' : 'none',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            <Save size={13} />
+                            <span>{isSaving ? 'Saving...' : 'Save'}</span>
+                          </button>
+
+                          {/* TOGGLE STATUS */}
                           <button
                             onClick={() => handleToggleStatus(u)}
                             disabled={actionLoading}
@@ -509,9 +1030,9 @@ export default function UsersPage({ user, onNavigate }) {
                             style={{
                               display: 'flex',
                               alignItems: 'center',
-                              gap: 5,
-                              padding: '5px 11px',
-                              fontSize: 12,
+                              gap: 4,
+                              padding: '5px 9px',
+                              fontSize: 11.5,
                               fontWeight: 600,
                               borderRadius: 6,
                               cursor: actionLoading ? 'not-allowed' : 'pointer',
@@ -521,9 +1042,10 @@ export default function UsersPage({ user, onNavigate }) {
                             }}
                           >
                             {isActive ? <UserX size={13} /> : <UserCheck size={13} />}
-                            <span>{isActive ? 'Disable Profile' : 'Enable Profile'}</span>
+                            <span>{isActive ? 'Disable' : 'Enable'}</span>
                           </button>
 
+                          {/* DELETE PROFILE */}
                           <button
                             onClick={() => { setSelectedUser(u); setShowDeleteModal(true); }}
                             disabled={actionLoading}
@@ -539,10 +1061,11 @@ export default function UsersPage({ user, onNavigate }) {
                             onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
                             onMouseLeave={e => e.currentTarget.style.color = '#94a3b8'}
                           >
-                            <Trash2 size={15} />
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </td>
+
                     </tr>
                   );
                 })}
@@ -568,7 +1091,7 @@ export default function UsersPage({ user, onNavigate }) {
           <div style={{
             background: '#ffffff',
             borderRadius: 16,
-            maxWidth: 480,
+            maxWidth: 500,
             width: '100%',
             padding: 28,
             boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)',
@@ -610,22 +1133,23 @@ export default function UsersPage({ user, onNavigate }) {
                   Create User Login Credential
                 </h3>
                 <p style={{ fontSize: 12.5, color: '#64748b', margin: '2px 0 0 0' }}>
-                  Provide credentials and role permissions for the new user.
+                  Set username, email, category, role, section access, and permissions.
                 </p>
               </div>
             </div>
 
-            <form onSubmit={handleCreateUserSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <form onSubmit={handleCreateUserSubmit} autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {/* Full Name */}
               <div>
                 <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
-                  Full Name <span style={{ color: '#dc2626' }}>*</span>
+                  Username / Full Name <span style={{ color: '#dc2626' }}>*</span>
                 </label>
                 <div style={{ position: 'relative' }}>
                   <User size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
                   <input
                     type="text"
-                    placeholder="e.g. Sarah Connor"
+                    autoComplete="off"
+                    placeholder="e.g. Name"
                     value={formData.name}
                     onChange={e => setFormData({ ...formData, name: e.target.value })}
                     required
@@ -650,7 +1174,8 @@ export default function UsersPage({ user, onNavigate }) {
                   <Mail size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
                   <input
                     type="email"
-                    placeholder="sarah@company.com"
+                    autoComplete="off"
+                    placeholder="Email@company.com"
                     value={formData.email}
                     onChange={e => setFormData({ ...formData, email: e.target.value })}
                     required
@@ -675,6 +1200,7 @@ export default function UsersPage({ user, onNavigate }) {
                   <Key size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
                   <input
                     type={showPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
                     placeholder="Minimum 6 characters"
                     value={formData.password}
                     onChange={e => setFormData({ ...formData, password: e.target.value })}
@@ -707,11 +1233,35 @@ export default function UsersPage({ user, onNavigate }) {
                 </div>
               </div>
 
-              {/* Role & Status Controls */}
+              {/* Category & Role Controls */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
-                    User Role
+                    User Category
+                  </label>
+                  <select
+                    value={formData.category}
+                    onChange={e => handleFormCategoryChange(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      borderRadius: 8,
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff'
+                    }}
+                  >
+                    <option value={CATEGORIES.INTERNAL}>Internal</option>
+                    <option value={CATEGORIES.CLIENT_ACCESS}>Client Access</option>
+                    <option value={CATEGORIES.VENDOR}>Vendor</option>
+                    <option value={CATEGORIES.ADMIN}>Admin</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                    Assigned Role
                   </label>
                   <select
                     value={formData.role}
@@ -726,19 +1276,34 @@ export default function UsersPage({ user, onNavigate }) {
                       background: '#ffffff'
                     }}
                   >
-                    <option value="USER">USER (Standard Access)</option>
-                    <option value="ADMIN">ADMIN (Full Control)</option>
-                    <option value="VENDOR">VENDOR (Assigned Projects)</option>
+                    {availableFormRoles.map(rKey => (
+                      <option key={rKey} value={rKey}>
+                        {ROLE_DISPLAY_NAMES[rKey] || rKey}
+                      </option>
+                    ))}
                   </select>
+                </div>
+              </div>
+
+              {/* Section Access & Permissions */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                    Module Access (Multiple)
+                  </label>
+                  <ModuleAccessMultiSelect
+                    value={formData.section_access}
+                    onChange={val => setFormData({ ...formData, section_access: val })}
+                  />
                 </div>
 
                 <div>
                   <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
-                    Account Status
+                    Action Permissions
                   </label>
                   <select
-                    value={formData.status}
-                    onChange={e => setFormData({ ...formData, status: e.target.value })}
+                    value={formData.permissions}
+                    onChange={e => setFormData({ ...formData, permissions: e.target.value })}
                     style={{
                       width: '100%',
                       padding: '8px 12px',
@@ -749,8 +1314,9 @@ export default function UsersPage({ user, onNavigate }) {
                       background: '#ffffff'
                     }}
                   >
-                    <option value="Active">Active (Enabled)</option>
-                    <option value="Disabled">Disabled (Blocked)</option>
+                    {PERMISSION_OPTIONS.map(opt => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -760,8 +1326,8 @@ export default function UsersPage({ user, onNavigate }) {
                   type="button"
                   onClick={() => setShowCreateModal(false)}
                   style={{
-                    padding: '9px 18px',
-                    fontSize: 13.5,
+                    padding: '8px 16px',
+                    fontSize: 13,
                     fontWeight: 600,
                     color: '#475569',
                     background: '#f1f5f9',
@@ -772,27 +1338,21 @@ export default function UsersPage({ user, onNavigate }) {
                 >
                   Cancel
                 </button>
-
                 <button
                   type="submit"
                   disabled={actionLoading}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '9px 18px',
-                    fontSize: 13.5,
+                    padding: '8px 18px',
+                    fontSize: 13,
                     fontWeight: 600,
                     color: '#ffffff',
                     background: 'var(--accent)',
                     border: 'none',
                     borderRadius: 8,
-                    cursor: actionLoading ? 'not-allowed' : 'pointer',
-                    opacity: actionLoading ? 0.7 : 1
+                    cursor: actionLoading ? 'not-allowed' : 'pointer'
                   }}
                 >
-                  <UserPlus size={15} />
-                  <span>{actionLoading ? 'Creating...' : 'Create Credential'}</span>
+                  {actionLoading ? 'Creating Credential...' : 'Create Credential'}
                 </button>
               </div>
             </form>
@@ -800,7 +1360,7 @@ export default function UsersPage({ user, onNavigate }) {
         </div>
       )}
 
-      {/* ─── CONFIRM DELETE USER MODAL ─────────────────────────────────────── */}
+      {/* Delete User Modal */}
       {showDeleteModal && selectedUser && (
         <div style={{
           position: 'fixed',
@@ -816,47 +1376,41 @@ export default function UsersPage({ user, onNavigate }) {
           <div style={{
             background: '#ffffff',
             borderRadius: 16,
-            maxWidth: 440,
+            maxWidth: 420,
             width: '100%',
-            padding: 28,
+            padding: 24,
             boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)',
-            position: 'relative',
             border: '1px solid var(--border)'
           }}>
-            <button
-              type="button"
-              onClick={() => { setShowDeleteModal(false); setSelectedUser(null); }}
-              style={{
-                position: 'absolute',
-                top: 18,
-                right: 18,
-                background: 'transparent',
-                border: 'none',
-                color: '#94a3b8',
-                cursor: 'pointer',
-                padding: 4
-              }}
-            >
-              <X size={18} />
-            </button>
+            <div style={{ textAlign: 'center', marginBottom: 16 }}>
+              <div style={{
+                width: 48,
+                height: 48,
+                borderRadius: '50%',
+                background: '#fef2f2',
+                color: '#dc2626',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 12px auto'
+              }}>
+                <Trash2 size={24} />
+              </div>
+              <h3 style={{ fontSize: 17, fontWeight: 700, color: '#0f172a', margin: '0 0 6px 0' }}>
+                Delete User Profile?
+              </h3>
+              <p style={{ fontSize: 13, color: '#64748b', margin: 0, lineHeight: 1.5 }}>
+                Are you sure you want to permanently delete credentials for <strong>{selectedUser.name}</strong> ({selectedUser.email})? This action cannot be undone.
+              </p>
+            </div>
 
-            <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px 0' }}>
-              Delete User Account?
-            </h3>
-            <p style={{ fontSize: 13.5, color: '#475569', lineHeight: '1.5', margin: '0 0 24px 0' }}>
-              Are you sure you want to permanently delete user profile <strong style={{ color: '#0f172a' }}>"{selectedUser.email}"</strong>?
-              <br /><br />
-              This will purge login access for this account. <span style={{ color: '#dc2626', fontWeight: 600 }}>This action cannot be undone.</span>
-            </p>
-
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 20 }}>
               <button
-                type="button"
-                onClick={() => { setShowDeleteModal(false); setSelectedUser(null); }}
-                disabled={actionLoading}
+                onClick={() => setShowDeleteModal(false)}
                 style={{
-                  padding: '9px 18px',
-                  fontSize: 13.5,
+                  flex: 1,
+                  padding: '9px 16px',
+                  fontSize: 13,
                   fontWeight: 600,
                   color: '#475569',
                   background: '#f1f5f9',
@@ -867,33 +1421,28 @@ export default function UsersPage({ user, onNavigate }) {
               >
                 Cancel
               </button>
-
               <button
-                type="button"
                 onClick={confirmDeleteUser}
                 disabled={actionLoading}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '9px 18px',
-                  fontSize: 13.5,
+                  flex: 1,
+                  padding: '9px 16px',
+                  fontSize: 13,
                   fontWeight: 600,
                   color: '#ffffff',
                   background: '#dc2626',
                   border: 'none',
                   borderRadius: 8,
-                  cursor: actionLoading ? 'not-allowed' : 'pointer',
-                  opacity: actionLoading ? 0.7 : 1
+                  cursor: actionLoading ? 'not-allowed' : 'pointer'
                 }}
               >
-                <Trash2 size={15} />
-                <span>{actionLoading ? 'Deleting...' : 'Yes, Delete User'}</span>
+                {actionLoading ? 'Deleting...' : 'Delete Profile'}
               </button>
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 }

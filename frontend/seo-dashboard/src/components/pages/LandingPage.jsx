@@ -1,9 +1,8 @@
-import { Search, Asterisk } from 'lucide-react';
+import { Search } from 'lucide-react';
 import LoginPage from './LoginPage';
-import SignUpPage from './SignUpPage';
 
 export default function LandingPage({ activeTab, onNavigate, user, onLoginSuccess, onLogout }) {
-  const currentTab = activeTab === 'signup' ? 'signup' : (activeTab === 'admin-login' ? 'admin-login' : 'login');
+  const currentTab = activeTab === 'admin-login' ? 'admin-login' : 'login';
 
   return (
     <div className="landing-container" style={{
@@ -28,26 +27,18 @@ export default function LandingPage({ activeTab, onNavigate, user, onLoginSucces
         }
         .right-panel {
           width: 42%;
-          background: #ffffff;
+          background: radial-gradient(circle at 85% 15%, rgba(124, 58, 237, 0.05) 0%, transparent 65%), #f8fafc;
           display: flex;
           flex-direction: column;
-          justify-content: flex-start;
+          justify-content: center;
           align-items: center;
-          padding: 40px 40px 30px;
+          padding: 40px;
           overflow-y: auto;
           position: relative;
         }
         .landing-auth-wrapper {
           width: 100%;
-          max-width: 420px;
-        }
-        /* Custom overrides to center wrappers */
-        .landing-auth-wrapper {
-          width: 100%;
-          max-width: 420px;
-        }
-        .landing-auth-wrapper-signup {
-          max-width: 440px;
+          max-width: 430px;
         }
         @media (max-width: 968px) {
           .landing-container {
@@ -115,94 +106,20 @@ export default function LandingPage({ activeTab, onNavigate, user, onLoginSucces
             Monitor keyword rankings, discover AI Overview visibility, analyze competitors, manage keyword clusters, and gain actionable SEO insights from one intelligent dashboard.
           </p>
         </div>
-
-
       </div>
 
       {/* Right Column (Authentication Column) */}
       <div className="right-panel">
-        {/* Welcome Back / Create Account Header */}
-        <div style={{
-          width: '100%',
-          maxWidth: currentTab === 'signup' ? 440 : 420,
-          marginBottom: 14
-        }}>
-          <h2 style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: '28px',
-            fontWeight: 700,
-            color: 'var(--text-primary)',
-            marginBottom: 0
-          }}>
-            {currentTab === 'signup' ? 'Create Account' : 'Welcome Back!'}
-          </h2>
-        </div>
-
-        {/* Tabs */}
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          width: '100%',
-          maxWidth: currentTab === 'signup' ? 440 : 420,
-          borderBottom: '1px solid var(--border)',
-          marginBottom: 16,
-          gap: 40
-        }}>
-          <button
-            onClick={() => onNavigate('login')}
-            style={{
-              padding: '8px 16px',
-              border: 'none',
-              background: 'transparent',
-              color: currentTab === 'login' || currentTab === 'admin-login' ? 'var(--accent)' : 'var(--text-muted)',
-              fontWeight: 700,
-              fontSize: 14.5,
-              cursor: 'pointer',
-              fontFamily: 'var(--font-body)',
-              borderBottom: currentTab === 'login' || currentTab === 'admin-login' ? '2px solid var(--accent)' : 'none',
-              marginBottom: -1,
-              transition: 'all 0.15s ease'
-            }}
-          >
-            Login
-          </button>
-          <button
-            onClick={() => onNavigate('signup')}
-            style={{
-              padding: '8px 16px',
-              border: 'none',
-              background: 'transparent',
-              color: currentTab === 'signup' ? 'var(--accent)' : 'var(--text-muted)',
-              fontWeight: 700,
-              fontSize: 14.5,
-              cursor: 'pointer',
-              fontFamily: 'var(--font-body)',
-              borderBottom: currentTab === 'signup' ? '2px solid var(--accent)' : 'none',
-              marginBottom: -1,
-              transition: 'all 0.15s ease'
-            }}
-          >
-            Sign Up
-          </button>
-        </div>
-
         {/* Form Wrap */}
-        <div className={`landing-auth-wrapper ${currentTab === 'signup' ? 'landing-auth-wrapper-signup' : ''}`}>
-          {currentTab === 'signup' ? (
-            <SignUpPage
-              onNavigate={onNavigate}
-              user={user}
-              onLoginSuccess={onLoginSuccess}
-            />
-          ) : (
-            <LoginPage
-              onNavigate={onNavigate}
-              initialAdminMode={currentTab === 'admin-login'}
-              user={user}
-              onLoginSuccess={onLoginSuccess}
-              onLogout={onLogout}
-            />
-          )}
+        <div className="landing-auth-wrapper">
+          <LoginPage
+            onNavigate={onNavigate}
+            initialAdminMode={currentTab === 'admin-login'}
+            user={user}
+            onLoginSuccess={onLoginSuccess}
+            onLogout={onLogout}
+            isEmbedded={true}
+          />
         </div>
       </div>
     </div>

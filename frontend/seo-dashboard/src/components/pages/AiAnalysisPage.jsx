@@ -7,8 +7,10 @@ import {
   runAiVisibilityAnalysis
 } from '../../lib/projectsApi';
 import { supabase } from '../../lib/supabaseClient';
+import { hasPermission, PERMISSIONS, canRunActions } from '../../lib/permissions';
 
-export default function AiAnalysisPage() {
+export default function AiAnalysisPage({ user }) {
+  const userCanRunActions = canRunActions(user);
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -67,6 +69,10 @@ export default function AiAnalysisPage() {
 
   const handleRunAnalysis = async () => {
     if (!activeProject?.slug || analyzing) return;
+    if (!userCanRunActions || !hasPermission(user, PERMISSIONS.RUN_ANALYSIS)) {
+      alert('Permission Denied: You do not have permission to run AI analysis.');
+      return;
+    }
     setAnalyzing(true);
     try {
       const domain = activeProject?.domain || activeProject?.name || '';
@@ -421,27 +427,29 @@ export default function AiAnalysisPage() {
               </button>
             </div>
 
-            <button
-              onClick={handleRunAnalysis}
-              disabled={analyzing}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                background: 'linear-gradient(135deg, #7c3aed 0%, #a855f7 100%)',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: 8,
-                padding: '8px 16px',
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: analyzing ? 'not-allowed' : 'pointer',
-                opacity: analyzing ? 0.7 : 1
-              }}
-            >
-              <RefreshCw size={14} className={analyzing ? 'animate-spin' : ''} />
-              <span>{analyzing ? 'Analyzing...' : 'Re-analyze'}</span>
-            </button>
+            {userCanRunActions && (
+              <button
+                onClick={handleRunAnalysis}
+                disabled={analyzing}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: 'linear-gradient(135deg, #7c3aed 0%, #a855f7 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: '8px 16px',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: analyzing ? 'not-allowed' : 'pointer',
+                  opacity: analyzing ? 0.7 : 1
+                }}
+              >
+                <RefreshCw size={14} className={analyzing ? 'animate-spin' : ''} />
+                <span>{analyzing ? 'Analyzing...' : 'Re-analyze'}</span>
+              </button>
+            )}
           </div>
         </div>
 

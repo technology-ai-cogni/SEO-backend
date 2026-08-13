@@ -13,8 +13,11 @@ class CreateUserRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Full name of the user")
     email: str = Field(..., min_length=3, max_length=255, description="Unique email address")
     password: str = Field(..., min_length=6, max_length=100, description="User password")
-    role: Optional[str] = Field("USER", description="User role: USER, ADMIN, VENDOR, etc.")
+    role: Optional[str] = Field("INTERNAL_ASSOCIATE", description="User role")
+    category: Optional[str] = Field("Internal", description="User category: Internal, Client Access, Vendor, Admin")
     status: Optional[str] = Field("Active", description="User status: Active or Disabled")
+    section_access: Optional[str] = Field("Default", description="Section access level: Default, All Sections, Project Setup, etc.")
+    permissions: Optional[str] = Field("Default", description="Action permissions: Default, View Only, View + Edit, etc.")
 
 
 class UpdateUserStatusRequest(BaseModel):
@@ -22,7 +25,10 @@ class UpdateUserStatusRequest(BaseModel):
 
 
 class UpdateUserRoleRequest(BaseModel):
-    role: str = Field(..., description="Target role: ADMIN, USER, VENDOR, etc.")
+    role: str = Field(..., description="Target role")
+    category: Optional[str] = Field(None, description="Target category: Internal, Client Access, Vendor, Admin")
+    section_access: Optional[str] = Field(None, description="Section access level")
+    permissions: Optional[str] = Field(None, description="Action permissions string")
 
 
 class LoginRequest(BaseModel):
@@ -46,7 +52,10 @@ class UserResponse(BaseModel):
     name: str
     email: str
     role: str
+    category: Optional[str] = "Internal"
     status: Optional[str] = "Active"
+    section_access: Optional[str] = "Default"
+    permissions: Optional[str] = "Default"
     created_at: Optional[datetime] = None
 
 

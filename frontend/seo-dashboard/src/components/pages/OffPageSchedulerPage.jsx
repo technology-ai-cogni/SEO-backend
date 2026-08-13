@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Calendar, UploadCloud, Clock, Trash2, Play, CheckCircle, AlertCircle, FileSpreadsheet, X } from 'lucide-react';
+import { Calendar, UploadCloud, Clock, Trash2, Play, CheckCircle, AlertCircle, FileSpreadsheet, X, Eye } from 'lucide-react';
+import { isReadOnlyUser, canRunActions } from '../../lib/permissions';
 
 // Reusable Modal Component matching Project Setup style
 function Modal({ open, onClose, title, children, footer }) {
@@ -20,7 +21,7 @@ function Modal({ open, onClose, title, children, footer }) {
           {children}
         </div>
         {footer && (
-          <div style={{ padding: '16px 28px 24px', display: 'flex', gap: 12 }}>
+          <div style={{ padding: '16px 28px', borderTop: '1px solid var(--border)', background: 'var(--surface-2)', display: 'flex', justifyContent: 'flex-end', gap: 10, borderRadius: '0 0 16px 16px' }}>
             {footer}
           </div>
         )}
@@ -103,9 +104,18 @@ function normalizeRow(item) {
   };
 }
 
-export default function OffPageSchedulerPage() {
+export default function OffPageSchedulerPage({ user }) {
+  const isReadOnly = isReadOnlyUser(user);
+  const userCanRunActions = canRunActions(user);
+  const isVendor = user?.role?.toUpperCase() === 'VENDOR' || isReadOnly;
   const [activeTab, setActiveTab] = useState('import'); // 'import' or 'scheduler'
-  
+
+  useEffect(() => {
+    if (!userCanRunActions && activeTab !== 'import') {
+      setActiveTab('import');
+    }
+  }, [userCanRunActions, activeTab]);
+
   // Modals & Details Visibility
   const [showImportModal, setShowImportModal] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
@@ -121,12 +131,12 @@ export default function OffPageSchedulerPage() {
 
   // --- Initial Mock Data for Imports ---
   const initialImports = [
-    { 
-      id: 1, 
-      filename: 'backlinks_audit_august.csv', 
-      project: 'One World International School', 
-      rows: 3, 
-      date: '2026-08-01 10:24 AM', 
+    {
+      id: 1,
+      filename: 'backlinks_audit_august.csv',
+      project: 'One World International School',
+      rows: 3,
+      date: '2026-08-01 10:24 AM',
       status: 'Success',
       rowsData: [
         {
@@ -200,12 +210,12 @@ export default function OffPageSchedulerPage() {
         }
       ]
     },
-    { 
-      id: 2, 
-      filename: 'outreach_leads_sais.xlsx', 
-      project: 'Stamford American', 
-      rows: 2, 
-      date: '2026-08-02 02:15 PM', 
+    {
+      id: 2,
+      filename: 'outreach_leads_sais.xlsx',
+      project: 'Stamford American',
+      rows: 2,
+      date: '2026-08-02 02:15 PM',
       status: 'Success',
       rowsData: [
         {
@@ -263,7 +273,7 @@ export default function OffPageSchedulerPage() {
     try {
       const saved = localStorage.getItem('seo_imported_datasets');
       if (saved) return JSON.parse(saved);
-    } catch (e) {}
+    } catch (e) { }
     return initialImports;
   });
   const [selectedImportProject, setSelectedImportProject] = useState(mockProjects[0].name);
@@ -276,7 +286,7 @@ export default function OffPageSchedulerPage() {
     try {
       const saved = localStorage.getItem('seo_scheduled_actions');
       if (saved) return JSON.parse(saved);
-    } catch (e) {}
+    } catch (e) { }
     return [
       { id: 1, action: 'Run Backlink Audit', project: 'testing308', datetime: '2026-08-15T09:00', frequency: 'Weekly', status: 'Scheduled' },
       { id: 2, action: 'Trigger Outreach Emails', project: 'One World International School', datetime: '2026-08-20T14:30', frequency: 'One-Time', status: 'Scheduled' }
@@ -401,19 +411,19 @@ export default function OffPageSchedulerPage() {
   // CSV Template download utility
   const downloadTemplateCSV = () => {
     const headers = [
-      'Period', 'Scheduled Date', 'Keyword 1', 'Landing Page', 'Cluster', 
-      'KW Category', 'Activity Name', 'Word Count', 'Content SPOC', 'Topic', 
-      'Content Doc', 'Status', 'Publisher', 'PG Site Domain', 'Domain Utilization for KW', 
+      'Period', 'Scheduled Date', 'Keyword 1', 'Landing Page', 'Cluster',
+      'KW Category', 'Activity Name', 'Word Count', 'Content SPOC', 'Topic',
+      'Content Doc', 'Status', 'Publisher', 'PG Site Domain', 'Domain Utilization for KW',
       'Live Link', 'Remarks', 'Solution', 'Keyword 2', 'Updated Date', 'Last Activity'
     ];
     // Example row containing empty fields to show N/A
     const row1 = [
-      'Q3 2026', '2026-08-10', 'school fees', '/fees', 'Fees', 
-      'Commercial', 'Outreach', '1200', 'Sarah Chen', 'SG School Fees Guide', 
-      'https://docs.google.com/document/d/1', 'Live', 'SgSchoolFinder', 'sgschoolfinder.com', '15%', 
+      'Q3 2026', '2026-08-10', 'school fees', '/fees', 'Fees',
+      'Commercial', 'Outreach', '1200', 'Sarah Chen', 'SG School Fees Guide',
+      'https://docs.google.com/document/d/1', 'Live', 'SgSchoolFinder', 'sgschoolfinder.com', '15%',
       '', 'Secured high DA link', 'Editorial Placement', 'education cost', '2026-08-04', 'Link validated'
     ];
-    const csvContent = "data:text/csv;charset=utf-8," 
+    const csvContent = "data:text/csv;charset=utf-8,"
       + [headers.join(','), row1.join(',')].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
@@ -475,7 +485,7 @@ export default function OffPageSchedulerPage() {
   // --- Render Dataset Detail full page ---
   if (selectedDataset) {
     const rows = selectedDataset.rowsData || [];
-    const filteredRows = rows.filter(r => 
+    const filteredRows = rows.filter(r =>
       (r.keyword1 || '').toLowerCase().includes(datasetSearch.toLowerCase()) ||
       (r.landingPage || '').toLowerCase().includes(datasetSearch.toLowerCase()) ||
       (r.publisher || '').toLowerCase().includes(datasetSearch.toLowerCase())
@@ -485,17 +495,17 @@ export default function OffPageSchedulerPage() {
       <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 0 }}>
         {/* Back Link */}
         <div style={{ marginBottom: 16 }}>
-          <button 
+          <button
             onClick={() => { setSelectedDataset(null); setDatasetSearch(''); }}
-            style={{ 
-              background: 'none', 
-              border: 'none', 
-              color: 'var(--accent)', 
-              fontSize: 13.5, 
-              fontWeight: 600, 
-              cursor: 'pointer', 
-              display: 'flex', 
-              alignItems: 'center', 
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--accent)',
+              fontSize: 13.5,
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
               gap: 6,
               padding: 0
             }}
@@ -516,7 +526,7 @@ export default function OffPageSchedulerPage() {
               Associated Project: <strong>{selectedDataset.project}</strong> · Total Rows: <strong>{rows.length}</strong> · Imported on {selectedDataset.date}
             </p>
           </div>
-          
+
           <Btn variant="outline" onClick={() => alert('Exporting dataset records as CSV...')} style={{ fontSize: 13, padding: '8px 16px' }}>
             Export CSV
           </Btn>
@@ -534,7 +544,7 @@ export default function OffPageSchedulerPage() {
           justifyContent: 'space-between',
           alignItems: 'center'
         }}>
-          <input 
+          <input
             type="text"
             placeholder="Search keywords, landing pages, publishers..."
             value={datasetSearch}
@@ -569,16 +579,16 @@ export default function OffPageSchedulerPage() {
               <thead>
                 <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 10 }}>
                   {[
-                    'Period', 'Scheduled Date', 'Keyword 1', 'Landing Page', 'Cluster', 
-                    'KW Category', 'Activity Name', 'Word Count', 'Content SPOC', 'Topic', 
-                    'Content Doc', 'Status', 'Publisher', 'PG Site Domain', 'Domain Utilization for KW', 
+                    'Period', 'Scheduled Date', 'Keyword 1', 'Landing Page', 'Cluster',
+                    'KW Category', 'Activity Name', 'Word Count', 'Content SPOC', 'Topic',
+                    'Content Doc', 'Status', 'Publisher', 'PG Site Domain', 'Domain Utilization for KW',
                     'Live Link', 'Remarks', 'Solution', 'Keyword 2', 'Updated Date', 'Last Activity'
                   ].map((col, idx) => (
-                    <th key={idx} style={{ 
-                      padding: '12px 16px', 
-                      textAlign: 'left', 
-                      fontSize: 12, 
-                      fontWeight: 700, 
+                    <th key={idx} style={{
+                      padding: '12px 16px',
+                      textAlign: 'left',
+                      fontSize: 12,
+                      fontWeight: 700,
                       color: 'var(--text-muted)',
                       textTransform: 'uppercase',
                       letterSpacing: '0.05em'
@@ -661,6 +671,26 @@ export default function OffPageSchedulerPage() {
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 0 }}>
+      {/* Vendor Read-Only Notice Banner */}
+      {isVendor && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '12px 16px',
+          background: '#eff6ff',
+          color: '#1e40af',
+          border: '1px solid #bfdbfe',
+          borderRadius: 10,
+          fontSize: 13,
+          fontWeight: 600,
+          marginBottom: 20
+        }}>
+          <Eye size={18} />
+          <span>Vendor Access Mode: You have read-only access to view Monthly Operations. Action and edit permissions are disabled.</span>
+        </div>
+      )}
+
       {/* Header Panel with Title & Top-Right Button */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
@@ -671,15 +701,17 @@ export default function OffPageSchedulerPage() {
             Automate audits, import data sheets, and schedule link outreach actions.
           </p>
         </div>
-        
-        {activeTab === 'import' ? (
-          <Btn variant="accent" onClick={() => { setImportMsg({ type: '', text: '' }); setImportFile(null); setShowImportModal(true); }}>
-            <UploadCloud size={16} /> Import Data
-          </Btn>
-        ) : (
-          <Btn variant="accent" onClick={() => { setSchedMsg({ type: '', text: '' }); setScheduleDate(''); setShowScheduleModal(true); }}>
-            <Calendar size={16} /> Schedule Activity
-          </Btn>
+
+        {userCanRunActions && (
+          activeTab === 'import' ? (
+            <Btn variant="accent" onClick={() => { setImportMsg({ type: '', text: '' }); setImportFile(null); setShowImportModal(true); }}>
+              <UploadCloud size={16} /> Import Data
+            </Btn>
+          ) : (
+            <Btn variant="accent" onClick={() => { setSchedMsg({ type: '', text: '' }); setScheduleDate(''); setShowScheduleModal(true); }}>
+              <Calendar size={16} /> Schedule Activity
+            </Btn>
+          )
         )}
       </div>
 
@@ -706,27 +738,29 @@ export default function OffPageSchedulerPage() {
           <UploadCloud size={16} />
           Import Data
         </button>
-        <button
-          onClick={() => setActiveTab('scheduler')}
-          style={{
-            padding: '12px 20px',
-            fontSize: 14.5,
-            fontWeight: 600,
-            color: activeTab === 'scheduler' ? 'var(--accent)' : 'var(--text-muted)',
-            background: 'none',
-            border: 'none',
-            borderBottom: activeTab === 'scheduler' ? '2.5px solid var(--accent)' : '2.5px solid transparent',
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-            outline: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8
-          }}
-        >
-          <Calendar size={16} />
-          Scheduler Calendar
-        </button>
+        {userCanRunActions && (
+          <button
+            onClick={() => setActiveTab('scheduler')}
+            style={{
+              padding: '12px 20px',
+              fontSize: 14.5,
+              fontWeight: 600,
+              color: activeTab === 'scheduler' ? 'var(--accent)' : 'var(--text-muted)',
+              background: 'none',
+              border: 'none',
+              borderBottom: activeTab === 'scheduler' ? '2.5px solid var(--accent)' : '2.5px solid transparent',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+              outline: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8
+            }}
+          >
+            <Calendar size={16} />
+            Scheduler Calendar
+          </button>
+        )}
       </div>
 
       {/* CONTENT PANEL */}
@@ -794,23 +828,27 @@ export default function OffPageSchedulerPage() {
                         </span>
                       </td>
                       <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                        <button
-                          onClick={() => handleDeleteImport(imp.id)}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: '#dc2626',
-                            fontSize: 12.5,
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            padding: '4px 8px',
-                            borderRadius: 4
-                          }}
-                          onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
-                          onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                        >
-                          Delete
-                        </button>
+                        {!isVendor ? (
+                          <button
+                            onClick={() => handleDeleteImport(imp.id)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: '#dc2626',
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              padding: '4px 8px',
+                              borderRadius: 4
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                          >
+                            Delete
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>View Only</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -872,44 +910,48 @@ export default function OffPageSchedulerPage() {
                           </span>
                         </td>
                         <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                            {sch.status === 'Scheduled' && (
+                          {!isVendor ? (
+                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                              {sch.status === 'Scheduled' && (
+                                <button
+                                  onClick={() => handleRunNow(sch.id)}
+                                  title="Run now manually"
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    padding: '4px',
+                                    borderRadius: 4,
+                                    color: 'var(--green)',
+                                    display: 'flex'
+                                  }}
+                                  onMouseEnter={e => e.currentTarget.style.background = 'var(--green-bg)'}
+                                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                                >
+                                  <Play size={14} fill="var(--green)" />
+                                </button>
+                              )}
                               <button
-                                onClick={() => handleRunNow(sch.id)}
-                                title="Execute immediately"
+                                onClick={() => handleDeleteSchedule(sch.id)}
+                                title="Delete scheduler event"
                                 style={{
                                   background: 'none',
                                   border: 'none',
                                   cursor: 'pointer',
                                   padding: '4px',
                                   borderRadius: 4,
-                                  color: 'var(--green)',
+                                  color: '#dc2626',
                                   display: 'flex'
                                 }}
-                                onMouseEnter={e => e.currentTarget.style.background = 'var(--green-bg)'}
+                                onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
                                 onMouseLeave={e => e.currentTarget.style.background = 'none'}
                               >
-                                <Play size={14} fill="var(--green)" />
+                                <Trash2 size={14} />
                               </button>
-                            )}
-                            <button
-                              onClick={() => handleDeleteSchedule(sch.id)}
-                              title="Delete scheduler event"
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                cursor: 'pointer',
-                                padding: '4px',
-                                borderRadius: 4,
-                                color: '#dc2626',
-                                display: 'flex'
-                              }}
-                              onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
-                              onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>View Only</span>
+                          )}
                         </td>
                       </tr>
                     ))}

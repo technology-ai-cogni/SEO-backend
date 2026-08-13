@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Home, LayoutDashboard, Search, Sparkles, FileText, FolderOpen, ChevronDown, ChevronRight, Settings, HelpCircle, Bell, Trash2, Users } from 'lucide-react';
 import { NAV_STRUCTURE } from '../../data/navigation';
-import { hasPermission, PERMISSIONS } from '../../lib/permissions';
+import { hasPermission, PERMISSIONS, canAccessRoute } from '../../lib/permissions';
 
 const ICONS = { Home, LayoutDashboard, Search, Sparkles, FileText, FolderOpen };
 
@@ -67,6 +67,15 @@ export default function Sidebar({ activePath, onNavigate, user }) {
           const color = MODULE_COLORS[item.id];
           const hasChildren = item.children?.length > 0;
 
+          if (!hasChildren) {
+            if (!canAccessRoute(user, item.path)) return null;
+          } else {
+            const hasAnyAllowedChild = item.children.some(sec =>
+              sec.items.some(child => canAccessRoute(user, child.path))
+            );
+            if (!hasAnyAllowedChild) return null;
+          }
+
           return (
             <div key={item.id}>
               <button
@@ -108,40 +117,45 @@ export default function Sidebar({ activePath, onNavigate, user }) {
 
               {hasChildren && isExpanded && (
                 <div style={{ background: color ? `${color.bg}55` : 'transparent' }}>
-                  {item.children.map((section, si) => (
-                    <div key={si}>
-                      <div style={{ padding: '6px 16px 2px 34px', fontSize: 10.5, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
-                        {section.label}
+                  {item.children.map((section, si) => {
+                    const allowedChildren = section.items.filter(child => canAccessRoute(user, child.path));
+                    if (allowedChildren.length === 0) return null;
+
+                    return (
+                      <div key={si}>
+                        <div style={{ padding: '6px 16px 2px 34px', fontSize: 10.5, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                          {section.label}
+                        </div>
+                        {allowedChildren.map(child => {
+                          const childActive = activePath === child.path;
+                          return (
+                            <button
+                              key={child.id}
+                              onClick={() => onNavigate(child.path)}
+                              style={{
+                                width: '100%',
+                                display: 'block',
+                                padding: '6px 16px 6px 34px',
+                                background: childActive ? 'var(--accent-light)' : 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                color: childActive ? 'var(--accent)' : 'var(--text-secondary)',
+                                fontFamily: 'var(--font-body)',
+                                fontSize: 13,
+                                fontWeight: childActive ? 600 : 400,
+                                transition: 'background 0.15s',
+                              }}
+                              onMouseEnter={e => { if (!childActive) e.currentTarget.style.background = '#f0f2f7'; }}
+                              onMouseLeave={e => { if (!childActive) e.currentTarget.style.background = 'transparent'; }}
+                            >
+                              {child.label}
+                            </button>
+                          );
+                        })}
                       </div>
-                      {section.items.map(child => {
-                        const childActive = activePath === child.path;
-                        return (
-                          <button
-                            key={child.id}
-                            onClick={() => onNavigate(child.path)}
-                            style={{
-                              width: '100%',
-                              display: 'block',
-                              padding: '6px 16px 6px 34px',
-                              background: childActive ? 'var(--accent-light)' : 'transparent',
-                              border: 'none',
-                              cursor: 'pointer',
-                              textAlign: 'left',
-                              color: childActive ? 'var(--accent)' : 'var(--text-secondary)',
-                              fontFamily: 'var(--font-body)',
-                              fontSize: 13,
-                              fontWeight: childActive ? 600 : 400,
-                              transition: 'background 0.15s',
-                            }}
-                            onMouseEnter={e => { if (!childActive) e.currentTarget.style.background = '#f0f2f7'; }}
-                            onMouseLeave={e => { if (!childActive) e.currentTarget.style.background = 'transparent'; }}
-                          >
-                            {child.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -152,6 +166,9 @@ export default function Sidebar({ activePath, onNavigate, user }) {
       {/* Bottom */}
       <div style={{ padding: '12px 10px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 2 }}>
         {bottomNavItems.map(({ icon: Icon, label, path, permission }) => {
+          if (!canAccessRoute(user, path)) {
+            return null;
+          }
           if (permission && !hasPermission(user, permission)) {
             return null;
           }

@@ -11,8 +11,8 @@ import {
   fetchCompetitorPageRows, insertCompetitorPageRows, updateCompetitorPageRow, deleteCompetitorPageRow,
   fetchCompetitors, insertCompetitor, updateCompetitor, deleteCompetitor, deleteCompetitorProjectData,
   findCompetitors, fetchCompetitorSnapshots, classifyCompetitorUrls,
-  createAuditLogApi, getActiveUserEmail, resolveFullCompetitorUrl, resolveFullCompetitorUrls, formatCleanName,
 } from '../../lib/projectsApi';
+import { isReadOnlyUser, canEdit, canDelete } from '../../lib/permissions';
 
 // ─── shared tiny components ────────────────────────────────────────────────
 
@@ -1642,7 +1642,9 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
   );
 }
 
-function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteProject, loading, error, search }) {
+function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteProject, loading, error, search, user }) {
+  const userCanEdit = canEdit(user);
+  const userCanDelete = canDelete(user);
   const [expandedRows, setExpandedRows] = useState(new Set());
   const [editingProject, setEditingProject] = useState(null);
 
@@ -1852,13 +1854,15 @@ function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteP
                 </td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                  <button
-                    onClick={() => setEditingProject(p)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'none'}>
-                    <Edit2 size={14} />
-                  </button>
+                  {userCanEdit && (
+                    <button
+                      onClick={() => setEditingProject(p)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                      <Edit2 size={14} />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -1875,7 +1879,8 @@ function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteP
     </>
   );
 }
-function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, totalLabel = 'Total  Pages', keywordsLabel = 'Keywords', deleteScopeLabel = 'the project and all its keywords', search }) {
+function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, totalLabel = 'Total  Pages', keywordsLabel = 'Keywords', deleteScopeLabel = 'the project and all its keywords', search, user }) {
+  const userCanDelete = canDelete(user);
   const [confirmingProject, setConfirmingProject] = useState(null);
 
   const handleConfirmDelete = async () => {
@@ -1966,7 +1971,7 @@ function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, tot
                 </td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                  {onDeleteProject && (
+                  {onDeleteProject && userCanDelete && (
                     <button
                       onClick={() => setConfirmingProject(p)}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
@@ -2260,7 +2265,9 @@ function HeaderQuickSelect({ placeholder, options, onSet, value }) {
   );
 }
 
-function PageDetailView({ project, onBack, onUpdatePages }) {
+function PageDetailView({ project, onBack, onUpdatePages, user }) {
+  const userCanEdit = canEdit(user);
+  const userCanDelete = canDelete(user);
   const [rows, setRows] = useState(project.detailPages || []);
   const loading = project.detailPages === undefined;
   const error = project.detailPagesError || '';
@@ -2452,11 +2459,13 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
           activeFilters={tableFilters}
           onFiltersChange={setTableFilters}
         />
-        <ActionsDropdown
-          selectedCount={selectedRows.size}
-          onBulkEdit={() => setShowBulkEdit(true)}
-          onBulkDelete={() => setShowBulkDelete(true)}
-        />
+        {userCanEdit && (
+          <ActionsDropdown
+            selectedCount={selectedRows.size}
+            onBulkEdit={() => setShowBulkEdit(true)}
+            onBulkDelete={() => setShowBulkDelete(true)}
+          />
+        )}
         <button
           onClick={() => downloadCSV(`${project?.name || 'pages'}_detail`, filteredRows)}
           title="Download CSV"
@@ -2563,11 +2572,13 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
                 <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetCategory ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetCategory || '—'}</td>
                 <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetType ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetType || '—'}</td>
                 <td style={{ padding: '10px 16px' }}>
-                  <button onClick={() => deleteRow(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
-                    onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
-                    <Trash2 size={14} />
-                  </button>
+                  {userCanDelete && (
+                    <button onClick={() => deleteRow(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -2580,7 +2591,9 @@ function PageDetailView({ project, onBack, onUpdatePages }) {
 
 const KW_PAGE_SIZE = 100;
 
-function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
+function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }) {
+  const userCanEdit = canEdit(user);
+  const userCanDelete = canDelete(user);
   const [rows, setRows] = useState(project.detailKeywords || []);
   const loading = project.detailKeywords === undefined;
   const error = project.detailKeywordsError || '';
@@ -3264,7 +3277,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
           <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{clusterError}</span>
         )}
 
-        {rows.length > 0 && selectedRows.size === 0 && (
+        {userCanEdit && rows.length > 0 && selectedRows.size === 0 && (
           <>
             {/* Check initial ranking button -- visible ONLY when ALL keywords have both cluster and category */}
             {rows.length > 0 && rows.every(r => Boolean(r.cluster && String(r.cluster).trim()) && Boolean(r.category && String(r.category).trim())) && (
@@ -3448,7 +3461,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
           </>
         )}
 
-        {rows.length > 0 && (
+        {userCanDelete && rows.length > 0 && (
           <>
             <ActionsDropdown
               selectedCount={selectedRows.size}
@@ -3479,7 +3492,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search }) {
           </>
         )}
 
-        {(hasPendingChanges || saving) && (
+        {userCanEdit && (hasPendingChanges || saving) && (
           <button
             onClick={handleSave}
             disabled={!hasPendingChanges || saving}
@@ -4917,7 +4930,8 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
   );
 }
 
-function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, onBack, onSelectCompetitor, onSelectKwDetail, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, onFindCompetitors, onAddPages, hasPendingChanges, saving, saveError, onSaveChanges, loading, error, top3KwByCategory, top3KwLoading, search, findingCompetitors }) {
+function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, onBack, onSelectCompetitor, onSelectKwDetail, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, onFindCompetitors, onAddPages, hasPendingChanges, saving, saveError, onSaveChanges, loading, error, top3KwByCategory, top3KwLoading, search, findingCompetitors, user }) {
+  const userCanEdit = canEdit(user);
   const [editingIdx, setEditingIdx] = useState(null);
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -5625,11 +5639,13 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                         {clusList.length ? `${clusList.length} ` : '—'}
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                        <button onClick={() => setEditingIdx(filtered.indexOf(c))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
-                          onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                          onMouseLeave={e => e.currentTarget.style.background = 'none'}>
-                          <Edit2 size={14} />
-                        </button>
+                        {userCanEdit && (
+                          <button onClick={() => setEditingIdx(filtered.indexOf(c))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                            <Edit2 size={14} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -5717,6 +5733,9 @@ function PrerequisiteModal({ open, onClose, title, message, actionLabel, onActio
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function ProjectSetupPage({ tab, user }) {
+  const isReadOnly = isReadOnlyUser(user);
+  const userCanEdit = canEdit(user);
+  const userCanDelete = canDelete(user);
   const [activeTab, setActiveTab] = useState(tab || 'Domain');
   useEffect(() => { if (tab) { setActiveTab(tab); setSelectedPageProject(null); setSelectedCompetitor(null); setSelectedCompetitorProject(null); setSelectedKwProject(null); setSearch(''); } }, [tab]);
   const [filter, setFilter] = useState(null);
@@ -6871,10 +6890,44 @@ export default function ProjectSetupPage({ tab, user }) {
           <div style={{ flex: 1 }} />
 
           {/* CTA */}
-          {activeTab === 'Competitors' ? (
-            selectedCompetitorProject === null ? (
+          {userCanEdit && (
+            activeTab === 'Competitors' ? (
+              selectedCompetitorProject === null ? (
+                <button
+                  onClick={() => { setChooseProjectMode('chooseProject'); setShowChooseProject(true); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                    padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
+                    fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                >
+                  <Plus size={15} />
+                  Choose project
+                </button>
+              ) : (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button
+                    onClick={handleRefreshCompetitors}
+                    disabled={competitorsRefreshing}
+                    title="Refresh"
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: 'none', border: '1.5px solid var(--border)', borderRadius: 8, padding: 9,
+                      cursor: competitorsRefreshing ? 'default' : 'pointer', color: 'var(--text-muted)',
+                    }}
+                    onMouseEnter={e => { if (!competitorsRefreshing) { e.currentTarget.style.borderColor = 'var(--border-hover)'; e.currentTarget.style.color = 'var(--text-primary)'; } }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+                  >
+                    <RefreshCw size={14} className={competitorsRefreshing ? 'spin-icon' : ''} />
+                  </button>
+                </div>
+              )
+            ) : (
               <button
-                onClick={() => { setChooseProjectMode('chooseProject'); setShowChooseProject(true); }}
+                onClick={cta.onClick}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
@@ -6885,41 +6938,9 @@ export default function ProjectSetupPage({ tab, user }) {
                 onMouseLeave={e => e.currentTarget.style.opacity = '1'}
               >
                 <Plus size={15} />
-                Choose project
+                {cta.label}
               </button>
-            ) : (
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <button
-                  onClick={handleRefreshCompetitors}
-                  disabled={competitorsRefreshing}
-                  title="Refresh"
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: 'none', border: '1.5px solid var(--border)', borderRadius: 8, padding: 9,
-                    cursor: competitorsRefreshing ? 'default' : 'pointer', color: 'var(--text-muted)',
-                  }}
-                  onMouseEnter={e => { if (!competitorsRefreshing) { e.currentTarget.style.borderColor = 'var(--border-hover)'; e.currentTarget.style.color = 'var(--text-primary)'; } }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
-                >
-                  <RefreshCw size={14} className={competitorsRefreshing ? 'spin-icon' : ''} />
-                </button>
-              </div>
             )
-          ) : (
-            <button
-              onClick={cta.onClick}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
-                padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
-                fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-              }}
-              onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
-              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-            >
-              <Plus size={15} />
-              {cta.label}
-            </button>
           )}
         </div>
 
@@ -6934,12 +6955,14 @@ export default function ProjectSetupPage({ tab, user }) {
           <KwClusterDetailView
             project={kwClusters[selectedKwProject]}
             search={search}
+            user={user}
             onBack={() => { setSelectedKwProject(null); setSearch(''); }}
             onUpdateKeywords={(updated) => setKwClusters(prev => prev.map((p, i) => i === selectedKwProject ? { ...p, detailKeywords: updated } : p))}
           />
         ) : activeTab === 'Pages' && selectedPageProject !== null ? (
           <PageDetailView
             project={pages[selectedPageProject]}
+            user={user}
             onBack={() => setSelectedPageProject(null)}
             onUpdatePages={(updated) => {
               const slug = pages[selectedPageProject]?.slug;
@@ -6977,9 +7000,9 @@ export default function ProjectSetupPage({ tab, user }) {
           />
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} domainFilters={domainFilters} search={search} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} />}
-            {activeTab === 'Intent' && <PagesTab pages={kwClusters} search={search} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's Intent data (keywords, categories, clusters)" />}
-            {activeTab === 'Pages' && <PagesTab pages={pages} search={search} onSelectProject={(i) => { const proj = pages[i]; if (!checkProjectPrerequisites(proj, 'Pages')) return; setSelectedPageProject(i); }} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" />}
+            {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} domainFilters={domainFilters} search={search} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} user={user} />}
+            {activeTab === 'Intent' && <PagesTab pages={kwClusters} search={search} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's Intent data (keywords, categories, clusters)" user={user} />}
+            {activeTab === 'Pages' && <PagesTab pages={pages} search={search} onSelectProject={(i) => { const proj = pages[i]; if (!checkProjectPrerequisites(proj, 'Pages')) return; setSelectedPageProject(i); }} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" user={user} />}
             {activeTab === 'Competitors' && selectedCompetitorProject === null && (
               <CompetitorProjectsTab
                 projects={projects}
@@ -7022,6 +7045,7 @@ export default function ProjectSetupPage({ tab, user }) {
                 top3KwByCategory={top3KwByCategory}
                 top3KwLoading={top3KwLoading}
                 findingCompetitors={findingCompetitors}
+                user={user}
               />
             )}
             {activeTab === 'Outreach' && (
@@ -7114,23 +7138,25 @@ export default function ProjectSetupPage({ tab, user }) {
                             {lnk.region3Traffic || '-'}
                           </td>
                           <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                            <button
-                              onClick={() => setDeletingOutreachLink(lnk)}
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                color: 'var(--red, #dc2626)',
-                                fontSize: 12.5,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                padding: '4px 8px',
-                                borderRadius: 4
-                              }}
-                              onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
-                              onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                            >
-                              Delete
-                            </button>
+                            {userCanDelete && (
+                              <button
+                                onClick={() => setDeletingOutreachLink(lnk)}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: 'var(--red, #dc2626)',
+                                  fontSize: 12.5,
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  padding: '4px 8px',
+                                  borderRadius: 4
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                              >
+                                Delete
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ExternalLink, Search, ChevronDown, CheckCircle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi } from '../../lib/projectsApi';
+import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions } from '../../lib/permissions';
 
 function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 100, projectTotalKeywords = 514 }) {
   const [hoverType, setHoverType] = useState(null); // null | 'mentions' | 'cited'
@@ -379,7 +380,9 @@ function RankHoverCell({ count, kwList, title, color }) {
   );
 }
 
-export default function PositionAnalysisPage({ onNavigate }) {
+export default function PositionAnalysisPage({ onNavigate, user }) {
+  const isReadOnly = isReadOnlyUser(user);
+  const userCanRunActions = canRunActions(user);
   const [projects, setProjects] = useState([]);
   const [selectedSlug, setSelectedSlug] = useState('');
   const [activeProject, setActiveProject] = useState(null);
@@ -627,6 +630,11 @@ export default function PositionAnalysisPage({ onNavigate }) {
   const handleAiAnalysis = async (e, options = {}) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!activeProject) return;
+
+    if (!userCanRunActions || !hasPermission(user, PERMISSIONS.RUN_ANALYSIS)) {
+      setAnalysisError('Permission Denied: You do not have permission to run AI analysis.');
+      return;
+    }
 
     const { targetEngine = null, analyzeAll = false } = options;
     const domain = activeProject.domain || activeProject.name || '';
@@ -1375,29 +1383,31 @@ export default function PositionAnalysisPage({ onNavigate }) {
           justifyContent: 'flex-end',
           gap: 10
         }}>
-          <button
-            onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
-            disabled={Object.values(analyzingTabs).some(Boolean)}
-            style={{
-              background: '#7c3aed',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: 8,
-              padding: '9px 16px',
-              fontSize: 13.5,
-              fontWeight: 700,
-              cursor: Object.values(analyzingTabs).some(Boolean) ? 'not-allowed' : 'pointer',
-              opacity: Object.values(analyzingTabs).some(Boolean) ? 0.7 : 1,
-              boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
-              transition: 'background 0.15s'
-            }}
-            onMouseEnter={e => { if (!Object.values(analyzingTabs).some(Boolean)) e.currentTarget.style.background = '#6d28d9'; }}
-            onMouseLeave={e => { if (!Object.values(analyzingTabs).some(Boolean)) e.currentTarget.style.background = '#7c3aed'; }}
-          >
-            {Object.values(analyzingTabs).some(Boolean)
-              ? 'Analyzing...'
-              : (Object.values(tabResults).some(r => r && r.length > 0) ? 'Re-analyze' : 'Analyze')}
-          </button>
+          {userCanRunActions && (
+            <button
+              onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
+              disabled={Object.values(analyzingTabs).some(Boolean)}
+              style={{
+                background: '#7c3aed',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: 8,
+                padding: '9px 16px',
+                fontSize: 13.5,
+                fontWeight: 700,
+                cursor: Object.values(analyzingTabs).some(Boolean) ? 'not-allowed' : 'pointer',
+                opacity: Object.values(analyzingTabs).some(Boolean) ? 0.7 : 1,
+                boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
+                transition: 'background 0.15s'
+              }}
+              onMouseEnter={e => { if (!Object.values(analyzingTabs).some(Boolean)) e.currentTarget.style.background = '#6d28d9'; }}
+              onMouseLeave={e => { if (!Object.values(analyzingTabs).some(Boolean)) e.currentTarget.style.background = '#7c3aed'; }}
+            >
+              {Object.values(analyzingTabs).some(Boolean)
+                ? 'Analyzing...'
+                : (Object.values(tabResults).some(r => r && r.length > 0) ? 'Re-analyze' : 'Analyze')}
+            </button>
+          )}
         </div>
       </div>
 
@@ -2453,13 +2463,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
             {(() => {
               const pageAnalysisData = getDynamicPageAnalysisData();
 
-<<<<<<< Updated upstream
-              const weeks = ['P1', 'P2', 'P3', 'P4', 'P5'];
-              const clusterTrendData = weeks.map((week) => {
-                const row = { week };
-                pageAnalysisData.forEach((item) => {
-                  row[item.name] = 0; // 0 value, no dummy values
-=======
               if (pageAnalysisData.length === 0) {
                 return (
                   <div style={{
@@ -2488,7 +2491,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
                   const baseCount = item.pageCount;
                   const variance = (wIdx - 2) * (pIdx % 2 === 0 ? 1 : -1);
                   row[item.clusterName] = Math.max(0, Math.min(20, baseCount + Math.floor(variance * 1.5)));
->>>>>>> Stashed changes
                 });
                 return row;
               });
@@ -2539,10 +2541,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
                           onMouseLeave={() => setHoveredChartLine(null)}
                         >
                           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-<<<<<<< Updated upstream
-                          <XAxis dataKey="week" stroke="#94a3b8" fontSize={10.5} tickLine={false} />
-                          <YAxis stroke="#94a3b8" fontSize={10.5} tickLine={false} domain={[0, 10]} />
-=======
                           <XAxis
                             dataKey="period"
                             stroke="#94a3b8"
@@ -2558,7 +2556,6 @@ export default function PositionAnalysisPage({ onNavigate }) {
                             ticks={[0, 5, 10, 15, 20]}
                             label={{ value: 'Pages', angle: -90, position: 'insideLeft', offset: 10, fill: '#64748b', fontSize: 11, fontWeight: 700 }}
                           />
->>>>>>> Stashed changes
                           <Tooltip
                             content={({ active, payload }) => {
                               if (active && payload && payload.length) {

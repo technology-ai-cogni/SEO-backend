@@ -1896,9 +1896,6 @@ async function fetchAuthEndpoint(endpoint, options = {}) {
 }
 
 export async function fetchUsersApi() {
-  if (isLocalMode) {
-    return JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-  }
   try {
     const res = await fetchAuthEndpoint('/auth/users');
     if (!res.ok) {
@@ -1907,8 +1904,22 @@ export async function fetchUsersApi() {
     }
     const data = await res.json();
     if (data && Array.isArray(data)) {
-      localStorage.setItem('seo_users_list', JSON.stringify(data));
-      return data;
+      const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+      const cachedMap = new Map(cached.map(u => [String(u.id), u]));
+      
+      const merged = data.map(u => {
+        const local = cachedMap.get(String(u.id)) || cached.find(x => x.email?.toLowerCase() === u.email?.toLowerCase());
+        return {
+          ...u,
+          section_access: (u.section_access !== undefined && u.section_access !== null && u.section_access !== '') ? u.section_access : (local?.section_access || 'Default'),
+          permissions: (u.permissions !== undefined && u.permissions !== null && u.permissions !== '') ? u.permissions : (local?.permissions || 'Default'),
+          category: u.category || local?.category || 'Internal',
+          role: u.role || local?.role || 'INTERNAL_ASSOCIATE'
+        };
+      });
+
+      localStorage.setItem('seo_users_list', JSON.stringify(merged));
+      return merged;
     }
     return data || [];
   } catch (err) {
@@ -1922,21 +1933,6 @@ export async function fetchUsersApi() {
 }
 
 export async function createUserApi(payload) {
-  if (isLocalMode) {
-    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-    const newUser = {
-      id: Date.now(),
-      name: payload.name,
-      email: payload.email,
-      role: payload.role || 'USER',
-      status: payload.status || 'Active',
-      created_at: new Date().toISOString()
-    };
-    list.unshift(newUser);
-    localStorage.setItem('seo_users_list', JSON.stringify(list));
-    return { user: newUser };
-  }
-
   try {
     const res = await fetchAuthEndpoint('/auth/users', {
       method: 'POST',
@@ -1955,7 +1951,10 @@ export async function createUserApi(payload) {
       id: Date.now(),
       name: payload.name,
       email: payload.email,
-      role: payload.role || 'USER',
+      role: payload.role || 'INTERNAL_ASSOCIATE',
+      category: payload.category || 'Internal',
+      section_access: payload.section_access || 'Default',
+      permissions: payload.permissions || 'Default',
       status: payload.status || 'Active',
       created_at: new Date().toISOString()
     };
@@ -1966,14 +1965,6 @@ export async function createUserApi(payload) {
 }
 
 export async function updateUserStatusApi(userId, status) {
-  if (isLocalMode) {
-    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-    const target = list.find(u => u.id === userId);
-    if (target) target.status = status;
-    localStorage.setItem('seo_users_list', JSON.stringify(list));
-    return target;
-  }
-
   try {
     const res = await fetchAuthEndpoint(`/auth/users/${userId}/status`, {
       method: 'PUT',
@@ -1994,43 +1985,41 @@ export async function updateUserStatusApi(userId, status) {
   }
 }
 
-export async function updateUserRoleApi(userId, role) {
-  if (isLocalMode) {
-    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-    const target = list.find(u => u.id === userId);
-    if (target) target.role = role;
-    localStorage.setItem('seo_users_list', JSON.stringify(list));
-    return target;
-  }
-
+export async function updateUserRoleApi(userId, role, category = null, section_access = null, permissions = null) {
   try {
+    const payload = {
+      role,
+      category: category ?? null,
+      section_access: section_access ?? null,
+      permissions: permissions ?? null
+    };
+
     const res = await fetchAuthEndpoint(`/auth/users/${userId}/role`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role })
+      body: JSON.stringify(payload)
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      throw new Error(body?.detail || 'Failed to update user role.');
+      throw new Error(body?.detail || 'Failed to update user settings.');
     }
     return await res.json();
   } catch (err) {
+    console.error('[updateUserRoleApi] Failed to save to DB, falling back to localStorage:', err);
     const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
     const target = list.find(u => u.id === userId);
-    if (target) target.role = role;
+    if (target) {
+      if (role) target.role = role;
+      if (category) target.category = category;
+      if (section_access) target.section_access = section_access;
+      if (permissions) target.permissions = permissions;
+    }
     localStorage.setItem('seo_users_list', JSON.stringify(list));
     return target;
   }
 }
 
 export async function deleteUserApi(userId) {
-  if (isLocalMode) {
-    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-    const updated = list.filter(u => u.id !== userId);
-    localStorage.setItem('seo_users_list', JSON.stringify(updated));
-    return;
-  }
-
   try {
     const res = await fetchAuthEndpoint(`/auth/users/${userId}`, {
       method: 'DELETE'
