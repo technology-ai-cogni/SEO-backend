@@ -2194,6 +2194,16 @@ export async function deleteMonthlyImportApi(importId) {
   return await res.json();
 }
 
+export async function runAuditAllocationApi(datasetId = null, days = 22) {
+  const res = await fetch(`${API_BASE}/monthly-operations/audit-allocate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataset_id: datasetId, days })
+  });
+  if (!res.ok) throw new Error('Failed to run audit allocation');
+  return await res.json();
+}
+
 export async function fetchScheduledActivitiesApi() {
   const res = await fetch(`${API_BASE}/monthly-operations/schedules`);
   if (!res.ok) throw new Error('Failed to fetch scheduled activities');

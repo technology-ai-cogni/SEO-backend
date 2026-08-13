@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
-import { Calendar, UploadCloud, Clock, Trash2, Play, CheckCircle, AlertCircle, FileSpreadsheet, X, Upload, ChevronDown, Filter, Pencil, Save } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Calendar, UploadCloud, Clock, Trash2, Play, CheckCircle, AlertCircle, FileSpreadsheet, X, Upload, ChevronDown, Filter, Pencil, Save, ShieldCheck, Users } from 'lucide-react';
 import { 
   fetchDomainRows, 
   fetchMonthlyImportsApi, 
   createMonthlyImportApi, 
   updateMonthlyImportApi, 
   deleteMonthlyImportApi, 
+  runAuditAllocationApi,
   fetchScheduledActivitiesApi, 
   createScheduledActivityApi, 
   deleteScheduledActivityApi 
@@ -148,6 +149,7 @@ export default function OffPageSchedulerPage() {
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [selectedDataset, setSelectedDataset] = useState(null);
   const [datasetSearch, setDatasetSearch] = useState('');
+  const [fieldFilters, setFieldFilters] = useState({});
   const [filterActivity, setFilterActivity] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [showFilterPopover, setShowFilterPopover] = useState(false);
@@ -155,10 +157,38 @@ export default function OffPageSchedulerPage() {
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   const [bulkEditActivity, setBulkEditActivity] = useState('');
   const [bulkEditStatus, setBulkEditStatus] = useState('');
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
   const [selectedRowIndices, setSelectedRowIndices] = useState([]);
   const [dbProjects, setDbProjects] = useState([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [savingState, setSavingState] = useState(''); // '', 'saving', 'saved', 'error'
+  const [auditAllocating, setAuditAllocating] = useState(false);
+  const [deleteConfirmImport, setDeleteConfirmImport] = useState(null);
+
+  const ALL_FIELD_CONFIGS = [
+    { key: 'activityName', label: 'Activity Name' },
+    { key: 'status', label: 'Status' },
+    { key: 'publisher', label: 'Publisher' },
+    { key: 'contentSpoc', label: 'Content SPOC' },
+    { key: 'remarks', label: 'Remarks' },
+    { key: 'solution', label: 'Solution' },
+  ];
+
+  const activeFieldFilterCount = useMemo(() => {
+    let count = Object.values(fieldFilters).filter(v => v && v.trim() !== '').length;
+    if (filterStartDate) count += 1;
+    if (filterEndDate) count += 1;
+    return count;
+  }, [fieldFilters, filterStartDate, filterEndDate]);
+
+  const handleResetFieldFilters = () => {
+    setFieldFilters({});
+    setFilterStartDate('');
+    setFilterEndDate('');
+    setFilterActivity('ALL');
+    setFilterStatus('ALL');
+  };
 
   const filterRef = useRef(null);
   const actionsRef = useRef(null);
@@ -741,9 +771,51 @@ export default function OffPageSchedulerPage() {
     }
   };
 
+  const handleRunAudit = async () => {
+    setAuditAllocating(true);
+    try {
+      const datasetId = selectedDataset ? selectedDataset.id : null;
+      const res = await runAuditAllocationApi(datasetId, 22);
+      const freshImports = await fetchMonthlyImportsApi();
+      setImports(freshImports);
+      if (selectedDataset) {
+        const updatedDs = freshImports.find(imp => imp.id === selectedDataset.id || imp.project === selectedDataset.project);
+        if (updatedDs) setSelectedDataset(updatedDs);
+      }
+      alert(res.message || 'Audit allocation completed successfully!');
+    } catch (err) {
+      alert(`Audit allocation notice: ${err.message}`);
+    } finally {
+      setAuditAllocating(false);
+    }
+  };
+
+  const activeDatasetRows = selectedDataset ? (selectedDataset.rowsData || []) : [];
+
+  const fieldOptions = useMemo(() => {
+    const acc = {};
+    ALL_FIELD_CONFIGS.forEach(f => acc[f.key] = new Set());
+
+    (activeDatasetRows || []).forEach(r => {
+      ALL_FIELD_CONFIGS.forEach(f => {
+        const val = r[f.key] ?? r[f.key.replace(/([A-Z])/g, "_$1").toLowerCase()];
+        if (val !== undefined && val !== null && String(val).trim() !== '') {
+          acc[f.key].add(String(val).trim());
+        }
+      });
+    });
+
+    const sorted = {};
+    ALL_FIELD_CONFIGS.forEach(f => {
+      sorted[f.key] = Array.from(acc[f.key]).sort();
+    });
+    return sorted;
+  }, [activeDatasetRows]);
+
   // Render Dataset details view when selected
   if (selectedDataset) {
     const rows = selectedDataset.rowsData || [];
+
     const filteredRows = rows.filter(r => {
       const matchSearch = !datasetSearch || 
         (r.keyword1 || '').toLowerCase().includes(datasetSearch.toLowerCase()) ||
@@ -753,12 +825,26 @@ export default function OffPageSchedulerPage() {
         (r.topic || '').toLowerCase().includes(datasetSearch.toLowerCase()) ||
         (r.cluster || '').toLowerCase().includes(datasetSearch.toLowerCase()) ||
         (r.kwCategory || '').toLowerCase().includes(datasetSearch.toLowerCase()) ||
-        (r.contentSpoc || '').toLowerCase().includes(datasetSearch.toLowerCase());
+        (r.contentSpoc || '').toLowerCase().includes(datasetSearch.toLowerCase()) ||
+        (r.uid || '').toLowerCase().includes(datasetSearch.toLowerCase());
 
-      const matchActivity = filterActivity === 'ALL' || (r.activityName || '') === filterActivity;
-      const matchStatus = filterStatus === 'ALL' || (r.status || '') === filterStatus;
+      if (!matchSearch) return false;
 
-      return matchSearch && matchActivity && matchStatus;
+      // Scheduled Date Range Filter
+      const rDate = (r.scheduledDate || r.scheduled_date || '').trim();
+      if (filterStartDate && rDate && rDate < filterStartDate) return false;
+      if (filterEndDate && rDate && rDate > filterEndDate) return false;
+      if ((filterStartDate || filterEndDate) && !rDate) return false;
+
+      for (const [key, filterVal] of Object.entries(fieldFilters)) {
+        if (!filterVal || filterVal === 'ALL') continue;
+        const rawVal = String(r[key] ?? r[key.replace(/([A-Z])/g, "_$1").toLowerCase()] ?? '').trim();
+        if (rawVal.toLowerCase() !== filterVal.toLowerCase()) {
+          return false;
+        }
+      }
+
+      return true;
     });
 
     return (
@@ -804,8 +890,33 @@ export default function OffPageSchedulerPage() {
             </p>
           </div>
 
-          {/* Save Changes Button with Supabase Sync */}
+          {/* Save Changes & Run Audit Buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button
+              onClick={handleRunAudit}
+              disabled={auditAllocating}
+              style={{
+                background: '#ffffff',
+                color: '#0f172a',
+                border: '1.5px solid #cbd5e1',
+                borderRadius: 10,
+                padding: '9px 18px',
+                fontSize: 13.5,
+                fontWeight: 700,
+                cursor: auditAllocating ? 'wait' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+              onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
+            >
+              <ShieldCheck size={16} color="var(--accent)" />
+              {auditAllocating ? 'Allocating Associates...' : 'Run Audit Allocation'}
+            </button>
+
             {hasUnsavedChanges && (
               <span style={{ fontSize: 12.5, fontWeight: 600, color: '#d97706', background: '#fef3c7', padding: '5px 12px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #fde68a' }}>
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#d97706' }} /> Unsaved changes
@@ -842,6 +953,77 @@ export default function OffPageSchedulerPage() {
             </button>
           </div>
         </div>
+
+        {/* Associate Resource Breakdown Summary Card */}
+        {(() => {
+          const assocCounts = (rows || []).reduce((acc, r) => {
+            const pub = r.publisher && r.publisher.trim() !== '' ? r.publisher : 'Unassigned';
+            acc[pub] = (acc[pub] || 0) + 1;
+            return acc;
+          }, {});
+          const assocEntries = Object.entries(assocCounts);
+          if (assocEntries.length === 0) return null;
+          const assignedCount = assocEntries.filter(([n]) => n !== 'Unassigned').length;
+
+          return (
+            <div style={{
+              background: '#ffffff',
+              border: '1.5px solid #e2e8f0',
+              borderRadius: 14,
+              padding: '16px 20px',
+              marginBottom: 20,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 16,
+              flexWrap: 'wrap',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.03)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <div>
+                  <h4 style={{ margin: 0, fontSize: 14.5, fontWeight: 800, color: 'var(--text-primary)' }}>
+                    
+                  </h4>
+                  <p style={{ margin: '2px 0 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                    <strong>{assignedCount} Associate(s)</strong> assigned across <strong>{rows.length}</strong> total resources
+                  </p>
+                </div>
+              </div>
+
+              {/* Associate Resource Badges */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                {assocEntries.map(([associateName, count]) => (
+                  <div key={associateName} style={{
+                    background: '#f8fafc',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 10,
+                    padding: '7px 14px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: '#0f172a',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+                  }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: associateName === 'Unassigned' ? '#94a3b8' : '#2563eb' }} />
+                    <span>{associateName}:</span>
+                    <span style={{ 
+                      background: associateName === 'Unassigned' ? '#f1f5f9' : '#dbeafe', 
+                      color: associateName === 'Unassigned' ? '#475569' : '#1e40af', 
+                      padding: '3px 9px', 
+                      borderRadius: 6, 
+                      fontSize: 12, 
+                      fontWeight: 800 
+                    }}>
+                      {count} resource{count !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Search, Filters, and Bulk Actions Bar */}
         <div style={{
@@ -882,133 +1064,151 @@ export default function OffPageSchedulerPage() {
                 onClick={() => setShowFilterPopover(!showFilterPopover)}
                 title="Filter Records"
                 style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 10,
-                  border: (filterActivity !== 'ALL' || filterStatus !== 'ALL') ? '1.5px solid var(--accent)' : '1.5px solid #cbd5e1',
-                  background: (filterActivity !== 'ALL' || filterStatus !== 'ALL') ? '#eff6ff' : '#ffffff',
+                  background: 'none',
+                  border: 'none',
+                  padding: 6,
+                  cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  cursor: 'pointer',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                  transition: 'all 0.15s ease',
-                  position: 'relative'
+                  borderRadius: 6,
+                  transition: 'opacity 0.15s ease',
+                  position: 'relative',
+                  outline: 'none'
                 }}
-                onMouseEnter={e => {
-                  if (filterActivity === 'ALL' && filterStatus === 'ALL') {
-                    e.currentTarget.style.background = '#f8fafc';
-                    e.currentTarget.style.borderColor = '#94a3b8';
-                  }
-                }}
-                onMouseLeave={e => {
-                  if (filterActivity === 'ALL' && filterStatus === 'ALL') {
-                    e.currentTarget.style.background = '#ffffff';
-                    e.currentTarget.style.borderColor = '#cbd5e1';
-                  }
-                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '0.75'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
               >
-                <Filter size={18} color={(filterActivity !== 'ALL' || filterStatus !== 'ALL') ? 'var(--accent)' : '#64748b'} style={{ strokeWidth: 1.8 }} />
+                <Filter size={19} color={activeFieldFilterCount > 0 ? 'var(--accent)' : '#64748b'} style={{ strokeWidth: 1.8 }} />
                 
-                {/* Active filter dot indicator */}
-                {(filterActivity !== 'ALL' || filterStatus !== 'ALL') && (
+                {activeFieldFilterCount > 0 && (
                   <span style={{
                     position: 'absolute',
-                    top: -3,
-                    right: -3,
-                    width: 9,
-                    height: 9,
+                    top: 2,
+                    right: 2,
+                    width: 7,
+                    height: 7,
                     borderRadius: '50%',
-                    background: 'var(--accent)',
-                    border: '1.5px solid #ffffff'
+                    background: 'var(--accent)'
                   }} />
                 )}
               </button>
 
-              {/* Popover Options Menu */}
+              {/* All-Fields Popover Options Menu */}
               {showFilterPopover && (
                 <div style={{
                   position: 'absolute',
                   top: 46,
                   left: 0,
                   zIndex: 100,
-                  width: 250,
+                  width: 540,
+                  maxHeight: '75vh',
+                  overflowY: 'auto',
                   background: '#ffffff',
-                  borderRadius: 12,
-                  border: '1px solid #e2e8f0',
-                  boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.05)',
-                  padding: 16,
+                  borderRadius: 14,
+                  border: '1px solid #cbd5e1',
+                  boxShadow: '0 14px 35px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.05)',
+                  padding: 18,
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 14
+                  gap: 16
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9', paddingBottom: 8 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Filter size={14} color="#64748b" /> Filter
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: 10 }}>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Filter size={16} color="var(--accent)" /> Filter {activeFieldFilterCount > 0 ? `(${activeFieldFilterCount} active)` : ''}
                     </span>
-                    {(filterActivity !== 'ALL' || filterStatus !== 'ALL') && (
+                    {activeFieldFilterCount > 0 && (
                       <button
-                        onClick={() => { setFilterActivity('ALL'); setFilterStatus('ALL'); }}
-                        style={{ border: 'none', background: 'none', color: 'var(--accent)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                        onClick={handleResetFieldFilters}
+                        style={{ border: 'none', background: '#fef2f2', color: '#b91c1c', fontSize: 12, fontWeight: 700, borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}
                       >
-                        Reset
+                        Reset All Filters
                       </button>
                     )}
                   </div>
 
-                  {/* Filter by Activity Name */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Activity Name</label>
-                    <select
-                      value={filterActivity}
-                      onChange={(e) => setFilterActivity(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '7px 10px',
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        borderRadius: 8,
-                        border: '1.5px solid #cbd5e1',
-                        background: '#ffffff',
-                        color: '#0f172a',
-                        outline: 'none',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <option value="ALL">All Activities</option>
-                      <option value="Forum Quora">Forum Quora</option>
-                      <option value="Forum Reddit">Forum Reddit</option>
-                      <option value="Paid Guest Post">Paid Guest Post</option>
-                      <option value="Business Listing">Business Listing</option>
-                      <option value="Brand Mention">Brand Mention</option>
-                    </select>
+                  {/* Scheduled Date Range Filter (Excludes Sat/Sun) */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, background: '#f8fafc', padding: 12, borderRadius: 10, border: '1px solid #e2e8f0' }}>
+                    <label style={{ fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Calendar size={13} color="var(--accent)" /> Scheduled Date Range
+                    </label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      <div>
+                        <span style={{ fontSize: 11, color: '#64748b', display: 'block', marginBottom: 3 }}>From</span>
+                        <input
+                          type="date"
+                          value={filterStartDate}
+                          onChange={(e) => setFilterStartDate(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '6px 10px',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            borderRadius: 8,
+                            border: filterStartDate ? '1.5px solid var(--accent)' : '1px solid #cbd5e1',
+                            background: '#ffffff',
+                            color: '#0f172a',
+                            outline: 'none'
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <span style={{ fontSize: 11, color: '#64748b', display: 'block', marginBottom: 3 }}>To</span>
+                        <input
+                          type="date"
+                          value={filterEndDate}
+                          onChange={(e) => setFilterEndDate(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '6px 10px',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            borderRadius: 8,
+                            border: filterEndDate ? '1.5px solid var(--accent)' : '1px solid #cbd5e1',
+                            background: '#ffffff',
+                            color: '#0f172a',
+                            outline: 'none'
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Filter by Status */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Status</label>
-                    <select
-                      value={filterStatus}
-                      onChange={(e) => setFilterStatus(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '7px 10px',
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        borderRadius: 8,
-                        border: '1.5px solid #cbd5e1',
-                        background: '#ffffff',
-                        color: '#0f172a',
-                        outline: 'none',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <option value="ALL">All Statuses</option>
-                      <option value="Audited-LQ">Audited-LQ</option>
-                      <option value="Audited-Indexed">Audited-Indexed</option>
-                      <option value="Published-Indexed">Published-Indexed</option>
-                      <option value="Published Non-Indexed">Published Non-Indexed</option>
-                    </select>
+                  {/* 2-Column Grid for All Field Filters */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 }}>
+                    {ALL_FIELD_CONFIGS.map(f => {
+                      const opts = fieldOptions[f.key] || [];
+                      const currVal = fieldFilters[f.key] || '';
+
+                      return (
+                        <div key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                          <label style={{ fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                            {f.label}
+                          </label>
+                          <select
+                            value={currVal}
+                            onChange={(e) => setFieldFilters(prev => ({ ...prev, [f.key]: e.target.value }))}
+                            style={{
+                              width: '100%',
+                              padding: '7px 10px',
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              borderRadius: 8,
+                              border: currVal ? '1.5px solid var(--accent)' : '1px solid #cbd5e1',
+                              background: currVal ? '#eff6ff' : '#ffffff',
+                              color: currVal ? '#1d4ed8' : '#0f172a',
+                              outline: 'none',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <option value="">All {f.label}s ({opts.length})</option>
+                            {opts.map(opt => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1266,7 +1466,7 @@ export default function OffPageSchedulerPage() {
                       </td>
                       <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
                         <select
-                          value={['Audited-LQ', 'Audited-Indexed', 'Published-Indexed', 'Published Non-Indexed'].includes(row.status) ? row.status : 'Published-Indexed'}
+                          value={['Audited-LQ', 'Audited-Indexed', 'Audited-Verified', 'Published-Indexed', 'Published Non-Indexed'].includes(row.status) ? row.status : 'Published-Indexed'}
                           onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'status', e.target.value)}
                           style={{
                             padding: '5px 10px',
@@ -1274,18 +1474,69 @@ export default function OffPageSchedulerPage() {
                             fontWeight: 700,
                             borderRadius: 6,
                             border: '1px solid #cbd5e1',
-                            background: row.status === 'Published-Indexed' ? '#ecfdf5' : row.status === 'Audited-Indexed' ? '#eff6ff' : row.status === 'Audited-LQ' ? '#fef2f2' : '#fff7ed',
-                            color: row.status === 'Published-Indexed' ? '#047857' : row.status === 'Audited-Indexed' ? '#1d4ed8' : row.status === 'Audited-LQ' ? '#b91c1c' : '#c2410c',
+                            background: row.status === 'Audited-Verified' ? '#dcfce7' : row.status === 'Published-Indexed' ? '#ecfdf5' : row.status === 'Audited-Indexed' ? '#eff6ff' : row.status === 'Audited-LQ' ? '#fef2f2' : '#fff7ed',
+                            color: row.status === 'Audited-Verified' ? '#15803d' : row.status === 'Published-Indexed' ? '#047857' : row.status === 'Audited-Indexed' ? '#1d4ed8' : row.status === 'Audited-LQ' ? '#b91c1c' : '#c2410c',
                             outline: 'none',
                             cursor: 'pointer'
                           }}
                         >
-                          {['Audited-LQ', 'Audited-Indexed', 'Published-Indexed', 'Published Non-Indexed'].map(opt => (
+                          {['Audited-LQ', 'Audited-Indexed', 'Audited-Verified', 'Published-Indexed', 'Published Non-Indexed'].map(opt => (
                             <option key={opt} value={opt} style={{ background: '#fff', color: '#0f172a', fontWeight: 500 }}>{opt}</option>
                           ))}
                         </select>
                       </td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.publisher || 'N/A'}</td>
+                      <td style={{ padding: '12px 16px', fontSize: 13, whiteSpace: 'nowrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                            {row.publisher || 'Unassigned'}
+                          </span>
+                          {row.status === 'Audited-Verified' ? (
+                            <span style={{ 
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              gap: 4, 
+                              padding: '3px 8px', 
+                              borderRadius: 6, 
+                              fontSize: 11.5, 
+                              fontWeight: 700, 
+                              background: '#dcfce7', 
+                              color: '#15803d',
+                              border: '1px solid #bbf7d0'
+                            }}>
+                              <CheckCircle size={13} color="#15803d" /> Verified
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                handleRowChange(selectedDataset.id, rIdx, 'status', 'Audited-Verified');
+                              }}
+                              style={{
+                                padding: '4px 10px',
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                borderRadius: 6,
+                                border: '1px solid #cbd5e1',
+                                background: '#ffffff',
+                                color: '#2563eb',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4
+                              }}
+                              onMouseEnter={e => {
+                                e.currentTarget.style.background = '#eff6ff';
+                                e.currentTarget.style.borderColor = '#93c5fd';
+                              }}
+                              onMouseLeave={e => {
+                                e.currentTarget.style.background = '#ffffff';
+                                e.currentTarget.style.borderColor = '#cbd5e1';
+                              }}
+                            >
+                              Verify
+                            </button>
+                          )}
+                        </div>
+                      </td>
                       <td style={{ padding: '14px 16px', fontSize: 13.5, color: '#2563eb', whiteSpace: 'nowrap' }} title={row.pgSiteDomain}>
                         {row.pgSiteDomain ? (
                           <a href={formatUrl(row.pgSiteDomain)} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
@@ -1400,15 +1651,42 @@ export default function OffPageSchedulerPage() {
           </p>
         </div>
         
-        {activeTab === 'import' ? (
-          <Btn variant="accent" onClick={() => { setImportMsg({ type: '', text: '' }); setImportFile(null); setShowImportModal(true); }}>
-            <UploadCloud size={16} /> Import Data
-          </Btn>
-        ) : (
-          <Btn variant="accent" onClick={() => { setSchedMsg({ type: '', text: '' }); setScheduleDate(''); setShowScheduleModal(true); }}>
-            <Calendar size={16} /> Schedule Activity
-          </Btn>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            onClick={handleRunAudit}
+            disabled={auditAllocating}
+            style={{
+              background: '#ffffff',
+              color: '#0f172a',
+              border: '1.5px solid #cbd5e1',
+              borderRadius: 10,
+              padding: '10px 18px',
+              fontSize: 13.5,
+              fontWeight: 700,
+              cursor: auditAllocating ? 'wait' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+            onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
+          >
+            <ShieldCheck size={16} color="var(--accent)" />
+            {auditAllocating ? 'Allocating...' : 'Run Audit Allocation'}
+          </button>
+
+          {activeTab === 'import' ? (
+            <Btn variant="accent" onClick={() => { setImportMsg({ type: '', text: '' }); setImportFile(null); setShowImportModal(true); }}>
+              <UploadCloud size={16} /> Import Data
+            </Btn>
+          ) : (
+            <Btn variant="accent" onClick={() => { setSchedMsg({ type: '', text: '' }); setScheduleDate(''); setShowScheduleModal(true); }}>
+              <Calendar size={16} /> Schedule Activity
+            </Btn>
+          )}
+        </div>
       </div>
 
       {/* Modern Tabs Navigation */}
@@ -1466,78 +1744,157 @@ export default function OffPageSchedulerPage() {
           boxShadow: 'var(--shadow-sm)',
           padding: 24
         }}>
+          {/* Global Associate Resource Breakdown Card in Main View */}
+          {(() => {
+            const globalCounts = {};
+            let totalRes = 0;
+            (imports || []).forEach(imp => {
+              (imp.rowsData || []).forEach(r => {
+                totalRes += 1;
+                const pub = r.publisher && r.publisher.trim() !== '' ? r.publisher : 'Unassigned';
+                globalCounts[pub] = (globalCounts[pub] || 0) + 1;
+              });
+            });
+            const globalEntries = Object.entries(globalCounts);
+            if (globalEntries.length === 0) return null;
+            const assignedCount = globalEntries.filter(([n]) => n !== 'Unassigned').length;
+
+            return (
+              <div style={{
+                background: '#ffffff',
+                border: '1.5px solid #e2e8f0',
+                borderRadius: 14,
+                padding: '16px 20px',
+                marginBottom: 20,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 16,
+                flexWrap: 'wrap',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.03)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {/* <div style={{ 
+                    width: 42, 
+                    height: 42, 
+                    borderRadius: 12, 
+                    background: '#eff6ff', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    border: '1px solid #bfdbfe'
+                  }}>
+                    <Users size={20} color="#2563eb" />
+                  </div> */}
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: 14.5, fontWeight: 800, color: 'var(--text-primary)' }}>
+                      
+                    </h4>
+                    <p style={{ margin: '2px 0 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                      <strong>{assignedCount} Associate(s)</strong> assigned across <strong>{totalRes}</strong> total resources
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  {globalEntries.map(([associateName, count]) => (
+                    <div key={associateName} style={{
+                      background: '#f8fafc',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 10,
+                      padding: '7px 14px',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: '#0f172a',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+                    }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: associateName === 'Unassigned' ? '#94a3b8' : '#2563eb' }} />
+                      <span>{associateName}:</span>
+                      <span style={{ 
+                        background: associateName === 'Unassigned' ? '#f1f5f9' : '#dbeafe', 
+                        color: associateName === 'Unassigned' ? '#475569' : '#1e40af', 
+                        padding: '3px 9px', 
+                        borderRadius: 6, 
+                        fontSize: 12, 
+                        fontWeight: 800 
+                      }}>
+                        {count} resource{count !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
           {imports.length === 0 ? (
             <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
               No spreadsheets imported yet. Click <strong>+ Import Data</strong> to get started.
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                 <thead>
                   <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
-                    <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Dataset Filename</th>
-                    <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Associated Project</th>
-                    <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 120 }}>Records</th>
-                    <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 180 }}>Import Date</th>
-                    <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 120 }}>Status</th>
-                    <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 100 }}>Action</th>
+                    <th style={{ padding: '14px 18px', textAlign: 'left', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', width: '25%' }}>Associated Project</th>
+                    <th style={{ padding: '14px 18px', textAlign: 'left', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', width: '20%' }}>Records</th>
+                    <th style={{ padding: '14px 18px', textAlign: 'left', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', width: '30%' }}>Dataset Filename</th>
+                    <th style={{ padding: '14px 18px', textAlign: 'left', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', width: '20%' }}>Import Date</th>
+                    <th style={{ padding: '14px 18px', textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', width: '5%' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {imports.map(imp => (
-                    <tr key={imp.id} style={{ borderBottom: '1px solid var(--border)' }}
-                      onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-primary)', fontWeight: 500 }}>
+                    <tr 
+                      key={imp.id} 
+                      onClick={() => setSelectedDataset(imp)}
+                      style={{ 
+                        borderBottom: '1px solid var(--border)', 
+                        cursor: 'pointer',
+                        transition: 'background 0.15s ease' 
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <td style={{ padding: '14px 18px', fontSize: 13.5, color: 'var(--text-primary)', fontWeight: 600 }}>
+                        {imp.project}
+                      </td>
+                      <td style={{ padding: '14px 18px', fontSize: 13.5, color: 'var(--text-secondary)' }}>{imp.rows} rows</td>
+                      <td style={{ padding: '14px 18px', fontSize: 13.5, color: 'var(--accent)', fontWeight: 600 }}>
+                        {imp.filename}
+                      </td>
+                      <td style={{ padding: '14px 18px', fontSize: 13.5, color: 'var(--text-muted)' }}>{imp.date}</td>
+                      <td style={{ padding: '14px 18px', textAlign: 'right' }}>
                         <button
-                          onClick={() => setSelectedDataset(imp)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteConfirmImport(imp);
+                          }}
+                          title="Delete Dataset"
                           style={{
                             background: 'none',
                             border: 'none',
-                            color: 'var(--accent)',
-                            fontWeight: 600,
+                            color: '#ef4444',
                             cursor: 'pointer',
-                            padding: 0,
-                            textAlign: 'left'
+                            padding: '6px',
+                            borderRadius: 6,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'all 0.15s ease'
                           }}
-                          onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
-                          onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
-                        >
-                          {imp.filename}
-                        </button>
-                      </td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)' }}>{imp.project}</td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)' }}>{imp.rows} rows</td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-muted)' }}>{imp.date}</td>
-                      <td style={{ padding: '14px 16px', fontSize: 13 }}>
-                        <span style={{
-                          background: 'var(--green-bg)',
-                          color: 'var(--green)',
-                          padding: '3px 8px',
-                          borderRadius: 6,
-                          fontSize: 11.5,
-                          fontWeight: 600
-                        }}>
-                          {imp.status}
-                        </span>
-                      </td>
-                      <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                        <button
-                          onClick={() => handleDeleteImport(imp.id)}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: '#dc2626',
-                            fontSize: 12.5,
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            padding: '4px 8px',
-                            borderRadius: 4
+                          onMouseEnter={e => {
+                            e.currentTarget.style.background = '#fef2f2';
+                            e.currentTarget.style.color = '#dc2626';
                           }}
-                          onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
-                          onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                          onMouseLeave={e => {
+                            e.currentTarget.style.background = 'none';
+                            e.currentTarget.style.color = '#ef4444';
+                          }}
                         >
-                          Delete
+                          <Trash2 size={16} />
                         </button>
                       </td>
                     </tr>
@@ -1968,6 +2325,66 @@ export default function OffPageSchedulerPage() {
               ))}
             </div>
           </div>
+        </div>
+      </Modal>
+
+      {/* Delete Dataset Confirmation Modal matching screenshot */}
+      <Modal
+        open={!!deleteConfirmImport}
+        onClose={() => setDeleteConfirmImport(null)}
+        title="Confirm delete"
+        footer={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', marginTop: 8 }}>
+            <button
+              onClick={async () => {
+                if (deleteConfirmImport) {
+                  await handleDeleteImport(deleteConfirmImport.id);
+                  setDeleteConfirmImport(null);
+                }
+              }}
+              style={{
+                flex: 1,
+                padding: '11px 20px',
+                fontSize: 14,
+                fontWeight: 700,
+                color: '#ffffff',
+                background: '#dc2626',
+                border: 'none',
+                borderRadius: 12,
+                cursor: 'pointer',
+                boxShadow: '0 2px 6px rgba(220, 38, 38, 0.25)',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = '#b91c1c'}
+              onMouseLeave={e => e.currentTarget.style.background = '#dc2626'}
+            >
+              Delete
+            </button>
+            <button
+              onClick={() => setDeleteConfirmImport(null)}
+              style={{
+                padding: '11px 24px',
+                fontSize: 14,
+                fontWeight: 700,
+                color: '#0f172a',
+                background: '#ffffff',
+                border: '1px solid #cbd5e1',
+                borderRadius: 12,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+              onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
+            >
+              Cancel
+            </button>
+          </div>
+        }
+      >
+        <div style={{ padding: '8px 0 16px 0' }}>
+          <p style={{ fontSize: 14.5, color: '#64748b', margin: 0, lineHeight: 1.6 }}>
+            Are you sure you want to delete <strong>this project's Monthly Operations data (records, scheduled activities)</strong> for <strong>{deleteConfirmImport?.project}</strong>? This action cannot be undone.
+          </p>
         </div>
       </Modal>
     </div>

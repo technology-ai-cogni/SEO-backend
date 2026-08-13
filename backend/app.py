@@ -474,6 +474,16 @@ def update_monthly_import_endpoint(import_id: int, payload: UpdateMonthlyImportR
     )
     return {"status": "success"}
 
+class AuditAllocateRequest(BaseModel):
+    dataset_id: Optional[int] = None
+    days: Optional[int] = 22
+
+@app.post("/monthly-operations/audit-allocate")
+def audit_allocate_endpoint(payload: Optional[AuditAllocateRequest] = None):
+    dataset_id = payload.dataset_id if payload else None
+    days = payload.days if payload and payload.days else 22
+    return db.run_monthly_operations_audit_allocation(dataset_id=dataset_id, days_count=days)
+
 @app.delete("/monthly-operations/imports/{import_id}")
 def delete_monthly_import_endpoint(import_id: int):
     db.delete_monthly_import(import_id)

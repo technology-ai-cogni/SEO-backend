@@ -2633,6 +2633,141 @@ def delete_scheduled_activity(schedule_id):
         conn.execute(text("DELETE FROM scheduled_activities WHERE id = :id"), {"id": schedule_id})
 
 
+def run_monthly_operations_audit_allocation(dataset_id=None, days_count=22):
+    with engine.begin() as conn:
+        # 1. Active projects from domains table
+        active_domains = conn.execute(text("""
+            SELECT DISTINCT project_name FROM domains 
+            WHERE is_active = TRUE AND (status IS NULL OR LOWER(status) = 'active')
+        """)).fetchall()
+        active_project_names = [r[0] for r in active_domains if r[0]]
+
+        if not active_project_names:
+            mo_projects = conn.execute(text("SELECT DISTINCT project_name FROM monthly_operations")).fetchall()
+            active_project_names = [r[0] for r in mo_projects if r[0]]
+
+        # 2. Associates from users table using role column (e.g. INTERNAL_ASSOCIATE, INTERNAL_SR_ASSOCIATE, etc.)
+        associates_rows = conn.execute(text("""
+            SELECT name FROM users 
+            WHERE (
+                LOWER(role) LIKE '%associate%' OR 
+                UPPER(role) IN ('INTERNAL_ASSOCIATE', 'INTERNAL_SR_ASSOCIATE', 'ASSOCIATE', 'SR_ASSOCIATE')
+            )
+            AND (status IS NULL OR LOWER(status) = 'active')
+            ORDER BY id ASC
+        """)).fetchall()
+        
+        raw_associates = [r[0] for r in associates_rows if r[0]]
+        associates = []
+        for name in raw_associates:
+            if name not in associates:
+                associates.append(name)
+
+        if not associates:
+            fallback_users = conn.execute(text("""
+                SELECT name FROM users WHERE status IS NULL OR LOWER(status) = 'active' ORDER BY id ASC
+            """)).fetchall()
+            raw_fallback = [r[0] for r in fallback_users if r[0]]
+            for name in raw_fallback:
+                if name not in associates:
+                    associates.append(name)
+            
+        if not associates:
+            associates = ["Associate Sarah", "Associate David", "Associate Alex"]
+
+        # 3. Target rows in monthly_operations
+        if dataset_id:
+            target = conn.execute(text("SELECT project_name FROM monthly_operations WHERE id = :id LIMIT 1"), {"id": dataset_id}).fetchone()
+            if target:
+                rows_to_alloc = conn.execute(text("""
+                    SELECT id FROM monthly_operations 
+                    WHERE LOWER(TRIM(project_name)) = LOWER(TRIM(:p))
+                    ORDER BY id ASC
+                """), {"p": target[0]}).fetchall()
+            else:
+                rows_to_alloc = conn.execute(text("SELECT id FROM monthly_operations ORDER BY id ASC")).fetchall()
+        else:
+            rows_to_alloc = conn.execute(text("SELECT id FROM monthly_operations ORDER BY id ASC")).fetchall()
+
+        row_ids = [r[0] for r in rows_to_alloc]
+        if not row_ids:
+            return {
+                "status": "success",
+                "message": "No records found to audit & allocate.",
+                "allocated_rows": 0,
+                "active_projects": len(active_project_names),
+                "associates_count": len(associates)
+            }
+
+        # 4. Generate 22 work days starting from today
+        from datetime import datetime, timedelta
+        work_days = []
+        curr = datetime.now()
+        while len(work_days) < days_count:
+            if curr.weekday() < 5:
+                work_days.append(curr.strftime("%Y-%m-%d"))
+            curr += timedelta(days=1)
+
+        # 5. Distribute equal associates among resources & projects over 22 days
+        num_associates = len(associates)
+        total_resources = len(row_ids)
+
+        base_count = total_resources // num_associates
+        remainder = total_resources % num_associates
+
+        # Build contiguous equal allocation map per associate
+        assoc_allocation = {}
+        curr_idx = 0
+        for a_idx, assoc_name in enumerate(associates):
+            alloc_len = base_count + (1 if a_idx < remainder else 0)
+            assoc_rows = row_ids[curr_idx : curr_idx + alloc_len]
+            assoc_allocation[assoc_name] = assoc_rows
+            curr_idx += alloc_len
+
+        updates = []
+        for assoc_name, assigned_rows in assoc_allocation.items():
+            for r_idx, row_id in enumerate(assigned_rows):
+                day_idx = r_idx % days_count
+                assigned_date = work_days[day_idx]
+                updates.append({
+                    "id": row_id,
+                    "publisher": assoc_name,
+                    "scheduled_date": assigned_date
+                })
+
+        # Batch UPDATE publisher and scheduled_date
+        chunk_size = 200
+        for i in range(0, len(updates), chunk_size):
+            chunk = updates[i:i + chunk_size]
+            params = {}
+            val_parts = []
+            for c_idx, item in enumerate(chunk):
+                p = f"_{c_idx}"
+                params[f"id{p}"] = item["id"]
+                params[f"publisher{p}"] = item["publisher"]
+                params[f"date{p}"] = item["scheduled_date"]
+                val_parts.append(f"(CAST(:id{p} AS bigint), :publisher{p}, :date{p})")
+            
+            sql = f"""
+                UPDATE monthly_operations AS m SET
+                    publisher = v.publisher,
+                    scheduled_date = v.scheduled_date,
+                    updated_at = now()
+                FROM (VALUES {','.join(val_parts)}) AS v(id, publisher, scheduled_date)
+                WHERE m.id = v.id
+            """
+            conn.execute(text(sql), params)
+
+        return {
+            "status": "success",
+            "message": f"Successfully allocated {len(row_ids)} resources across {len(associates)} Associates over 22 work days.",
+            "allocated_rows": len(row_ids),
+            "active_projects": len(active_project_names),
+            "associates_count": len(associates),
+            "associates": associates
+        }
+
+
 if __name__ == "__main__":
     # Create/update the shared tables (run from the `backend/` directory):
     #   python -m core.db
