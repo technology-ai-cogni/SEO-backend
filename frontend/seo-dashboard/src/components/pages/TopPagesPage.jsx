@@ -13,6 +13,23 @@ export default function TopPagesPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [intentFilter, setIntentFilter] = useState('all'); // 'all' | 'informational' | 'commercial'
   const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'landing' | 'blog'
+  // Region and date state
+  const [selectedRegion, setSelectedRegion] = useState('IN');
+  const [countryMenuOpen, setCountryMenuOpen] = useState(false);
+  const [countrySearch, setCountrySearch] = useState('');
+  const [selectedDate, setSelectedDate] = useState('2026-08-13');
+
+  const COUNTRY_OPTIONS = [
+    { code: 'IN', name: 'India' },
+    { code: 'US', name: 'United States' },
+    { code: 'GB', name: 'United Kingdom' },
+    { code: 'CA', name: 'Canada' },
+    { code: 'AU', name: 'Australia' },
+    { code: 'AE', name: 'UAE' },
+    { code: 'SG', name: 'Singapore' },
+    { code: 'DE', name: 'Germany' },
+    { code: 'FR', name: 'France' }
+  ];
 
   // Load project list on mount
   useEffect(() => {
@@ -157,92 +174,337 @@ export default function TopPagesPage() {
     ? (totalKeywordPosition / numberOfKeywords).toFixed(1)
     : 0;
 
+  const [activeTooltip, setActiveTooltip] = useState(null); // null | 'top1' | 'top3' | 'top10'
+
+  // Calculate Top Pages (Top 1, Top 3, Top 10) count & list of unique URLs using best (upper/lowest numeric) rank
+  const bestPageRankMap = {};
+  const bestPageUrlMap = {};
+
+  (projectKeywords || []).forEach(k => {
+    const rawUrl = (k.landingPage || k.url || k.page_url || k.landing_page || k.page || '').trim();
+    if (!rawUrl) return;
+    const cleanUrl = rawUrl.toLowerCase();
+
+    const rawRank = k.rank ?? k.position ?? k.rankVal ?? k.rank_meta?.rank;
+    const rankVal = Number(rawRank);
+    if (rawRank != null && !isNaN(rankVal) && rankVal > 0 && rankVal <= 10) {
+      if (bestPageRankMap[cleanUrl] == null || rankVal < bestPageRankMap[cleanUrl]) {
+        bestPageRankMap[cleanUrl] = rankVal;
+        bestPageUrlMap[cleanUrl] = rawUrl;
+      }
+    }
+  });
+
+  (pagesData || []).forEach(p => {
+    const cleanUrl = (p.url || '').trim().toLowerCase();
+    if (!cleanUrl) return;
+
+    (p.ranks || []).forEach(r => {
+      if (typeof r === 'number' && r > 0 && r <= 10) {
+        if (bestPageRankMap[cleanUrl] == null || r < bestPageRankMap[cleanUrl]) {
+          bestPageRankMap[cleanUrl] = r;
+          bestPageUrlMap[cleanUrl] = p.url;
+        }
+      }
+    });
+  });
+
+  const top1PagesList = [];
+  const top3PagesList = [];
+  const top10PagesList = [];
+
+  Object.entries(bestPageRankMap).forEach(([cleanUrl, rank]) => {
+    const item = { url: bestPageUrlMap[cleanUrl] || cleanUrl, rank };
+    if (rank === 1) {
+      top1PagesList.push(item);
+    } else if (rank >= 2 && rank <= 3) {
+      top3PagesList.push(item);
+    } else if (rank >= 4 && rank <= 10) {
+      top10PagesList.push(item);
+    }
+  });
+
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: '#f8fafc', minHeight: '100vh' }}>
       
-      {/* ─── HEADER BAR: Title & Domain Selector ─────────────────────────────── */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: 16,
-        background: '#ffffff',
-        padding: '16px 20px',
-        borderRadius: 12,
-        border: '1px solid #e2e8f0',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-      }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <FileText size={20} color="#7c3aed" />
-            <h1 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: 0 }}>Top Pages</h1>
-          </div>
-          <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0 0' }}>
-            Pages tracked under Project Setup for {activeProject?.domain || activeProject?.name || 'Selected Domain'}
-          </p>
-        </div>
+      {/* ─── HEADER BAR: Dashboard: domain.com v [Link] 🇮🇳 India v 📅 Date ───── */}
+      {(() => {
+        const currentDomainDisplay = activeProject?.domain || activeProject?.name || 'Select Domain';
+        const activeCountry = COUNTRY_OPTIONS.find(c => c.code === selectedRegion) || COUNTRY_OPTIONS[0];
+        const filteredCountries = COUNTRY_OPTIONS.filter(c =>
+          c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
+          c.code.toLowerCase().includes(countrySearch.toLowerCase())
+        );
 
-        {/* Project Selector Dropdown */}
-        <div style={{ position: 'relative' }}>
-          <button
-            onClick={() => setProjectMenuOpen(!projectMenuOpen)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: '#f1f5f9',
-              border: '1px solid #cbd5e1',
-              borderRadius: 8,
-              padding: '8px 14px',
-              fontSize: 13,
-              fontWeight: 700,
-              color: '#0f172a',
-              cursor: 'pointer'
-            }}
-          >
-            <span>Domain: <strong>{activeProject?.domain || activeProject?.name || 'Select Domain'}</strong></span>
-            <ChevronDown size={14} />
-          </button>
+        return (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 16,
+            background: '#ffffff',
+            padding: '16px 20px',
+            borderRadius: 12,
+            border: '1px solid #e2e8f0',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+          }}>
+            {/* Left Side: Dashboard: domain.com v */}
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <h1 style={{
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 8,
+                fontSize: 20,
+                fontWeight: 800,
+                color: '#0f172a',
+                margin: 0
+              }}>
+                <span>Project:</span>
+                <div style={{ position: 'relative', display: 'inline-block' }}>
+                  <button
+                    onClick={() => setProjectMenuOpen(!projectMenuOpen)}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      padding: 0,
+                      fontSize: 20,
+                      fontWeight: 800,
+                      color: '#7c3aed',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    {currentDomainDisplay}
+                    <ChevronDown size={18} style={{ transform: projectMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+                  </button>
 
-          {projectMenuOpen && (
+                  {projectMenuOpen && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      marginTop: 6,
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 8,
+                      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)',
+                      zIndex: 1000,
+                      minWidth: 200,
+                      padding: '4px 0',
+                      display: 'flex',
+                      flexDirection: 'column'
+                    }}>
+                      {projects.map(p => (
+                        <button
+                          key={p.slug}
+                          onClick={() => handleSelectProject(p)}
+                          style={{
+                            padding: '8px 14px',
+                            fontSize: 13.5,
+                            fontWeight: activeProject?.slug === p.slug ? 700 : 500,
+                            color: activeProject?.slug === p.slug ? '#7c3aed' : '#1e293b',
+                            backgroundColor: activeProject?.slug === p.slug ? '#f5f3ff' : 'transparent',
+                            border: 'none',
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            transition: 'background 0.12s'
+                          }}
+                        >
+                          {p.domain || p.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <a
+                  href={`https://${currentDomainDisplay}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: '#7c3aed', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
+                >
+                  <ExternalLink size={16} />
+                </a>
+              </h1>
+            </div>
+
+            {/* Right Side: Country Selector & Date Picker */}
             <div style={{
-              position: 'absolute',
-              right: 0,
-              top: '110%',
-              background: '#ffffff',
-              border: '1px solid #e2e8f0',
-              borderRadius: 8,
-              boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
-              zIndex: 100,
-              minWidth: 200,
-              overflow: 'hidden'
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 12,
+              fontSize: 13,
+              color: '#64748b',
+              fontWeight: 500
             }}>
-              {projects.map(p => (
-                <div
-                  key={p.slug}
-                  onClick={() => handleSelectProject(p)}
+              {/* Country Selector */}
+              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                <button
+                  onClick={() => {
+                    setCountryMenuOpen(!countryMenuOpen);
+                    setCountrySearch('');
+                  }}
                   style={{
-                    padding: '10px 14px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
                     fontSize: 13,
-                    fontWeight: activeProject?.slug === p.slug ? 700 : 500,
-                    color: activeProject?.slug === p.slug ? '#7c3aed' : '#334155',
-                    background: activeProject?.slug === p.slug ? '#f5f3ff' : 'transparent',
-                    cursor: 'pointer'
+                    fontWeight: 600,
+                    color: '#2563eb',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    whiteSpace: 'nowrap'
                   }}
                 >
-                  {p.domain || p.name}
-                </div>
-              ))}
+                  <img
+                    src={`https://flagcdn.com/16x12/${activeCountry.code.toLowerCase()}.png`}
+                    width="16"
+                    height="12"
+                    alt={activeCountry.name}
+                    style={{ borderRadius: 1.5, objectFit: 'cover' }}
+                  />
+                  <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>{activeCountry.name}</span>
+                  <ChevronDown size={14} style={{ color: '#2563eb', transform: countryMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+                </button>
+
+                {countryMenuOpen && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    right: 0,
+                    marginTop: 6,
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 10,
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
+                    zIndex: 1000,
+                    width: 220,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden'
+                  }}>
+                    <div style={{ padding: '8px 8px 6px 8px', borderBottom: '1px solid #f1f5f9' }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        background: '#ffffff',
+                        border: '1.5px solid #818cf8',
+                        borderRadius: 8,
+                        padding: '4px 8px'
+                      }}>
+                        <Search size={14} style={{ color: '#64748b' }} />
+                        <input
+                          type="text"
+                          placeholder="Search"
+                          value={countrySearch}
+                          onChange={e => setCountrySearch(e.target.value)}
+                          autoFocus
+                          style={{
+                            border: 'none',
+                            outline: 'none',
+                            background: 'transparent',
+                            fontSize: 12.5,
+                            fontWeight: 500,
+                            color: '#0f172a',
+                            width: '100%'
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ overflowY: 'auto', maxHeight: 210, padding: '4px 0' }}>
+                      {filteredCountries.map((c) => (
+                        <button
+                          key={c.code}
+                          onClick={() => {
+                            setSelectedRegion(c.code);
+                            setCountryMenuOpen(false);
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '7px 12px',
+                            fontSize: 13,
+                            fontWeight: c.code === selectedRegion ? 700 : 500,
+                            color: '#0f172a',
+                            backgroundColor: c.code === selectedRegion ? '#eff6ff' : 'transparent',
+                            border: 'none',
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10
+                          }}
+                        >
+                          <img
+                            src={`https://flagcdn.com/16x12/${c.code.toLowerCase()}.png`}
+                            width="16"
+                            height="12"
+                            alt={c.name}
+                            style={{ borderRadius: 1.5, objectFit: 'cover' }}
+                          />
+                          <span>{c.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Date Picker Button */}
+              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                <button
+                  onClick={() => {
+                    const hiddenInput = document.getElementById('tp_header_date_picker');
+                    if (hiddenInput) hiddenInput.showPicker ? hiddenInput.showPicker() : hiddenInput.click();
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: '#2563eb',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  <span>📅</span>
+                  <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>
+                    {new Date(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                </button>
+                <input
+                  id="tp_header_date_picker"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 0, height: 0 }}
+                />
+              </div>
             </div>
-          )}
-        </div>
-      </div>
+          </div>
+        );
+      })()}
 
       {/* ─── SUMMARY CARDS ─────────────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
         
-        {/* CARD 1: Avg. Traffic */}
+        {/* CARD 1: Traffic */}
         <div style={{
           background: '#ffffff',
           border: '1px solid #e2e8f0',
@@ -253,11 +515,11 @@ export default function TopPagesPage() {
           flexDirection: 'column',
           justifyContent: 'center'
         }}>
-          <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>Avg. Traffic</div>
+          <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>Traffic</div>
           <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>{avgTraffic || '0'}</div>
         </div>
 
-        {/* CARD 2: Top Pages in Top 1, Top 3, Top 10 (Column / Row-wise Layout) */}
+        {/* CARD 2: Top Pages in Top 1, Top 3, Top 10 with Hover Popovers */}
         <div style={{
           background: '#ffffff',
           border: '1px solid #e2e8f0',
@@ -272,18 +534,142 @@ export default function TopPagesPage() {
             Top Pages
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, alignItems: 'center' }}>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
+            
+            {/* Top 1 */}
+            <div
+              onMouseEnter={() => setActiveTooltip('top1')}
+              onMouseLeave={() => setActiveTooltip(null)}
+              style={{ display: 'flex', flexDirection: 'column', position: 'relative', cursor: 'pointer' }}
+            >
               <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Top 1</span>
-              <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>0</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>{top1PagesList.length}</span>
+
+              {activeTooltip === 'top1' && (
+                <div style={{
+                  position: 'absolute',
+                  bottom: '100%',
+                  left: 0,
+                  marginBottom: 8,
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  border: '1px solid #e2e8f0',
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+                  zIndex: 100,
+                  maxHeight: 180,
+                  overflowY: 'auto',
+                  width: 280,
+                  pointerEvents: 'none'
+                }}>
+                  <div style={{ fontWeight: 800, color: '#7c3aed', marginBottom: 6, borderBottom: '1px solid #f1f5f9', paddingBottom: 4 }}>
+                    Top 1 Pages
+                  </div>
+                  {top1PagesList.length === 0 ? (
+                    <div style={{ color: '#94a3b8' }}>No pages in Top 1</div>
+                  ) : (
+                    top1PagesList.map((item, i) => (
+                      <div key={i} style={{ color: '#334155', padding: '3px 0', borderBottom: '1px solid #f8fafc', wordBreak: 'break-all' }}>
+                        • {item.url} <span style={{ color: '#16a34a', fontWeight: 700 }}>(Rank {item.rank})</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #e2e8f0', paddingLeft: 10 }}>
+
+            {/* Top 3 */}
+            <div
+              onMouseEnter={() => setActiveTooltip('top3')}
+              onMouseLeave={() => setActiveTooltip(null)}
+              style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #e2e8f0', paddingLeft: 10, position: 'relative', cursor: 'pointer' }}
+            >
               <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Top 3</span>
-              <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>0</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>{top3PagesList.length}</span>
+
+              {activeTooltip === 'top3' && (
+                <div style={{
+                  position: 'absolute',
+                  bottom: '100%',
+                  left: -40,
+                  marginBottom: 8,
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  border: '1px solid #e2e8f0',
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+                  zIndex: 100,
+                  maxHeight: 180,
+                  overflowY: 'auto',
+                  width: 280,
+                  pointerEvents: 'none'
+                }}>
+                  <div style={{ fontWeight: 800, color: '#7c3aed', marginBottom: 6, borderBottom: '1px solid #f1f5f9', paddingBottom: 4 }}>
+                    Top 3 Pages
+                  </div>
+                  {top3PagesList.length === 0 ? (
+                    <div style={{ color: '#94a3b8' }}>No pages in Top 3</div>
+                  ) : (
+                    top3PagesList.map((item, i) => (
+                      <div key={i} style={{ color: '#334155', padding: '3px 0', borderBottom: '1px solid #f8fafc', wordBreak: 'break-all' }}>
+                        • {item.url} <span style={{ color: '#16a34a', fontWeight: 700 }}>(Rank {item.rank})</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #e2e8f0', paddingLeft: 10 }}>
+
+            {/* Top 10 */}
+            <div
+              onMouseEnter={() => setActiveTooltip('top10')}
+              onMouseLeave={() => setActiveTooltip(null)}
+              style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #e2e8f0', paddingLeft: 10, position: 'relative', cursor: 'pointer' }}
+            >
               <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Top 10</span>
-              <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>0</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>{top10PagesList.length}</span>
+
+              {activeTooltip === 'top10' && (
+                <div style={{
+                  position: 'absolute',
+                  bottom: '100%',
+                  right: 0,
+                  marginBottom: 8,
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  border: '1px solid #e2e8f0',
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+                  zIndex: 100,
+                  maxHeight: 180,
+                  overflowY: 'auto',
+                  width: 280,
+                  pointerEvents: 'none'
+                }}>
+                  <div style={{ fontWeight: 800, color: '#7c3aed', marginBottom: 6, borderBottom: '1px solid #f1f5f9', paddingBottom: 4 }}>
+                    Top 10 Pages
+                  </div>
+                  {top10PagesList.length === 0 ? (
+                    <div style={{ color: '#94a3b8' }}>No pages in Top 10</div>
+                  ) : (
+                    top10PagesList.map((item, i) => (
+                      <div key={i} style={{ color: '#334155', padding: '3px 0', borderBottom: '1px solid #f8fafc', wordBreak: 'break-all' }}>
+                        • {item.url} <span style={{ color: '#16a34a', fontWeight: 700 }}>(Rank {item.rank})</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
+
           </div>
         </div>
 
@@ -384,10 +770,9 @@ export default function TopPagesPage() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>Page Name</th>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>URL</th>
-                <th style={{ padding: '12px 16px', fontWeight: 700 }}>Traffic</th>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>Category</th>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>Cluster</th>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>Target Type</th>
@@ -397,59 +782,54 @@ export default function TopPagesPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
+                  <td colSpan={6} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
                     Loading pages for {activeProject?.domain || activeProject?.name}...
                   </td>
                 </tr>
               ) : filteredPages.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
+                  <td colSpan={6} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
                     No pages found under Project Setup for {activeProject?.domain || activeProject?.name}.
                   </td>
                 </tr>
               ) : (
                 filteredPages.map(row => (
-                  <tr key={row.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <tr key={row.id} style={{ borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' }}>
                     
                     {/* PAGE NAME */}
-                    <td style={{ padding: '12px 16px', fontWeight: 700, color: '#0f172a', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '12px 16px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {row.pageName}
                     </td>
 
                     {/* URL */}
-                    <td style={{ padding: '12px 16px', color: '#2563eb', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '12px 16px', color: '#2563eb', whiteSpace: 'nowrap' }}>
                       <a href={row.url} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         {row.url}
                         <ExternalLink size={11} />
                       </a>
                     </td>
 
-                    {/* TRAFFIC */}
-                    <td style={{ padding: '12px 16px', color: '#64748b', fontWeight: 600 }}>
-                      {row.traffic || 0}
-                    </td>
-
                     {/* CATEGORY */}
-                    <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
-                      <span style={{ background: '#f1f5f9', color: '#334155', fontSize: 12, fontWeight: 600, padding: '3px 9px', borderRadius: 6 }}>
+                    <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      <span style={{ background: '#f1f5f9', color: '#334155', fontSize: 12, fontWeight: 600, padding: '3px 9px', borderRadius: 6, display: 'inline-block', whiteSpace: 'nowrap' }}>
                         {row.category}
                       </span>
                     </td>
 
                     {/* CLUSTER */}
-                    <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
-                      <span style={{ background: '#f5f3ff', color: '#7c3aed', fontSize: 12, fontWeight: 600, padding: '3px 9px', borderRadius: 6 }}>
+                    <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      <span style={{ background: '#f5f3ff', color: '#7c3aed', fontSize: 12, fontWeight: 600, padding: '3px 9px', borderRadius: 6, display: 'inline-block', whiteSpace: 'nowrap' }}>
                         {row.cluster}
                       </span>
                     </td>
 
                     {/* TARGET TYPE */}
-                    <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
+                    <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600, whiteSpace: 'nowrap' }}>
                       {row.targetType}
                     </td>
 
                     {/* TARGET SUBTYPE */}
-                    <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
+                    <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600, whiteSpace: 'nowrap' }}>
                       {row.targetCategory}
                     </td>
 

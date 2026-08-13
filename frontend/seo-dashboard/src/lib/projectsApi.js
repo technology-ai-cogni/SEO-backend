@@ -1,6 +1,8 @@
 import { supabase } from './supabaseClient';
 import { derivedKeywordClusters, derivedPages } from '../data/mockData';
 
+const isLocalMode = !supabase;
+
 export async function fetchRecycleBinItemsApi(itemType = null) {
   if (isLocalMode) {
     const items = JSON.parse(localStorage.getItem('seo_recycle_bin') || '[]');
@@ -258,7 +260,6 @@ function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
 }
 
 // ─── Local Mode Detection & Setup ───────────────────────────────────────────
-const isLocalMode = !supabase;
 
 function initializeLocalStorage() {
   if (!isLocalMode) return;

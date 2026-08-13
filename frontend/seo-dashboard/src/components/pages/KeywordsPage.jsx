@@ -24,6 +24,24 @@ export default function KeywordsPage() {
     priority: 'all'
   });
 
+  // Region and date state
+  const [selectedRegion, setSelectedRegion] = useState('IN');
+  const [countryMenuOpen, setCountryMenuOpen] = useState(false);
+  const [countrySearch, setCountrySearch] = useState('');
+  const [selectedDate, setSelectedDate] = useState('2026-08-13');
+
+  const COUNTRY_OPTIONS = [
+    { code: 'IN', name: 'India' },
+    { code: 'US', name: 'United States' },
+    { code: 'GB', name: 'United Kingdom' },
+    { code: 'CA', name: 'Canada' },
+    { code: 'AU', name: 'Australia' },
+    { code: 'AE', name: 'UAE' },
+    { code: 'SG', name: 'Singapore' },
+    { code: 'DE', name: 'Germany' },
+    { code: 'FR', name: 'France' }
+  ];
+
   const hasActiveFilters = Object.values(columnFilters).some(v => v !== 'all');
 
   const resetAllFilters = () => {
@@ -196,84 +214,279 @@ export default function KeywordsPage() {
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: '#f8fafc', minHeight: '100vh' }}>
 
-      {/* ─── HEADER BAR: Title & Domain Selector ─────────────────────────────── */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: 16,
-        background: '#ffffff',
-        padding: '16px 20px',
-        borderRadius: 12,
-        border: '1px solid #e2e8f0',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-      }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <KeyRound size={20} color="#7c3aed" />
-            <h1 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: 0 }}>Keywords</h1>
-          </div>
-          <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0 0' }}>
-            {totalKeywordsCount} tracked keywords under Project Setup for {activeProject?.domain || activeProject?.name || 'Selected Domain'}
-          </p>
-        </div>
+      {/* ─── HEADER BAR: Dashboard: domain.com v [Link] 🇮🇳 India v 📅 Date ───── */}
+      {(() => {
+        const currentDomainDisplay = activeProject?.domain || activeProject?.name || 'Select Domain';
+        const activeCountry = COUNTRY_OPTIONS.find(c => c.code === selectedRegion) || COUNTRY_OPTIONS[0];
+        const filteredCountries = COUNTRY_OPTIONS.filter(c =>
+          c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
+          c.code.toLowerCase().includes(countrySearch.toLowerCase())
+        );
 
-        {/* Project Selector Dropdown */}
-        <div style={{ position: 'relative' }}>
-          <button
-            onClick={() => setProjectMenuOpen(!projectMenuOpen)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: '#f1f5f9',
-              border: '1px solid #cbd5e1',
-              borderRadius: 8,
-              padding: '8px 14px',
-              fontSize: 13,
-              fontWeight: 700,
-              color: '#0f172a',
-              cursor: 'pointer'
-            }}
-          >
-            <span>Domain: <strong>{activeProject?.domain || activeProject?.name || 'Select Domain'}</strong></span>
-            <ChevronDown size={14} />
-          </button>
+        return (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 16,
+            background: '#ffffff',
+            padding: '16px 20px',
+            borderRadius: 12,
+            border: '1px solid #e2e8f0',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+          }}>
+            {/* Left Side: Dashboard: domain.com v */}
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <h1 style={{
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 8,
+                fontSize: 20,
+                fontWeight: 800,
+                color: '#0f172a',
+                margin: 0
+              }}>
+                <span>Project:</span>
+                <div style={{ position: 'relative', display: 'inline-block' }}>
+                  <button
+                    onClick={() => setProjectMenuOpen(!projectMenuOpen)}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      padding: 0,
+                      fontSize: 20,
+                      fontWeight: 800,
+                      color: '#7c3aed',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    {currentDomainDisplay}
+                    <ChevronDown size={18} style={{ transform: projectMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+                  </button>
 
-          {projectMenuOpen && (
+                  {projectMenuOpen && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      marginTop: 6,
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 8,
+                      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)',
+                      zIndex: 1000,
+                      minWidth: 200,
+                      padding: '4px 0',
+                      display: 'flex',
+                      flexDirection: 'column'
+                    }}>
+                      {projects.map(p => (
+                        <button
+                          key={p.slug}
+                          onClick={() => handleSelectProject(p)}
+                          style={{
+                            padding: '8px 14px',
+                            fontSize: 13.5,
+                            fontWeight: activeProject?.slug === p.slug ? 700 : 500,
+                            color: activeProject?.slug === p.slug ? '#7c3aed' : '#1e293b',
+                            backgroundColor: activeProject?.slug === p.slug ? '#f5f3ff' : 'transparent',
+                            border: 'none',
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            transition: 'background 0.12s'
+                          }}
+                        >
+                          {p.domain || p.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <a
+                  href={`https://${currentDomainDisplay}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: '#7c3aed', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
+                >
+                  <ExternalLink size={16} />
+                </a>
+              </h1>
+            </div>
+
+            {/* Right Side: Country Selector & Date Picker */}
             <div style={{
-              position: 'absolute',
-              right: 0,
-              top: '110%',
-              background: '#ffffff',
-              border: '1px solid #e2e8f0',
-              borderRadius: 8,
-              boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
-              zIndex: 100,
-              minWidth: 200,
-              overflow: 'hidden'
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 12,
+              fontSize: 13,
+              color: '#64748b',
+              fontWeight: 500
             }}>
-              {projects.map(p => (
-                <div
-                  key={p.slug}
-                  onClick={() => handleSelectProject(p)}
+              {/* Country Selector */}
+              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                <button
+                  onClick={() => {
+                    setCountryMenuOpen(!countryMenuOpen);
+                    setCountrySearch('');
+                  }}
                   style={{
-                    padding: '10px 14px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
                     fontSize: 13,
-                    fontWeight: activeProject?.slug === p.slug ? 700 : 500,
-                    color: activeProject?.slug === p.slug ? '#7c3aed' : '#334155',
-                    background: activeProject?.slug === p.slug ? '#f5f3ff' : 'transparent',
-                    cursor: 'pointer'
+                    fontWeight: 600,
+                    color: '#2563eb',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    whiteSpace: 'nowrap'
                   }}
                 >
-                  {p.domain || p.name}
-                </div>
-              ))}
+                  <img
+                    src={`https://flagcdn.com/16x12/${activeCountry.code.toLowerCase()}.png`}
+                    width="16"
+                    height="12"
+                    alt={activeCountry.name}
+                    style={{ borderRadius: 1.5, objectFit: 'cover' }}
+                  />
+                  <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>{activeCountry.name}</span>
+                  <ChevronDown size={14} style={{ color: '#2563eb', transform: countryMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+                </button>
+
+                {countryMenuOpen && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    right: 0,
+                    marginTop: 6,
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 10,
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
+                    zIndex: 1000,
+                    width: 220,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden'
+                  }}>
+                    <div style={{ padding: '8px 8px 6px 8px', borderBottom: '1px solid #f1f5f9' }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        background: '#ffffff',
+                        border: '1.5px solid #818cf8',
+                        borderRadius: 8,
+                        padding: '4px 8px'
+                      }}>
+                        <Search size={14} style={{ color: '#64748b' }} />
+                        <input
+                          type="text"
+                          placeholder="Search"
+                          value={countrySearch}
+                          onChange={e => setCountrySearch(e.target.value)}
+                          autoFocus
+                          style={{
+                            border: 'none',
+                            outline: 'none',
+                            background: 'transparent',
+                            fontSize: 12.5,
+                            fontWeight: 500,
+                            color: '#0f172a',
+                            width: '100%'
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ overflowY: 'auto', maxHeight: 210, padding: '4px 0' }}>
+                      {filteredCountries.map((c) => (
+                        <button
+                          key={c.code}
+                          onClick={() => {
+                            setSelectedRegion(c.code);
+                            setCountryMenuOpen(false);
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '7px 12px',
+                            fontSize: 13,
+                            fontWeight: c.code === selectedRegion ? 700 : 500,
+                            color: '#0f172a',
+                            backgroundColor: c.code === selectedRegion ? '#eff6ff' : 'transparent',
+                            border: 'none',
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10
+                          }}
+                        >
+                          <img
+                            src={`https://flagcdn.com/16x12/${c.code.toLowerCase()}.png`}
+                            width="16"
+                            height="12"
+                            alt={c.name}
+                            style={{ borderRadius: 1.5, objectFit: 'cover' }}
+                          />
+                          <span>{c.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Date Picker Button */}
+              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                <button
+                  onClick={() => {
+                    const hiddenInput = document.getElementById('kw_header_date_picker');
+                    if (hiddenInput) hiddenInput.showPicker ? hiddenInput.showPicker() : hiddenInput.click();
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: '#2563eb',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  <span>📅</span>
+                  <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>
+                    {new Date(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                </button>
+                <input
+                  id="kw_header_date_picker"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 0, height: 0 }}
+                />
+              </div>
             </div>
-          )}
-        </div>
-      </div>
+          </div>
+        );
+      })()}
 
       {/* ─── SUMMARY CARDS GRID (4 Cards) ─────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>

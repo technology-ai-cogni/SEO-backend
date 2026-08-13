@@ -392,6 +392,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   const [clusterCount, setClusterCount] = useState(0);
   const [netPotential, setNetPotential] = useState(0);
   const [aiTab, setAiTab] = useState('Overview');
+  const [pageAnalysisLlm, setPageAnalysisLlm] = useState('chatgpt');
   const [loading, setLoading] = useState(true);
   const [showReport, setShowReport] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
@@ -627,6 +628,58 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     setTabResults(prev => ({ ...prev, ...newResults }));
   }, [activeProject?.slug]);
 
+  const saveHitToPeriodHistory = (projectSlug, engineKey, visibilityResult) => {
+    if (!projectSlug || !engineKey) return;
+    const normEngine = engineKey.toLowerCase().trim();
+    const storageKey = `ai_period_hits_${projectSlug}_${normEngine}`;
+    let hits = [];
+    try {
+      hits = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    } catch (e) {}
+
+    // Calculate cluster counts for this specific analysis run
+    const citedPages = visibilityResult.cited_pages_list || [];
+    const clusterCounts = {};
+
+    citedPages.forEach((item) => {
+      const pageUrl = typeof item === 'string' ? item : (item.url || item.cited_url || item.page || '');
+      if (!pageUrl) return;
+
+      const normUrl = pageUrl.trim().toLowerCase();
+      const matchedKw = (projectKeywords || []).find(k => {
+        const kUrl = (k.landingPage || k.url || k.page_url || '').trim().toLowerCase();
+        return kUrl && (kUrl === normUrl || kUrl.includes(normUrl) || normUrl.includes(kUrl));
+      });
+
+      const clusterName = matchedKw?.cluster || matchedKw?.type || 'Schools';
+      clusterCounts[clusterName] = (clusterCounts[clusterName] || 0) + 1;
+    });
+
+    if (Object.keys(clusterCounts).length === 0) {
+      (projectKeywords || []).forEach(k => {
+        const cName = k.cluster || k.type || 'General';
+        clusterCounts[cName] = (clusterCounts[cName] || 0) + 1;
+      });
+    }
+
+    const hitObj = {
+      timestamp: new Date().toISOString(),
+      dateStr: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      result: visibilityResult,
+      clusterCounts
+    };
+
+    hits.push(hitObj);
+
+    // FIFO Sliding Window: Max 3 periods (P1, P2, P3)
+    if (hits.length > 3) {
+      hits = hits.slice(-3); // Discards oldest hit: Hit 2 -> P1, Hit 3 -> P2, Hit 4 -> P3
+    }
+
+    localStorage.setItem(storageKey, JSON.stringify(hits));
+    return hits;
+  };
+
   const handleAiAnalysis = async (e, options = {}) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!activeProject) return;
@@ -700,6 +753,9 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         allResults.forEach(({ key, result }) => {
           newTabResults[key] = result;
           localStorage.setItem(`ai_results_${activeProject.slug}_${key}`, JSON.stringify(result));
+          if (result && result[0]) {
+            saveHitToPeriodHistory(activeProject.slug, key, result[0]);
+          }
         });
 
         // Overview aggregation
@@ -757,6 +813,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         setTabResults(prev => ({ ...prev, [engineKey]: results, [currentTab]: results }));
         localStorage.setItem(`ai_results_${activeProject.slug}_${engineKey}`, JSON.stringify(results));
         localStorage.setItem(`ai_results_${activeProject.slug}_${currentTab}`, JSON.stringify(results));
+        saveHitToPeriodHistory(activeProject.slug, engineKey, visibilityResult);
       } catch (err) {
         setAnalysisError(err.message);
       } finally {
@@ -826,17 +883,110 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       .slice(0, 5);
   };
 
-  const getDynamicPageAnalysisData = () => {
-    if ((!projectKeywords || projectKeywords.length === 0) && (!projectPages || projectPages.length === 0)) {
+  const getDynamicPageAnalysisData = (targetLlm = pageAnalysisLlm) => {
+    if (!projectKeywords || projectKeywords.length === 0) {
       return [];
     }
 
+    const isOrganic = String(targetLlm).toLowerCase() === 'organic';
+
+    if (isOrganic) {
+      // ORGANIC TAB: Process all dynamic project keywords, extract unique links, filter rank <= 5
+      const pageMap = {};
+
+      (projectKeywords || []).forEach(k => {
+        const pageUrl = String(k.landingPage || k.url || k.page_url || k.landing_page || '').trim();
+        if (!pageUrl) return;
+
+        const cluster = String(k.cluster || k.type || 'General').trim();
+        const category = String(k.category || k.targetSubtype || k.subtype || 'General').trim();
+        const kwText = k.kw || k.keyword || '';
+
+        const rawRank = k.rank ?? k.position ?? k.rankVal ?? k.rank_meta?.rank ?? k.intentRank;
+        const rankVal = rawRank != null && !isNaN(Number(rawRank)) ? Number(rawRank) : null;
+        const isTop5 = rankVal !== null && rankVal > 0 && rankVal <= 5;
+
+        if (!pageMap[pageUrl]) {
+          const rawName = pageUrl.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || kwText || 'PAGE';
+          pageMap[pageUrl] = {
+            url: pageUrl,
+            pageName: rawName.toUpperCase(),
+            categoryName: category,
+            clusterName: cluster,
+            rank: rankVal,
+            isTop5: isTop5
+          };
+        } else {
+          if (rankVal !== null && (pageMap[pageUrl].rank === null || rankVal < pageMap[pageUrl].rank)) {
+            pageMap[pageUrl].rank = rankVal;
+            pageMap[pageUrl].isTop5 = isTop5;
+          }
+        }
+      });
+
+      // Include projectPages
+      (projectPages || []).forEach(p => {
+        const pageUrl = String(p.url || '').trim();
+        if (!pageUrl || pageMap[pageUrl]) return;
+        const cluster = String(p.cluster || p.targetCluster || 'General').trim();
+        const category = String(p.category || p.targetCategory || 'General').trim();
+        const rawName = p.pageName || p.name || pageUrl.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || 'PAGE';
+
+        pageMap[pageUrl] = {
+          url: pageUrl,
+          pageName: rawName.toUpperCase(),
+          categoryName: category,
+          clusterName: cluster,
+          rank: null,
+          isTop5: false
+        };
+      });
+
+      let allPages = Object.values(pageMap);
+      let top5Pages = allPages.filter(p => p.isTop5);
+      if (top5Pages.length === 0) {
+        top5Pages = allPages.sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+      }
+
+      return top5Pages;
+    }
+
+    // AI LLM TABS (ChatGPT, Gemini, AI Overview)
+    const llmKey = targetLlm === 'ai overview' ? 'ai overview' : targetLlm === 'gemini' ? 'gemini' : 'chatgpt';
+    const llmResults = tabResults[llmKey] || tabResults[targetLlm] || [];
+    const activeRes = llmResults[0] || {};
+    const citedPagesList = activeRes.cited_pages_list || [];
+
+    if (citedPagesList.length > 0) {
+      return citedPagesList.map(citationStr => {
+        let kw = 'Keyword';
+        let urlStr = citationStr;
+        if (citationStr.includes(' - ')) {
+          const parts = citationStr.split(' - ');
+          kw = parts[0].trim();
+          urlStr = parts.slice(1).join(' - ').trim();
+        }
+
+        const kwMatch = projectKeywords.find(k => (k.kw || k.keyword || '').toLowerCase() === kw.toLowerCase());
+        const clusterName = kwMatch?.cluster || kwMatch?.type || 'General';
+        const categoryName = kwMatch?.category || kwMatch?.targetSubtype || kwMatch?.subtype || 'General';
+        const pageName = urlStr.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || kw;
+
+        return {
+          url: urlStr,
+          pageName: pageName.toUpperCase(),
+          categoryName: categoryName,
+          clusterName: clusterName,
+          keyword: kw
+        };
+      });
+    }
+
+    // Default Fallback
     const clusterMap = {};
 
-    const registerItem = (clusterName, catName, pageUrl, pageName) => {
-      const cleanCluster = String(clusterName || '').trim();
-      if (!cleanCluster) return;
-
+    const registerItem = (clusterName, catName, pageUrl, pageName = '') => {
+      const cleanCluster = String(clusterName || 'General').trim() || 'General';
       if (!clusterMap[cleanCluster]) {
         clusterMap[cleanCluster] = {
           clusterName: cleanCluster,
@@ -880,23 +1030,18 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       registerItem(cluster, category, pageUrl, pageName);
     });
 
-    const result = Object.values(clusterMap).map(item => {
+    return Object.values(clusterMap).map(item => {
       const catList = Array.from(item.categories);
       const pageList = Array.from(item.pages);
       return {
+        url: item.pageDetails[0]?.url || item.clusterName,
+        pageName: item.clusterName,
+        categoryName: catList[0] || 'General',
         clusterName: item.clusterName,
         categoryCount: catList.length,
-        categories: catList.length > 0 ? catList : ['General'],
-        pageCount: pageList.length,
-        pages: pageList,
-        pageDetails: item.pageDetails
+        pageCount: pageList.length
       };
     });
-
-    // Sort by unique page count descending (top cluster has most pages)
-    result.sort((a, b) => b.pageCount - a.pageCount);
-
-    return result.slice(0, 5);
   };
 
   const computeLiveMetrics = () => {
@@ -1056,7 +1201,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
             alignItems: 'center',
             gap: 8
           }}>
-            Dashboard:
+            Project:
             {projects.length > 1 ? (
               <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                 <button
@@ -2233,13 +2378,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
           minHeight: 120
         }}>
           {/* Left Section: Page Analysis with 3 Sub-columns */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ flex: 1.2, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
             <span style={{
               background: '#f3e8ff',
               color: '#7c3aed',
               fontSize: 11,
               fontWeight: 800,
-              padding: '4px 12px',
+              padding: '3px 10px',
               borderRadius: 6,
               letterSpacing: '0.5px',
               textTransform: 'uppercase'
@@ -2247,22 +2392,53 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               PAGE ANALYSIS
             </span>
 
-            {/* 3 Sub-columns Container: Cluster | Category | Pages */}
-            <div style={{ width: '100%', flex: 1, display: 'flex', alignItems: 'stretch', gap: 16 }}>
+            {/* Dynamic Sub-nav tabs under PAGE ANALYSIS word */}
+            <div style={{ display: 'flex', gap: 6, borderBottom: '1px solid #f1f5f9', paddingBottom: 6, width: '100%', marginTop: 2, marginBottom: 4 }}>
+              {[
+                { key: 'organic', label: 'Organic' },
+                { key: 'chatgpt', label: 'ChatGPT' },
+                { key: 'gemini', label: 'Gemini' },
+                { key: 'ai overview', label: 'AI Overview' }
+              ].map((t) => {
+                const isActive = pageAnalysisLlm === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    onClick={() => setPageAnalysisLlm(t.key)}
+                    style={{
+                      background: isActive ? '#ede9fe' : 'transparent',
+                      color: isActive ? '#7c3aed' : '#64748b',
+                      fontWeight: isActive ? 700 : 500,
+                      fontSize: 13,
+                      border: 'none',
+                      borderRadius: 6,
+                      padding: '5px 12px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 3 Sub-columns Container: URL | Category | Cluster */}
+            <div style={{ width: '100%', minWidth: 0, flex: 1, display: 'flex', alignItems: 'stretch', gap: 12, maxHeight: 240, overflowY: 'auto' }}>
               {(() => {
-                const pageAnalysisData = getDynamicPageAnalysisData();
+                const pageAnalysisData = getDynamicPageAnalysisData(pageAnalysisLlm);
 
                 return (
                   <>
-                    {/* Sub-column 1: Cluster (Unique cluster names) */}
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <div style={{ textAlign: 'center', marginBottom: 4 }}>
+                    {/* Sub-column 1: URL */}
+                    <div style={{ flex: 1.5, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ textAlign: 'left', marginBottom: 4 }}>
                         <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                          Cluster
+                          {pageAnalysisLlm === 'organic' ? 'PAGE NAME' : 'CITATIONS'}
                         </span>
                       </div>
                       {pageAnalysisData.length === 0 ? (
-                        <div style={{ padding: '12px 10px', borderRadius: 6, background: '#f8fafc', fontSize: 12, fontWeight: 600, color: '#94a3b8', textAlign: 'center' }}>
+                        <div style={{ padding: '12px 10px', borderRadius: 6, background: '#f8fafc', fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>
                           N/A
                         </div>
                       ) : (
@@ -2270,184 +2446,119 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                           <div
                             key={idx}
                             style={{
-                              padding: '6px 10px',
+                              padding: '8px 10px',
                               borderRadius: 6,
                               background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
                               fontSize: 12,
                               fontWeight: 700,
-                              color: '#0f172a',
+                              color: '#2563eb',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'flex-start',
                               overflow: 'hidden',
-                              whiteSpace: 'nowrap',
-                              textOverflow: 'ellipsis'
+                              minWidth: 0
                             }}
-                            title={item.clusterName}
+                            title={item.url}
                           >
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {item.clusterName}
-                            </span>
+                            <a
+                              href={item.url.startsWith('http') ? item.url : `https://${item.url}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                width: '100%',
+                                display: 'block',
+                                color: '#2563eb',
+                                fontWeight: 700,
+                                textDecoration: 'none'
+                              }}
+                            >
+                              {item.url}
+                            </a>
                           </div>
                         ))
                       )}
                     </div>
 
                     {/* Vertical Divider 1 */}
-                    <div style={{ width: '1px', background: '#e2e8f0' }} />
+                    <div style={{ width: '1px', background: '#e2e8f0', flexShrink: 0 }} />
 
-                    {/* Sub-column 2: Category (Number of unique categories in cluster) */}
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <div style={{ textAlign: 'center', marginBottom: 4 }}>
+                    {/* Sub-column 2: CATEGORY NAME (TEXT STRING, NO NUMBER) */}
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ textAlign: 'left', marginBottom: 4 }}>
                         <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                           Category
                         </span>
                       </div>
                       {pageAnalysisData.length === 0 ? (
-                        <div style={{ padding: '12px 10px', borderRadius: 6, background: '#f8fafc', fontSize: 12, fontWeight: 600, color: '#94a3b8', textAlign: 'center' }}>
+                        <div style={{ padding: '12px 10px', borderRadius: 6, background: '#f8fafc', fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>
                           N/A
                         </div>
                       ) : (
                         pageAnalysisData.map((item, idx) => (
                           <div
                             key={idx}
-                            onMouseEnter={() => setActiveTooltip(`cat-${idx}`)}
-                            onMouseLeave={() => setActiveTooltip(null)}
                             style={{
-                              padding: '6px 10px',
+                              padding: '8px 10px',
                               borderRadius: 6,
                               background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
                               fontSize: 12,
+                              fontWeight: 700,
+                              color: '#334155',
                               display: 'flex',
                               alignItems: 'center',
-                              justifyContent: 'center',
-                              position: 'relative'
+                              justifyContent: 'flex-start',
+                              overflow: 'hidden',
+                              minWidth: 0
                             }}
+                            title={item.categoryName}
                           >
-                            <span
-                              style={{
-                                fontWeight: 800,
-                                color: '#0f172a',
-                                fontSize: 13,
-                                cursor: 'pointer',
-                                display: 'inline-block'
-                              }}
-                            >
-                              {item.categoryCount}
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%', display: 'block', fontWeight: 700, color: '#334155' }}>
+                              {item.categoryName || 'General'}
                             </span>
-
-                            {/* Hover Tooltip Popup */}
-                            {activeTooltip === `cat-${idx}` && (
-                              <div style={{
-                                position: 'absolute',
-                                bottom: '100%',
-                                left: '50%',
-                                transform: 'translateX(-50%)',
-                                marginBottom: 6,
-                                background: '#0f172a',
-                                color: '#ffffff',
-                                padding: '10px 14px',
-                                borderRadius: 8,
-                                fontSize: 11,
-                                fontWeight: 500,
-                                boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
-                                zIndex: 100,
-                                maxHeight: 180,
-                                overflowY: 'auto',
-                                maxWidth: 300,
-                                minWidth: 200,
-                                pointerEvents: 'auto'
-                              }}>
-                                <div style={{ fontWeight: 800, color: '#fde047', marginBottom: 6, borderBottom: '1px solid #334155', paddingBottom: 4, position: 'sticky', top: 0, background: '#0f172a' }}>
-                                  Categories in {item.clusterName} ({item.categoryCount})
-                                </div>
-                                {item.categories.map((cat, i) => (
-                                  <div key={i} style={{ color: '#f8fafc', padding: '2px 0', wordBreak: 'break-word' }}>• {cat}</div>
-                                ))}
-                              </div>
-                            )}
                           </div>
                         ))
                       )}
                     </div>
 
                     {/* Vertical Divider 2 */}
-                    <div style={{ width: '1px', background: '#e2e8f0' }} />
+                    <div style={{ width: '1px', background: '#e2e8f0', flexShrink: 0 }} />
 
-                    {/* Sub-column 3: Pages (Number of unique pages in cluster) */}
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <div style={{ textAlign: 'center', marginBottom: 4 }}>
+                    {/* Sub-column 3: CLUSTER NAME (TEXT STRING, NO NUMBER) */}
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ textAlign: 'left', marginBottom: 4 }}>
                         <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                          Pages
+                          Cluster
                         </span>
                       </div>
                       {pageAnalysisData.length === 0 ? (
-                        <div style={{ padding: '12px 10px', borderRadius: 6, background: '#f8fafc', fontSize: 12, fontWeight: 600, color: '#94a3b8', textAlign: 'center' }}>
+                        <div style={{ padding: '12px 10px', borderRadius: 6, background: '#f8fafc', fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>
                           N/A
                         </div>
                       ) : (
                         pageAnalysisData.map((item, idx) => (
                           <div
                             key={idx}
-                            onMouseEnter={() => setActiveTooltip(`page-${idx}`)}
-                            onMouseLeave={() => setActiveTooltip(null)}
                             style={{
-                              padding: '6px 10px',
+                              padding: '8px 10px',
                               borderRadius: 6,
                               background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
                               fontSize: 12,
+                              fontWeight: 700,
+                              color: '#2563eb',
                               display: 'flex',
                               alignItems: 'center',
-                              justifyContent: 'center',
-                              position: 'relative'
+                              justifyContent: 'flex-start',
+                              overflow: 'hidden',
+                              minWidth: 0
                             }}
+                            title={item.clusterName}
                           >
-                            <span
-                              style={{
-                                fontWeight: 800,
-                                color: '#7c3aed',
-                                fontSize: 13,
-                                cursor: 'pointer',
-                                display: 'inline-block'
-                              }}
-                            >
-                              {item.pageCount}
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%', display: 'block', fontWeight: 700, color: '#2563eb' }}>
+                              {item.clusterName || 'General'}
                             </span>
-
-                            {/* Hover Tooltip Popup */}
-                            {activeTooltip === `page-${idx}` && (
-                              <div style={{
-                                position: 'absolute',
-                                bottom: '100%',
-                                left: '50%',
-                                transform: 'translateX(-50%)',
-                                marginBottom: 6,
-                                background: '#0f172a',
-                                color: '#ffffff',
-                                padding: '10px 14px',
-                                borderRadius: 8,
-                                fontSize: 11,
-                                fontWeight: 500,
-                                boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
-                                zIndex: 100,
-                                maxHeight: 180,
-                                overflowY: 'auto',
-                                maxWidth: 320,
-                                minWidth: 220,
-                                pointerEvents: 'auto'
-                              }}>
-                                <div style={{ fontWeight: 800, color: '#a78bfa', marginBottom: 6, borderBottom: '1px solid #334155', paddingBottom: 4, position: 'sticky', top: 0, background: '#0f172a' }}>
-                                  Pages in {item.clusterName} ({item.pageCount})
-                                </div>
-                                {item.pages.length === 0 ? (
-                                  <div style={{ color: '#94a3b8' }}>None</div>
-                                ) : (
-                                  item.pages.map((pUrl, i) => (
-                                    <div key={i} style={{ color: '#f8fafc', padding: '2px 0', wordBreak: 'break-all' }}>• {pUrl}</div>
-                                  ))
-                                )}
-                              </div>
-                            )}
                           </div>
                         ))
                       )}
@@ -2458,10 +2569,10 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
             </div>
           </div>
 
-          {/* Right Section: Cluster Tracking Line Graph (Graph revealed with 0 data) */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
+          {/* Right Section: Cluster Tracking Line Graph */}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
             {(() => {
-              const pageAnalysisData = getDynamicPageAnalysisData();
+              const pageAnalysisData = getDynamicPageAnalysisData(pageAnalysisLlm);
 
               if (pageAnalysisData.length === 0) {
                 return (
@@ -2472,7 +2583,6 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                     justifyContent: 'center',
                     width: '100%',
                     height: 220,
-                    marginTop: 12,
                     color: '#94a3b8',
                     fontSize: 14,
                     fontWeight: 600,
@@ -2484,28 +2594,56 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 );
               }
 
-              const periods = ['P1', 'P2', 'P3', 'P4', 'P5'];
+              const llmKey = pageAnalysisLlm === 'organic' ? 'organic' : pageAnalysisLlm === 'ai overview' ? 'ai overview' : pageAnalysisLlm === 'gemini' ? 'gemini' : 'chatgpt';
+              const storageKey = `ai_period_hits_${activeProject?.slug}_${llmKey}`;
+              let savedHits = [];
+              try {
+                savedHits = JSON.parse(localStorage.getItem(storageKey) || '[]');
+              } catch (e) {}
+
+              // Calculate total page counts per cluster from left-side table data
+              const clusterCounts = {};
+              pageAnalysisData.forEach((item) => {
+                const cName = item.clusterName || 'General';
+                clusterCounts[cName] = (clusterCounts[cName] || 0) + 1;
+              });
+
+              const uniqueClusters = Object.keys(clusterCounts);
+
+              const periods = ['P1', 'P2', 'P3'];
+              // Determine how many analysis runs / period hits have actually been recorded
+              const recordedHitsCount = savedHits.length;
+
               const clusterTrendData = periods.map((period, wIdx) => {
                 const row = { period };
-                pageAnalysisData.forEach((item, pIdx) => {
-                  const baseCount = item.pageCount;
-                  const variance = (wIdx - 2) * (pIdx % 2 === 0 ? 1 : -1);
-                  row[item.clusterName] = Math.max(0, Math.min(20, baseCount + Math.floor(variance * 1.5)));
+                const hit = savedHits[wIdx];
+
+                uniqueClusters.forEach((cName) => {
+                  if (wIdx < recordedHitsCount && hit) {
+                    if (hit.clusterCounts && hit.clusterCounts[cName] != null) {
+                      row[cName] = hit.clusterCounts[cName];
+                    } else {
+                      row[cName] = clusterCounts[cName] || 0;
+                    }
+                  } else {
+                    // Future unrecorded period: null so no point/line is drawn
+                    row[cName] = null;
+                  }
                 });
                 return row;
               });
 
-              const colors = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626'];
-              const legendPages = pageAnalysisData.map((item, idx) => ({
-                name: item.clusterName,
+              const colors = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#06b6d4', '#ec4899', '#8b5cf6', '#eab308'];
+              const legendPages = uniqueClusters.map((cName, idx) => ({
+                name: cName,
                 color: colors[idx % colors.length]
               }));
 
               return (
-                <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-                  <div style={{ display: 'flex', gap: 16, width: '100%', height: 220, marginTop: 12 }}>
-                    {/* Cluster Name Legend List on Left */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, justifyContent: 'center', minWidth: 130 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', width: '100%', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: 12, width: '100%', height: 210, marginTop: 20, alignItems: 'center' }}>
+                    {/* Cluster Color Code Legend List on Left Side */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, justifyContent: 'center', minWidth: 110, paddingRight: 4 }}>
                       {legendPages.map((clusterItem, idx) => {
                         const isHovered = hoveredChartLine === clusterItem.name;
                         return (
@@ -2522,11 +2660,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                               color: isHovered ? clusterItem.color : '#334155',
                               cursor: 'pointer',
                               transition: 'all 0.15s ease',
-                              opacity: hoveredChartLine && !isHovered ? 0.4 : 1
+                              opacity: hoveredChartLine && !isHovered ? 0.35 : 1
                             }}
                           >
                             <span style={{ width: 8, height: 8, borderRadius: '50%', background: clusterItem.color, display: 'inline-block', flexShrink: 0 }} />
-                            <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 115 }}>{clusterItem.name}</span>
+                            <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 95 }} title={clusterItem.name}>
+                              {clusterItem.name}
+                            </span>
                           </div>
                         );
                       })}
@@ -2537,7 +2677,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart
                           data={clusterTrendData}
-                          margin={{ top: 15, right: 15, left: 0, bottom: 20 }}
+                          margin={{ top: 15, right: 15, left: 20, bottom: 20 }}
                           onMouseLeave={() => setHoveredChartLine(null)}
                         >
                           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
@@ -2550,34 +2690,51 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                           />
                           <YAxis
                             stroke="#94a3b8"
-                            fontSize={10.5}
-                            tickLine={false}
-                            domain={[0, 20]}
-                            ticks={[0, 5, 10, 15, 20]}
+                            fontSize={11}
+                            tickLine={true}
+                            axisLine={true}
+                            allowDecimals={false}
+                            domain={[0, (dataMax) => (typeof dataMax === 'number' && !isNaN(dataMax) && dataMax > 0 ? Math.ceil(dataMax * 1.2) + 2 : 10)]}
+                            tickFormatter={(val) => Math.round(val)}
                             label={{ value: 'Pages', angle: -90, position: 'insideLeft', offset: 10, fill: '#64748b', fontSize: 11, fontWeight: 700 }}
                           />
                           <Tooltip
                             content={({ active, payload }) => {
                               if (active && payload && payload.length) {
-                                const targetItem = (hoveredChartLine && payload.find(p => p.dataKey === hoveredChartLine)) || payload[0];
-                                if (!targetItem) return null;
+                                const validPayload = payload.filter(p => p.value != null);
+                                if (validPayload.length === 0) return null;
+                                const pName = validPayload[0].payload.period;
+                                const pIdx = periods.indexOf(pName);
+                                const hitObj = savedHits[pIdx];
+
                                 return (
                                   <div style={{
-                                    background: '#0f172a',
-                                    border: 'none',
+                                    background: '#ffffff',
+                                    border: '1px solid #e2e8f0',
                                     borderRadius: 8,
-                                    color: '#fff',
+                                    color: '#0f172a',
                                     fontSize: 11,
                                     padding: '8px 12px',
-                                    boxShadow: '0 10px 15px -3px rgba(0,0,0,0.3)'
+                                    boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.05)',
+                                    minWidth: 140
                                   }}>
-                                    <div style={{ fontWeight: 700, color: targetItem.color, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: targetItem.color, display: 'inline-block' }} />
-                                      {targetItem.dataKey}
+                                    <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: 2 }}>
+                                      Period: {pName}
                                     </div>
-                                    <div style={{ color: '#f8fafc', fontWeight: 600 }}>
-                                      Pages: <span style={{ color: targetItem.color, fontWeight: 800 }}>{targetItem.value}</span>
-                                    </div>
+                                    {hitObj?.dateStr && (
+                                      <div style={{ fontSize: 10, color: '#64748b', marginBottom: 4, borderBottom: '1px solid #f1f5f9', paddingBottom: 4 }}>
+                                        {hitObj.dateStr}
+                                      </div>
+                                    )}
+                                    {validPayload.map((entry, idx) => (
+                                      <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '2px 0' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: entry.color, fontWeight: 700 }}>
+                                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: entry.color, display: 'inline-block' }} />
+                                          {entry.dataKey}:
+                                        </div>
+                                        <span style={{ color: '#0f172a', fontWeight: 800 }}>{entry.value} {entry.value === 1 ? 'Page' : 'Pages'}</span>
+                                      </div>
+                                    ))}
                                   </div>
                                 );
                               }
@@ -2592,6 +2749,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                                 type="monotone"
                                 dataKey={page.name}
                                 stroke={page.color}
+                                connectNulls={false}
                                 strokeWidth={isHovered ? 4 : (hoveredChartLine ? 1.5 : 2.5)}
                                 strokeOpacity={hoveredChartLine && !isHovered ? 0.25 : 1}
                                 dot={{ r: isHovered ? 5 : 3 }}
@@ -2608,19 +2766,19 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                     </div>
                   </div>
 
-                  {/* Clean Text Below Graph */}
+                  {/* Centered Aligned Title Below Graph */}
                   <div style={{
-                    fontSize: 13,
+                    fontSize: 12,
                     fontWeight: 800,
                     color: '#0f172a',
                     letterSpacing: '0.5px',
                     textTransform: 'uppercase',
-                    marginTop: 6,
-                    textAlign: 'left',
+                    marginTop: 10,
+                    textAlign: 'center',
                     width: '100%',
-                    paddingLeft: 275
+                    paddingLeft: 110
                   }}>
-                    Cluster Trend Tracking
+                    CLUSTER TREND TRACKING
                   </div>
                 </div>
               );
