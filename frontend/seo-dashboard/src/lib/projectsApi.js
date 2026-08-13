@@ -2106,7 +2106,7 @@ export async function runAiVisibilityAnalysis(projectSlug, domain, country, keyw
       if (sbErr) {
         console.warn('[runAiVisibilityAnalysis] Supabase insert error:', sbErr);
       } else {
-        console.log('[runAiVisibilityAnalysis] Saved to Supabase successfully:', sbData);
+        console.log('[runAiVisibilityAnalysis] Saved successfully:', sbData);
       }
     } catch (sbErr) {
       console.warn('[runAiVisibilityAnalysis] Supabase direct insert notice:', sbErr);
@@ -2152,4 +2152,68 @@ export async function fetchAiAnalysisHistory(projectSlug, engine = '') {
   }
 
   return [];
+}
+
+
+// --- Monthly Operations API Calls -------------------------
+const API_BASE = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000').replace('0.0.0.0', '127.0.0.1');
+
+export async function fetchMonthlyImportsApi() {
+  const res = await fetch(`${API_BASE}/monthly-operations/imports`);
+  if (!res.ok) throw new Error('Failed to fetch monthly imports');
+  const data = await res.json();
+  return data.imports || [];
+}
+
+export async function createMonthlyImportApi(importData) {
+  const res = await fetch(`${API_BASE}/monthly-operations/imports`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(importData)
+  });
+  if (!res.ok) throw new Error('Failed to save monthly import');
+  return await res.json();
+}
+
+export async function updateMonthlyImportApi(importId, updateData) {
+  const res = await fetch(`${API_BASE}/monthly-operations/imports/${importId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updateData)
+  });
+  if (!res.ok) throw new Error('Failed to update monthly import');
+  return await res.json();
+}
+
+export async function deleteMonthlyImportApi(importId) {
+  const res = await fetch(`${API_BASE}/monthly-operations/imports/${importId}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error('Failed to delete monthly import');
+  return await res.json();
+}
+
+export async function fetchScheduledActivitiesApi() {
+  const res = await fetch(`${API_BASE}/monthly-operations/schedules`);
+  if (!res.ok) throw new Error('Failed to fetch scheduled activities');
+  const data = await res.json();
+  return data.schedules || [];
+}
+
+export async function createScheduledActivityApi(scheduleData) {
+  const res = await fetch(`${API_BASE}/monthly-operations/schedules`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(scheduleData)
+  });
+  if (!res.ok) throw new Error('Failed to save scheduled activity');
+  return await res.json();
+}
+
+export async function deleteScheduledActivityApi(scheduleId) {
+  const res = await fetch(`${API_BASE}/monthly-operations/schedules/${scheduleId}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error('Failed to delete scheduled activity');
+  return await res.json();
 }

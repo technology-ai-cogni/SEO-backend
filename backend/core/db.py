@@ -194,19 +194,13 @@ def init_db():
                 name TEXT NOT NULL,
                 email TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'INTERNAL_ASSOCIATE',
-                category TEXT NOT NULL DEFAULT 'Internal',
+                role TEXT NOT NULL DEFAULT 'USER',
                 status TEXT NOT NULL DEFAULT 'Active',
-                section_access TEXT NOT NULL DEFAULT 'Default',
-                permissions TEXT NOT NULL DEFAULT 'Default',
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'INTERNAL_ASSOCIATE'"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Internal'"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'USER'"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'Active'"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS section_access TEXT NOT NULL DEFAULT 'Default'"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions TEXT NOT NULL DEFAULT 'Default'"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_users_email ON users (LOWER(email))"))
 
         conn.execute(text("""
@@ -294,6 +288,53 @@ def init_db():
         """))
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'Active'"))
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE"))
+
+        # --- Single Unified Monthly Operations Table -----------------
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS monthly_operations (
+                id BIGSERIAL PRIMARY KEY,
+                uid TEXT,
+                filename TEXT,
+                project_name TEXT NOT NULL,
+                project_slug TEXT,
+                period TEXT,
+                scheduled_date TEXT,
+                keyword1 TEXT,
+                keyword2 TEXT,
+                landing_page TEXT,
+                cluster TEXT,
+                kw_category TEXT,
+                activity_name TEXT,
+                word_count TEXT,
+                content_spoc TEXT,
+                topic TEXT,
+                content_doc TEXT,
+                status TEXT,
+                publisher TEXT,
+                pg_site_domain TEXT,
+                live_link TEXT,
+                remarks TEXT,
+                solution TEXT,
+                last_activity TEXT,
+                updated_date TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS uid TEXT"))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scheduled_activities (
+                id BIGSERIAL PRIMARY KEY,
+                action TEXT NOT NULL,
+                project_name TEXT NOT NULL,
+                project_slug TEXT,
+                datetime TEXT NOT NULL,
+                frequency TEXT DEFAULT 'One-Time',
+                status TEXT DEFAULT 'Scheduled',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
 
         # --- Shared categories/clusters/category_cluster_map/keyword_categories ---
         conn.execute(text("""
@@ -2269,6 +2310,327 @@ def get_project_summary(project_slug: str):
             "blog_count": total_blogs,
             "ai_history": ai_history
         }
+
+
+# --- Single Unified Monthly Operations Table Functions -------------------
+
+def _generate_uid(custom_uid=None):
+    if custom_uid and str(custom_uid).strip():
+        return str(custom_uid).strip()
+    import uuid
+    return f"MO-{uuid.uuid4().hex[:8].upper()}"
+
+
+def _insert_monthly_operation_rows(conn, filename, project_name, rows_data):
+    if not rows_data:
+        return
+
+    chunk_size = 200
+    for i in range(0, len(rows_data), chunk_size):
+        chunk = rows_data[i:i + chunk_size]
+        params = {}
+        values_sql_parts = []
+        for idx, r in enumerate(chunk):
+            p = f"_{idx}"
+            params.update({
+                f"uid{p}": _generate_uid(r.get("uid")),
+                f"filename{p}": filename,
+                f"project_name{p}": project_name,
+                f"period{p}": r.get("period", ""),
+                f"scheduled_date{p}": r.get("scheduledDate", r.get("scheduled_date", "")),
+                f"keyword1{p}": r.get("keyword1", ""),
+                f"keyword2{p}": r.get("keyword2", ""),
+                f"landing_page{p}": r.get("landingPage", r.get("landing_page", "")),
+                f"cluster{p}": r.get("cluster", ""),
+                f"kw_category{p}": r.get("kwCategory", r.get("kw_category", "")),
+                f"activity_name{p}": r.get("activityName", r.get("activity_name", "")),
+                f"word_count{p}": str(r.get("wordCount", r.get("word_count", ""))),
+                f"content_spoc{p}": r.get("contentSpoc", r.get("content_spoc", "")),
+                f"topic{p}": r.get("topic", ""),
+                f"content_doc{p}": r.get("contentDoc", r.get("content_doc", "")),
+                f"status{p}": r.get("status", ""),
+                f"publisher{p}": r.get("publisher", ""),
+                f"pg_site_domain{p}": r.get("pgSiteDomain", r.get("pg_site_domain", "")),
+                f"live_link{p}": r.get("liveLink", r.get("live_link", "")),
+                f"remarks{p}": r.get("remarks", ""),
+                f"solution{p}": r.get("solution", ""),
+                f"last_activity{p}": r.get("lastActivity", r.get("last_activity", "")),
+                f"updated_date{p}": r.get("updatedDate", r.get("updated_date", ""))
+            })
+            values_sql_parts.append(f"""(
+                :uid{p}, :filename{p}, :project_name{p}, :period{p}, :scheduled_date{p}, :keyword1{p}, :keyword2{p},
+                :landing_page{p}, :cluster{p}, :kw_category{p}, :activity_name{p}, :word_count{p},
+                :content_spoc{p}, :topic{p}, :content_doc{p}, :status{p}, :publisher{p},
+                :pg_site_domain{p}, :live_link{p}, :remarks{p}, :solution{p}, :last_activity{p}, :updated_date{p}
+            )""")
+
+        sql = f"""
+            INSERT INTO monthly_operations (
+                uid, filename, project_name, period, scheduled_date, keyword1, keyword2,
+                landing_page, cluster, kw_category, activity_name, word_count,
+                content_spoc, topic, content_doc, status, publisher,
+                pg_site_domain, live_link, remarks, solution, last_activity, updated_date
+            ) VALUES {','.join(values_sql_parts)}
+        """
+        conn.execute(text(sql), params)
+
+
+def list_monthly_imports():
+    with engine.begin() as conn:
+        all_rows = conn.execute(text("""
+            SELECT id, uid, filename, project_name, period, scheduled_date as "scheduledDate",
+                   keyword1, keyword2, landing_page as "landingPage", cluster,
+                   kw_category as "kwCategory", activity_name as "activityName",
+                   word_count as "wordCount", content_spoc as "contentSpoc",
+                   topic, content_doc as "contentDoc", status, publisher,
+                   pg_site_domain as "pgSiteDomain", live_link as "liveLink",
+                   remarks, solution, last_activity as "lastActivity",
+                   updated_date as "updatedDate", created_at
+            FROM monthly_operations
+            ORDER BY id ASC
+        """)).mappings().fetchall()
+
+        grouped = {}
+        for r in all_rows:
+            p_name = r["project_name"] or "Default"
+            key = p_name.lower().strip() if isinstance(p_name, str) else p_name
+            if key not in grouped:
+                grouped[key] = {
+                    "id": r["id"],
+                    "filename": r["filename"] or f"{p_name}_dataset.csv",
+                    "project": p_name,
+                    "project_name": p_name,
+                    "rows": 0,
+                    "date": r["created_at"].strftime("%m/%d/%Y %I:%M %p") if r.get("created_at") else "",
+                    "status": "Success",
+                    "rowsData": []
+                }
+            grouped[key]["rowsData"].append(dict(r))
+            grouped[key]["rows"] += 1
+
+        result = list(grouped.values())
+        return _clean_for_json(result)
+
+
+def save_monthly_import(filename, project_name, rows, date, rows_data):
+    with engine.begin() as conn:
+        _insert_monthly_operation_rows(conn, filename, project_name, rows_data)
+        res = conn.execute(text("SELECT MAX(id) FROM monthly_operations WHERE project_name = :p"), {"p": project_name}).fetchone()
+        return res[0] if res else 1
+
+
+def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, date=None, project_name=None):
+    with engine.begin() as conn:
+        p_name = project_name
+        f_name = filename
+        if import_id:
+            target = conn.execute(text("SELECT project_name, filename FROM monthly_operations WHERE id = :id LIMIT 1"), {"id": import_id}).fetchone()
+            if target:
+                if not p_name:
+                    p_name = target[0]
+                if not f_name:
+                    f_name = target[1]
+
+        if not p_name and isinstance(import_id, str):
+            p_name = import_id
+
+        if not p_name and rows_data:
+            for r in rows_data:
+                if r.get("id"):
+                    row_target = conn.execute(text("SELECT project_name, filename FROM monthly_operations WHERE id = :id LIMIT 1"), {"id": r.get("id")}).fetchone()
+                    if row_target:
+                        p_name = row_target[0]
+                        if not f_name:
+                            f_name = row_target[1]
+                        break
+
+        if rows_data is not None:
+            if not p_name:
+                first_db = conn.execute(text("SELECT project_name, filename FROM monthly_operations LIMIT 1")).fetchone()
+                if first_db:
+                    p_name = first_db[0]
+                    if not f_name:
+                        f_name = first_db[1]
+                else:
+                    p_name = "Default Project"
+                    f_name = "dataset.csv"
+
+            # 1. Fetch existing database IDs for this project
+            existing_rows = conn.execute(
+                text("SELECT id FROM monthly_operations WHERE LOWER(TRIM(project_name)) = LOWER(TRIM(:p))"),
+                {"p": p_name}
+            ).fetchall()
+            existing_ids = {r[0] for r in existing_rows}
+
+            input_ids = set()
+            update_param_list = []
+            new_rows_list = []
+
+            for r in rows_data:
+                r_id = r.get("id")
+                r_uid = _generate_uid(r.get("uid"))
+                if r_id and isinstance(r_id, int) and r_id in existing_ids:
+                    input_ids.add(r_id)
+                    update_param_list.append({
+                        "id": r_id,
+                        "uid": r_uid,
+                        "filename": f_name,
+                        "project_name": p_name,
+                        "period": r.get("period", ""),
+                        "scheduled_date": r.get("scheduledDate", r.get("scheduled_date", "")),
+                        "keyword1": r.get("keyword1", ""),
+                        "keyword2": r.get("keyword2", ""),
+                        "landing_page": r.get("landingPage", r.get("landing_page", "")),
+                        "cluster": r.get("cluster", ""),
+                        "kw_category": r.get("kwCategory", r.get("kw_category", "")),
+                        "activity_name": r.get("activityName", r.get("activity_name", "")),
+                        "word_count": str(r.get("wordCount", r.get("word_count", ""))),
+                        "content_spoc": r.get("contentSpoc", r.get("content_spoc", "")),
+                        "topic": r.get("topic", ""),
+                        "content_doc": r.get("contentDoc", r.get("content_doc", "")),
+                        "status": r.get("status", ""),
+                        "publisher": r.get("publisher", ""),
+                        "pg_site_domain": r.get("pgSiteDomain", r.get("pg_site_domain", "")),
+                        "live_link": r.get("liveLink", r.get("live_link", "")),
+                        "remarks": r.get("remarks", ""),
+                        "solution": r.get("solution", ""),
+                        "last_activity": r.get("lastActivity", r.get("last_activity", "")),
+                        "updated_date": r.get("updatedDate", r.get("updated_date", ""))
+                    })
+                else:
+                    new_rows_list.append(r)
+
+            # Batch UPDATE existing rows using single multi-row VALUES query
+            if update_param_list:
+                chunk_size = 200
+                for i in range(0, len(update_param_list), chunk_size):
+                    chunk = update_param_list[i:i + chunk_size]
+                    params = {}
+                    values_parts = []
+                    for idx, u in enumerate(chunk):
+                        p = f"_{idx}"
+                        params.update({
+                            f"id{p}": u["id"],
+                            f"uid{p}": u["uid"],
+                            f"filename{p}": u["filename"],
+                            f"project_name{p}": u["project_name"],
+                            f"period{p}": u["period"],
+                            f"scheduled_date{p}": u["scheduled_date"],
+                            f"keyword1{p}": u["keyword1"],
+                            f"keyword2{p}": u["keyword2"],
+                            f"landing_page{p}": u["landing_page"],
+                            f"cluster{p}": u["cluster"],
+                            f"kw_category{p}": u["kw_category"],
+                            f"activity_name{p}": u["activity_name"],
+                            f"word_count{p}": u["word_count"],
+                            f"content_spoc{p}": u["content_spoc"],
+                            f"topic{p}": u["topic"],
+                            f"content_doc{p}": u["content_doc"],
+                            f"status{p}": u["status"],
+                            f"publisher{p}": u["publisher"],
+                            f"pg_site_domain{p}": u["pg_site_domain"],
+                            f"live_link{p}": u["live_link"],
+                            f"remarks{p}": u["remarks"],
+                            f"solution{p}": u["solution"],
+                            f"last_activity{p}": u["last_activity"],
+                            f"updated_date{p}": u["updated_date"]
+                        })
+                        values_parts.append(f"""(
+                            CAST(:id{p} AS bigint), :uid{p}, :filename{p}, :project_name{p}, :period{p}, :scheduled_date{p},
+                            :keyword1{p}, :keyword2{p}, :landing_page{p}, :cluster{p}, :kw_category{p}, :activity_name{p},
+                            :word_count{p}, :content_spoc{p}, :topic{p}, :content_doc{p}, :status{p}, :publisher{p},
+                            :pg_site_domain{p}, :live_link{p}, :remarks{p}, :solution{p}, :last_activity{p}, :updated_date{p}
+                        )""")
+
+                    sql = f"""
+                        UPDATE monthly_operations AS m SET
+                            uid = COALESCE(v.uid, m.uid),
+                            filename = COALESCE(v.filename, m.filename),
+                            project_name = COALESCE(v.project_name, m.project_name),
+                            period = v.period,
+                            scheduled_date = v.scheduled_date,
+                            keyword1 = v.keyword1,
+                            keyword2 = v.keyword2,
+                            landing_page = v.landing_page,
+                            cluster = v.cluster,
+                            kw_category = v.kw_category,
+                            activity_name = v.activity_name,
+                            word_count = v.word_count,
+                            content_spoc = v.content_spoc,
+                            topic = v.topic,
+                            content_doc = v.content_doc,
+                            status = v.status,
+                            publisher = v.publisher,
+                            pg_site_domain = v.pg_site_domain,
+                            live_link = v.live_link,
+                            remarks = v.remarks,
+                            solution = v.solution,
+                            last_activity = v.last_activity,
+                            updated_date = v.updated_date,
+                            updated_at = now()
+                        FROM (VALUES {','.join(values_parts)}) AS v(
+                            id, uid, filename, project_name, period, scheduled_date,
+                            keyword1, keyword2, landing_page, cluster, kw_category, activity_name,
+                            word_count, content_spoc, topic, content_doc, status, publisher,
+                            pg_site_domain, live_link, remarks, solution, last_activity, updated_date
+                        )
+                        WHERE m.id = v.id
+                    """
+                    conn.execute(text(sql), params)
+
+            # Batch INSERT new rows
+            if new_rows_list:
+                _insert_monthly_operation_rows(conn, f_name, p_name, new_rows_list)
+
+            # 2. Safely delete ONLY rows explicitly deleted from frontend
+            to_delete = existing_ids - input_ids
+            if to_delete:
+                for del_id in to_delete:
+                    conn.execute(text("DELETE FROM monthly_operations WHERE id = :id"), {"id": del_id})
+
+
+def delete_monthly_import(import_id):
+    with engine.begin() as conn:
+        target = conn.execute(text("SELECT project_name FROM monthly_operations WHERE id = :id"), {"id": import_id}).fetchone()
+        if target:
+            conn.execute(text("DELETE FROM monthly_operations WHERE project_name = :p"), {"p": target[0]})
+        else:
+            conn.execute(text("DELETE FROM monthly_operations WHERE id = :id"), {"id": import_id})
+
+
+def list_scheduled_activities():
+    with engine.begin() as conn:
+        rows = conn.execute(text("SELECT * FROM scheduled_activities ORDER BY created_at DESC")).mappings().fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["project"] = d.get("project_name")
+            result.append(d)
+        return _clean_for_json(result)
+
+
+def save_scheduled_activity(action, project_name, datetime, frequency='One-Time', status='Scheduled'):
+    with engine.begin() as conn:
+        res = conn.execute(text("""
+            INSERT INTO scheduled_activities (action, project_name, datetime, frequency, status)
+            VALUES (:action, :project_name, :datetime, :frequency, :status)
+            RETURNING id
+        """), {
+            "action": action, "project_name": project_name,
+            "datetime": datetime, "frequency": frequency, "status": status
+        })
+        row = res.fetchone()
+        return row[0] if row else None
+
+
+def update_scheduled_activity_status(schedule_id, status):
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE scheduled_activities SET status = :status WHERE id = :id"), {"id": schedule_id, "status": status})
+
+
+def delete_scheduled_activity(schedule_id):
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM scheduled_activities WHERE id = :id"), {"id": schedule_id})
 
 
 if __name__ == "__main__":
