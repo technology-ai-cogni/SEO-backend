@@ -115,7 +115,7 @@ import io
 import csv
 import threading
 import time
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 import pandas as pd
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
@@ -419,6 +419,90 @@ def create_domain(payload: CreateDomainRequest):
 def list_domains_endpoint():
     """Every domain that's been registered -- the project listing view."""
     return {"domains": db.list_domain_records()}
+
+
+# --- Monthly Operations API endpoints -----------------------------------
+
+class MonthlyImportRequest(BaseModel):
+    filename: str
+    project: str
+    rows: int
+    date: str
+    rowsData: List[Dict[str, Any]] = []
+
+class UpdateMonthlyImportRequest(BaseModel):
+    rowsData: Optional[List[Dict[str, Any]]] = None
+    filename: Optional[str] = None
+    rows: Optional[int] = None
+    date: Optional[str] = None
+    project: Optional[str] = None
+
+class ScheduledActivityRequest(BaseModel):
+    action: str
+    project: str
+    datetime: str
+    frequency: Optional[str] = "One-Time"
+    status: Optional[str] = "Scheduled"
+
+class UpdateScheduleStatusRequest(BaseModel):
+    status: str
+
+@app.get("/monthly-operations/imports")
+def get_monthly_imports():
+    return {"imports": db.list_monthly_imports()}
+
+@app.post("/monthly-operations/imports")
+def create_monthly_import(payload: MonthlyImportRequest):
+    new_id = db.save_monthly_import(
+        filename=payload.filename,
+        project_name=payload.project,
+        rows=payload.rows,
+        date=payload.date,
+        rows_data=payload.rowsData
+    )
+    return {"status": "success", "id": new_id}
+
+@app.put("/monthly-operations/imports/{import_id}")
+def update_monthly_import_endpoint(import_id: int, payload: UpdateMonthlyImportRequest):
+    db.update_monthly_import(
+        import_id=import_id,
+        rows_data=payload.rowsData,
+        filename=payload.filename,
+        rows=payload.rows,
+        date=payload.date,
+        project_name=payload.project
+    )
+    return {"status": "success"}
+
+@app.delete("/monthly-operations/imports/{import_id}")
+def delete_monthly_import_endpoint(import_id: int):
+    db.delete_monthly_import(import_id)
+    return {"status": "success"}
+
+@app.get("/monthly-operations/schedules")
+def get_scheduled_activities():
+    return {"schedules": db.list_scheduled_activities()}
+
+@app.post("/monthly-operations/schedules")
+def create_scheduled_activity(payload: ScheduledActivityRequest):
+    new_id = db.save_scheduled_activity(
+        action=payload.action,
+        project_name=payload.project,
+        datetime=payload.datetime,
+        frequency=payload.frequency,
+        status=payload.status or "Scheduled"
+    )
+    return {"status": "success", "id": new_id}
+
+@app.patch("/monthly-operations/schedules/{schedule_id}")
+def update_schedule_status(schedule_id: int, payload: UpdateScheduleStatusRequest):
+    db.update_scheduled_activity_status(schedule_id, payload.status)
+    return {"status": "success"}
+
+@app.delete("/monthly-operations/schedules/{schedule_id}")
+def delete_scheduled_activity_endpoint(schedule_id: int):
+    db.delete_scheduled_activity(schedule_id)
+    return {"status": "success"}
 
 
 @app.get("/projects")
