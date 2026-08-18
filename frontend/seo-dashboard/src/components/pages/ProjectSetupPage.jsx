@@ -4147,6 +4147,7 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
     })
     .filter(p => {
       if (!p.domain || !String(p.domain).trim()) return false;
+      if (p.competitorCount <= 0) return false;
       if (search && search.trim()) {
         const q = search.trim().toLowerCase();
         const n = (p.name || '').toLowerCase();
@@ -5137,16 +5138,20 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
     { key: 'da', label: 'DA', type: 'range' },
   ];
 
+  const safeCompetitors = Array.isArray(competitors) ? competitors : [];
   const targetSlug = (scopedProject?.slug || scopedProject?.project_slug || scopedProject?.name || '').toLowerCase();
   const baseFiltered = scopedProject
-    ? competitors.filter(c => {
-        const cSlug = (c.projectSlug || c.project_slug || c.project_name || '').toLowerCase();
+    ? safeCompetitors.filter(c => {
+        if (!c) return false;
+        const cSlug = (c.projectSlug || c.project_slug || c.project_name || c.projectName || '').toLowerCase();
         if (!cSlug) return true;
         return cSlug === targetSlug || cSlug.includes(targetSlug) || targetSlug.includes(cSlug);
       })
-    : competitors;
+    : safeCompetitors;
+
   let filtered = baseFiltered
     .filter(c => {
+      if (!c) return false;
       if (search && search.trim()) {
         const q = search.trim().toLowerCase();
         const n = (c.name || '').toLowerCase();
@@ -5191,6 +5196,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
   // Fallback: If strict category matching yields 0 items but project has competitors, fallback to project competitors
   if (categoryFilter && filtered.length === 0 && baseFiltered.length > 0) {
     filtered = baseFiltered.filter(c => {
+      if (!c) return false;
       if (search && search.trim()) {
         const q = search.trim().toLowerCase();
         const n = (c.name || '').toLowerCase();
@@ -5251,8 +5257,18 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
   useEffect(() => { setPage(1); setSelectedIds(new Set()); setSubView('competitors'); }, [scopedProject?.slug]);
 
   const displayedCategorySummaryRows = (selectedCategoriesFilter && selectedCategoriesFilter.length > 0)
-    ? categorySummaryRows.filter(r => selectedCategoriesFilter.some(c => r.category.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(r.category.toLowerCase()) || (r.cluster && (r.cluster.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(r.cluster.toLowerCase())))))
-    : categorySummaryRows;
+    ? (categorySummaryRows || []).filter(r => {
+        if (!r) return false;
+        const rCat = (r.category || '').toLowerCase();
+        const rClus = (r.cluster || '').toLowerCase();
+        return selectedCategoriesFilter.some(c => {
+          if (!c) return false;
+          const cLower = String(c).toLowerCase();
+          return (rCat && (rCat.includes(cLower) || cLower.includes(rCat))) || 
+                 (rClus && (rClus.includes(cLower) || cLower.includes(rClus)));
+        });
+      })
+    : (categorySummaryRows || []);
 
   return (
     <>
