@@ -376,6 +376,21 @@ class QuoraScraper:
         """Navigate to Quora home and wait for input fields before logging in."""
         email = email or os.getenv("QUORA_EMAIL")
         password = password or os.getenv("QUORA_PASSWORD")
+        cookie_file = "quora_cookies.json"
+
+        # 1. Try loading saved session cookies first
+        if os.path.exists(cookie_file):
+            try:
+                print(f"\n[Cookies] Loading saved session cookies from {cookie_file}...")
+                with open(cookie_file, "r", encoding="utf-8") as f:
+                    cookies = json.load(f)
+                    await self.context.add_cookies(cookies)
+                await self.page.goto("https://www.quora.com/", timeout=60000, wait_until="domcontentloaded")
+                await self.page.wait_for_timeout(3000)
+                print("[Cookies] Session cookies loaded successfully! Active session restored.")
+                return
+            except Exception as e:
+                print(f"[Cookies] Could not load cookies ({str(e)}). Proceeding with standard login...")
 
         if not email or not password:
             print("No Quora login credentials found (QUORA_EMAIL / QUORA_PASSWORD or --email/--password). Proceeding without login...")
@@ -467,9 +482,9 @@ class QuoraScraper:
                     try:
                         cookies = await self.context.cookies()
                         if cookies:
-                            with open("quora_cookies.json", "w", encoding="utf-8") as f:
+                            with open(cookie_file, "w", encoding="utf-8") as f:
                                 json.dump(cookies, f, indent=4)
-                            print(f"[Cookies] Successfully saved session cookies to quora_cookies.json!")
+                            print(f"[Cookies] Successfully saved session cookies to {cookie_file}! Future runs will use these cookies.")
                     except Exception as e:
                         print(f"[Cookies] Failed to save cookies: {str(e)}")
                     break
@@ -645,7 +660,7 @@ async def main():
     output_json = args.out
     use_bright_data = not args.no_bright_data
     limit = args.limit
-    use_uc = (args.uc or not use_bright_data) and HAS_UC
+    use_uc = args.uc and HAS_UC
     
     results = []
     print(f"Reading {input_csv} (Processing up to {limit} dataset rows)...")
