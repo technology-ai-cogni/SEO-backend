@@ -2,12 +2,14 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, status
 from auth.schemas import (
     SignupRequest, LoginRequest, UpdateProfileRequest, ChangePasswordRequest, 
-    AuthResponse, UserResponse, CreateUserRequest, UpdateUserStatusRequest, UpdateUserRoleRequest
+    AuthResponse, UserResponse, CreateUserRequest, UpdateUserStatusRequest, UpdateUserRoleRequest,
+    UpdateAttendanceRequest, MarkAllAttendanceRequest
 )
 from auth.security import hash_password, verify_password
 from auth.db import (
     get_user_by_email, create_user, update_user_name, update_user_password,
-    list_all_users, update_user_status, update_user_role, delete_user_by_id
+    list_all_users, update_user_status, update_user_role, delete_user_by_id,
+    update_user_attendance, update_all_users_attendance
 )
 from core.db import insert_audit_log
 
@@ -111,6 +113,7 @@ def get_users():
             status=u.get("status", "Active"),
             section_access=u.get("section_access", "Default"),
             permissions=u.get("permissions", "Default"),
+            attendance=u.get("attendance", "Not Present"),
             created_at=u.get("created_at")
         )
         for u in users
@@ -208,8 +211,39 @@ def update_role_endpoint(user_id: int, payload: UpdateUserRoleRequest):
         status=updated.get("status", "Active"),
         section_access=updated.get("section_access", "Default"),
         permissions=updated.get("permissions", "Default"),
+        attendance=updated.get("attendance", "Not Present"),
         created_at=updated.get("created_at")
     )
+
+
+@router.put("/users/{user_id}/attendance", response_model=UserResponse)
+def update_user_attendance_endpoint(user_id: int, payload: UpdateAttendanceRequest):
+    """Update single user attendance status in Supabase DB."""
+    updated = update_user_attendance(user_id, payload.attendance)
+    if not updated:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    insert_audit_log(user_email="admin", action=f"Updated User Attendance ({updated['email']}: {payload.attendance})", status="Success")
+    return UserResponse(
+        id=updated["id"],
+        name=updated["name"],
+        email=updated["email"],
+        role=updated["role"],
+        category=updated.get("category", "Internal"),
+        status=updated.get("status", "Active"),
+        section_access=updated.get("section_access", "Default"),
+        permissions=updated.get("permissions", "Default"),
+        attendance=updated.get("attendance", "Not Present"),
+        created_at=updated.get("created_at")
+    )
+
+
+@router.post("/users/attendance/mark-all")
+def mark_all_attendance_endpoint(payload: MarkAllAttendanceRequest):
+    """Bulk update attendance for all users in Supabase DB."""
+    update_all_users_attendance(payload.attendance)
+    insert_audit_log(user_email="admin", action=f"Bulk Updated All Users Attendance: {payload.attendance}", status="Success")
+    return {"message": f"Successfully updated attendance for all users to '{payload.attendance}' in Supabase DB."}
 
 
 @router.delete("/users/{user_id}")

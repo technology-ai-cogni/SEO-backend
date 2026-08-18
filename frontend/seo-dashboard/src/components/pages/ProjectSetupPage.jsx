@@ -12,7 +12,7 @@ import {
   fetchCompetitors, insertCompetitor, updateCompetitor, deleteCompetitor, deleteCompetitorProjectData,
   findCompetitors, fetchCompetitorSnapshots, classifyCompetitorUrls,
 } from '../../lib/projectsApi';
-import { isReadOnlyUser, canEdit, canDelete } from '../../lib/permissions';
+import { isReadOnlyUser, canEdit, canDelete, canUpdate, canDownload } from '../../lib/permissions';
 
 // ─── shared tiny components ────────────────────────────────────────────────
 
@@ -1881,6 +1881,8 @@ function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteP
 }
 function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, totalLabel = 'Total  Pages', keywordsLabel = 'Keywords', deleteScopeLabel = 'the project and all its keywords', search, user }) {
   const userCanDelete = canDelete(user);
+  const userCanUpdate = canUpdate(user);
+  const userCanDownload = canDownload(user);
   const [confirmingProject, setConfirmingProject] = useState(null);
 
   const handleConfirmDelete = async () => {
@@ -2230,23 +2232,27 @@ function ActionsDropdown({ selectedCount, onBulkEdit, onBulkDelete }) {
             boxShadow: '0 8px 24px rgba(0,0,0,0.18)', minWidth: 160, overflow: 'hidden',
           }}
         >
-          <button
-            onClick={() => { setOpen(false); onBulkEdit(); }}
-            style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--text-primary)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
-            onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >
-            <Edit2 size={14} color="var(--text-muted)" /> Bulk Edit
-          </button>
-          <div style={{ height: 1, background: 'var(--border)' }} />
-          <button
-            onClick={() => { setOpen(false); onBulkDelete(); }}
-            style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--red)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
-            onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >
-            <Trash2 size={14} /> Bulk Delete
-          </button>
+          {onBulkEdit && (
+            <button
+              onClick={() => { setOpen(false); onBulkEdit(); }}
+              style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--text-primary)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <Edit2 size={14} color="var(--text-muted)" /> Bulk Edit
+            </button>
+          )}
+          {onBulkEdit && onBulkDelete && <div style={{ height: 1, background: 'var(--border)' }} />}
+          {onBulkDelete && (
+            <button
+              onClick={() => { setOpen(false); onBulkDelete(); }}
+              style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--red)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
+              onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <Trash2 size={14} /> Bulk Delete
+            </button>
+          )}
         </div>,
         document.body
       )}
@@ -2459,28 +2465,30 @@ function PageDetailView({ project, onBack, onUpdatePages, user }) {
           activeFilters={tableFilters}
           onFiltersChange={setTableFilters}
         />
-        {userCanEdit && (
+        {(userCanEdit || userCanDelete) && (
           <ActionsDropdown
             selectedCount={selectedRows.size}
-            onBulkEdit={() => setShowBulkEdit(true)}
-            onBulkDelete={() => setShowBulkDelete(true)}
+            onBulkEdit={userCanEdit ? () => setShowBulkEdit(true) : null}
+            onBulkDelete={userCanDelete ? () => setShowBulkDelete(true) : null}
           />
         )}
-        <button
-          onClick={() => downloadCSV(`${project?.name || 'pages'}_detail`, filteredRows)}
-          title="Download CSV"
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'var(--surface-2)', color: 'var(--text-secondary)',
-            border: '1px solid var(--border)', borderRadius: 8,
-            padding: '7px 10px', cursor: 'pointer',
-            fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-          }}
-          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-        >
-          <Download size={14} />
-        </button>
+        {userCanDownload && (
+          <button
+            onClick={() => downloadCSV(`${project?.name || 'pages'}_detail`, filteredRows)}
+            title="Download CSV"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--surface-2)', color: 'var(--text-secondary)',
+              border: '1px solid var(--border)', borderRadius: 8,
+              padding: '7px 10px', cursor: 'pointer',
+              fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+          >
+            <Download size={14} />
+          </button>
+        )}
         <div style={{ flex: 1 }} />
         {saveError && (
           <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError}</span>
@@ -2594,6 +2602,8 @@ const KW_PAGE_SIZE = 100;
 function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }) {
   const userCanEdit = canEdit(user);
   const userCanDelete = canDelete(user);
+  const userCanUpdate = canUpdate(user);
+  const userCanDownload = canDownload(user);
   const [rows, setRows] = useState(project.detailKeywords || []);
   const loading = project.detailKeywords === undefined;
   const error = project.detailKeywordsError || '';
@@ -3248,21 +3258,23 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
               onFiltersChange={setTableFilters}
             />
 
-            <button
-              onClick={() => downloadCSV(`${project?.name || 'keywords'}_clusters`, visibleRows)}
-              title="Download CSV"
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'var(--surface-2)', color: 'var(--text-secondary)',
-                border: '1px solid var(--border)', borderRadius: 8,
-                padding: '7px 10px', cursor: 'pointer',
-                fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-              }}
-              onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-            >
-              <Download size={14} />
-            </button>
+            {userCanDownload && (
+              <button
+                onClick={() => downloadCSV(`${project?.name || 'keywords'}_clusters`, visibleRows)}
+                title="Download CSV"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'var(--surface-2)', color: 'var(--text-secondary)',
+                  border: '1px solid var(--border)', borderRadius: 8,
+                  padding: '7px 10px', cursor: 'pointer',
+                  fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+              >
+                <Download size={14} />
+              </button>
+            )}
           </>
         )}
 
@@ -3277,7 +3289,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
           <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{clusterError}</span>
         )}
 
-        {userCanEdit && rows.length > 0 && selectedRows.size === 0 && (
+        {userCanUpdate && rows.length > 0 && selectedRows.size === 0 && (
           <>
             {/* Check initial ranking button -- visible ONLY when ALL keywords have both cluster and category */}
             {rows.length > 0 && rows.every(r => Boolean(r.cluster && String(r.cluster).trim()) && Boolean(r.category && String(r.category).trim())) && (
@@ -3461,34 +3473,36 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
           </>
         )}
 
-        {userCanDelete && rows.length > 0 && (
+        {(userCanEdit || userCanDelete) && rows.length > 0 && (
           <>
             <ActionsDropdown
               selectedCount={selectedRows.size}
-              onBulkEdit={() => setShowBulkEdit(true)}
-              onBulkDelete={() => setShowBulkDelete(true)}
+              onBulkEdit={userCanEdit ? () => setShowBulkEdit(true) : null}
+              onBulkDelete={userCanDelete ? () => setShowBulkDelete(true) : null}
             />
 
             {/* Robot Face AI Cluster Button */}
-            <button
-              onClick={handleRunClustering}
-              disabled={clustering}
-              style={{
-                background: 'linear-gradient(135deg, var(--accent), var(--accent-hover))',
-                border: 'none', cursor: clustering ? 'default' : 'pointer',
-                display: 'flex', alignItems: 'center', gap: 3,
-                padding: '7px 16px 7px 10px', borderRadius: 999, transition: 'transform 0.15s, box-shadow 0.15s',
-                opacity: clustering ? 0.75 : 1,
-                boxShadow: '0 2px 10px rgba(92, 74, 242, 0.35)',
-              }}
-              onMouseEnter={e => { if (!clustering) { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(92, 74, 242, 0.45)'; } }}
-              onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 2px 10px rgba(92, 74, 242, 0.35)'; }}
-            >
-              <RobotClusterIcon busy={clustering} size={24} />
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>
-                {clustering ? 'Clustering keywords…' : '   AI-Clustering'}
-              </span>
-            </button>
+            {userCanUpdate && (
+              <button
+                onClick={handleRunClustering}
+                disabled={clustering}
+                style={{
+                  background: 'linear-gradient(135deg, var(--accent), var(--accent-hover))',
+                  border: 'none', cursor: clustering ? 'default' : 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 3,
+                  padding: '7px 16px 7px 10px', borderRadius: 999, transition: 'transform 0.15s, box-shadow 0.15s',
+                  opacity: clustering ? 0.75 : 1,
+                  boxShadow: '0 2px 10px rgba(92, 74, 242, 0.35)',
+                }}
+                onMouseEnter={e => { if (!clustering) { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(92, 74, 242, 0.45)'; } }}
+                onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 2px 10px rgba(92, 74, 242, 0.35)'; }}
+              >
+                <RobotClusterIcon busy={clustering} size={24} />
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>
+                  {clustering ? 'Clustering keywords…' : '   AI-Clustering'}
+                </span>
+              </button>
+            )}
           </>
         )}
 
@@ -3702,7 +3716,9 @@ function RegionTags({ regions }) {
   );
 }
 
-function CompetitorDetailView({ competitor, onBack }) {
+function CompetitorDetailView({ competitor, onBack, user }) {
+  const userCanUpdate = canUpdate(user);
+  const userCanDownload = canDownload(user);
   const [details, setDetails] = useState([]);
   const [detailsLoading, setDetailsLoading] = useState(true);
   const [kwPage, setKwPage] = useState(1);
@@ -3740,35 +3756,37 @@ function CompetitorDetailView({ competitor, onBack }) {
         <div>
           <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
         </div>
-        <button
-          onClick={() => {
-            const rowsToExport = details.map(d => ({
-              Domain: d.domain,
-              Name: d.name,
-              Regions: (d.regions || []).join('; '),
-              DA: d.da ?? '',
-              'Ranking Keywords': d.rankingKeywords,
-              Location: d.location,
-              'Common KWs': Math.round(((d.commonKw ?? 0) / 100) * d.totalKw),
-              'Total KWs': d.totalKw,
-              'SERP Comp Level': d.serpCompLevel,
-              'Comp Level': d.compLevel,
-            }));
-            downloadCSV(`${title}_competitor_detail`, rowsToExport);
-          }}
-          title="Download CSV"
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'var(--surface-2)', color: 'var(--text-secondary)',
-            border: '1px solid var(--border)', borderRadius: 8,
-            padding: '7px 10px', cursor: 'pointer',
-            fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-          }}
-          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-        >
-          <Download size={14} />
-        </button>
+        {userCanDownload && (
+          <button
+            onClick={() => {
+              const rowsToExport = details.map(d => ({
+                Domain: d.domain,
+                Name: d.name,
+                Regions: (d.regions || []).join('; '),
+                DA: d.da ?? '',
+                'Ranking Keywords': d.rankingKeywords,
+                Location: d.location,
+                'Common KWs': Math.round(((d.commonKw ?? 0) / 100) * d.totalKw),
+                'Total KWs': d.totalKw,
+                'SERP Comp Level': d.serpCompLevel,
+                'Comp Level': d.compLevel,
+              }));
+              downloadCSV(`${title}_competitor_detail`, rowsToExport);
+            }}
+            title="Download CSV"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--surface-2)', color: 'var(--text-secondary)',
+              border: '1px solid var(--border)', borderRadius: 8,
+              padding: '7px 10px', cursor: 'pointer',
+              fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+          >
+            <Download size={14} />
+          </button>
+        )}
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{details.length} entr{details.length !== 1 ? 'ies' : 'y'}</span>
       </div>
@@ -4040,7 +4058,8 @@ function getSyncUniqueCounts(slug, competitors) {
   return { categoryCount: catSet.size, clusterCount: clusSet.size };
 }
 
-function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDeleteProject, loading, error, search }) {
+function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDeleteProject, loading, error, search, user }) {
+  const userCanDelete = canDelete(user);
   const [page, setPage] = useState(1);
   const [deletingProject, setDeletingProject] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -4191,28 +4210,30 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{p.competitorCount}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeletingProject(p);
-                    }}
-                    title="Delete project competitor data"
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justify: 'center',
-                      color: 'var(--text-muted)',
-                      padding: '4px',
-                      transition: 'color 0.15s'
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
-                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                  {onDeleteProject && userCanDelete && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeletingProject(p);
+                      }}
+                      title="Delete project competitor data"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justify: 'center',
+                        color: 'var(--text-muted)',
+                        padding: '4px',
+                        transition: 'color 0.15s'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
+                      onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -4932,6 +4953,7 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
 
 function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, onBack, onSelectCompetitor, onSelectKwDetail, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, onFindCompetitors, onAddPages, hasPendingChanges, saving, saveError, onSaveChanges, loading, error, top3KwByCategory, top3KwLoading, search, findingCompetitors, user }) {
   const userCanEdit = canEdit(user);
+  const userCanDelete = canDelete(user);
   const [editingIdx, setEditingIdx] = useState(null);
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -5113,7 +5135,8 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
   const baseFiltered = scopedProject
     ? competitors.filter(c => {
         const cSlug = (c.projectSlug || c.project_slug || c.project_name || '').toLowerCase();
-        return cSlug === targetSlug;
+        if (!cSlug) return true;
+        return cSlug === targetSlug || cSlug.includes(targetSlug) || targetSlug.includes(cSlug);
       })
     : competitors;
   const filtered = baseFiltered
@@ -5131,8 +5154,11 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
         const filterLower = categoryFilter.trim().toLowerCase();
         const cCats = (c.category || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
         const cClus = (c.cluster || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-        const matches = cCats.some(cat => cat === filterLower || cat.includes(filterLower)) ||
-                        cClus.some(clus => clus === filterLower || clus.includes(filterLower));
+        const matches = cCats.some(cat => cat === filterLower || cat.includes(filterLower) || filterLower.includes(cat)) ||
+                        cClus.some(clus => clus === filterLower || clus.includes(filterLower) || filterLower.includes(clus)) ||
+                        (c.category || '').toLowerCase().includes(filterLower) ||
+                        (c.cluster || '').toLowerCase().includes(filterLower) ||
+                        !c.category;
         if (!matches) return false;
       }
       if (tableFilters.category?.length) {
@@ -5229,39 +5255,43 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                   activeFilters={tableFilters}
                   onFiltersChange={setTableFilters}
                 />
-                <ActionsDropdown
-                  selectedCount={selectedIds.size}
-                  onBulkEdit={() => setShowBulkEdit(true)}
-                  onBulkDelete={() => setShowBulkDelete(true)}
-                />
-                <button
-                  onClick={() => {
-                    const rowsToExport = filtered.map(c => ({
-                      Competitor: c.name || c.domain,
-                      Domain: c.domain,
-                      Device: c.device || 'Desktop',
-                      Location: c.location,
-                      DA: c.da ?? '',
-                      'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
-                      'Total KWs': c.totalKw,
-                      'SERP Comp Level': c.serpCompLevel,
-                      'Comp Level': c.compLevel,
-                    }));
-                    downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
-                  }}
-                  title="Download CSV"
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: 'var(--surface-2)', color: 'var(--text-secondary)',
-                    border: '1px solid var(--border)', borderRadius: 8,
-                    padding: '7px 10px', cursor: 'pointer',
-                    fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-                >
-                  <Download size={14} />
-                </button>
+                {(userCanEdit || userCanDelete) && (
+                  <ActionsDropdown
+                    selectedCount={selectedIds.size}
+                    onBulkEdit={userCanEdit ? () => setShowBulkEdit(true) : null}
+                    onBulkDelete={userCanDelete ? () => setShowBulkDelete(true) : null}
+                  />
+                )}
+                {userCanDownload && (
+                  <button
+                    onClick={() => {
+                      const rowsToExport = filtered.map(c => ({
+                        Competitor: c.name || c.domain,
+                        Domain: c.domain,
+                        Device: c.device || 'Desktop',
+                        Location: c.location,
+                        DA: c.da ?? '',
+                        'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
+                        'Total KWs': c.totalKw,
+                        'SERP Comp Level': c.serpCompLevel,
+                        'Comp Level': c.compLevel,
+                      }));
+                      downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
+                    }}
+                    title="Download CSV"
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: 'var(--surface-2)', color: 'var(--text-secondary)',
+                      border: '1px solid var(--border)', borderRadius: 8,
+                      padding: '7px 10px', cursor: 'pointer',
+                      fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+                    onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                  >
+                    <Download size={14} />
+                  </button>
+                )}
               </>
             )}
             <div style={{ flex: 1 }} />
@@ -5404,18 +5434,20 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                   <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetCategory ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetCategory || '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetType ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetType || '—'}</td>
                   <td style={{ padding: '10px 16px' }}>
-                    <button onClick={() => handleDeletePageRow(r.id || i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
-                      onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
-                      <Trash2 size={14} />
-                    </button>
+                    {userCanDelete && (
+                      <button onClick={() => handleDeletePageRow(r.id || i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      ) : (categoryFilter === null || loading || findingCompetitors || baseFiltered.length < 10) ? (
+      ) : (categoryFilter === null) ? (
         <CategoryBasedCompetitorsTable
           rows={displayedCategorySummaryRows}
           loading={categorySummaryLoading || loading || findingCompetitors}
@@ -5661,7 +5693,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
         onClose={() => setEditingIdx(null)}
         competitor={editingIdx !== null ? competitors[editingIdx] : null}
         onSave={editingIdx !== null ? (updates) => onSaveCompetitor?.(competitors[editingIdx], updates) : undefined}
-        onDelete={editingIdx !== null ? () => onDeleteCompetitor?.(editingIdx) : undefined}
+        onDelete={editingIdx !== null && userCanDelete ? () => onDeleteCompetitor?.(editingIdx) : undefined}
       />
       <BulkEditModal open={showBulkEdit} onClose={() => setShowBulkEdit(false)} count={selectedIds.size} onApply={handleBulkEditApply} fields={COMPETITOR_BULK_FIELDS} itemLabel="competitor" />
       <BulkDeleteModal open={showBulkDelete} onClose={() => setShowBulkDelete(false)} count={selectedIds.size} onConfirm={handleBulkDelete} itemLabel="competitor" />
@@ -5736,6 +5768,8 @@ export default function ProjectSetupPage({ tab, user }) {
   const isReadOnly = isReadOnlyUser(user);
   const userCanEdit = canEdit(user);
   const userCanDelete = canDelete(user);
+  const userCanUpdate = canUpdate(user);
+  const userCanDownload = canDownload(user);
   const [activeTab, setActiveTab] = useState(tab || 'Domain');
   useEffect(() => { if (tab) { setActiveTab(tab); setSelectedPageProject(null); setSelectedCompetitor(null); setSelectedCompetitorProject(null); setSelectedKwProject(null); setSearch(''); } }, [tab]);
   const [filter, setFilter] = useState(null);
@@ -6855,21 +6889,10 @@ export default function ProjectSetupPage({ tab, user }) {
                 )}
               </div>
 
-              <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-                {filterTabs.map(f => (
-                  <button key={f} onClick={() => setFilter(prev => prev === f ? null : f)} style={{
-                    padding: '7px 16px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500,
-                    fontFamily: 'var(--font-body)', transition: 'all 0.15s',
-                    background: filter === f ? '#0f1523' : '#fff',
-                    color: filter === f ? '#fff' : 'var(--text-secondary)',
-                    borderRight: f !== 'Gemini' ? '1px solid var(--border)' : 'none',
-                  }}>{f}</button>
-                ))}
-              </div>
             </div>
           )}
 
-          {!isInDetailView && (
+          {userCanDownload && !isInDetailView && (
             <button
               onClick={handleDownloadMainTab}
               title="Download CSV"
@@ -6989,6 +7012,7 @@ export default function ProjectSetupPage({ tab, user }) {
           <CompetitorDetailView
             competitor={competitors[selectedCompetitor]}
             onBack={() => setSelectedCompetitor(null)}
+            user={user}
           />
         ) : activeTab === 'Competitors' && selectedKwDetail !== null ? (
           <KeywordDetailView
@@ -7012,6 +7036,7 @@ export default function ProjectSetupPage({ tab, user }) {
                 onDeleteProject={handleDeleteCompetitorProject}
                 loading={competitorsLoading}
                 error={competitorsError}
+                user={user}
               />
             )}
             {activeTab === 'Competitors' && selectedCompetitorProject !== null && (
@@ -7071,9 +7096,6 @@ export default function ProjectSetupPage({ tab, user }) {
                           SS
                         </th>
                         <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
-                          Traffic
-                        </th>
-                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
                           Total Traffic
                         </th>
                         <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
@@ -7121,9 +7143,6 @@ export default function ProjectSetupPage({ tab, user }) {
                           </td>
                           <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
                             {lnk.ss || '-'}
-                          </td>
-                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
-                            {lnk.traffic || '-'}
                           </td>
                           <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
                             {lnk.totalTraffic || '-'}

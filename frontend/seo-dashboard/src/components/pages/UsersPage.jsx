@@ -1,20 +1,18 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Users, UserPlus, Shield, CheckCircle, AlertCircle, RefreshCw, X, Search,
-  Trash2, Eye, EyeOff, UserCheck, UserX, Key, Mail, User, Save, Layers, Lock, ChevronDown
+  Trash2, Eye, EyeOff, UserCheck, UserX, Key, Mail, User, Save, Layers, Lock, ChevronDown, Calendar
 } from 'lucide-react';
 import {
   hasPermission, PERMISSIONS, CATEGORIES, ROLES, ROLE_DISPLAY_NAMES, CATEGORY_ROLES_MAP
 } from '../../lib/permissions';
-import { fetchUsersApi, createUserApi, updateUserStatusApi, updateUserRoleApi, deleteUserApi } from '../../lib/projectsApi';
+import { fetchUsersApi, createUserApi, updateUserStatusApi, updateUserRoleApi, deleteUserApi, updateUserAttendanceApi, markAllAttendanceApi } from '../../lib/projectsApi';
 
 const SECTION_ACCESS_OPTIONS = [
   'Default',
+  'Project Setup',
   'Performance',
   'Operations',
-  'Project Setup',
-  'AI Visibility',
-  'Content Engine',
   'Access All',
 ];
 
@@ -22,10 +20,9 @@ const PERMISSION_OPTIONS = [
   'Default',
   'View Only',
   'View + Edit',
-  'View + Edit + Update',
-  'Full Control (View, Edit, Update, Delete, Analyze)',
-  'Recycle Bin Access',
-  'Logs Access',
+  'View + Edit + Delete',
+  'View + Edit + Delete + Update',
+  'Full Control',
 ];
 
 function ModuleAccessMultiSelect({ value = 'Default', onChange }) {
@@ -34,12 +31,10 @@ function ModuleAccessMultiSelect({ value = 'Default', onChange }) {
 
   const MODULE_OPTIONS = [
     'Default',
+    'Project Setup',
     'Performance',
     'Operations',
-    'Project Setup',
-    'AI Visibility',
-    'Content Engine',
-    'Access All'
+    'Access All',
   ];
 
   const currentList = useMemo(() => {
@@ -201,6 +196,44 @@ export default function UsersPage({ user, onNavigate }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [attendanceRecords, setAttendanceRecords] = useState(() => {
+    try {
+      const saved = localStorage.getItem('seo_users_attendance');
+      return saved ? JSON.parse(saved) : {};
+    } catch (_) {
+      return {};
+    }
+  });
+
+  const handleMarkAttendance = async (userId, status) => {
+    const updated = {
+      ...attendanceRecords,
+      [userId]: { status }
+    };
+    setAttendanceRecords(updated);
+    setUsersList(prev => prev.map(u => String(u.id) === String(userId) ? { ...u, attendance: status } : u));
+    try {
+      await updateUserAttendanceApi(userId, status);
+      setAlertMsg({ type: 'success', text: `Updated attendance to "${status}".` });
+    } catch (err) {
+      console.error('Failed to save attendance:', err);
+    }
+  };
+
+  const handleMarkAllPresent = async () => {
+    const updated = { ...attendanceRecords };
+    usersList.forEach(u => {
+      updated[u.id] = { status: 'Present' };
+    });
+    setAttendanceRecords(updated);
+    setUsersList(prev => prev.map(u => ({ ...u, attendance: 'Present' })));
+    try {
+      await markAllAttendanceApi('Present');
+      setAlertMsg({ type: 'success', text: `Marked all ${usersList.length} associates present in Supabase DB.` });
+    } catch (err) {
+      console.error('Failed to mark all present:', err);
+    }
+  };
 
   // Form State
   const [formData, setFormData] = useState({
@@ -842,7 +875,34 @@ export default function UsersPage({ user, onNavigate }) {
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Category</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Role</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Module Access</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Permissions</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700, width: 145 }}>Permissions</th>
+                  <th style={{ padding: '10px 16px', fontWeight: 700, textAlign: 'center' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <span>Attendance</span>
+                      <button
+                        onClick={handleMarkAllPresent}
+                        title="Mark all associates present in Supabase database"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          padding: '3px 8px',
+                          fontSize: 10.5,
+                          fontWeight: 700,
+                          color: '#15803d',
+                          background: '#f0fdf4',
+                          border: '1px solid #bbf7d0',
+                          borderRadius: 6,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          textTransform: 'none'
+                        }}
+                      >
+                        <CheckCircle size={12} />
+                        <span>Mark All Present</span>
+                      </button>
+                    </div>
+                  </th>
                   <th style={{ padding: '12px 16px', fontWeight: 700, textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
@@ -970,12 +1030,12 @@ export default function UsersPage({ user, onNavigate }) {
                       </td>
 
                       {/* PERMISSIONS DROPDOWN */}
-                      <td style={{ padding: '12px 16px' }}>
+                      <td style={{ padding: '12px 16px', width: 145 }}>
                         <select
                           value={currentEdit.permissions}
                           onChange={e => handleInlineFieldChange(u.id, 'permissions', e.target.value)}
                           style={{
-                            padding: '6px 10px',
+                            padding: '6px 8px',
                             fontSize: 12,
                             fontWeight: 600,
                             borderRadius: 6,
@@ -983,7 +1043,12 @@ export default function UsersPage({ user, onNavigate }) {
                             background: '#ffffff',
                             color: '#0f172a',
                             cursor: 'pointer',
-                            outline: 'none'
+                            outline: 'none',
+                            width: 145,
+                            maxWidth: 145,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
                           }}
                         >
                           {PERMISSION_OPTIONS.map(opt => (
@@ -992,35 +1057,49 @@ export default function UsersPage({ user, onNavigate }) {
                         </select>
                       </td>
 
+                      {/* ATTENDANCE CHECKBOX COLUMN */}
+                      {(() => {
+                        const currentAttendance = attendanceRecords[u.id]?.status || u.attendance || 'Not Present';
+                        const isPresent = currentAttendance === 'Present';
+                        return (
+                          <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                            <label
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                cursor: 'pointer',
+                                fontSize: 11.5,
+                                fontWeight: 600,
+                                userSelect: 'none',
+                                background: isPresent ? '#f0fdf4' : '#fef2f2',
+                                color: isPresent ? '#15803d' : '#dc2626',
+                                border: `1px solid ${isPresent ? '#bbf7d0' : '#fca5a5'}`,
+                                padding: '4px 8px',
+                                borderRadius: 6,
+                                transition: 'all 0.15s ease'
+                              }}
+                              title={`Toggle attendance status for ${u.name}`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isPresent}
+                                onChange={(e) => {
+                                  handleMarkAttendance(u.id, e.target.checked ? 'Present' : 'Not Present');
+                                }}
+                                style={{ cursor: 'pointer', accentColor: '#16a34a', width: 13, height: 13 }}
+                              />
+                              <span>{isPresent ? 'Present' : 'Not Present'}</span>
+                            </label>
+                          </td>
+                        );
+                      })()}
+
                       {/* ACTIONS */}
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
 
                           {/* SAVE BUTTON */}
-                          <button
-                            onClick={() => handleSaveUserSettings(u)}
-                            disabled={isSaving}
-                            title="Save User Settings & Permissions to Database"
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              padding: '5px 10px',
-                              fontSize: 11.5,
-                              fontWeight: 700,
-                              borderRadius: 6,
-                              cursor: isSaving ? 'not-allowed' : 'pointer',
-                              background: currentEdit.isDirty ? 'var(--accent, #7c3aed)' : '#64748b',
-                              color: '#ffffff',
-                              border: 'none',
-                              opacity: isSaving ? 0.7 : 1,
-                              boxShadow: currentEdit.isDirty ? '0 2px 5px rgba(124, 58, 237, 0.3)' : 'none',
-                              transition: 'all 0.15s ease'
-                            }}
-                          >
-                            <Save size={13} />
-                            <span>{isSaving ? 'Saving...' : 'Save'}</span>
-                          </button>
 
                           {/* TOGGLE STATUS */}
                           <button

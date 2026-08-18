@@ -20,6 +20,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Inter
 ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'Active';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS section_access TEXT NOT NULL DEFAULT 'Default';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions TEXT NOT NULL DEFAULT 'Default';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS attendance TEXT NOT NULL DEFAULT 'Not Present';
 
 -- Case-insensitive index for fast email lookups
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (LOWER(email));

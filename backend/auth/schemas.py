@@ -47,6 +47,14 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=6, max_length=100, description="New password")
 
 
+class UpdateAttendanceRequest(BaseModel):
+    attendance: str = Field("Present", description="Attendance status: Present or Not Present")
+
+
+class MarkAllAttendanceRequest(BaseModel):
+    attendance: str = Field("Present", description="Target attendance for all users")
+
+
 class UserResponse(BaseModel):
     id: int
     name: str
@@ -56,6 +64,7 @@ class UserResponse(BaseModel):
     status: Optional[str] = "Active"
     section_access: Optional[str] = "Default"
     permissions: Optional[str] = "Default"
+    attendance: Optional[str] = "Not Present"
     created_at: Optional[datetime] = None
 
 

@@ -29,6 +29,7 @@ def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
                        COALESCE(status, 'Active') as status,
                        COALESCE(section_access, 'Default') as section_access,
                        COALESCE(permissions, 'Default') as permissions,
+                       COALESCE(attendance, 'Not Present') as attendance,
                        created_at 
                 FROM users WHERE LOWER(email) = LOWER(:email)
             """),
@@ -41,15 +42,15 @@ def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def create_user(name: str, email: str, password_hash: str, role: str = 'INTERNAL_ASSOCIATE', category: str = None, status: str = 'Active', section_access: str = 'Default', permissions: str = 'Default') -> Dict[str, Any]:
+def create_user(name: str, email: str, password_hash: str, role: str = 'INTERNAL_ASSOCIATE', category: str = None, status: str = 'Active', section_access: str = 'Default', permissions: str = 'Default', attendance: str = 'Not Present') -> Dict[str, Any]:
     """Insert a new user record into Supabase PostgreSQL and return the created record."""
     resolved_cat = resolve_user_category(role, category)
     with engine.begin() as conn:
         result = conn.execute(
             text("""
-                INSERT INTO users (name, email, password_hash, role, category, status, section_access, permissions, created_at)
-                VALUES (:name, LOWER(:email), :password_hash, UPPER(:role), :category, :status, :section_access, :permissions, NOW())
-                RETURNING id, name, email, role, category, status, section_access, permissions, created_at
+                INSERT INTO users (name, email, password_hash, role, category, status, section_access, permissions, attendance, created_at)
+                VALUES (:name, LOWER(:email), :password_hash, UPPER(:role), :category, :status, :section_access, :permissions, :attendance, NOW())
+                RETURNING id, name, email, role, category, status, section_access, permissions, attendance, created_at
             """),
             {
                 "name": name.strip(),
@@ -59,7 +60,8 @@ def create_user(name: str, email: str, password_hash: str, role: str = 'INTERNAL
                 "category": resolved_cat,
                 "status": status,
                 "section_access": section_access,
-                "permissions": permissions
+                "permissions": permissions,
+                "attendance": attendance
             }
         ).mappings().first()
         res = dict(result)
@@ -77,6 +79,7 @@ def list_all_users() -> List[Dict[str, Any]]:
                        COALESCE(status, 'Active') as status,
                        COALESCE(section_access, 'Default') as section_access,
                        COALESCE(permissions, 'Default') as permissions,
+                       COALESCE(attendance, 'Not Present') as attendance,
                        created_at
                 FROM users
                 ORDER BY created_at DESC
@@ -100,11 +103,43 @@ def update_user_status(user_id: int, new_status: str) -> Optional[Dict[str, Any]
                 WHERE id = :id
                 RETURNING id, name, email, role, category, status, 
                           COALESCE(section_access, 'Default') as section_access,
-                          COALESCE(permissions, 'Default') as permissions, created_at
+                          COALESCE(permissions, 'Default') as permissions,
+                          COALESCE(attendance, 'Not Present') as attendance, created_at
             """),
             {"id": user_id, "status": new_status}
         ).mappings().first()
         return dict(row) if row else None
+
+
+def update_user_attendance(user_id: int, attendance: str) -> Optional[Dict[str, Any]]:
+    """Update attendance status for a user in Supabase DB."""
+    with engine.begin() as conn:
+        row = conn.execute(
+            text("""
+                UPDATE users
+                SET attendance = :attendance
+                WHERE id = :id
+                RETURNING id, name, email, role, category, status, 
+                          COALESCE(section_access, 'Default') as section_access,
+                          COALESCE(permissions, 'Default') as permissions,
+                          COALESCE(attendance, 'Not Present') as attendance, created_at
+            """),
+            {"id": user_id, "attendance": attendance}
+        ).mappings().first()
+        return dict(row) if row else None
+
+
+def update_all_users_attendance(attendance: str = 'Present') -> bool:
+    """Bulk update attendance for all users in Supabase DB."""
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE users
+                SET attendance = :attendance
+            """),
+            {"attendance": attendance}
+        )
+        return True
 
 
 def update_user_role(user_id: int, new_role: str, category: Optional[str] = None, section_access: Optional[str] = None, permissions: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -133,6 +168,7 @@ def update_user_role(user_id: int, new_role: str, category: Optional[str] = None
                           COALESCE(status, 'Active') as status,
                           COALESCE(section_access, 'Default') as section_access,
                           COALESCE(permissions, 'Default') as permissions,
+                          COALESCE(attendance, 'Not Present') as attendance,
                           created_at
             """),
             params

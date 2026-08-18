@@ -110,6 +110,9 @@ export function hasPermission(user, permission) {
   if (permission === PERMISSIONS.VIEW_LOGS && (userPerms.includes('logs') || userPerms.includes('full control'))) {
     return true;
   }
+  if (permission === PERMISSIONS.RUN_ANALYSIS && canEdit(user)) {
+    return true;
+  }
 
   const permissions = ROLE_PERMISSIONS[userRole] || [];
   return permissions.includes(permission);
@@ -194,10 +197,7 @@ export function canAccessRoute(user, routePath) {
       'search-visibility/ai-analysis',
       'search-visibility/keywords',
       'search-visibility/top-pages',
-      'search-visibility/competitors',
-      'ai-visibility/overview',
-      'ai-visibility/brand-performance',
-      'content-engine/top-blogs'
+      'search-visibility/competitors'
     ];
     if (performanceRoutes.some(r => routePath === r || routePath.startsWith(r))) {
       isAllowed = true;
@@ -206,25 +206,11 @@ export function canAccessRoute(user, routePath) {
 
   if (lowerAccess.includes('operations')) {
     const operationsRoutes = [
-      'search-visibility/link-outreach',
-      'search-visibility/off-page-scheduler',
-      'search-visibility/on-page',
-      'ai-visibility/prompt-research',
-      'ai-visibility/content-builder',
-      'ai-visibility/competitor-insights',
-      'content-engine'
+      'search-visibility/off-page-scheduler'
     ];
     if (operationsRoutes.some(r => routePath === r || routePath.startsWith(r))) {
       isAllowed = true;
     }
-  }
-
-  if (lowerAccess.includes('ai visibility') && routePath.startsWith('ai-visibility')) {
-    isAllowed = true;
-  }
-
-  if (lowerAccess.includes('content engine') && routePath.startsWith('content-engine')) {
-    isAllowed = true;
   }
 
   return isAllowed;
@@ -233,7 +219,7 @@ export function canAccessRoute(user, routePath) {
 /**
  * Role-Based Default Action Permission Mapping:
  * - ADMIN: Full Control
- * - INTERNAL_TEAM_LEAD: View + Edit + Update
+ * - INTERNAL_TEAM_LEAD: View + Edit + Delete
  * - INTERNAL_SR_ASSOCIATE: View + Edit
  * - INTERNAL_ASSOCIATE: View Only (Read-Only Default)
  * - CLIENT_TEAM_LEAD: View + Edit
@@ -254,7 +240,7 @@ export function isReadOnlyUser(user) {
 
   // Explicit Admin Overrides:
   if (permissions === 'view only' || permissions === 'view') return true;
-  if (permissions.includes('edit') || permissions.includes('update') || permissions.includes('full control')) return false;
+  if (permissions.includes('edit') || permissions.includes('update') || permissions.includes('delete') || permissions.includes('full control')) return false;
 
   // Role-Based Defaults (when permissions === 'Default'):
   if (
@@ -272,12 +258,12 @@ export function isReadOnlyUser(user) {
 
 /**
  * Determines whether a user can perform edit actions.
- * Triggered by: 'View + Edit', 'View + Edit + Update', 'Full Control'
+ * Triggered by: 'View + Edit', 'View + Edit + Delete', 'Full Control'
  *
  * Permission levels (from Users Page):
  *   View Only              → Edit ❌  Delete ❌  Run/Import ❌
  *   View + Edit            → Edit ✅  Delete ❌  Run/Import ❌
- *   View + Edit + Update   → Edit ✅  Delete ✅  Run/Import ❌
+ *   View + Edit + Delete   → Edit ✅  Delete ✅  Run/Import ❌
  *   Full Control           → Edit ✅  Delete ✅  Run/Import ✅
  *
  * @param {Object} user - Logged in user context.
@@ -295,6 +281,7 @@ export function canEdit(user) {
   if (
     permissions.includes('edit') ||
     permissions.includes('update') ||
+    permissions.includes('delete') ||
     permissions.includes('full control')
   ) return true;
 
@@ -308,7 +295,7 @@ export function canEdit(user) {
 
 /**
  * Determines whether a user can perform delete actions.
- * Triggered by: 'View + Edit + Update', 'Full Control'
+ * Triggered by: 'View + Edit + Delete', 'Full Control'
  *
  * @param {Object} user - Logged in user context.
  * @returns {boolean} True if user can see/use delete buttons.
@@ -323,13 +310,51 @@ export function canDelete(user) {
   // Explicit permission overrides:
   if (permissions === 'view only' || permissions === 'view') return false;
   if (
+    permissions.includes('delete') ||
     permissions.includes('update') ||
-    permissions.includes('full control') ||
-    permissions.includes('delete')
+    permissions.includes('full control')
   ) return true;
 
   // Role-Based Defaults: no role gets delete by default except ADMIN
   return false;
+}
+
+/**
+ * Determines whether a user can run update operations such as AI-Clustering and AI Rank Check.
+ * Triggered by: 'View + Edit + Delete + Update', 'Full Control'
+ *
+ * @param {Object} user - Logged in user context.
+ * @returns {boolean} True if user can trigger AI-Clustering and AI Rank Check.
+ */
+export function canUpdate(user) {
+  if (!user || !user.role) return false;
+  const role = user.role.toUpperCase();
+  if (role === 'ADMIN') return true;
+
+  const permissions = (user.permissions || 'Default').trim().toLowerCase();
+
+  // Explicit permission overrides:
+  if (permissions === 'view only' || permissions === 'view') return false;
+  if (
+    permissions.includes('update') ||
+    permissions.includes('full control')
+  ) return true;
+
+  // Role-Based Defaults:
+  if (role === 'INTERNAL_TEAM_LEAD' || role === 'CLIENT_TEAM_LEAD') return true;
+
+  return false;
+}
+
+/**
+ * Determines whether a user can download data files (CSV, Excel).
+ * Triggered by: 'View + Edit', 'View + Edit + Delete', 'View + Edit + Delete + Update', 'Full Control'
+ *
+ * @param {Object} user - Logged in user context.
+ * @returns {boolean} True if user is allowed to download CSV/Excel data.
+ */
+export function canDownload(user) {
+  return canEdit(user);
 }
 
 /**
@@ -349,11 +374,79 @@ export function canRunActions(user) {
   // Explicit permission overrides:
   if (permissions === 'view only' || permissions === 'view') return false;
 
-  if (permissions.includes('full control')) return true;
+  if (
+    permissions.includes('full control') ||
+    permissions.includes('edit') ||
+    permissions.includes('update') ||
+    permissions.includes('delete') ||
+    canEdit(user)
+  ) return true;
 
   // Role-Based Defaults (when permissions === 'Default'):
   if (role === 'INTERNAL_TEAM_LEAD' || role === 'CLIENT_TEAM_LEAD') return true;
 
   return false;
 }
+
+/**
+ * Checks whether a user is an Associate (Internal, Client, or legacy user role).
+ *
+ * @param {Object} user - Logged in user context.
+ * @returns {boolean} True if user is an Associate.
+ */
+export function isAssociateUser(user) {
+  if (!user || !user.role) return false;
+  const role = user.role.toUpperCase();
+  return (
+    role === 'INTERNAL_ASSOCIATE' ||
+    role === 'INTERNAL_SR_ASSOCIATE' ||
+    role === 'CLIENT_ASSOCIATE' ||
+    role === 'CLIENT_SR_ASSOCIATE' ||
+    role === 'USER' ||
+    role.includes('ASSOCIATE')
+  );
+}
+
+/**
+ * Determines whether a user can run Brand Discovery analysis.
+ * Default Permission Rules:
+ * - ADMIN & Team Leads: Full continuous run/re-analyze permission.
+ * - Associates: Default allowed ONCE per project. After 1 hit, the Analyze button is removed for them.
+ * - View Only override: Cannot run.
+ *
+ * @param {Object} user - Logged in user context.
+ * @param {string} projectSlug - The active project identifier.
+ * @returns {boolean} True if user is allowed to hit Analyze on Brand Discovery.
+ */
+export function canRunBrandDiscovery(user, projectSlug) {
+  if (!user || !user.role) return false;
+  const role = user.role.toUpperCase();
+  if (role === 'ADMIN') return true;
+
+  const permissions = (user.permissions || 'Default').trim().toLowerCase();
+
+  // Explicit permission overrides:
+  if (permissions === 'view only' || permissions === 'view') return false;
+  if (
+    permissions.includes('full control') ||
+    permissions.includes('edit') ||
+    permissions.includes('update') ||
+    permissions.includes('delete') ||
+    canEdit(user)
+  ) return true;
+
+  // Team Leads get multi-use access
+  if (role === 'INTERNAL_TEAM_LEAD' || role === 'CLIENT_TEAM_LEAD') return true;
+
+  // Associates: Allowed ONCE by default for Brand Discovery
+  if (isAssociateUser(user)) {
+    const userId = user.id || user.username || user.email || 'user';
+    const storageKey = `bd_analyzed_associate_${userId}_${projectSlug || 'default'}`;
+    const hasAnalyzed = localStorage.getItem(storageKey) === 'true';
+    return !hasAnalyzed;
+  }
+
+  return false;
+}
+
 

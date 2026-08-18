@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ExternalLink, Search, ChevronDown, CheckCircle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi } from '../../lib/projectsApi';
-import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions } from '../../lib/permissions';
+import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions, canRunBrandDiscovery, isAssociateUser } from '../../lib/permissions';
 
 function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 100, projectTotalKeywords = 514 }) {
   const [hoverType, setHoverType] = useState(null); // null | 'mentions' | 'cited'
@@ -382,10 +382,11 @@ function RankHoverCell({ count, kwList, title, color }) {
 
 export default function PositionAnalysisPage({ onNavigate, user }) {
   const isReadOnly = isReadOnlyUser(user);
-  const userCanRunActions = canRunActions(user);
+  const [associateAnalyzed, setAssociateAnalyzed] = useState(false);
   const [projects, setProjects] = useState([]);
   const [selectedSlug, setSelectedSlug] = useState('');
   const [activeProject, setActiveProject] = useState(null);
+  const userCanRunActions = (canRunActions(user) || canRunBrandDiscovery(user, activeProject?.slug)) && !associateAnalyzed;
   const [kwCount, setKwCount] = useState(0);
   const [pageCount, setPageCount] = useState(0);
   const [blogCount, setBlogCount] = useState(0);
@@ -776,6 +777,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         }
 
         setTabResults(prev => ({ ...prev, ...newTabResults }));
+
+        if (isAssociateUser(user)) {
+          const userId = user?.id || user?.username || user?.email || 'user';
+          const storageKey = `bd_analyzed_associate_${userId}_${activeProject?.slug || 'default'}`;
+          localStorage.setItem(storageKey, 'true');
+          setAssociateAnalyzed(true);
+        }
       } catch (err) {
         setAnalysisError(err.message);
       } finally {
@@ -814,6 +822,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         localStorage.setItem(`ai_results_${activeProject.slug}_${engineKey}`, JSON.stringify(results));
         localStorage.setItem(`ai_results_${activeProject.slug}_${currentTab}`, JSON.stringify(results));
         saveHitToPeriodHistory(activeProject.slug, engineKey, visibilityResult);
+
+        if (isAssociateUser(user)) {
+          const userId = user?.id || user?.username || user?.email || 'user';
+          const storageKey = `bd_analyzed_associate_${userId}_${activeProject?.slug || 'default'}`;
+          localStorage.setItem(storageKey, 'true');
+          setAssociateAnalyzed(true);
+        }
       } catch (err) {
         setAnalysisError(err.message);
       } finally {
@@ -1681,27 +1696,29 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       padding: '28px 12px',
                       textAlign: 'center'
                     }}>
-                      <button
-                        onClick={(e) => handleAiAnalysis(e, { targetEngine: aiTab.toLowerCase() })}
-                        disabled={isCurrentTabAnalyzing || !topKeywords.length}
-                        style={{
-                          background: '#7c3aed',
-                          color: '#ffffff',
-                          border: 'none',
-                          borderRadius: 8,
-                          padding: '10px 20px',
-                          fontSize: 13.5,
-                          fontWeight: 700,
-                          cursor: isCurrentTabAnalyzing || !topKeywords.length ? 'not-allowed' : 'pointer',
-                          opacity: isCurrentTabAnalyzing || !topKeywords.length ? 0.7 : 1,
-                          boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8
-                        }}
-                      >
-                        {isCurrentTabAnalyzing ? 'Analyzing...' : 'Analyze'}
-                      </button>
+                      {userCanRunActions && (
+                        <button
+                          onClick={(e) => handleAiAnalysis(e, { targetEngine: aiTab.toLowerCase() })}
+                          disabled={isCurrentTabAnalyzing || !topKeywords.length}
+                          style={{
+                            background: '#7c3aed',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: 8,
+                            padding: '10px 20px',
+                            fontSize: 13.5,
+                            fontWeight: 700,
+                            cursor: isCurrentTabAnalyzing || !topKeywords.length ? 'not-allowed' : 'pointer',
+                            opacity: isCurrentTabAnalyzing || !topKeywords.length ? 0.7 : 1,
+                            boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8
+                          }}
+                        >
+                          {isCurrentTabAnalyzing ? 'Analyzing...' : 'Analyze'}
+                        </button>
+                      )}
                       {analysisError && (
                         <div style={{ color: '#ef4444', fontSize: 13, fontWeight: 600 }}>{analysisError}</div>
                       )}
@@ -1768,30 +1785,30 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                         );
                       })()}
 
-
-
                       {/* Re-analyze Action */}
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-                        <button
-                          onClick={(e) => handleAiAnalysis(e, { targetEngine: aiTab.toLowerCase() })}
-                          disabled={!!analyzingTabs[aiTab.toLowerCase()]}
-                          style={{
-                            background: 'transparent',
-                            color: '#7c3aed',
-                            border: '1px solid #ddd6fe',
-                            borderRadius: 6,
-                            padding: '4px 12px',
-                            fontSize: 12,
-                            fontWeight: 600,
-                            cursor: !!analyzingTabs[aiTab.toLowerCase()] ? 'not-allowed' : 'pointer',
-                            opacity: !!analyzingTabs[aiTab.toLowerCase()] ? 0.6 : 1
-                          }}
-                        >
-                          {!!analyzingTabs[aiTab.toLowerCase()]
-                            ? 'Analyzing...'
-                            : ((tabResults[aiTab.toLowerCase()] || []).length > 0 ? 'Re-analyze' : 'Analyze')}
-                        </button>
-                      </div>
+                      {userCanRunActions && (
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+                          <button
+                            onClick={(e) => handleAiAnalysis(e, { targetEngine: aiTab.toLowerCase() })}
+                            disabled={!!analyzingTabs[aiTab.toLowerCase()]}
+                            style={{
+                              background: 'transparent',
+                              color: '#7c3aed',
+                              border: '1px solid #ddd6fe',
+                              borderRadius: 6,
+                              padding: '4px 12px',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              cursor: !!analyzingTabs[aiTab.toLowerCase()] ? 'not-allowed' : 'pointer',
+                              opacity: !!analyzingTabs[aiTab.toLowerCase()] ? 0.6 : 1
+                            }}
+                          >
+                            {!!analyzingTabs[aiTab.toLowerCase()]
+                              ? 'Analyzing...'
+                              : ((tabResults[aiTab.toLowerCase()] || []).length > 0 ? 'Re-analyze' : 'Analyze')}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

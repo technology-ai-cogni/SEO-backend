@@ -1915,7 +1915,8 @@ export async function fetchUsersApi() {
           section_access: (u.section_access !== undefined && u.section_access !== null && u.section_access !== '') ? u.section_access : (local?.section_access || 'Default'),
           permissions: (u.permissions !== undefined && u.permissions !== null && u.permissions !== '') ? u.permissions : (local?.permissions || 'Default'),
           category: u.category || local?.category || 'Internal',
-          role: u.role || local?.role || 'INTERNAL_ASSOCIATE'
+          role: u.role || local?.role || 'INTERNAL_ASSOCIATE',
+          attendance: u.attendance || local?.attendance || 'Not Present'
         };
       });
 
@@ -1928,8 +1929,58 @@ export async function fetchUsersApi() {
     const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
     if (cached && cached.length > 0) return cached;
     return [
-      { id: 1, name: 'Admin User', email: 'admin@company.com', role: 'ADMIN', status: 'Active', created_at: new Date().toISOString() }
+      { id: 1, name: 'Admin User', email: 'admin@company.com', role: 'ADMIN', status: 'Active', attendance: 'Not Present', created_at: new Date().toISOString() }
     ];
+  }
+}
+
+export async function updateUserAttendanceApi(userId, attendance) {
+  try {
+    const res = await fetchAuthEndpoint(`/auth/users/${userId}/attendance`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attendance })
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail || 'Failed to update user attendance.');
+    }
+    const updated = await res.json();
+    const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    const nextList = cached.map(u => String(u.id) === String(userId) ? { ...u, attendance } : u);
+    localStorage.setItem('seo_users_list', JSON.stringify(nextList));
+    return updated;
+  } catch (err) {
+    console.warn('[updateUserAttendanceApi] API failed, updating in local cache:', err);
+    const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    const nextList = cached.map(u => String(u.id) === String(userId) ? { ...u, attendance } : u);
+    localStorage.setItem('seo_users_list', JSON.stringify(nextList));
+    return { id: userId, attendance };
+  }
+}
+
+export async function markAllAttendanceApi(attendance = 'Present') {
+  try {
+    const res = await fetchAuthEndpoint('/auth/users/attendance/mark-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attendance })
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail || 'Failed to bulk update attendance.');
+    }
+    const result = await res.json();
+    const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    const nextList = cached.map(u => ({ ...u, attendance }));
+    localStorage.setItem('seo_users_list', JSON.stringify(nextList));
+    return result;
+  } catch (err) {
+    console.warn('[markAllAttendanceApi] API failed, updating in local cache:', err);
+    const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    const nextList = cached.map(u => ({ ...u, attendance }));
+    localStorage.setItem('seo_users_list', JSON.stringify(nextList));
+    return { message: 'Updated locally' };
   }
 }
 
