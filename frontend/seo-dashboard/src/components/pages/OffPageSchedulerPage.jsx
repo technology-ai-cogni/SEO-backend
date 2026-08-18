@@ -100,6 +100,15 @@ function parseCSVLine(text) {
   return result.map(val => val.replace(/^"|"$/g, '').trim());
 }
 
+// Helper to format today's date as YYYY-MM-DD
+function getTodayFormatted() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 // Helper to normalize parsed keys case-insensitively
 function normalizeRow(item, index) {
   const findVal = (keys) => {
@@ -114,6 +123,8 @@ function normalizeRow(item, index) {
 
   const existingUid = findVal(['uid', 'uniqueid', 'id']);
   const defaultUid = existingUid || `MO-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+  const todayStr = getTodayFormatted();
+  const rawUpdatedDate = findVal(['updateddate', 'updated_date', 'updated']);
 
   return {
     uid: defaultUid,
@@ -136,7 +147,8 @@ function normalizeRow(item, index) {
     remarks: findVal(['remarks']),
     solution: findVal(['solution']),
     keyword2: findVal(['keyword2', 'kw2']),
-    updatedDate: findVal(['updateddate', 'updated']),
+    updatedDate: rawUpdatedDate || todayStr,
+    updated_date: rawUpdatedDate || todayStr,
     lastActivity: findVal(['lastactivity', 'activity'])
   };
 }
@@ -157,19 +169,103 @@ export default function OffPageSchedulerPage() {
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   const [bulkEditActivity, setBulkEditActivity] = useState('');
   const [bulkEditStatus, setBulkEditStatus] = useState('');
+  const [bulkEditField, setBulkEditField] = useState('');
+  const [bulkEditValue, setBulkEditValue] = useState('');
   const [filterStartDate, setFilterStartDate] = useState('');
   const [filterEndDate, setFilterEndDate] = useState('');
   const [selectedRowIndices, setSelectedRowIndices] = useState([]);
   const [dbProjects, setDbProjects] = useState([]);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [originalRowsData, setOriginalRowsData] = useState([]);
+  const [isDirty, setIsDirty] = useState(false);
+  const originalDatasetIdRef = useRef(null);
   const [savingState, setSavingState] = useState(''); // '', 'saving', 'saved', 'error'
   const [auditAllocating, setAuditAllocating] = useState(false);
   const [deleteConfirmImport, setDeleteConfirmImport] = useState(null);
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+  const [pendingLeaveAction, setPendingLeaveAction] = useState(null);
+  const [auditSuccessMsg, setAuditSuccessMsg] = useState('');
+
+  useEffect(() => {
+    if (selectedDataset) {
+      if (originalDatasetIdRef.current !== selectedDataset.id) {
+        setOriginalRowsData(JSON.parse(JSON.stringify(selectedDataset.rowsData || [])));
+        originalDatasetIdRef.current = selectedDataset.id;
+        setIsDirty(false);
+      }
+    } else {
+      setOriginalRowsData([]);
+      originalDatasetIdRef.current = null;
+      setIsDirty(false);
+    }
+  }, [selectedDataset?.id]);
+
+  const FIELDS_TO_COMPARE = useMemo(() => [
+    'uid', 'keyword1', 'keyword2', 'landingPage', 'cluster', 'kwCategory', 
+    'activityName', 'wordCount', 'contentSpoc', 'topic', 'contentDoc', 
+    'status', 'publisher', 'pgSiteDomain', 'liveLink', 'remarks', 'solution', 
+    'lastActivity', 'scheduledDate', 'scheduled_date', 'verified'
+  ], []);
+
+  const hasUnsavedChanges = useMemo(() => {
+    if (!selectedDataset) return false;
+    if (isDirty) return true;
+    if (!originalRowsData || originalRowsData.length === 0) return false;
+    const currentRows = selectedDataset.rowsData || [];
+    if (currentRows.length !== originalRowsData.length) return true;
+
+    for (let i = 0; i < currentRows.length; i++) {
+      const cur = currentRows[i] || {};
+      const orig = originalRowsData[i] || {};
+
+      for (const key of FIELDS_TO_COMPARE) {
+        const getVal = (r, k) => {
+          if (k === 'verified') return r.verified === true || r.verified === 'true';
+          const v = r[k] ?? r[k.replace(/([A-Z])/g, "_$1").toLowerCase()] ?? '';
+          return String(v).trim();
+        };
+        if (getVal(cur, key) !== getVal(orig, key)) return true;
+      }
+    }
+
+    return false;
+  }, [selectedDataset?.rowsData, originalRowsData, FIELDS_TO_COMPARE, isDirty]);
+
+  const handleAttemptLeaveDataset = (leaveAction) => {
+    if (hasUnsavedChanges) {
+      setPendingLeaveAction(() => leaveAction);
+      setShowUnsavedModal(true);
+    } else {
+      leaveAction();
+    }
+  };
+
+  const BULK_EDIT_FIELD_OPTIONS = [
+    { key: 'uid', label: 'UID' },
+    { key: 'keyword1', label: 'Keyword 1' },
+    { key: 'keyword2', label: 'Keyword 2' },
+    { key: 'landingPage', label: 'Landing Page' },
+    { key: 'cluster', label: 'Cluster' },
+    { key: 'kwCategory', label: 'KW Category' },
+    { key: 'activityName', label: 'Activity Name' },
+    { key: 'wordCount', label: 'Word Count' },
+    { key: 'contentSpoc', label: 'Content SPOC' },
+    { key: 'topic', label: 'Topic' },
+    { key: 'contentDoc', label: 'Content Doc' },
+    { key: 'status', label: 'Status' },
+    { key: 'publisher', label: 'POC' },
+    { key: 'pgSiteDomain', label: 'PG Site Domain' },
+    { key: 'liveLink', label: 'Live Link' },
+    { key: 'remarks', label: 'Remarks' },
+    { key: 'solution', label: 'Solution' },
+    { key: 'lastActivity', label: 'Last Activity' },
+    { key: 'scheduledDate', label: 'Scheduled Date' },
+    { key: 'updatedDate', label: 'Updated Date' },
+  ];
 
   const ALL_FIELD_CONFIGS = [
     { key: 'activityName', label: 'Activity Name' },
     { key: 'status', label: 'Status' },
-    { key: 'publisher', label: 'Publisher' },
+    { key: 'publisher', label: 'POC' },
     { key: 'contentSpoc', label: 'Content SPOC' },
     { key: 'remarks', label: 'Remarks' },
     { key: 'solution', label: 'Solution' },
@@ -586,7 +682,7 @@ export default function OffPageSchedulerPage() {
     const headers = [
       'UID', 'Period', 'Scheduled Date', 'Keyword 1', 'Keyword 2', 'Landing Page', 'Cluster', 
       'KW Category', 'Activity Name', 'Word Count', 'Content SPOC', 'Topic', 
-      'Content Doc', 'Status', 'Publisher', 'PG Site Domain', 
+      'Content Doc', 'Status', 'POC', 'PG Site Domain', 
       'Live Link', 'Remarks', 'Solution', 'Last Activity', 'Updated Date'
     ];
     // Example row
@@ -665,12 +761,18 @@ export default function OffPageSchedulerPage() {
   };
 
   const handleRowChange = (datasetId, rowIndex, field, value) => {
+    const todayStr = getTodayFormatted();
     let updatedRows = [];
     setImports(prevImports => 
       prevImports.map(imp => {
         if (imp.id !== datasetId) return imp;
         const newRowsData = [...imp.rowsData];
-        newRowsData[rowIndex] = { ...newRowsData[rowIndex], [field]: value };
+        newRowsData[rowIndex] = { 
+          ...newRowsData[rowIndex], 
+          [field]: value,
+          updatedDate: todayStr,
+          updated_date: todayStr
+        };
         updatedRows = newRowsData;
         return { ...imp, rowsData: newRowsData };
       })
@@ -678,20 +780,17 @@ export default function OffPageSchedulerPage() {
     if (selectedDataset && selectedDataset.id === datasetId) {
       setSelectedDataset(prev => {
         const newRowsData = [...prev.rowsData];
-        newRowsData[rowIndex] = { ...newRowsData[rowIndex], [field]: value };
+        newRowsData[rowIndex] = { 
+          ...newRowsData[rowIndex], 
+          [field]: value,
+          updatedDate: todayStr,
+          updated_date: todayStr
+        };
         return { ...prev, rowsData: newRowsData };
       });
     }
-    setHasUnsavedChanges(true);
+    setIsDirty(true);
     setSavingState('');
-    // Sync row edit to backend DB
-    if (datasetId && typeof datasetId === 'number' && datasetId < 1000000000000) {
-      updateMonthlyImportApi(datasetId, { 
-        project: selectedDataset?.project || selectedDataset?.project_name,
-        filename: selectedDataset?.filename,
-        rowsData: updatedRows 
-      }).catch(err => console.warn('Failed to save row update to DB:', err));
-    }
   };
 
   const handleBulkDelete = () => {
@@ -710,24 +809,23 @@ export default function OffPageSchedulerPage() {
     );
     setSelectedDataset(prev => ({ ...prev, rows: remainingRows.length, rowsData: remainingRows }));
     setSelectedRowIndices([]);
-    setHasUnsavedChanges(true);
+    setIsDirty(true);
     setSavingState('');
-
-    updateMonthlyImportApi(datasetId, { 
-      project: selectedDataset?.project || selectedDataset?.project_name,
-      filename: selectedDataset?.filename,
-      rows: remainingRows.length, 
-      rowsData: remainingRows 
-    }).catch(err => console.warn('Failed to save bulk delete to DB:', err));
   };
 
   const handleBulkEditField = (field, value) => {
     if (!selectedDataset || selectedRowIndices.length === 0 || !value) return;
+    const todayStr = getTodayFormatted();
 
     const currentRows = selectedDataset.rowsData || [];
     const updatedRows = currentRows.map((r, idx) => {
       if (selectedRowIndices.includes(idx)) {
-        return { ...r, [field]: value };
+        return { 
+          ...r, 
+          [field]: value,
+          updatedDate: todayStr,
+          updated_date: todayStr
+        };
       }
       return r;
     });
@@ -740,14 +838,8 @@ export default function OffPageSchedulerPage() {
       })
     );
     setSelectedDataset(prev => ({ ...prev, rowsData: updatedRows }));
-    setHasUnsavedChanges(true);
+    setIsDirty(true);
     setSavingState('');
-
-    updateMonthlyImportApi(datasetId, { 
-      project: selectedDataset?.project || selectedDataset?.project_name,
-      filename: selectedDataset?.filename,
-      rowsData: updatedRows 
-    }).catch(err => console.warn('Failed to save bulk edit to DB:', err));
   };
 
   const handleSaveChanges = async () => {
@@ -762,7 +854,8 @@ export default function OffPageSchedulerPage() {
         rows: currentRows.length, 
         rowsData: currentRows 
       });
-      setHasUnsavedChanges(false);
+      setOriginalRowsData(JSON.parse(JSON.stringify(currentRows)));
+      setIsDirty(false);
       setSavingState('saved');
       setTimeout(() => setSavingState(''), 3500);
     } catch (err) {
@@ -782,9 +875,9 @@ export default function OffPageSchedulerPage() {
         const updatedDs = freshImports.find(imp => imp.id === selectedDataset.id || imp.project === selectedDataset.project);
         if (updatedDs) setSelectedDataset(updatedDs);
       }
-      alert(res.message || 'Audit allocation completed successfully!');
+      setAuditSuccessMsg(res.message || 'Audit allocation completed successfully!');
     } catch (err) {
-      alert(`Audit allocation notice: ${err.message}`);
+      setAuditSuccessMsg(`Audit allocation notice: ${err.message}`);
     } finally {
       setAuditAllocating(false);
     }
@@ -853,12 +946,14 @@ export default function OffPageSchedulerPage() {
         <div style={{ marginBottom: 16 }}>
           <button 
             onClick={() => { 
-              setSelectedDataset(null); 
-              setDatasetSearch(''); 
-              setFilterActivity('ALL');
-              setFilterStatus('ALL');
-              setShowFilterPopover(false);
-              setSelectedRowIndices([]);
+              handleAttemptLeaveDataset(() => {
+                setSelectedDataset(null); 
+                setDatasetSearch(''); 
+                setFilterActivity('ALL');
+                setFilterStatus('ALL');
+                setShowFilterPopover(false);
+                setSelectedRowIndices([]);
+              });
             }}
             style={{ 
               background: 'none', 
@@ -878,15 +973,14 @@ export default function OffPageSchedulerPage() {
             ← Back to Import Logs
           </button>
         </div>
-
         {/* Header Title info & Save Changes Button */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
           <div>
-            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 6 }}>
-              {selectedDataset.filename}
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 4 }}>
+              {selectedDataset.project || selectedDataset.project_name}
             </h1>
-            <p style={{ color: 'var(--text-muted)', fontSize: 13.5, margin: 0 }}>
-              Associated Project: <strong>{selectedDataset.project}</strong> · Total Rows: <strong>{rows.length}</strong> · Imported on {selectedDataset.date}
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
+               Imported: {selectedDataset.date}
             </p>
           </div>
 
@@ -1043,7 +1137,7 @@ export default function OffPageSchedulerPage() {
             {/* Search Input */}
             <input 
               type="text"
-              placeholder="Search keywords, landing pages, publishers..."
+              placeholder="Search keywords, landing pages, POCs..."
               value={datasetSearch}
               onChange={(e) => setDatasetSearch(e.target.value)}
               style={{
@@ -1354,7 +1448,7 @@ export default function OffPageSchedulerPage() {
                   {[
                     'UID', 'Period', 'Scheduled Date', 'Keyword 1', 'Keyword 2', 'Cluster', 
                     'KW Category', 'Activity Name', 'Word Count', 'Content SPOC', 'Topic', 
-                    'Content Doc', 'Status', 'Publisher', 'PG Site Domain', 
+                    'Content Doc', 'Status', 'POC', 'PG Site Domain', 
                     'Live Link', 'Remarks', 'Solution', 'Last Activity', 'Updated Date'
                   ].map((col, idx) => (
                     <th key={idx} style={{ 
@@ -1466,7 +1560,7 @@ export default function OffPageSchedulerPage() {
                       </td>
                       <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
                         <select
-                          value={['Audited-LQ', 'Audited-Indexed', 'Audited-Verified', 'Published-Indexed', 'Published Non-Indexed'].includes(row.status) ? row.status : 'Published-Indexed'}
+                          value={['Audited-LQ', 'Audited-Indexed', 'Published-Indexed', 'Published Non-Indexed'].includes(row.status) ? row.status : 'Published-Indexed'}
                           onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'status', e.target.value)}
                           style={{
                             padding: '5px 10px',
@@ -1474,13 +1568,13 @@ export default function OffPageSchedulerPage() {
                             fontWeight: 700,
                             borderRadius: 6,
                             border: '1px solid #cbd5e1',
-                            background: row.status === 'Audited-Verified' ? '#dcfce7' : row.status === 'Published-Indexed' ? '#ecfdf5' : row.status === 'Audited-Indexed' ? '#eff6ff' : row.status === 'Audited-LQ' ? '#fef2f2' : '#fff7ed',
-                            color: row.status === 'Audited-Verified' ? '#15803d' : row.status === 'Published-Indexed' ? '#047857' : row.status === 'Audited-Indexed' ? '#1d4ed8' : row.status === 'Audited-LQ' ? '#b91c1c' : '#c2410c',
+                            background: row.status === 'Published-Indexed' ? '#ecfdf5' : row.status === 'Audited-Indexed' ? '#eff6ff' : row.status === 'Audited-LQ' ? '#fef2f2' : '#fff7ed',
+                            color: row.status === 'Published-Indexed' ? '#047857' : row.status === 'Audited-Indexed' ? '#1d4ed8' : row.status === 'Audited-LQ' ? '#b91c1c' : '#c2410c',
                             outline: 'none',
                             cursor: 'pointer'
                           }}
                         >
-                          {['Audited-LQ', 'Audited-Indexed', 'Audited-Verified', 'Published-Indexed', 'Published Non-Indexed'].map(opt => (
+                          {['Audited-LQ', 'Audited-Indexed', 'Published-Indexed', 'Published Non-Indexed'].map(opt => (
                             <option key={opt} value={opt} style={{ background: '#fff', color: '#0f172a', fontWeight: 500 }}>{opt}</option>
                           ))}
                         </select>
@@ -1490,46 +1584,63 @@ export default function OffPageSchedulerPage() {
                           <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                             {row.publisher || 'Unassigned'}
                           </span>
-                          {row.status === 'Audited-Verified' ? (
-                            <span style={{ 
-                              display: 'inline-flex', 
-                              alignItems: 'center', 
-                              gap: 4, 
-                              padding: '3px 8px', 
-                              borderRadius: 6, 
-                              fontSize: 11.5, 
-                              fontWeight: 700, 
-                              background: '#dcfce7', 
-                              color: '#15803d',
-                              border: '1px solid #bbf7d0'
-                            }}>
-                              <CheckCircle size={13} color="#15803d" /> Verified
-                            </span>
+                          {(row.verified === true || row.verified === 'true') ? (
+                            <button
+                              onClick={() => {
+                                handleRowChange(selectedDataset.id, rIdx, 'verified', false);
+                              }}
+                              title="Click to Unverify"
+                              style={{ 
+                                display: 'inline-flex', 
+                                alignItems: 'center', 
+                                gap: 4, 
+                                padding: '3px 8px', 
+                                borderRadius: 6, 
+                                fontSize: 11.5, 
+                                fontWeight: 700, 
+                                background: '#dcfce7', 
+                                color: '#15803d',
+                                border: '1px solid #bbf7d0',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease'
+                              }}
+                              onMouseEnter={e => {
+                                e.currentTarget.style.background = '#fef2f2';
+                                e.currentTarget.style.color = '#dc2626';
+                                e.currentTarget.style.borderColor = '#fca5a5';
+                              }}
+                              onMouseLeave={e => {
+                                e.currentTarget.style.background = '#dcfce7';
+                                e.currentTarget.style.color = '#15803d';
+                                e.currentTarget.style.borderColor = '#bbf7d0';
+                              }}
+                            >
+                              <CheckCircle size={13} /> Verified ✓
+                            </button>
                           ) : (
                             <button
                               onClick={() => {
-                                handleRowChange(selectedDataset.id, rIdx, 'status', 'Audited-Verified');
+                                handleRowChange(selectedDataset.id, rIdx, 'verified', true);
                               }}
+                              title="Click to Verify"
                               style={{
                                 padding: '4px 10px',
                                 fontSize: 11.5,
                                 fontWeight: 700,
                                 borderRadius: 6,
-                                border: '1px solid #cbd5e1',
-                                background: '#ffffff',
-                                color: '#2563eb',
+                                border: '1px solid var(--accent)',
+                                background: '#eff6ff',
+                                color: 'var(--accent)',
                                 cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 4
+                                transition: 'all 0.15s ease'
                               }}
                               onMouseEnter={e => {
-                                e.currentTarget.style.background = '#eff6ff';
-                                e.currentTarget.style.borderColor = '#93c5fd';
+                                e.currentTarget.style.background = 'var(--accent)';
+                                e.currentTarget.style.color = '#ffffff';
                               }}
                               onMouseLeave={e => {
-                                e.currentTarget.style.background = '#ffffff';
-                                e.currentTarget.style.borderColor = '#cbd5e1';
+                                e.currentTarget.style.background = '#eff6ff';
+                                e.currentTarget.style.color = 'var(--accent)';
                               }}
                             >
                               Verify
@@ -1567,71 +1678,303 @@ export default function OffPageSchedulerPage() {
           </div>
         </div>
 
-        {/* Bulk Edit Modal */}
+        {/* Bulk Edit Modal matching screenshot */}
         <Modal
           open={showBulkEditModal}
-          onClose={() => setShowBulkEditModal(false)}
-          title={`Bulk Edit ${selectedRowIndices.length} Selected Rows`}
+          onClose={() => {
+            setShowBulkEditModal(false);
+            setBulkEditField('');
+            setBulkEditValue('');
+          }}
+          title="Bulk Edit"
           footer={
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', marginTop: 12 }}>
               <button
-                onClick={() => setShowBulkEditModal(false)}
-                style={{ padding: '8px 16px', fontSize: 13, fontWeight: 600, borderRadius: 8, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}
+                onClick={() => {
+                  if (bulkEditField && bulkEditValue) {
+                    handleBulkEditField(bulkEditField, bulkEditValue);
+                  }
+                  setShowBulkEditModal(false);
+                  setBulkEditField('');
+                  setBulkEditValue('');
+                }}
+                disabled={!bulkEditField || !bulkEditValue}
+                style={{
+                  flex: 1,
+                  padding: '12px 20px',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: '#ffffff',
+                  background: (bulkEditField && bulkEditValue) ? '#0f172a' : '#94a3b8',
+                  border: 'none',
+                  borderRadius: 12,
+                  cursor: (bulkEditField && bulkEditValue) ? 'pointer' : 'not-allowed',
+                  boxShadow: (bulkEditField && bulkEditValue) ? '0 4px 12px rgba(15, 23, 42, 0.2)' : 'none',
+                  transition: 'all 0.15s ease'
+                }}
               >
-                Cancel
+                Apply to {selectedRowIndices.length} {selectedRowIndices.length === 1 ? 'page' : 'pages'}
               </button>
               <button
                 onClick={() => {
-                  if (bulkEditActivity) handleBulkEditField('activityName', bulkEditActivity);
-                  if (bulkEditStatus) handleBulkEditField('status', bulkEditStatus);
                   setShowBulkEditModal(false);
-                  setBulkEditActivity('');
-                  setBulkEditStatus('');
+                  setBulkEditField('');
+                  setBulkEditValue('');
                 }}
-                style={{ padding: '8px 18px', fontSize: 13, fontWeight: 700, borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}
+                style={{
+                  padding: '12px 24px',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: '#0f172a',
+                  background: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 12,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
               >
-                Apply Changes
+                Cancel
               </button>
             </div>
           }
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '10px 0' }}>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
-              Select fields to update across all <strong>{selectedRowIndices.length}</strong> selected rows:
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '4px 0 10px 0' }}>
+            <p style={{ fontSize: 13.5, color: '#64748b', margin: 0 }}>
+              Editing <strong>{selectedRowIndices.length}</strong> selected {selectedRowIndices.length === 1 ? 'page' : 'pages'}
             </p>
 
-            {/* Activity Name */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <label style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>Activity Name</label>
-              <select
-                value={bulkEditActivity}
-                onChange={(e) => setBulkEditActivity(e.target.value)}
-                style={{ padding: '9px 12px', fontSize: 13, borderRadius: 8, border: '1.5px solid var(--border)', outline: 'none' }}
-              >
-                <option value="">-- No Change --</option>
-                <option value="Forum Quora">Forum Quora</option>
-                <option value="Forum Reddit">Forum Reddit</option>
-                <option value="Paid Guest Post">Paid Guest Post</option>
-                <option value="Business Listing">Business Listing</option>
-                <option value="Brand Mention">Brand Mention</option>
-              </select>
+            {/* Field to Edit Dropdown */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <label style={{ fontSize: 13.5, fontWeight: 700, color: '#0f172a' }}>Field to edit</label>
+              <div style={{ position: 'relative', width: '100%' }}>
+                <select
+                  value={bulkEditField}
+                  onChange={(e) => {
+                    setBulkEditField(e.target.value);
+                    setBulkEditValue('');
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '11px 36px 11px 14px',
+                    fontSize: 14,
+                    fontWeight: 500,
+                    borderRadius: 10,
+                    border: '1px solid #cbd5e1',
+                    background: '#ffffff',
+                    color: bulkEditField ? '#0f172a' : '#94a3b8',
+                    outline: 'none',
+                    cursor: 'pointer',
+                    appearance: 'none',
+                    WebkitAppearance: 'none',
+                    MozAppearance: 'none'
+                  }}
+                >
+                  <option value="">Choose a field</option>
+                  {BULK_EDIT_FIELD_OPTIONS.map(f => (
+                    <option key={f.key} value={f.key} style={{ color: '#0f172a' }}>{f.label}</option>
+                  ))}
+                </select>
+                <ChevronDown size={16} color="#64748b" style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+              </div>
             </div>
 
-            {/* Status */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <label style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>Status</label>
-              <select
-                value={bulkEditStatus}
-                onChange={(e) => setBulkEditStatus(e.target.value)}
-                style={{ padding: '9px 12px', fontSize: 13, borderRadius: 8, border: '1.5px solid var(--border)', outline: 'none' }}
+            {/* Value Input depending on selected field */}
+            {bulkEditField && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <label style={{ fontSize: 13.5, fontWeight: 700, color: '#0f172a' }}>
+                  New Value for {BULK_EDIT_FIELD_OPTIONS.find(f => f.key === bulkEditField)?.label}
+                </label>
+                
+                {bulkEditField === 'status' ? (
+                  <div style={{ position: 'relative', width: '100%' }}>
+                    <select
+                      value={bulkEditValue}
+                      onChange={(e) => setBulkEditValue(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '11px 36px 11px 14px',
+                        fontSize: 14,
+                        fontWeight: 500,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        background: '#ffffff',
+                        color: '#0f172a',
+                        outline: 'none',
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        MozAppearance: 'none'
+                      }}
+                    >
+                      <option value="">Select Status</option>
+                      <option value="Audited-Verified">Audited-Verified</option>
+                      <option value="Published-Indexed">Published-Indexed</option>
+                      <option value="Audited-Indexed">Audited-Indexed</option>
+                      <option value="Audited-LQ">Audited-LQ</option>
+                      <option value="Published Non-Indexed">Published Non-Indexed</option>
+                    </select>
+                    <ChevronDown size={16} color="#64748b" style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+                  </div>
+                ) : bulkEditField === 'activityName' ? (
+                  <div style={{ position: 'relative', width: '100%' }}>
+                    <select
+                      value={bulkEditValue}
+                      onChange={(e) => setBulkEditValue(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '11px 36px 11px 14px',
+                        fontSize: 14,
+                        fontWeight: 500,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        background: '#ffffff',
+                        color: '#0f172a',
+                        outline: 'none',
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        MozAppearance: 'none'
+                      }}
+                    >
+                      <option value="">Select Activity Name</option>
+                      <option value="Forum Quora">Forum Quora</option>
+                      <option value="Forum Reddit">Forum Reddit</option>
+                      <option value="Paid Guest Post">Paid Guest Post</option>
+                      <option value="Business Listing">Business Listing</option>
+                      <option value="Brand Mention">Brand Mention</option>
+                    </select>
+                    <ChevronDown size={16} color="#64748b" style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+                  </div>
+                ) : bulkEditField === 'scheduledDate' ? (
+                  <input
+                    type="date"
+                    value={bulkEditValue}
+                    onChange={(e) => setBulkEditValue(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '11px 14px',
+                      fontSize: 14,
+                      fontWeight: 500,
+                      borderRadius: 10,
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#0f172a',
+                      outline: 'none'
+                    }}
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    placeholder={`Enter new ${BULK_EDIT_FIELD_OPTIONS.find(f => f.key === bulkEditField)?.label}...`}
+                    value={bulkEditValue}
+                    onChange={(e) => setBulkEditValue(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '11px 14px',
+                      fontSize: 14,
+                      fontWeight: 500,
+                      borderRadius: 10,
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#0f172a',
+                      outline: 'none'
+                    }}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        </Modal>
+
+        {/* Unsaved Changes Confirmation Modal */}
+        <Modal
+          open={showUnsavedModal}
+          onClose={() => {
+            setShowUnsavedModal(false);
+            setPendingLeaveAction(null);
+          }}
+          title="Unsaved Changes"
+          footer={
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, width: '100%', marginTop: 8 }}>
+              <button
+                onClick={() => {
+                  setShowUnsavedModal(false);
+                  setPendingLeaveAction(null);
+                }}
+                style={{
+                  padding: '10px 18px',
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  color: '#475569',
+                  background: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 10,
+                  cursor: 'pointer'
+                }}
               >
-                <option value="">-- No Change --</option>
-                <option value="Audited-LQ">Audited-LQ</option>
-                <option value="Audited-Indexed">Audited-Indexed</option>
-                <option value="Published-Indexed">Published-Indexed</option>
-                <option value="Published Non-Indexed">Published Non-Indexed</option>
-              </select>
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setShowUnsavedModal(false);
+                  try {
+                    const freshImports = await fetchMonthlyImportsApi();
+                    setImports(freshImports);
+                  } catch (e) {
+                    console.warn(e);
+                  }
+                  setIsDirty(false);
+                  setSavingState('');
+                  if (pendingLeaveAction) pendingLeaveAction();
+                  setPendingLeaveAction(null);
+                }}
+                style={{
+                  padding: '10px 18px',
+                  fontSize: 13.5,
+                  fontWeight: 700,
+                  color: '#b91c1c',
+                  background: '#fef2f2',
+                  border: '1px solid #fca5a5',
+                  borderRadius: 10,
+                  cursor: 'pointer'
+                }}
+              >
+                No, Discard Changes
+              </button>
+              <button
+                onClick={async () => {
+                  setShowUnsavedModal(false);
+                  try {
+                    await handleSaveChanges();
+                  } catch (e) {
+                    console.error(e);
+                  }
+                  setIsDirty(false);
+                  if (pendingLeaveAction) pendingLeaveAction();
+                  setPendingLeaveAction(null);
+                }}
+                style={{
+                  padding: '10px 20px',
+                  fontSize: 13.5,
+                  fontWeight: 700,
+                  color: '#ffffff',
+                  background: '#0f172a',
+                  border: 'none',
+                  borderRadius: 10,
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 6px rgba(15,23,42,0.2)'
+                }}
+              >
+                Yes, Save Changes
+              </button>
             </div>
+          }
+        >
+          <div style={{ padding: '8px 0 12px 0' }}>
+            
+            <p style={{ fontSize: 13.5, color: '#64748b', margin: 0, lineHeight: 0.1 }}>
+              Would you like to save your changes before leaving?
+            </p>
           </div>
         </Modal>
       </div>
@@ -2385,6 +2728,126 @@ export default function OffPageSchedulerPage() {
           <p style={{ fontSize: 14.5, color: '#64748b', margin: 0, lineHeight: 1.6 }}>
             Are you sure you want to delete <strong>this project's Monthly Operations data (records, scheduled activities)</strong> for <strong>{deleteConfirmImport?.project}</strong>? This action cannot be undone.
           </p>
+        </div>
+      </Modal>
+      {/* Unsaved Changes Confirmation Modal */}
+      <Modal
+        open={showUnsavedModal}
+        onClose={() => {
+          setShowUnsavedModal(false);
+          setPendingLeaveAction(null);
+        }}
+        title="Unsaved Changes"
+        footer={
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, width: '100%', marginTop: 8 }}>
+            <button
+              onClick={() => {
+                setShowUnsavedModal(false);
+                setPendingLeaveAction(null);
+              }}
+              style={{
+                padding: '10px 18px',
+                fontSize: 13.5,
+                fontWeight: 600,
+                color: '#475569',
+                background: '#ffffff',
+                border: '1px solid #cbd5e1',
+                borderRadius: 10,
+                cursor: 'pointer'
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                setShowUnsavedModal(false);
+                try {
+                  const freshImports = await fetchMonthlyImportsApi();
+                  setImports(freshImports);
+                } catch (e) {
+                  console.warn(e);
+                }
+                setIsDirty(false);
+                setSavingState('');
+                if (pendingLeaveAction) pendingLeaveAction();
+                setPendingLeaveAction(null);
+              }}
+              style={{
+                padding: '10px 18px',
+                fontSize: 13.5,
+                fontWeight: 700,
+                color: '#b91c1c',
+                background: '#fef2f2',
+                border: '1px solid #fca5a5',
+                borderRadius: 10,
+                cursor: 'pointer'
+              }}
+            >
+              No, Discard Changes
+            </button>
+            <button
+              onClick={async () => {
+                setShowUnsavedModal(false);
+                try {
+                  await handleSaveChanges();
+                } catch (e) {
+                  console.error(e);
+                }
+                if (pendingLeaveAction) pendingLeaveAction();
+                setPendingLeaveAction(null);
+              }}
+              style={{
+                padding: '10px 20px',
+                fontSize: 13.5,
+                fontWeight: 700,
+                color: '#ffffff',
+                background: '#0f172a',
+                border: 'none',
+                borderRadius: 10,
+                cursor: 'pointer',
+                boxShadow: '0 2px 6px rgba(15,23,42,0.2)'
+              }}
+            >
+              Yes, Save Changes
+            </button>
+          </div>
+        }
+      >
+        <div style={{ padding: '8px 0 12px 0' }}>
+         
+          <p style={{ fontSize: 13.5, color: '#64748b', margin: 0, lineHeight: 0.1 }}>
+            Would you like to save your changes to the database before leaving?
+          </p>
+        </div>
+      </Modal>
+      {/* Audit Allocation Success Modal */}
+      <Modal
+        open={!!auditSuccessMsg}
+        onClose={() => setAuditSuccessMsg('')}
+        title="Audit Allocation"
+        footer={null}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: '10px 0' }}>
+          <div style={{
+            width: 42,
+            height: 42,
+            borderRadius: '50%',
+            background: '#dcfce7',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            <CheckCircle size={22} color="#16a34a" />
+          </div>
+          <div>
+            <h4 style={{ margin: '0 0 6px 0', fontSize: 15, fontWeight: 700, color: '#0f172a' }}>
+              Allocation Completed
+            </h4>
+            <p style={{ margin: 0, fontSize: 13.5, color: '#64748b', lineHeight: 1.5 }}>
+              {auditSuccessMsg}
+            </p>
+          </div>
         </div>
       </Modal>
     </div>

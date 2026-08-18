@@ -10,11 +10,18 @@ import {
   fetchPageRows, insertPageRows, updatePageRow, deletePageRow, bulkDeletePageRows, deletePagesData, fetchPagesCounts,
   fetchCompetitorPageRows, insertCompetitorPageRows, updateCompetitorPageRow, deleteCompetitorPageRow,
   fetchCompetitors, insertCompetitor, updateCompetitor, deleteCompetitor, deleteCompetitorProjectData,
-  findCompetitors, fetchCompetitorSnapshots, classifyCompetitorUrls,
+  findCompetitors, fetchCompetitorSnapshots, classifyCompetitorUrls, resolveFullCompetitorUrl,
 } from '../../lib/projectsApi';
 import { isReadOnlyUser, canEdit, canDelete, canUpdate, canDownload } from '../../lib/permissions';
 
 // ─── shared tiny components ────────────────────────────────────────────────
+
+function formatCleanName(str) {
+  if (!str) return '—';
+  let s = String(str).trim();
+  s = s.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0];
+  return s || str;
+}
 
 function downloadCSV(filename, rows) {
   if (!rows || !rows.length) return;
@@ -5139,7 +5146,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
         return cSlug === targetSlug || cSlug.includes(targetSlug) || targetSlug.includes(cSlug);
       })
     : competitors;
-  const filtered = baseFiltered
+  let filtered = baseFiltered
     .filter(c => {
       if (search && search.trim()) {
         const q = search.trim().toLowerCase();
@@ -5180,9 +5187,23 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
       if (tableFilters.commonKw?.min !== '' && (c.commonKw == null || Number(c.commonKw) < Number(tableFilters.commonKw.min))) return false;
       if (tableFilters.commonKw?.max !== '' && (c.commonKw == null || Number(c.commonKw) > Number(tableFilters.commonKw.max))) return false;
       return true;
-    })
-    .slice()
-    .sort((a, b) => (b.commonKw ?? 0) - (a.commonKw ?? 0));
+    });
+
+  // Fallback: If strict category matching yields 0 items but project has competitors, fallback to project competitors
+  if (categoryFilter && filtered.length === 0 && baseFiltered.length > 0) {
+    filtered = baseFiltered.filter(c => {
+      if (search && search.trim()) {
+        const q = search.trim().toLowerCase();
+        const n = (c.name || '').toLowerCase();
+        const d = (c.domain || '').toLowerCase();
+        const u = (c.url || '').toLowerCase();
+        if (!n.includes(q) && !d.includes(q) && !u.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  filtered = filtered.slice().sort((a, b) => (b.commonKw ?? 0) - (a.commonKw ?? 0));
   const pageCount = Math.max(1, Math.ceil(filtered.length / COMPETITORS_PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const paged = filtered.slice((safePage - 1) * COMPETITORS_PAGE_SIZE, safePage * COMPETITORS_PAGE_SIZE);
@@ -5447,7 +5468,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
             </tbody>
           </table>
         </div>
-      ) : (categoryFilter === null) ? (
+      ) : categoryFilter === null ? (
         <CategoryBasedCompetitorsTable
           rows={displayedCategorySummaryRows}
           loading={categorySummaryLoading || loading || findingCompetitors}
@@ -5468,7 +5489,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
             borderRadius: 8,
             display: 'flex',
             alignItems: 'center',
-            justify: 'space-between'
+            justifyContent: 'space-between'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <button
