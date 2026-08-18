@@ -1949,7 +1949,7 @@ function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, tot
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                 <td style={{ padding: '14px 16px' }}>
                   {p.name && (
-                    <div onClick={() => onSelectProject(i)} style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)', marginBottom: 2, cursor: 'pointer' }}
+                    <div onClick={() => onSelectProject(p)} style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)', marginBottom: 2, cursor: 'pointer' }}
                       onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
                       onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
                       {p.name}
@@ -2281,6 +2281,8 @@ function HeaderQuickSelect({ placeholder, options, onSet, value }) {
 function PageDetailView({ project, onBack, onUpdatePages, user }) {
   const userCanEdit = canEdit(user);
   const userCanDelete = canDelete(user);
+  const userCanDownload = canDownload(user);
+  if (!project) return null;
   const [rows, setRows] = useState(project.detailPages || []);
   const loading = project.detailPages === undefined;
   const error = project.detailPagesError || '';
@@ -7063,7 +7065,7 @@ export default function ProjectSetupPage({ tab, user }) {
           <div style={{ overflowX: 'auto' }}>
             {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} domainFilters={domainFilters} search={search} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} user={user} />}
             {activeTab === 'Intent' && <PagesTab pages={kwClusters} search={search} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's Intent data (keywords, categories, clusters)" user={user} />}
-            {activeTab === 'Pages' && <PagesTab pages={pages} search={search} onSelectProject={(i) => { const proj = pages[i]; if (!checkProjectPrerequisites(proj, 'Pages')) return; setSelectedPageProject(i); }} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" user={user} />}
+            {activeTab === 'Pages' && <PagesTab pages={pages} search={search} onSelectProject={(item) => { const proj = typeof item === 'object' ? item : pages[item]; const origIdx = pages.findIndex(x => x.slug === proj?.slug); if (origIdx === -1) return; if (!checkProjectPrerequisites(proj, 'Pages')) return; setSelectedPageProject(origIdx); }} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" user={user} />}
             {activeTab === 'Competitors' && selectedCompetitorProject === null && (
               <CompetitorProjectsTab
                 projects={projects}
