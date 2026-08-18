@@ -4147,7 +4147,6 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
     })
     .filter(p => {
       if (!p.domain || !String(p.domain).trim()) return false;
-      if (p.competitorCount <= 0) return false;
       if (search && search.trim()) {
         const q = search.trim().toLowerCase();
         const n = (p.name || '').toLowerCase();
@@ -5587,39 +5586,11 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={8} style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading competitors…</td></tr>
+                  <tr><td colSpan={7} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading competitors…</td></tr>
                 ) : error ? (
-                  <tr><td colSpan={8} style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+                  <tr><td colSpan={7} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
                 ) : paged.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} style={{ padding: '40px 20px', textAlign: 'center', background: '#fafbfc' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-                        <Globe size={28} color="#94a3b8" />
-                        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
-                          No competitors found for category "{categoryFilter}"
-                        </span>
-                        <span style={{ fontSize: 12.5, color: 'var(--text-muted)', maxWidth: 400 }}>
-                          No competitors are assigned to this category yet. Click below to discover or add competitors.
-                        </span>
-                        <button
-                          onClick={() => onFindCompetitors?.()}
-                          style={{
-                            marginTop: 6,
-                            padding: '7px 16px',
-                            fontSize: 13,
-                            fontWeight: 600,
-                            background: '#0f1523',
-                            color: '#fff',
-                            border: 'none',
-                            borderRadius: 8,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Find Competitors
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                  <tr><td colSpan={7} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors found for category "{categoryFilter}".</td></tr>
                 ) : paged.map((c, i) => {
                   const catList = c.category ? c.category.split(',').map(s => s.trim()).filter(Boolean) : [];
                   const clusList = c.cluster ? c.cluster.split(',').map(s => s.trim()).filter(Boolean) : [];
