@@ -252,8 +252,8 @@ class UndetectedQuoraScraper:
             except Exception:
                 pass
 
-            print("[OK] Collapsed answers & text expanded. Pausing 6 seconds for DOM rendering...")
-            time.sleep(6)
+            print("[PAUSE] Pausing 5 seconds for collapsed answers content to render before link extraction...")
+            time.sleep(5)
 
             topic_path = normalize_quora_url(url)
             expected_prefix = f"{topic_path}/answer/" if topic_path else ""
@@ -264,7 +264,7 @@ class UndetectedQuoraScraper:
                 let links = Array.from(document.querySelectorAll('a[href*="/answer/"], a[href*="/profile/"]'));
                 
                 for (let link of links) {
-                    let href = link.getAttribute('href') || link.href;
+                    let href = link.getAttribute('href');
                     if (!href) continue;
                     
                     let urlObj;
@@ -300,22 +300,18 @@ class UndetectedQuoraScraper:
                     if (container) {
                         let innerLinks = container.querySelectorAll('a[href]');
                         for (let a of innerLinks) {
-                            let aHref = a.href || a.getAttribute('href') || "";
+                            let aHref = a.getAttribute('href');
                             if (!aHref) continue;
-                            if (aHref.includes('quora.com')) {
+                            if (aHref.includes('quora.com') && (aHref.includes('/profile/') || aHref.includes('/answer/'))) {
                                 if (!authorUrl && aHref.includes('/profile/')) authorUrl = aHref;
-                            } else if (!aHref.startsWith('#') && !aHref.startsWith('javascript:') && (aHref.startsWith('http://') || aHref.startsWith('https://'))) {
-                                if (!externalLinks.includes(aHref)) {
-                                    externalLinks.push(aHref);
-                                }
+                            } else if (!aHref.startsWith('#') && !aHref.startsWith('javascript:') && !aHref.includes('quora.com')) {
+                                externalLinks.push(aHref);
                             }
                         }
                     }
 
                     let text = container ? container.innerText : "";
-                    if (text.length > 3000) {
-                        text = text.substring(0, 3000); 
-                    }
+                    if (text.length > 3000) text = text.substring(0, 3000);
                     
                     results.push({
                         url: path,
@@ -546,8 +542,8 @@ class QuoraScraper:
             except Exception:
                 pass
 
-            print("[OK] Collapsed answers & text expanded. Pausing 6 seconds for DOM rendering...")
-            await self.page.wait_for_timeout(6000)
+            print("[PAUSE] Pausing 5 seconds for collapsed answers content to render before link extraction...")
+            await self.page.wait_for_timeout(5000)
 
             topic_path = normalize_quora_url(url)
             if not topic_path:
@@ -561,7 +557,7 @@ class QuoraScraper:
                 let links = Array.from(document.querySelectorAll('a[href*="/answer/"], a[href*="/profile/"]'));
                 
                 for (let link of links) {
-                    let href = link.getAttribute('href') || link.href;
+                    let href = link.getAttribute('href');
                     if (!href) continue;
                     
                     let urlObj;
@@ -604,14 +600,12 @@ class QuoraScraper:
                     if (container) {
                         let innerLinks = container.querySelectorAll('a[href]');
                         for (let a of innerLinks) {
-                            let aHref = a.href || a.getAttribute('href') || "";
+                            let aHref = a.getAttribute('href');
                             if (!aHref) continue;
-                            if (aHref.includes('quora.com')) {
+                            if (aHref.includes('quora.com') && (aHref.includes('/profile/') || aHref.includes('/answer/'))) {
                                 if (!authorUrl && aHref.includes('/profile/')) authorUrl = aHref;
-                            } else if (!aHref.startsWith('#') && !aHref.startsWith('javascript:') && (aHref.startsWith('http://') || aHref.startsWith('https://'))) {
-                                if (!externalLinks.includes(aHref)) {
-                                    externalLinks.push(aHref);
-                                }
+                            } else if (!aHref.startsWith('#') && !aHref.startsWith('javascript:') && !aHref.includes('quora.com')) {
+                                externalLinks.push(aHref);
                             }
                         }
                     }
