@@ -4961,6 +4961,7 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
 function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, onBack, onSelectCompetitor, onSelectKwDetail, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, onFindCompetitors, onAddPages, hasPendingChanges, saving, saveError, onSaveChanges, loading, error, top3KwByCategory, top3KwLoading, search, findingCompetitors, user }) {
   const userCanEdit = canEdit(user);
   const userCanDelete = canDelete(user);
+  const userCanDownload = canDownload(user);
   const [editingIdx, setEditingIdx] = useState(null);
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState(new Set());
