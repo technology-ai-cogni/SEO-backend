@@ -474,16 +474,6 @@ def update_monthly_import_endpoint(import_id: int, payload: UpdateMonthlyImportR
     )
     return {"status": "success"}
 
-class AuditAllocateRequest(BaseModel):
-    dataset_id: Optional[int] = None
-    days: Optional[int] = 22
-
-@app.post("/monthly-operations/audit-allocate")
-def audit_allocate_endpoint(payload: Optional[AuditAllocateRequest] = None):
-    dataset_id = payload.dataset_id if payload else None
-    days = payload.days if payload and payload.days else 22
-    return db.run_monthly_operations_audit_allocation(dataset_id=dataset_id, days_count=days)
-
 @app.delete("/monthly-operations/imports/{import_id}")
 def delete_monthly_import_endpoint(import_id: int):
     db.delete_monthly_import(import_id)
@@ -1772,7 +1762,67 @@ def classify_competitor_urls_endpoint(req: ClassifyUrlsRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class AddOutreachSiteRequest(BaseModel):
+    url: str
+    regions: Optional[List[str]] = None
+
+
+@app.get("/projects/{project_slug}/outreach")
+def get_outreach_sites_endpoint(project_slug: str):
+    """List all stored outreach sites for a given project."""
+    try:
+        sites = db.list_outreach_sites(project_slug)
+        return {"sites": sites}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/projects/{project_slug}/outreach")
+def add_outreach_site_endpoint(project_slug: str, req: AddOutreachSiteRequest):
+    """
+    Add a new outreach site for a project. Dynamically fetches DA, PA, SS,
+    main traffic, total traffic, and top 3 regions via scripts/domain_checeker.py.
+    """
+    try:
+        from scripts.domain_checeker import check_domain_metrics
+
+        url = req.url.strip()
+        metrics = check_domain_metrics(url, regions=req.regions)
+
+
+        site_payload = {
+            "url": metrics["url"],
+            "domain": metrics["domain"],
+            "da": metrics["da"],
+            "pa": metrics["pa"],
+            "ss": metrics["ss"],
+            "traffic": metrics["traffic"],
+            "total_traffic": metrics["totalTraffic"],
+            "region1_traffic": metrics["region1Traffic"],
+            "region2_traffic": metrics["region2Traffic"],
+            "region3_traffic": metrics["region3Traffic"],
+            "metrics_json": metrics
+        }
+
+        saved = db.insert_outreach_site(project_slug, site_payload)
+        return {"status": "success", "site": saved}
+    except Exception as e:
+        print(f"[app] Error adding outreach site: {e}", file=sys.stderr, flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/projects/{project_slug}/outreach/{site_id}")
+def delete_outreach_site_endpoint(project_slug: str, site_id: int):
+    """Delete an outreach site by ID."""
+    try:
+        db.delete_outreach_site(site_id)
+        return {"status": "success", "id": site_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+
 

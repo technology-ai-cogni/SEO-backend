@@ -1,8 +1,6 @@
 import { supabase } from './supabaseClient';
 import { derivedKeywordClusters, derivedPages } from '../data/mockData';
 
-const isLocalMode = !supabase;
-
 export async function fetchRecycleBinItemsApi(itemType = null) {
   if (isLocalMode) {
     const items = JSON.parse(localStorage.getItem('seo_recycle_bin') || '[]');
@@ -260,6 +258,7 @@ function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
 }
 
 // ─── Local Mode Detection & Setup ───────────────────────────────────────────
+const isLocalMode = !supabase;
 
 function initializeLocalStorage() {
   if (!isLocalMode) return;
@@ -1915,8 +1914,7 @@ export async function fetchUsersApi() {
           section_access: (u.section_access !== undefined && u.section_access !== null && u.section_access !== '') ? u.section_access : (local?.section_access || 'Default'),
           permissions: (u.permissions !== undefined && u.permissions !== null && u.permissions !== '') ? u.permissions : (local?.permissions || 'Default'),
           category: u.category || local?.category || 'Internal',
-          role: u.role || local?.role || 'INTERNAL_ASSOCIATE',
-          attendance: u.attendance || local?.attendance || 'Not Present'
+          role: u.role || local?.role || 'INTERNAL_ASSOCIATE'
         };
       });
 
@@ -1929,58 +1927,8 @@ export async function fetchUsersApi() {
     const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
     if (cached && cached.length > 0) return cached;
     return [
-      { id: 1, name: 'Admin User', email: 'admin@company.com', role: 'ADMIN', status: 'Active', attendance: 'Not Present', created_at: new Date().toISOString() }
+      { id: 1, name: 'Admin User', email: 'admin@company.com', role: 'ADMIN', status: 'Active', created_at: new Date().toISOString() }
     ];
-  }
-}
-
-export async function updateUserAttendanceApi(userId, attendance) {
-  try {
-    const res = await fetchAuthEndpoint(`/auth/users/${userId}/attendance`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ attendance })
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.detail || 'Failed to update user attendance.');
-    }
-    const updated = await res.json();
-    const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-    const nextList = cached.map(u => String(u.id) === String(userId) ? { ...u, attendance } : u);
-    localStorage.setItem('seo_users_list', JSON.stringify(nextList));
-    return updated;
-  } catch (err) {
-    console.warn('[updateUserAttendanceApi] API failed, updating in local cache:', err);
-    const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-    const nextList = cached.map(u => String(u.id) === String(userId) ? { ...u, attendance } : u);
-    localStorage.setItem('seo_users_list', JSON.stringify(nextList));
-    return { id: userId, attendance };
-  }
-}
-
-export async function markAllAttendanceApi(attendance = 'Present') {
-  try {
-    const res = await fetchAuthEndpoint('/auth/users/attendance/mark-all', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ attendance })
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.detail || 'Failed to bulk update attendance.');
-    }
-    const result = await res.json();
-    const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-    const nextList = cached.map(u => ({ ...u, attendance }));
-    localStorage.setItem('seo_users_list', JSON.stringify(nextList));
-    return result;
-  } catch (err) {
-    console.warn('[markAllAttendanceApi] API failed, updating in local cache:', err);
-    const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-    const nextList = cached.map(u => ({ ...u, attendance }));
-    localStorage.setItem('seo_users_list', JSON.stringify(nextList));
-    return { message: 'Updated locally' };
   }
 }
 
@@ -2245,16 +2193,6 @@ export async function deleteMonthlyImportApi(importId) {
   return await res.json();
 }
 
-export async function runAuditAllocationApi(datasetId = null, days = 22) {
-  const res = await fetch(`${API_BASE}/monthly-operations/audit-allocate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ dataset_id: datasetId, days })
-  });
-  if (!res.ok) throw new Error('Failed to run audit allocation');
-  return await res.json();
-}
-
 export async function fetchScheduledActivitiesApi() {
   const res = await fetch(`${API_BASE}/monthly-operations/schedules`);
   if (!res.ok) throw new Error('Failed to fetch scheduled activities');
@@ -2279,3 +2217,36 @@ export async function deleteScheduledActivityApi(scheduleId) {
   if (!res.ok) throw new Error('Failed to delete scheduled activity');
   return await res.json();
 }
+
+export async function fetchOutreachSitesApi(projectSlug) {
+  if (!projectSlug) return [];
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach`);
+  if (!res.ok) throw new Error('Failed to fetch outreach sites');
+  const data = await res.json();
+  return data.sites || [];
+}
+
+export async function addOutreachSiteApi(projectSlug, url, regions = null) {
+  if (!projectSlug) throw new Error('Project slug is required');
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, regions })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.detail || 'Failed to add outreach site');
+  }
+  const data = await res.json();
+  return data.site;
+}
+
+export async function deleteOutreachSiteApi(projectSlug, siteId) {
+  if (!projectSlug || !siteId) return;
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach/${siteId}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error('Failed to delete outreach site');
+  return await res.json();
+}
+

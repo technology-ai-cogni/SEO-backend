@@ -10,18 +10,12 @@ import {
   fetchPageRows, insertPageRows, updatePageRow, deletePageRow, bulkDeletePageRows, deletePagesData, fetchPagesCounts,
   fetchCompetitorPageRows, insertCompetitorPageRows, updateCompetitorPageRow, deleteCompetitorPageRow,
   fetchCompetitors, insertCompetitor, updateCompetitor, deleteCompetitor, deleteCompetitorProjectData,
-  findCompetitors, fetchCompetitorSnapshots, classifyCompetitorUrls, resolveFullCompetitorUrl,
+  findCompetitors, fetchCompetitorSnapshots, classifyCompetitorUrls,
+  fetchOutreachSitesApi, addOutreachSiteApi, deleteOutreachSiteApi
 } from '../../lib/projectsApi';
-import { isReadOnlyUser, canEdit, canDelete, canUpdate, canDownload } from '../../lib/permissions';
+import { isReadOnlyUser, canEdit, canDelete } from '../../lib/permissions';
 
 // ─── shared tiny components ────────────────────────────────────────────────
-
-function formatCleanName(str) {
-  if (!str) return '—';
-  let s = String(str).trim();
-  s = s.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0];
-  return s || str;
-}
 
 function downloadCSV(filename, rows) {
   if (!rows || !rows.length) return;
@@ -1888,8 +1882,6 @@ function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteP
 }
 function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, totalLabel = 'Total  Pages', keywordsLabel = 'Keywords', deleteScopeLabel = 'the project and all its keywords', search, user }) {
   const userCanDelete = canDelete(user);
-  const userCanUpdate = canUpdate(user);
-  const userCanDownload = canDownload(user);
   const [confirmingProject, setConfirmingProject] = useState(null);
 
   const handleConfirmDelete = async () => {
@@ -1949,7 +1941,7 @@ function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, tot
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                 <td style={{ padding: '14px 16px' }}>
                   {p.name && (
-                    <div onClick={() => onSelectProject(p)} style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)', marginBottom: 2, cursor: 'pointer' }}
+                    <div onClick={() => onSelectProject(i)} style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)', marginBottom: 2, cursor: 'pointer' }}
                       onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
                       onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
                       {p.name}
@@ -2239,27 +2231,23 @@ function ActionsDropdown({ selectedCount, onBulkEdit, onBulkDelete }) {
             boxShadow: '0 8px 24px rgba(0,0,0,0.18)', minWidth: 160, overflow: 'hidden',
           }}
         >
-          {onBulkEdit && (
-            <button
-              onClick={() => { setOpen(false); onBulkEdit(); }}
-              style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--text-primary)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            >
-              <Edit2 size={14} color="var(--text-muted)" /> Bulk Edit
-            </button>
-          )}
-          {onBulkEdit && onBulkDelete && <div style={{ height: 1, background: 'var(--border)' }} />}
-          {onBulkDelete && (
-            <button
-              onClick={() => { setOpen(false); onBulkDelete(); }}
-              style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--red)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
-              onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            >
-              <Trash2 size={14} /> Bulk Delete
-            </button>
-          )}
+          <button
+            onClick={() => { setOpen(false); onBulkEdit(); }}
+            style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--text-primary)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <Edit2 size={14} color="var(--text-muted)" /> Bulk Edit
+          </button>
+          <div style={{ height: 1, background: 'var(--border)' }} />
+          <button
+            onClick={() => { setOpen(false); onBulkDelete(); }}
+            style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--red)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
+            onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <Trash2 size={14} /> Bulk Delete
+          </button>
         </div>,
         document.body
       )}
@@ -2281,8 +2269,6 @@ function HeaderQuickSelect({ placeholder, options, onSet, value }) {
 function PageDetailView({ project, onBack, onUpdatePages, user }) {
   const userCanEdit = canEdit(user);
   const userCanDelete = canDelete(user);
-  const userCanDownload = canDownload(user);
-  if (!project) return null;
   const [rows, setRows] = useState(project.detailPages || []);
   const loading = project.detailPages === undefined;
   const error = project.detailPagesError || '';
@@ -2474,30 +2460,28 @@ function PageDetailView({ project, onBack, onUpdatePages, user }) {
           activeFilters={tableFilters}
           onFiltersChange={setTableFilters}
         />
-        {(userCanEdit || userCanDelete) && (
+        {userCanEdit && (
           <ActionsDropdown
             selectedCount={selectedRows.size}
-            onBulkEdit={userCanEdit ? () => setShowBulkEdit(true) : null}
-            onBulkDelete={userCanDelete ? () => setShowBulkDelete(true) : null}
+            onBulkEdit={() => setShowBulkEdit(true)}
+            onBulkDelete={() => setShowBulkDelete(true)}
           />
         )}
-        {userCanDownload && (
-          <button
-            onClick={() => downloadCSV(`${project?.name || 'pages'}_detail`, filteredRows)}
-            title="Download CSV"
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'var(--surface-2)', color: 'var(--text-secondary)',
-              border: '1px solid var(--border)', borderRadius: 8,
-              padding: '7px 10px', cursor: 'pointer',
-              fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-            }}
-            onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-          >
-            <Download size={14} />
-          </button>
-        )}
+        <button
+          onClick={() => downloadCSV(`${project?.name || 'pages'}_detail`, filteredRows)}
+          title="Download CSV"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--surface-2)', color: 'var(--text-secondary)',
+            border: '1px solid var(--border)', borderRadius: 8,
+            padding: '7px 10px', cursor: 'pointer',
+            fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+        >
+          <Download size={14} />
+        </button>
         <div style={{ flex: 1 }} />
         {saveError && (
           <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError}</span>
@@ -2611,8 +2595,6 @@ const KW_PAGE_SIZE = 100;
 function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }) {
   const userCanEdit = canEdit(user);
   const userCanDelete = canDelete(user);
-  const userCanUpdate = canUpdate(user);
-  const userCanDownload = canDownload(user);
   const [rows, setRows] = useState(project.detailKeywords || []);
   const loading = project.detailKeywords === undefined;
   const error = project.detailKeywordsError || '';
@@ -3267,23 +3249,21 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
               onFiltersChange={setTableFilters}
             />
 
-            {userCanDownload && (
-              <button
-                onClick={() => downloadCSV(`${project?.name || 'keywords'}_clusters`, visibleRows)}
-                title="Download CSV"
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'var(--surface-2)', color: 'var(--text-secondary)',
-                  border: '1px solid var(--border)', borderRadius: 8,
-                  padding: '7px 10px', cursor: 'pointer',
-                  fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-                }}
-                onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-              >
-                <Download size={14} />
-              </button>
-            )}
+            <button
+              onClick={() => downloadCSV(`${project?.name || 'keywords'}_clusters`, visibleRows)}
+              title="Download CSV"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--surface-2)', color: 'var(--text-secondary)',
+                border: '1px solid var(--border)', borderRadius: 8,
+                padding: '7px 10px', cursor: 'pointer',
+                fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+            >
+              <Download size={14} />
+            </button>
           </>
         )}
 
@@ -3298,7 +3278,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
           <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{clusterError}</span>
         )}
 
-        {userCanUpdate && rows.length > 0 && selectedRows.size === 0 && (
+        {userCanEdit && rows.length > 0 && selectedRows.size === 0 && (
           <>
             {/* Check initial ranking button -- visible ONLY when ALL keywords have both cluster and category */}
             {rows.length > 0 && rows.every(r => Boolean(r.cluster && String(r.cluster).trim()) && Boolean(r.category && String(r.category).trim())) && (
@@ -3482,36 +3462,34 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
           </>
         )}
 
-        {(userCanEdit || userCanDelete) && rows.length > 0 && (
+        {userCanDelete && rows.length > 0 && (
           <>
             <ActionsDropdown
               selectedCount={selectedRows.size}
-              onBulkEdit={userCanEdit ? () => setShowBulkEdit(true) : null}
-              onBulkDelete={userCanDelete ? () => setShowBulkDelete(true) : null}
+              onBulkEdit={() => setShowBulkEdit(true)}
+              onBulkDelete={() => setShowBulkDelete(true)}
             />
 
             {/* Robot Face AI Cluster Button */}
-            {userCanUpdate && (
-              <button
-                onClick={handleRunClustering}
-                disabled={clustering}
-                style={{
-                  background: 'linear-gradient(135deg, var(--accent), var(--accent-hover))',
-                  border: 'none', cursor: clustering ? 'default' : 'pointer',
-                  display: 'flex', alignItems: 'center', gap: 3,
-                  padding: '7px 16px 7px 10px', borderRadius: 999, transition: 'transform 0.15s, box-shadow 0.15s',
-                  opacity: clustering ? 0.75 : 1,
-                  boxShadow: '0 2px 10px rgba(92, 74, 242, 0.35)',
-                }}
-                onMouseEnter={e => { if (!clustering) { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(92, 74, 242, 0.45)'; } }}
-                onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 2px 10px rgba(92, 74, 242, 0.35)'; }}
-              >
-                <RobotClusterIcon busy={clustering} size={24} />
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>
-                  {clustering ? 'Clustering keywords…' : '   AI-Clustering'}
-                </span>
-              </button>
-            )}
+            <button
+              onClick={handleRunClustering}
+              disabled={clustering}
+              style={{
+                background: 'linear-gradient(135deg, var(--accent), var(--accent-hover))',
+                border: 'none', cursor: clustering ? 'default' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: 3,
+                padding: '7px 16px 7px 10px', borderRadius: 999, transition: 'transform 0.15s, box-shadow 0.15s',
+                opacity: clustering ? 0.75 : 1,
+                boxShadow: '0 2px 10px rgba(92, 74, 242, 0.35)',
+              }}
+              onMouseEnter={e => { if (!clustering) { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(92, 74, 242, 0.45)'; } }}
+              onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 2px 10px rgba(92, 74, 242, 0.35)'; }}
+            >
+              <RobotClusterIcon busy={clustering} size={24} />
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>
+                {clustering ? 'Clustering keywords…' : '   AI-Clustering'}
+              </span>
+            </button>
           </>
         )}
 
@@ -3725,9 +3703,7 @@ function RegionTags({ regions }) {
   );
 }
 
-function CompetitorDetailView({ competitor, onBack, user }) {
-  const userCanUpdate = canUpdate(user);
-  const userCanDownload = canDownload(user);
+function CompetitorDetailView({ competitor, onBack }) {
   const [details, setDetails] = useState([]);
   const [detailsLoading, setDetailsLoading] = useState(true);
   const [kwPage, setKwPage] = useState(1);
@@ -3765,37 +3741,35 @@ function CompetitorDetailView({ competitor, onBack, user }) {
         <div>
           <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
         </div>
-        {userCanDownload && (
-          <button
-            onClick={() => {
-              const rowsToExport = details.map(d => ({
-                Domain: d.domain,
-                Name: d.name,
-                Regions: (d.regions || []).join('; '),
-                DA: d.da ?? '',
-                'Ranking Keywords': d.rankingKeywords,
-                Location: d.location,
-                'Common KWs': Math.round(((d.commonKw ?? 0) / 100) * d.totalKw),
-                'Total KWs': d.totalKw,
-                'SERP Comp Level': d.serpCompLevel,
-                'Comp Level': d.compLevel,
-              }));
-              downloadCSV(`${title}_competitor_detail`, rowsToExport);
-            }}
-            title="Download CSV"
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'var(--surface-2)', color: 'var(--text-secondary)',
-              border: '1px solid var(--border)', borderRadius: 8,
-              padding: '7px 10px', cursor: 'pointer',
-              fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-            }}
-            onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-          >
-            <Download size={14} />
-          </button>
-        )}
+        <button
+          onClick={() => {
+            const rowsToExport = details.map(d => ({
+              Domain: d.domain,
+              Name: d.name,
+              Regions: (d.regions || []).join('; '),
+              DA: d.da ?? '',
+              'Ranking Keywords': d.rankingKeywords,
+              Location: d.location,
+              'Common KWs': Math.round(((d.commonKw ?? 0) / 100) * d.totalKw),
+              'Total KWs': d.totalKw,
+              'SERP Comp Level': d.serpCompLevel,
+              'Comp Level': d.compLevel,
+            }));
+            downloadCSV(`${title}_competitor_detail`, rowsToExport);
+          }}
+          title="Download CSV"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--surface-2)', color: 'var(--text-secondary)',
+            border: '1px solid var(--border)', borderRadius: 8,
+            padding: '7px 10px', cursor: 'pointer',
+            fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+        >
+          <Download size={14} />
+        </button>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{details.length} entr{details.length !== 1 ? 'ies' : 'y'}</span>
       </div>
@@ -4067,8 +4041,7 @@ function getSyncUniqueCounts(slug, competitors) {
   return { categoryCount: catSet.size, clusterCount: clusSet.size };
 }
 
-function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDeleteProject, loading, error, search, user }) {
-  const userCanDelete = canDelete(user);
+function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDeleteProject, loading, error, search }) {
   const [page, setPage] = useState(1);
   const [deletingProject, setDeletingProject] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -4219,30 +4192,28 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{p.competitorCount}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                  {onDeleteProject && userCanDelete && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeletingProject(p);
-                      }}
-                      title="Delete project competitor data"
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justify: 'center',
-                        color: 'var(--text-muted)',
-                        padding: '4px',
-                        transition: 'color 0.15s'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
-                      onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeletingProject(p);
+                    }}
+                    title="Delete project competitor data"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justify: 'center',
+                      color: 'var(--text-muted)',
+                      padding: '4px',
+                      transition: 'color 0.15s'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
+                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </td>
               </tr>
             ))}
@@ -4962,8 +4933,6 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
 
 function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, onBack, onSelectCompetitor, onSelectKwDetail, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, onFindCompetitors, onAddPages, hasPendingChanges, saving, saveError, onSaveChanges, loading, error, top3KwByCategory, top3KwLoading, search, findingCompetitors, user }) {
   const userCanEdit = canEdit(user);
-  const userCanDelete = canDelete(user);
-  const userCanDownload = canDownload(user);
   const [editingIdx, setEditingIdx] = useState(null);
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -5141,20 +5110,15 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
     { key: 'da', label: 'DA', type: 'range' },
   ];
 
-  const safeCompetitors = Array.isArray(competitors) ? competitors : [];
   const targetSlug = (scopedProject?.slug || scopedProject?.project_slug || scopedProject?.name || '').toLowerCase();
   const baseFiltered = scopedProject
-    ? safeCompetitors.filter(c => {
-        if (!c) return false;
-        const cSlug = (c.projectSlug || c.project_slug || c.project_name || c.projectName || '').toLowerCase();
-        if (!cSlug) return true;
-        return cSlug === targetSlug || cSlug.includes(targetSlug) || targetSlug.includes(cSlug);
+    ? competitors.filter(c => {
+        const cSlug = (c.projectSlug || c.project_slug || c.project_name || '').toLowerCase();
+        return cSlug === targetSlug;
       })
-    : safeCompetitors;
-
-  let filtered = baseFiltered
+    : competitors;
+  const filtered = baseFiltered
     .filter(c => {
-      if (!c) return false;
       if (search && search.trim()) {
         const q = search.trim().toLowerCase();
         const n = (c.name || '').toLowerCase();
@@ -5168,11 +5132,8 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
         const filterLower = categoryFilter.trim().toLowerCase();
         const cCats = (c.category || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
         const cClus = (c.cluster || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-        const matches = cCats.some(cat => cat === filterLower || cat.includes(filterLower) || filterLower.includes(cat)) ||
-                        cClus.some(clus => clus === filterLower || clus.includes(filterLower) || filterLower.includes(clus)) ||
-                        (c.category || '').toLowerCase().includes(filterLower) ||
-                        (c.cluster || '').toLowerCase().includes(filterLower) ||
-                        !c.category;
+        const matches = cCats.some(cat => cat === filterLower || cat.includes(filterLower)) ||
+                        cClus.some(clus => clus === filterLower || clus.includes(filterLower));
         if (!matches) return false;
       }
       if (tableFilters.category?.length) {
@@ -5194,24 +5155,9 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
       if (tableFilters.commonKw?.min !== '' && (c.commonKw == null || Number(c.commonKw) < Number(tableFilters.commonKw.min))) return false;
       if (tableFilters.commonKw?.max !== '' && (c.commonKw == null || Number(c.commonKw) > Number(tableFilters.commonKw.max))) return false;
       return true;
-    });
-
-  // Fallback: If strict category matching yields 0 items but project has competitors, fallback to project competitors
-  if (categoryFilter && filtered.length === 0 && baseFiltered.length > 0) {
-    filtered = baseFiltered.filter(c => {
-      if (!c) return false;
-      if (search && search.trim()) {
-        const q = search.trim().toLowerCase();
-        const n = (c.name || '').toLowerCase();
-        const d = (c.domain || '').toLowerCase();
-        const u = (c.url || '').toLowerCase();
-        if (!n.includes(q) && !d.includes(q) && !u.includes(q)) return false;
-      }
-      return true;
-    });
-  }
-
-  filtered = filtered.slice().sort((a, b) => (b.commonKw ?? 0) - (a.commonKw ?? 0));
+    })
+    .slice()
+    .sort((a, b) => (b.commonKw ?? 0) - (a.commonKw ?? 0));
   const pageCount = Math.max(1, Math.ceil(filtered.length / COMPETITORS_PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const paged = filtered.slice((safePage - 1) * COMPETITORS_PAGE_SIZE, safePage * COMPETITORS_PAGE_SIZE);
@@ -5260,18 +5206,8 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
   useEffect(() => { setPage(1); setSelectedIds(new Set()); setSubView('competitors'); }, [scopedProject?.slug]);
 
   const displayedCategorySummaryRows = (selectedCategoriesFilter && selectedCategoriesFilter.length > 0)
-    ? (categorySummaryRows || []).filter(r => {
-        if (!r) return false;
-        const rCat = (r.category || '').toLowerCase();
-        const rClus = (r.cluster || '').toLowerCase();
-        return selectedCategoriesFilter.some(c => {
-          if (!c) return false;
-          const cLower = String(c).toLowerCase();
-          return (rCat && (rCat.includes(cLower) || cLower.includes(rCat))) || 
-                 (rClus && (rClus.includes(cLower) || cLower.includes(rClus)));
-        });
-      })
-    : (categorySummaryRows || []);
+    ? categorySummaryRows.filter(r => selectedCategoriesFilter.some(c => r.category.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(r.category.toLowerCase()) || (r.cluster && (r.cluster.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(r.cluster.toLowerCase())))))
+    : categorySummaryRows;
 
   return (
     <>
@@ -5294,43 +5230,39 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                   activeFilters={tableFilters}
                   onFiltersChange={setTableFilters}
                 />
-                {(userCanEdit || userCanDelete) && (
-                  <ActionsDropdown
-                    selectedCount={selectedIds.size}
-                    onBulkEdit={userCanEdit ? () => setShowBulkEdit(true) : null}
-                    onBulkDelete={userCanDelete ? () => setShowBulkDelete(true) : null}
-                  />
-                )}
-                {userCanDownload && (
-                  <button
-                    onClick={() => {
-                      const rowsToExport = filtered.map(c => ({
-                        Competitor: c.name || c.domain,
-                        Domain: c.domain,
-                        Device: c.device || 'Desktop',
-                        Location: c.location,
-                        DA: c.da ?? '',
-                        'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
-                        'Total KWs': c.totalKw,
-                        'SERP Comp Level': c.serpCompLevel,
-                        'Comp Level': c.compLevel,
-                      }));
-                      downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
-                    }}
-                    title="Download CSV"
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      background: 'var(--surface-2)', color: 'var(--text-secondary)',
-                      border: '1px solid var(--border)', borderRadius: 8,
-                      padding: '7px 10px', cursor: 'pointer',
-                      fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-                    onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-                  >
-                    <Download size={14} />
-                  </button>
-                )}
+                <ActionsDropdown
+                  selectedCount={selectedIds.size}
+                  onBulkEdit={() => setShowBulkEdit(true)}
+                  onBulkDelete={() => setShowBulkDelete(true)}
+                />
+                <button
+                  onClick={() => {
+                    const rowsToExport = filtered.map(c => ({
+                      Competitor: c.name || c.domain,
+                      Domain: c.domain,
+                      Device: c.device || 'Desktop',
+                      Location: c.location,
+                      DA: c.da ?? '',
+                      'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
+                      'Total KWs': c.totalKw,
+                      'SERP Comp Level': c.serpCompLevel,
+                      'Comp Level': c.compLevel,
+                    }));
+                    downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
+                  }}
+                  title="Download CSV"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'var(--surface-2)', color: 'var(--text-secondary)',
+                    border: '1px solid var(--border)', borderRadius: 8,
+                    padding: '7px 10px', cursor: 'pointer',
+                    fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                >
+                  <Download size={14} />
+                </button>
               </>
             )}
             <div style={{ flex: 1 }} />
@@ -5473,20 +5405,18 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                   <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetCategory ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetCategory || '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetType ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetType || '—'}</td>
                   <td style={{ padding: '10px 16px' }}>
-                    {userCanDelete && (
-                      <button onClick={() => handleDeletePageRow(r.id || i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
-                        onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
-                        <Trash2 size={14} />
-                      </button>
-                    )}
+                    <button onClick={() => handleDeletePageRow(r.id || i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
+                      <Trash2 size={14} />
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      ) : categoryFilter === null ? (
+      ) : (categoryFilter === null || loading || findingCompetitors || baseFiltered.length < 10) ? (
         <CategoryBasedCompetitorsTable
           rows={displayedCategorySummaryRows}
           loading={categorySummaryLoading || loading || findingCompetitors}
@@ -5507,7 +5437,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
             borderRadius: 8,
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between'
+            justify: 'space-between'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <button
@@ -5732,7 +5662,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
         onClose={() => setEditingIdx(null)}
         competitor={editingIdx !== null ? competitors[editingIdx] : null}
         onSave={editingIdx !== null ? (updates) => onSaveCompetitor?.(competitors[editingIdx], updates) : undefined}
-        onDelete={editingIdx !== null && userCanDelete ? () => onDeleteCompetitor?.(editingIdx) : undefined}
+        onDelete={editingIdx !== null ? () => onDeleteCompetitor?.(editingIdx) : undefined}
       />
       <BulkEditModal open={showBulkEdit} onClose={() => setShowBulkEdit(false)} count={selectedIds.size} onApply={handleBulkEditApply} fields={COMPETITOR_BULK_FIELDS} itemLabel="competitor" />
       <BulkDeleteModal open={showBulkDelete} onClose={() => setShowBulkDelete(false)} count={selectedIds.size} onConfirm={handleBulkDelete} itemLabel="competitor" />
@@ -5807,8 +5737,6 @@ export default function ProjectSetupPage({ tab, user }) {
   const isReadOnly = isReadOnlyUser(user);
   const userCanEdit = canEdit(user);
   const userCanDelete = canDelete(user);
-  const userCanUpdate = canUpdate(user);
-  const userCanDownload = canDownload(user);
   const [activeTab, setActiveTab] = useState(tab || 'Domain');
   useEffect(() => { if (tab) { setActiveTab(tab); setSelectedPageProject(null); setSelectedCompetitor(null); setSelectedCompetitorProject(null); setSelectedKwProject(null); setSearch(''); } }, [tab]);
   const [filter, setFilter] = useState(null);
@@ -6017,19 +5945,63 @@ export default function ProjectSetupPage({ tab, user }) {
     setSearch('');
   };
 
-  const [outreachLinks, setOutreachLinks] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('seo_outreach_links') || '[]');
-    } catch (e) {
-      return [];
-    }
-  });
+  const [outreachLinks, setOutreachLinks] = useState([]);
+  const [outreachLoading, setOutreachLoading] = useState(false);
   const [showAddOutreach, setShowAddOutreach] = useState(false);
   const [newOutreachLink, setNewOutreachLink] = useState('');
   const [outreachError, setOutreachError] = useState('');
+  const [addingOutreach, setAddingOutreach] = useState(false);
   const [deletingOutreachLink, setDeletingOutreachLink] = useState(null);
 
-  const handleAddOutreachLink = (e) => {
+  // Determine active project for Outreach
+  const activeProject = useMemo(() => {
+    if (selectedCompetitorProject) return selectedCompetitorProject;
+    if (selectedPageProject !== null && pages[selectedPageProject]) return pages[selectedPageProject];
+    if (selectedKwProject !== null && kwClusters[selectedKwProject]) return kwClusters[selectedKwProject];
+    if (projects && projects.length > 0) return projects[0];
+    return null;
+  }, [selectedCompetitorProject, selectedPageProject, pages, selectedKwProject, kwClusters, projects]);
+
+  // Fetch outreach sites whenever active project or active tab changes
+  useEffect(() => {
+    if (activeTab !== 'Outreach') return;
+    let cancelled = false;
+    const pSlug = activeProject?.project_slug || activeProject?.slug;
+    if (!pSlug) {
+      setOutreachLinks([]);
+      setOutreachLoading(false);
+      return;
+    }
+    setOutreachLoading(true);
+    fetchOutreachSitesApi(pSlug)
+      .then(sites => {
+        if (!cancelled) {
+          const mapped = sites.map(s => ({
+            id: s.id,
+            url: s.url,
+            domain: s.domain,
+            da: s.da,
+            pa: s.pa,
+            ss: s.ss,
+            traffic: s.traffic,
+            totalTraffic: s.total_traffic || s.totalTraffic,
+            region1Traffic: s.region1_traffic || s.region1Traffic,
+            region2Traffic: s.region2_traffic || s.region2Traffic,
+            region3Traffic: s.region3_traffic || s.region3Traffic
+          }));
+          setOutreachLinks(mapped);
+        }
+      })
+      .catch(err => {
+        if (!cancelled) console.error("Error fetching outreach sites:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setOutreachLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeProject, activeTab]);
+
+  const handleAddOutreachLink = async (e) => {
     if (e) e.preventDefault();
     setOutreachError('');
     let link = newOutreachLink.trim();
@@ -6055,47 +6027,51 @@ export default function ProjectSetupPage({ tab, user }) {
       return;
     }
 
-    const domainPart = link.replace(/https?:\/\/(www\.)?/, '').split('/')[0];
-    const hash = domainPart.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    
-    const mockDa = (hash % 80) + 15;
-    const mockPa = Math.max(10, mockDa - (hash % 15) - 2);
-    const mockSs = (hash % 5) === 0 ? `${(hash % 4) + 1}%` : '0%';
-    const trafficVal = ((hash % 180) + 10) * 100;
-    const mockTraffic = trafficVal >= 1000 ? `${(trafficVal / 1000).toFixed(1)}K` : `${trafficVal}`;
-    const totalVal = trafficVal * ((hash % 5) + 2);
-    const mockTotalTraffic = totalVal >= 1000 ? `${(totalVal / 1000).toFixed(1)}K` : `${totalVal}`;
-    
-    const mockRegion1 = `US: ${((trafficVal * 0.5) / 1000).toFixed(1)}K`;
-    const mockRegion2 = `UK: ${((trafficVal * 0.25) / 1000).toFixed(1)}K`;
-    const mockRegion3 = `IN: ${((trafficVal * 0.15) / 1000).toFixed(1)}K`;
+    const pSlug = activeProject?.project_slug || activeProject?.slug;
+    if (!pSlug) {
+      setOutreachError('Please select or create a project first.');
+      return;
+    }
 
-    const updated = [
-      ...outreachLinks,
-      {
-        id: Date.now(),
-        url: link,
-        da: mockDa,
-        pa: mockPa,
-        ss: mockSs,
-        traffic: mockTraffic,
-        totalTraffic: mockTotalTraffic,
-        region1Traffic: mockRegion1,
-        region2Traffic: mockRegion2,
-        region3Traffic: mockRegion3
-      }
-    ];
-    setOutreachLinks(updated);
-    localStorage.setItem('seo_outreach_links', JSON.stringify(updated));
-    
-    setNewOutreachLink('');
-    setShowAddOutreach(false);
+    setAddingOutreach(true);
+    try {
+      const targetRegions = activeProject?.target_regions || ['in', 'us', 'uk'];
+      const newSite = await addOutreachSiteApi(pSlug, link, targetRegions);
+      
+      const mappedSite = {
+        id: newSite.id,
+        url: newSite.url,
+        domain: newSite.domain,
+        da: newSite.da,
+        pa: newSite.pa,
+        ss: newSite.ss,
+        traffic: newSite.traffic,
+        totalTraffic: newSite.total_traffic || newSite.totalTraffic,
+        region1Traffic: newSite.region1_traffic || newSite.region1Traffic,
+        region2Traffic: newSite.region2_traffic || newSite.region2Traffic,
+        region3Traffic: newSite.region3_traffic || newSite.region3Traffic
+      };
+
+      setOutreachLinks(prev => [mappedSite, ...prev]);
+      setNewOutreachLink('');
+      setShowAddOutreach(false);
+    } catch (err) {
+      setOutreachError(err.message || 'Failed to add outreach site & fetch metrics.');
+    } finally {
+      setAddingOutreach(false);
+    }
   };
 
-  const handleDeleteOutreachLink = (id) => {
-    const updated = outreachLinks.filter(lnk => lnk.id !== id);
-    setOutreachLinks(updated);
-    localStorage.setItem('seo_outreach_links', JSON.stringify(updated));
+  const handleDeleteOutreachLink = async (id) => {
+    const pSlug = activeProject?.project_slug || activeProject?.slug;
+    if (pSlug && id) {
+      try {
+        await deleteOutreachSiteApi(pSlug, id);
+      } catch (err) {
+        console.error("Failed deleting outreach site from backend:", err);
+      }
+    }
+    setOutreachLinks(prev => prev.filter(lnk => lnk.id !== id));
   };
 
   useEffect(() => {
@@ -6928,10 +6904,21 @@ export default function ProjectSetupPage({ tab, user }) {
                 )}
               </div>
 
+              <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                {filterTabs.map(f => (
+                  <button key={f} onClick={() => setFilter(prev => prev === f ? null : f)} style={{
+                    padding: '7px 16px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500,
+                    fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+                    background: filter === f ? '#0f1523' : '#fff',
+                    color: filter === f ? '#fff' : 'var(--text-secondary)',
+                    borderRight: f !== 'Gemini' ? '1px solid var(--border)' : 'none',
+                  }}>{f}</button>
+                ))}
+              </div>
             </div>
           )}
 
-          {userCanDownload && !isInDetailView && (
+          {!isInDetailView && (
             <button
               onClick={handleDownloadMainTab}
               title="Download CSV"
@@ -7051,7 +7038,6 @@ export default function ProjectSetupPage({ tab, user }) {
           <CompetitorDetailView
             competitor={competitors[selectedCompetitor]}
             onBack={() => setSelectedCompetitor(null)}
-            user={user}
           />
         ) : activeTab === 'Competitors' && selectedKwDetail !== null ? (
           <KeywordDetailView
@@ -7065,7 +7051,7 @@ export default function ProjectSetupPage({ tab, user }) {
           <div style={{ overflowX: 'auto' }}>
             {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} domainFilters={domainFilters} search={search} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} user={user} />}
             {activeTab === 'Intent' && <PagesTab pages={kwClusters} search={search} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's Intent data (keywords, categories, clusters)" user={user} />}
-            {activeTab === 'Pages' && <PagesTab pages={pages} search={search} onSelectProject={(item) => { const proj = typeof item === 'object' ? item : pages[item]; const origIdx = pages.findIndex(x => x.slug === proj?.slug); if (origIdx === -1) return; if (!checkProjectPrerequisites(proj, 'Pages')) return; setSelectedPageProject(origIdx); }} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" user={user} />}
+            {activeTab === 'Pages' && <PagesTab pages={pages} search={search} onSelectProject={(i) => { const proj = pages[i]; if (!checkProjectPrerequisites(proj, 'Pages')) return; setSelectedPageProject(i); }} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" user={user} />}
             {activeTab === 'Competitors' && selectedCompetitorProject === null && (
               <CompetitorProjectsTab
                 projects={projects}
@@ -7075,7 +7061,6 @@ export default function ProjectSetupPage({ tab, user }) {
                 onDeleteProject={handleDeleteCompetitorProject}
                 loading={competitorsLoading}
                 error={competitorsError}
-                user={user}
               />
             )}
             {activeTab === 'Competitors' && selectedCompetitorProject !== null && (
@@ -7113,7 +7098,12 @@ export default function ProjectSetupPage({ tab, user }) {
               />
             )}
             {activeTab === 'Outreach' && (
-              outreachLinks.length === 0 ? (
+              outreachLoading ? (
+                <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  <RefreshCw size={16} className="spin" style={{ animation: 'spin 1s linear infinite' }} />
+                  Loading outreach sites...
+                </div>
+              ) : outreachLinks.length === 0 ? (
                 <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
                   No outreach sites configured yet. Click <strong>+ {cta.label}</strong> to get started.
                 </div>
@@ -7135,7 +7125,7 @@ export default function ProjectSetupPage({ tab, user }) {
                           SS
                         </th>
                         <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
-                          Total Traffic
+                          Traffic
                         </th>
                         <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
                           Region 1
@@ -7184,7 +7174,7 @@ export default function ProjectSetupPage({ tab, user }) {
                             {lnk.ss || '-'}
                           </td>
                           <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
-                            {lnk.totalTraffic || '-'}
+                            {lnk.totalTraffic || lnk.traffic || '-'}
                           </td>
                           <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
                             {lnk.region1Traffic || '-'}
@@ -7326,12 +7316,23 @@ export default function ProjectSetupPage({ tab, user }) {
         }}
         title="Add Outreach Sites"
         footer={<>
-          <Btn variant="primary" onClick={handleAddOutreachLink}>Add Site</Btn>
+          <Btn variant="primary" onClick={handleAddOutreachLink} disabled={addingOutreach}>
+            {addingOutreach ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <RefreshCw size={14} className="spin" style={{ animation: 'spin 1s linear infinite' }} />
+                Fetching Metrics...
+              </span>
+            ) : (
+              'Add Site'
+            )}
+          </Btn>
           <Btn variant="outline" onClick={() => {
-            setShowAddOutreach(false);
-            setOutreachError('');
-            setNewOutreachLink('');
-          }} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
+            if (!addingOutreach) {
+              setShowAddOutreach(false);
+              setOutreachError('');
+              setNewOutreachLink('');
+            }
+          }} style={{ flex: 'none', padding: '10px 28px' }} disabled={addingOutreach}>Cancel</Btn>
         </>}
       >
         {outreachError && (

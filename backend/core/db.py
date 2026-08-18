@@ -63,7 +63,6 @@ import uuid
 import sys
 from decimal import Decimal
 import json
-from datetime import datetime
 
 def _clean_for_json(v):
     if v is None:
@@ -202,7 +201,6 @@ def init_db():
         """))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'USER'"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'Active'"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS attendance TEXT NOT NULL DEFAULT 'Not Present'"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_users_email ON users (LOWER(email))"))
 
         conn.execute(text("""
@@ -324,7 +322,6 @@ def init_db():
             )
         """))
         conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS uid TEXT"))
-        conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT false"))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS scheduled_activities (
@@ -515,8 +512,99 @@ def init_db():
         except Exception as idx_err:
             print(f"[DB Init] Notice during startup migration: {idx_err}")
 
+        # --- Outreach Sites Table ---
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS outreach_sites (
+                id BIGSERIAL PRIMARY KEY,
+                project_slug TEXT NOT NULL REFERENCES projects(slug),
+                url TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                da INTEGER,
+                pa INTEGER,
+                ss TEXT,
+                traffic TEXT,
+                total_traffic TEXT,
+                region1_traffic TEXT,
+                region2_traffic TEXT,
+                region3_traffic TEXT,
+                metrics_json JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_outreach_sites_project ON outreach_sites (project_slug)"))
 
-# --- Projects -------------------------------------------------------------
+
+# --- Outreach Sites Database Functions ------------------------------------
+
+def list_outreach_sites(project_slug: str):
+    """Fetch all stored outreach sites for a given project slug."""
+    if not os.environ.get("DATABASE_URL"):
+        return []
+    with engine.connect() as conn:
+        res = conn.execute(
+            text("""
+                SELECT id, project_slug, url, domain, da, pa, ss, traffic,
+                       total_traffic, region1_traffic, region2_traffic, region3_traffic,
+                       metrics_json, created_at
+                FROM outreach_sites
+                WHERE project_slug = :slug
+                ORDER BY id DESC
+            """),
+            {"slug": project_slug}
+        ).mappings().all()
+        return [dict(r) for r in res]
+
+
+def insert_outreach_site(project_slug: str, site_data: dict):
+    """Insert or return newly inserted outreach site record."""
+    if not os.environ.get("DATABASE_URL"):
+        return site_data
+    with engine.begin() as conn:
+        res = conn.execute(
+            text("""
+                INSERT INTO outreach_sites (
+                    project_slug, url, domain, da, pa, ss, traffic,
+                    total_traffic, region1_traffic, region2_traffic, region3_traffic, metrics_json
+                )
+                VALUES (
+                    :project_slug, :url, :domain, :da, :pa, :ss, :traffic,
+                    :total_traffic, :region1_traffic, :region2_traffic, :region3_traffic, :metrics_json
+                )
+                RETURNING id, created_at
+            """),
+            {
+                "project_slug": project_slug,
+                "url": site_data.get("url"),
+                "domain": site_data.get("domain"),
+                "da": site_data.get("da"),
+                "pa": site_data.get("pa"),
+                "ss": site_data.get("ss"),
+                "traffic": site_data.get("traffic"),
+                "total_traffic": site_data.get("total_traffic") or site_data.get("totalTraffic"),
+                "region1_traffic": site_data.get("region1_traffic") or site_data.get("region1Traffic"),
+                "region2_traffic": site_data.get("region2_traffic") or site_data.get("region2Traffic"),
+                "region3_traffic": site_data.get("region3_traffic") or site_data.get("region3Traffic"),
+                "metrics_json": json.dumps(site_data.get("metrics_json", {})) if isinstance(site_data.get("metrics_json"), dict) else site_data.get("metrics_json")
+            }
+        ).mappings().first()
+        out = dict(site_data)
+        if res:
+            out["id"] = res["id"]
+        return out
+
+
+def delete_outreach_site(site_id: int):
+    """Delete an outreach site by ID."""
+    if not os.environ.get("DATABASE_URL"):
+        return True
+    with engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM outreach_sites WHERE id = :id"),
+            {"id": site_id}
+        )
+    return True
+
 
 def get_or_create_project(name):
     """Look up a project by its display name, registering it if it's new.
@@ -2358,14 +2446,13 @@ def _insert_monthly_operation_rows(conn, filename, project_name, rows_data):
                 f"remarks{p}": r.get("remarks", ""),
                 f"solution{p}": r.get("solution", ""),
                 f"last_activity{p}": r.get("lastActivity", r.get("last_activity", "")),
-                f"updated_date{p}": r.get("updatedDate") or r.get("updated_date") or datetime.now().strftime("%Y-%m-%d"),
-                f"verified{p}": bool(r.get("verified", False))
+                f"updated_date{p}": r.get("updatedDate", r.get("updated_date", ""))
             })
             values_sql_parts.append(f"""(
                 :uid{p}, :filename{p}, :project_name{p}, :period{p}, :scheduled_date{p}, :keyword1{p}, :keyword2{p},
                 :landing_page{p}, :cluster{p}, :kw_category{p}, :activity_name{p}, :word_count{p},
                 :content_spoc{p}, :topic{p}, :content_doc{p}, :status{p}, :publisher{p},
-                :pg_site_domain{p}, :live_link{p}, :remarks{p}, :solution{p}, :last_activity{p}, :updated_date{p}, :verified{p}
+                :pg_site_domain{p}, :live_link{p}, :remarks{p}, :solution{p}, :last_activity{p}, :updated_date{p}
             )""")
 
         sql = f"""
@@ -2373,7 +2460,7 @@ def _insert_monthly_operation_rows(conn, filename, project_name, rows_data):
                 uid, filename, project_name, period, scheduled_date, keyword1, keyword2,
                 landing_page, cluster, kw_category, activity_name, word_count,
                 content_spoc, topic, content_doc, status, publisher,
-                pg_site_domain, live_link, remarks, solution, last_activity, updated_date, verified
+                pg_site_domain, live_link, remarks, solution, last_activity, updated_date
             ) VALUES {','.join(values_sql_parts)}
         """
         conn.execute(text(sql), params)
@@ -2389,7 +2476,7 @@ def list_monthly_imports():
                    topic, content_doc as "contentDoc", status, publisher,
                    pg_site_domain as "pgSiteDomain", live_link as "liveLink",
                    remarks, solution, last_activity as "lastActivity",
-                   updated_date as "updatedDate", verified, created_at
+                   updated_date as "updatedDate", created_at
             FROM monthly_operations
             ORDER BY id ASC
         """)).mappings().fetchall()
@@ -2459,39 +2546,23 @@ def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, d
                     p_name = "Default Project"
                     f_name = "dataset.csv"
 
-            # 1. Fetch existing database IDs and row data for this project
-            existing_db_rows = conn.execute(
-                text("""
-                    SELECT id, uid, filename, project_name, period, scheduled_date, 
-                           keyword1, keyword2, landing_page, cluster, kw_category, 
-                           activity_name, word_count, content_spoc, topic, content_doc, 
-                           status, publisher, pg_site_domain, live_link, remarks, 
-                           solution, last_activity, updated_date, verified
-                    FROM monthly_operations 
-                    WHERE LOWER(TRIM(project_name)) = LOWER(TRIM(:p))
-                """),
+            # 1. Fetch existing database IDs for this project
+            existing_rows = conn.execute(
+                text("SELECT id FROM monthly_operations WHERE LOWER(TRIM(project_name)) = LOWER(TRIM(:p))"),
                 {"p": p_name}
             ).fetchall()
-            db_row_map = {r[0]: dict(r._mapping) for r in existing_db_rows}
-            existing_ids = set(db_row_map.keys())
+            existing_ids = {r[0] for r in existing_rows}
 
             input_ids = set()
             update_param_list = []
             new_rows_list = []
 
             for r in rows_data:
-                if isinstance(r, str):
-                    try:
-                        r = json.loads(r)
-                    except Exception:
-                        continue
-                if not isinstance(r, dict):
-                    continue
                 r_id = r.get("id")
                 r_uid = _generate_uid(r.get("uid"))
                 if r_id and isinstance(r_id, int) and r_id in existing_ids:
                     input_ids.add(r_id)
-                    param_dict = {
+                    update_param_list.append({
                         "id": r_id,
                         "uid": r_uid,
                         "filename": f_name,
@@ -2515,31 +2586,8 @@ def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, d
                         "remarks": r.get("remarks", ""),
                         "solution": r.get("solution", ""),
                         "last_activity": r.get("lastActivity", r.get("last_activity", "")),
-                        "updated_date": r.get("updatedDate") or r.get("updated_date") or datetime.now().strftime("%Y-%m-%d"),
-                        "verified": bool(r.get("verified") in [True, "true", "True", 1, "1"])
-                    }
-
-                    # Compare against existing DB row state to only update dirty rows
-                    existing_db = db_row_map.get(r_id, {})
-                    is_changed = False
-                    for k, new_v in param_dict.items():
-                        if k == "id": continue
-                        if k == "verified":
-                            old_b = bool(existing_db.get("verified"))
-                            new_b = bool(new_v)
-                            if old_b != new_b:
-                                is_changed = True
-                                break
-                        else:
-                            old_v = "" if existing_db.get(k) is None else str(existing_db.get(k)).strip()
-                            new_v_str = "" if new_v is None else str(new_v).strip()
-                            if old_v != new_v_str:
-                                is_changed = True
-                                break
-
-                    if is_changed:
-                        param_dict["updated_date"] = r.get("updatedDate") or r.get("updated_date") or datetime.now().strftime("%Y-%m-%d")
-                        update_param_list.append(param_dict)
+                        "updated_date": r.get("updatedDate", r.get("updated_date", ""))
+                    })
                 else:
                     new_rows_list.append(r)
 
@@ -2576,15 +2624,13 @@ def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, d
                             f"remarks{p}": u["remarks"],
                             f"solution{p}": u["solution"],
                             f"last_activity{p}": u["last_activity"],
-                            f"updated_date{p}": u["updated_date"],
-                            f"verified{p}": u["verified"]
+                            f"updated_date{p}": u["updated_date"]
                         })
                         values_parts.append(f"""(
                             CAST(:id{p} AS bigint), :uid{p}, :filename{p}, :project_name{p}, :period{p}, :scheduled_date{p},
                             :keyword1{p}, :keyword2{p}, :landing_page{p}, :cluster{p}, :kw_category{p}, :activity_name{p},
                             :word_count{p}, :content_spoc{p}, :topic{p}, :content_doc{p}, :status{p}, :publisher{p},
-                            :pg_site_domain{p}, :live_link{p}, :remarks{p}, :solution{p}, :last_activity{p}, :updated_date{p},
-                            CAST(:verified{p} AS boolean)
+                            :pg_site_domain{p}, :live_link{p}, :remarks{p}, :solution{p}, :last_activity{p}, :updated_date{p}
                         )""")
 
                     sql = f"""
@@ -2612,13 +2658,12 @@ def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, d
                             solution = v.solution,
                             last_activity = v.last_activity,
                             updated_date = v.updated_date,
-                            verified = v.verified,
                             updated_at = now()
                         FROM (VALUES {','.join(values_parts)}) AS v(
                             id, uid, filename, project_name, period, scheduled_date,
                             keyword1, keyword2, landing_page, cluster, kw_category, activity_name,
                             word_count, content_spoc, topic, content_doc, status, publisher,
-                            pg_site_domain, live_link, remarks, solution, last_activity, updated_date, verified
+                            pg_site_domain, live_link, remarks, solution, last_activity, updated_date
                         )
                         WHERE m.id = v.id
                     """
@@ -2677,145 +2722,6 @@ def update_scheduled_activity_status(schedule_id, status):
 def delete_scheduled_activity(schedule_id):
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM scheduled_activities WHERE id = :id"), {"id": schedule_id})
-
-
-def run_monthly_operations_audit_allocation(dataset_id=None, days_count=22):
-    with engine.begin() as conn:
-        # 1. Active projects from domains table
-        active_domains = conn.execute(text("""
-            SELECT DISTINCT project_name FROM domains 
-            WHERE is_active = TRUE AND (status IS NULL OR LOWER(status) = 'active')
-        """)).fetchall()
-        active_project_names = [r[0] for r in active_domains if r[0]]
-
-        if not active_project_names:
-            mo_projects = conn.execute(text("SELECT DISTINCT project_name FROM monthly_operations")).fetchall()
-            active_project_names = [r[0] for r in mo_projects if r[0]]
-
-        # 2. Associates from users table using role column (e.g. INTERNAL_ASSOCIATE, INTERNAL_SR_ASSOCIATE, etc.)
-        associates_rows = conn.execute(text("""
-            SELECT name FROM users 
-            WHERE (
-                LOWER(role) LIKE '%associate%' OR 
-                UPPER(role) IN ('INTERNAL_ASSOCIATE', 'INTERNAL_SR_ASSOCIATE', 'ASSOCIATE', 'SR_ASSOCIATE')
-            )
-            AND (status IS NULL OR LOWER(status) = 'active')
-            ORDER BY id ASC
-        """)).fetchall()
-        
-        raw_associates = [r[0] for r in associates_rows if r[0]]
-        associates = []
-        for name in raw_associates:
-            if name not in associates:
-                associates.append(name)
-
-        if not associates:
-            fallback_users = conn.execute(text("""
-                SELECT name FROM users WHERE status IS NULL OR LOWER(status) = 'active' ORDER BY id ASC
-            """)).fetchall()
-            raw_fallback = [r[0] for r in fallback_users if r[0]]
-            for name in raw_fallback:
-                if name not in associates:
-                    associates.append(name)
-            
-        if not associates:
-            associates = ["Associate Sarah", "Associate David", "Associate Alex"]
-
-        # 3. Target rows in monthly_operations
-        if dataset_id:
-            target = conn.execute(text("SELECT project_name FROM monthly_operations WHERE id = :id LIMIT 1"), {"id": dataset_id}).fetchone()
-            if target:
-                rows_to_alloc = conn.execute(text("""
-                    SELECT id FROM monthly_operations 
-                    WHERE LOWER(TRIM(project_name)) = LOWER(TRIM(:p))
-                    ORDER BY id ASC
-                """), {"p": target[0]}).fetchall()
-            else:
-                rows_to_alloc = conn.execute(text("SELECT id FROM monthly_operations ORDER BY id ASC")).fetchall()
-        else:
-            rows_to_alloc = conn.execute(text("SELECT id FROM monthly_operations ORDER BY id ASC")).fetchall()
-
-        row_ids = [r[0] for r in rows_to_alloc]
-        if not row_ids:
-            return {
-                "status": "success",
-                "message": "No records found to audit & allocate.",
-                "allocated_rows": 0,
-                "active_projects": len(active_project_names),
-                "associates_count": len(associates)
-            }
-
-        # 4. Generate 22 work days starting from today
-        from datetime import datetime, timedelta
-        work_days = []
-        curr = datetime.now()
-        while len(work_days) < days_count:
-            if curr.weekday() < 5:
-                work_days.append(curr.strftime("%Y-%m-%d"))
-            curr += timedelta(days=1)
-
-        # 5. Distribute equal associates among resources & projects over 22 days
-        num_associates = len(associates)
-        total_resources = len(row_ids)
-
-        base_count = total_resources // num_associates
-        remainder = total_resources % num_associates
-
-        # Build contiguous equal allocation map per associate
-        assoc_allocation = {}
-        curr_idx = 0
-        for a_idx, assoc_name in enumerate(associates):
-            alloc_len = base_count + (1 if a_idx < remainder else 0)
-            assoc_rows = row_ids[curr_idx : curr_idx + alloc_len]
-            assoc_allocation[assoc_name] = assoc_rows
-            curr_idx += alloc_len
-
-        today_date = datetime.now().strftime("%Y-%m-%d")
-        updates = []
-        for assoc_name, assigned_rows in assoc_allocation.items():
-            for r_idx, row_id in enumerate(assigned_rows):
-                day_idx = r_idx % days_count
-                assigned_date = work_days[day_idx]
-                updates.append({
-                    "id": row_id,
-                    "publisher": assoc_name,
-                    "scheduled_date": assigned_date,
-                    "updated_date": today_date
-                })
-
-        # Batch UPDATE publisher, scheduled_date, and updated_date
-        chunk_size = 200
-        for i in range(0, len(updates), chunk_size):
-            chunk = updates[i:i + chunk_size]
-            params = {}
-            val_parts = []
-            for c_idx, item in enumerate(chunk):
-                p = f"_{c_idx}"
-                params[f"id{p}"] = item["id"]
-                params[f"publisher{p}"] = item["publisher"]
-                params[f"date{p}"] = item["scheduled_date"]
-                params[f"udate{p}"] = item["updated_date"]
-                val_parts.append(f"(CAST(:id{p} AS bigint), :publisher{p}, :date{p}, :udate{p})")
-            
-            sql = f"""
-                UPDATE monthly_operations AS m SET
-                    publisher = v.publisher,
-                    scheduled_date = v.scheduled_date,
-                    updated_date = v.updated_date,
-                    updated_at = now()
-                FROM (VALUES {','.join(val_parts)}) AS v(id, publisher, scheduled_date, updated_date)
-                WHERE m.id = v.id
-            """
-            conn.execute(text(sql), params)
-
-        return {
-            "status": "success",
-            "message": f"Successfully allocated {len(row_ids)} resources across {len(associates)} Associates over 22 work days.",
-            "allocated_rows": len(row_ids),
-            "active_projects": len(active_project_names),
-            "associates_count": len(associates),
-            "associates": associates
-        }
 
 
 if __name__ == "__main__":
