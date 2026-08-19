@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Calendar, UploadCloud, Clock, Trash2, Play, CheckCircle, AlertCircle, FileSpreadsheet, X, Upload, ChevronDown, Filter, Pencil, Save, ShieldCheck, Users } from 'lucide-react';
+import { Calendar, UploadCloud, Clock, Trash2, Play, CheckCircle, AlertCircle, FileSpreadsheet, X, Upload, ChevronDown, Filter, Pencil, Save, ShieldCheck, Users, Sparkles } from 'lucide-react';
 import { 
   fetchDomainRows, 
   fetchMonthlyImportsApi, 
@@ -7,6 +7,7 @@ import {
   updateMonthlyImportApi, 
   deleteMonthlyImportApi, 
   runAuditAllocationApi,
+  runAiStatusCheckApi,
   fetchScheduledActivitiesApi, 
   createScheduledActivityApi, 
   deleteScheduledActivityApi,
@@ -181,10 +182,45 @@ export default function OffPageSchedulerPage() {
   const originalDatasetIdRef = useRef(null);
   const [savingState, setSavingState] = useState(''); // '', 'saving', 'saved', 'error'
   const [auditAllocating, setAuditAllocating] = useState(false);
+  const [aiChecking, setAiChecking] = useState(false);
   const [deleteConfirmImport, setDeleteConfirmImport] = useState(null);
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
   const [pendingLeaveAction, setPendingLeaveAction] = useState(null);
   const [auditSuccessMsg, setAuditSuccessMsg] = useState('');
+
+  const STATUS_PRESET_OPTIONS = useMemo(() => [
+    'Audited-Indexed',
+    'Audited-LQ',
+    'Published-Indexed',
+    'Published-LQ',
+    'Flagged-Indexation',
+    'Published Non-Indexed',
+    'Draft',
+    'In Progress',
+    'Not Found'
+  ], []);
+
+  const REMARKS_PRESET_OPTIONS = useMemo(() => [
+    'No Issues',
+    'Optimized',
+    'No/Incorrect Anchor Text',
+    '2nd Anchor Text Missing',
+    '1st Anchor Text Missing',
+    'Wrong url Targeted',
+    'Link Replaced',
+    'Link Fixed',
+    'Flagged-Indexation'
+  ], []);
+
+  const SOLUTION_PRESET_OPTIONS = useMemo(() => [
+    'fixed',
+    'Content Replace',
+    'Link Replace',
+    'Quora : Reddit- Post New Answer',
+    'Quora : Reddit- Add More Upvotes',
+    'To Solve With Publisher',
+    'Quora : Reddit- Duplicate'
+  ], []);
 
   useEffect(() => {
     if (selectedDataset) {
@@ -942,6 +978,29 @@ export default function OffPageSchedulerPage() {
     }
   };
 
+  const handleRunAiStatusCheck = async () => {
+    if (!selectedDataset) return;
+    setAiChecking(true);
+    try {
+      const res = await runAiStatusCheckApi({
+        dataset_id: selectedDataset.id,
+        rows: selectedDataset.rowsData
+      });
+      const freshImports = await fetchMonthlyImportsApi();
+      setImports(freshImports);
+      if (selectedDataset) {
+        const updatedDs = freshImports.find(imp => imp.id === selectedDataset.id || imp.project === selectedDataset.project);
+        if (updatedDs) setSelectedDataset(updatedDs);
+      }
+      setAuditSuccessMsg(res.message || 'AI Status Check completed successfully!');
+      setTimeout(() => setAuditSuccessMsg(''), 5000);
+    } catch (err) {
+      setAuditSuccessMsg(`AI Status Check notice: ${err.message}`);
+    } finally {
+      setAiChecking(false);
+    }
+  };
+
   const activeDatasetRows = selectedDataset ? (selectedDataset.rowsData || []) : [];
 
   const fieldOptions = useMemo(() => {
@@ -1068,6 +1127,31 @@ export default function OffPageSchedulerPage() {
             >
               <ShieldCheck size={16} color="var(--accent)" />
               {auditAllocating ? 'Allocating Associates...' : 'Run Audit Allocation'}
+            </button>
+
+            <button
+              onClick={handleRunAiStatusCheck}
+              disabled={aiChecking}
+              style={{
+                background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: 10,
+                padding: '9px 18px',
+                fontSize: 13.5,
+                fontWeight: 700,
+                cursor: aiChecking ? 'wait' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                boxShadow: '0 3px 10px rgba(59, 130, 246, 0.25)',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+            >
+              <Sparkles size={16} color="#ffffff" />
+              {aiChecking ? 'Running AI Status Check...' : 'AI Status Check'}
             </button>
 
             {hasUnsavedChanges && (
@@ -1633,7 +1717,7 @@ export default function OffPageSchedulerPage() {
                       </td>
                       <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
                         <select
-                          value={['Audited-LQ', 'Audited-Indexed', 'Published-Indexed', 'Published Non-Indexed'].includes(row.status) ? row.status : 'Published-Indexed'}
+                          value={STATUS_PRESET_OPTIONS.includes(row.status) ? row.status : (row.status || 'Published-Indexed')}
                           onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'status', e.target.value)}
                           style={{
                             padding: '5px 10px',
@@ -1641,13 +1725,16 @@ export default function OffPageSchedulerPage() {
                             fontWeight: 700,
                             borderRadius: 6,
                             border: '1px solid #cbd5e1',
-                            background: row.status === 'Published-Indexed' ? '#ecfdf5' : row.status === 'Audited-Indexed' ? '#eff6ff' : row.status === 'Audited-LQ' ? '#fef2f2' : '#fff7ed',
-                            color: row.status === 'Published-Indexed' ? '#047857' : row.status === 'Audited-Indexed' ? '#1d4ed8' : row.status === 'Audited-LQ' ? '#b91c1c' : '#c2410c',
+                            background: row.status === 'Published-Indexed' || row.status === 'Audited-Indexed' ? '#ecfdf5' : row.status === 'Audited-LQ' || row.status === 'Published-LQ' ? '#fff7ed' : row.status === 'Flagged-Indexation' || row.status === 'Not Found' ? '#fef2f2' : '#f8fafc',
+                            color: row.status === 'Published-Indexed' || row.status === 'Audited-Indexed' ? '#047857' : row.status === 'Audited-LQ' || row.status === 'Published-LQ' ? '#c2410c' : row.status === 'Flagged-Indexation' || row.status === 'Not Found' ? '#b91c1c' : '#334155',
                             outline: 'none',
                             cursor: 'pointer'
                           }}
                         >
-                          {['Audited-LQ', 'Audited-Indexed', 'Published-Indexed', 'Published Non-Indexed'].map(opt => (
+                          {row.status && !STATUS_PRESET_OPTIONS.includes(row.status) && (
+                            <option value={row.status}>{row.status}</option>
+                          )}
+                          {STATUS_PRESET_OPTIONS.map(opt => (
                             <option key={opt} value={opt} style={{ background: '#fff', color: '#0f172a', fontWeight: 500 }}>{opt}</option>
                           ))}
                         </select>
@@ -1739,8 +1826,57 @@ export default function OffPageSchedulerPage() {
                           </a>
                         ) : 'N/A'}
                       </td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-muted)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.remarks}>{row.remarks || 'N/A'}</td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.solution || 'N/A'}</td>
+                      <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
+                        <select
+                          value={REMARKS_PRESET_OPTIONS.includes(row.remarks) ? row.remarks : (row.remarks || 'No Issues')}
+                          onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'remarks', e.target.value)}
+                          style={{
+                            padding: '5px 10px',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            borderRadius: 6,
+                            border: '1px solid #cbd5e1',
+                            background: '#ffffff',
+                            color: '#0f172a',
+                            outline: 'none',
+                            cursor: 'pointer',
+                            maxWidth: 240
+                          }}
+                          title={row.remarks}
+                        >
+                          {row.remarks && !REMARKS_PRESET_OPTIONS.includes(row.remarks) && (
+                            <option value={row.remarks}>{row.remarks}</option>
+                          )}
+                          {REMARKS_PRESET_OPTIONS.map(opt => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
+                        <select
+                          value={SOLUTION_PRESET_OPTIONS.includes(row.solution) ? row.solution : (row.solution || 'fixed')}
+                          onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'solution', e.target.value)}
+                          style={{
+                            padding: '5px 10px',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            borderRadius: 6,
+                            border: '1px solid #cbd5e1',
+                            background: row.solution === 'fixed' ? '#f0fdf4' : '#ffffff',
+                            color: row.solution === 'fixed' ? '#166534' : '#0f172a',
+                            outline: 'none',
+                            cursor: 'pointer'
+                          }}
+                          title={row.solution}
+                        >
+                          {row.solution && !SOLUTION_PRESET_OPTIONS.includes(row.solution) && (
+                            <option value={row.solution}>{row.solution}</option>
+                          )}
+                          {SOLUTION_PRESET_OPTIONS.map(opt => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                      </td>
                       <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.lastActivity || 'N/A'}</td>
                       <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{row.updatedDate || 'N/A'}</td>
                     </tr>
@@ -1881,11 +2017,63 @@ export default function OffPageSchedulerPage() {
                       }}
                     >
                       <option value="">Select Status</option>
-                      <option value="Audited-Verified">Audited-Verified</option>
-                      <option value="Published-Indexed">Published-Indexed</option>
-                      <option value="Audited-Indexed">Audited-Indexed</option>
-                      <option value="Audited-LQ">Audited-LQ</option>
-                      <option value="Published Non-Indexed">Published Non-Indexed</option>
+                      {STATUS_PRESET_OPTIONS.map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                    <ChevronDown size={16} color="#64748b" style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+                  </div>
+                ) : bulkEditField === 'remarks' ? (
+                  <div style={{ position: 'relative', width: '100%' }}>
+                    <select
+                      value={bulkEditValue}
+                      onChange={(e) => setBulkEditValue(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '11px 36px 11px 14px',
+                        fontSize: 14,
+                        fontWeight: 500,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        background: '#ffffff',
+                        color: '#0f172a',
+                        outline: 'none',
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        MozAppearance: 'none'
+                      }}
+                    >
+                      <option value="">Select Remarks</option>
+                      {REMARKS_PRESET_OPTIONS.map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                    <ChevronDown size={16} color="#64748b" style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+                  </div>
+                ) : bulkEditField === 'solution' ? (
+                  <div style={{ position: 'relative', width: '100%' }}>
+                    <select
+                      value={bulkEditValue}
+                      onChange={(e) => setBulkEditValue(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '11px 36px 11px 14px',
+                        fontSize: 14,
+                        fontWeight: 500,
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        background: '#ffffff',
+                        color: '#0f172a',
+                        outline: 'none',
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        MozAppearance: 'none'
+                      }}
+                    >
+                      <option value="">Select Solution</option>
+                      {SOLUTION_PRESET_OPTIONS.map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
                     </select>
                     <ChevronDown size={16} color="#64748b" style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
                   </div>
@@ -2512,7 +2700,7 @@ export default function OffPageSchedulerPage() {
                 transition: 'all 0.15s'
               }}
             >
-              Import Keywords
+              Import Data
             </button>
             <button
               onClick={() => setShowImportModal(false)}
@@ -2584,7 +2772,7 @@ export default function OffPageSchedulerPage() {
 
           {/* Import Keywords Header & Template Link */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 13.5, fontWeight: 600, color: '#0f172a' }}>Import Keywords</span>
+            <span style={{ fontSize: 13.5, fontWeight: 600, color: '#0f172a' }}>Import Data</span>
             <button
               type="button"
               onClick={downloadTemplateCSV}

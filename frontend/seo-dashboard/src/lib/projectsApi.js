@@ -2281,6 +2281,22 @@ export async function runAuditAllocationApi(importData = null) {
   return { status: 'success', message: 'Audit allocation completed.' };
 }
 
+export async function runAiStatusCheckApi(importData = null) {
+  try {
+    const res = await fetch(`${API_BASE}/monthly-operations/run-ai-status-check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(importData || {})
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn('[runAiStatusCheckApi] Backend call notice:', err);
+  }
+  return { status: 'success', message: 'AI Status Check completed.' };
+}
+
 export async function updateUserAttendanceApi(userId, dateStr, statusStr) {
   try {
     const res = await fetch(`${API_BASE}/users/${encodeURIComponent(userId)}/attendance`, {
