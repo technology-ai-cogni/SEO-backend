@@ -201,6 +201,8 @@ def init_db():
         """))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'USER'"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'Active'"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS attendance TEXT NOT NULL DEFAULT 'Not Present'"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_project TEXT NOT NULL DEFAULT 'All Projects'"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_users_email ON users (LOWER(email))"))
 
         conn.execute(text("""

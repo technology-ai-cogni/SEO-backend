@@ -18,6 +18,7 @@ class CreateUserRequest(BaseModel):
     status: Optional[str] = Field("Active", description="User status: Active or Disabled")
     section_access: Optional[str] = Field("Default", description="Section access level: Default, All Sections, Project Setup, etc.")
     permissions: Optional[str] = Field("Default", description="Action permissions: Default, View Only, View + Edit, etc.")
+    assigned_project: Optional[str] = Field("All Projects", description="Assigned project for vendor access")
 
 
 class UpdateUserStatusRequest(BaseModel):
@@ -29,6 +30,7 @@ class UpdateUserRoleRequest(BaseModel):
     category: Optional[str] = Field(None, description="Target category: Internal, Client Access, Vendor, Admin")
     section_access: Optional[str] = Field(None, description="Section access level")
     permissions: Optional[str] = Field(None, description="Action permissions string")
+    assigned_project: Optional[str] = Field(None, description="Assigned project for vendor access")
 
 
 class LoginRequest(BaseModel):
@@ -65,6 +67,7 @@ class UserResponse(BaseModel):
     section_access: Optional[str] = "Default"
     permissions: Optional[str] = "Default"
     attendance: Optional[str] = "Not Present"
+    assigned_project: Optional[str] = "All Projects"
     created_at: Optional[datetime] = None
 
 

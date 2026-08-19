@@ -3606,11 +3606,13 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
                   <td style={{ padding: '10px 16px', fontSize: 13, color: r.priority ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.priority || '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--accent)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.landingPage || '—'}</td>
                   <td style={{ padding: '10px 16px' }}>
-                    <button onClick={() => deleteRow(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
-                      onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
-                      <Trash2 size={14} />
-                    </button>
+                    {userCanDelete && (
+                      <button onClick={() => deleteRow(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               );

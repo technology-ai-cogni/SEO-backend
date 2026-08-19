@@ -30,6 +30,7 @@ def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
                        COALESCE(section_access, 'Default') as section_access,
                        COALESCE(permissions, 'Default') as permissions,
                        COALESCE(attendance, 'Not Present') as attendance,
+                       COALESCE(assigned_project, 'All Projects') as assigned_project,
                        created_at 
                 FROM users WHERE LOWER(email) = LOWER(:email)
             """),
@@ -42,15 +43,15 @@ def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def create_user(name: str, email: str, password_hash: str, role: str = 'INTERNAL_ASSOCIATE', category: str = None, status: str = 'Active', section_access: str = 'Default', permissions: str = 'Default', attendance: str = 'Not Present') -> Dict[str, Any]:
+def create_user(name: str, email: str, password_hash: str, role: str = 'INTERNAL_ASSOCIATE', category: str = None, status: str = 'Active', section_access: str = 'Default', permissions: str = 'Default', attendance: str = 'Not Present', assigned_project: str = 'All Projects') -> Dict[str, Any]:
     """Insert a new user record into Supabase PostgreSQL and return the created record."""
     resolved_cat = resolve_user_category(role, category)
     with engine.begin() as conn:
         result = conn.execute(
             text("""
-                INSERT INTO users (name, email, password_hash, role, category, status, section_access, permissions, attendance, created_at)
-                VALUES (:name, LOWER(:email), :password_hash, UPPER(:role), :category, :status, :section_access, :permissions, :attendance, NOW())
-                RETURNING id, name, email, role, category, status, section_access, permissions, attendance, created_at
+                INSERT INTO users (name, email, password_hash, role, category, status, section_access, permissions, attendance, assigned_project, created_at)
+                VALUES (:name, LOWER(:email), :password_hash, UPPER(:role), :category, :status, :section_access, :permissions, :attendance, :assigned_project, NOW())
+                RETURNING id, name, email, role, category, status, section_access, permissions, attendance, assigned_project, created_at
             """),
             {
                 "name": name.strip(),
@@ -61,7 +62,8 @@ def create_user(name: str, email: str, password_hash: str, role: str = 'INTERNAL
                 "status": status,
                 "section_access": section_access,
                 "permissions": permissions,
-                "attendance": attendance
+                "attendance": attendance,
+                "assigned_project": assigned_project or 'All Projects'
             }
         ).mappings().first()
         res = dict(result)
@@ -80,6 +82,7 @@ def list_all_users() -> List[Dict[str, Any]]:
                        COALESCE(section_access, 'Default') as section_access,
                        COALESCE(permissions, 'Default') as permissions,
                        COALESCE(attendance, 'Not Present') as attendance,
+                       COALESCE(assigned_project, 'All Projects') as assigned_project,
                        created_at
                 FROM users
                 ORDER BY created_at DESC
@@ -104,7 +107,8 @@ def update_user_status(user_id: int, new_status: str) -> Optional[Dict[str, Any]
                 RETURNING id, name, email, role, category, status, 
                           COALESCE(section_access, 'Default') as section_access,
                           COALESCE(permissions, 'Default') as permissions,
-                          COALESCE(attendance, 'Not Present') as attendance, created_at
+                          COALESCE(attendance, 'Not Present') as attendance,
+                          COALESCE(assigned_project, 'All Projects') as assigned_project, created_at
             """),
             {"id": user_id, "status": new_status}
         ).mappings().first()
@@ -122,7 +126,8 @@ def update_user_attendance(user_id: int, attendance: str) -> Optional[Dict[str, 
                 RETURNING id, name, email, role, category, status, 
                           COALESCE(section_access, 'Default') as section_access,
                           COALESCE(permissions, 'Default') as permissions,
-                          COALESCE(attendance, 'Not Present') as attendance, created_at
+                          COALESCE(attendance, 'Not Present') as attendance,
+                          COALESCE(assigned_project, 'All Projects') as assigned_project, created_at
             """),
             {"id": user_id, "attendance": attendance}
         ).mappings().first()
@@ -142,8 +147,8 @@ def update_all_users_attendance(attendance: str = 'Present') -> bool:
         return True
 
 
-def update_user_role(user_id: int, new_role: str, category: Optional[str] = None, section_access: Optional[str] = None, permissions: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """Update user role, category, section_access, and permissions."""
+def update_user_role(user_id: int, new_role: str, category: Optional[str] = None, section_access: Optional[str] = None, permissions: Optional[str] = None, assigned_project: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Update user role, category, section_access, permissions, and assigned_project."""
     resolved_cat = resolve_user_category(new_role, category)
     with engine.begin() as conn:
         updates = ["role = UPPER(:role)", "category = :category"]
@@ -156,6 +161,9 @@ def update_user_role(user_id: int, new_role: str, category: Optional[str] = None
         if permissions is not None:
             updates.append("permissions = :permissions")
             params["permissions"] = permissions
+        if assigned_project is not None:
+            updates.append("assigned_project = :assigned_project")
+            params["assigned_project"] = assigned_project
 
         set_clause = ", ".join(updates)
         row = conn.execute(
@@ -169,6 +177,7 @@ def update_user_role(user_id: int, new_role: str, category: Optional[str] = None
                           COALESCE(section_access, 'Default') as section_access,
                           COALESCE(permissions, 'Default') as permissions,
                           COALESCE(attendance, 'Not Present') as attendance,
+                          COALESCE(assigned_project, 'All Projects') as assigned_project,
                           created_at
             """),
             params
@@ -180,11 +189,11 @@ def update_user_role(user_id: int, new_role: str, category: Optional[str] = None
         return None
 
 
-def delete_user_by_id(user_id: int) -> bool:
-    """Permanently delete a user account by ID."""
+def delete_user_by_id(user_id: int) -> Optional[str]:
+    """Permanently delete a user account by ID and return deleted user email."""
     with engine.begin() as conn:
-        res = conn.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
-        return res.rowcount > 0
+        row = conn.execute(text("DELETE FROM users WHERE id = :id RETURNING email"), {"id": user_id}).mappings().first()
+        return row["email"] if row else None
 
 
 def update_user_name(email: str, name: str) -> Optional[Dict[str, Any]]:

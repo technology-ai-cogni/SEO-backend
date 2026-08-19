@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ExternalLink, Search, ChevronDown, CheckCircle } from 'lucide-react';
+import { ExternalLink, Search, ChevronDown, CheckCircle, Lock, ShieldAlert } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi, fetchDomainMetricsApi } from '../../lib/projectsApi';
 import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions, canRunBrandDiscovery, isAssociateUser } from '../../lib/permissions';
@@ -403,6 +403,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   const [analyzingTabs, setAnalyzingTabs] = useState({});
   const [projectKeywords, setProjectKeywords] = useState([]);
   const [projectPages, setProjectPages] = useState([]);
+  const [unauthorizedModal, setUnauthorizedModal] = useState({ show: false, message: '' });
 
   // Hidden cards state
   const [closedCards, setClosedCards] = useState({});
@@ -435,10 +436,37 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       try {
         setLoading(true);
         const domains = await fetchDomainRows();
+        const isVendor = user?.category === 'Vendor' || user?.role?.toUpperCase() === 'VENDOR';
+        const vendorProjectName = isVendor && user?.assigned_project && user.assigned_project !== 'All Projects' ? user.assigned_project : null;
+
         if (isMounted && domains && domains.length > 0) {
-          setProjects(domains);
-          const savedSlug = localStorage.getItem('bd_selected_project');
-          const targetProject = (savedSlug && domains.find(p => p.slug === savedSlug)) || domains[0];
+          let targetProject = null;
+
+          if (vendorProjectName) {
+            const matched = domains.find(p => 
+              p.name?.toLowerCase() === vendorProjectName.toLowerCase() ||
+              p.slug?.toLowerCase() === vendorProjectName.toLowerCase() ||
+              p.domain?.toLowerCase() === vendorProjectName.toLowerCase()
+            );
+
+            if (matched) {
+              setProjects([matched]);
+              targetProject = matched;
+            } else {
+              setProjects([]);
+              setUnauthorizedModal({
+                show: true,
+                message: `You are not authorized to view this project or no project setup data exists for your assigned project ("${vendorProjectName}").`
+              });
+              setLoading(false);
+              return;
+            }
+          } else {
+            setProjects(domains);
+            const savedSlug = localStorage.getItem('bd_selected_project');
+            targetProject = (savedSlug && domains.find(p => p.slug === savedSlug)) || domains[0];
+          }
+
           setSelectedSlug(targetProject.slug);
           setActiveProject(targetProject);
 
@@ -451,6 +479,14 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
             ]);
 
             if (isMounted) {
+              const hasData = (summary && summary.kw_count > 0) || (kws && kws.length > 0) || (pgs && pgs.length > 0);
+              if (vendorProjectName && !hasData) {
+                setUnauthorizedModal({
+                  show: true,
+                  message: `You are not authorized to view this project data or no keyword/rank data exists for your assigned project ("${vendorProjectName}").`
+                });
+              }
+
               if (summary && summary.kw_count > 0) {
                 setKwCount(summary.kw_count);
                 setNetPotential(summary.net_potential || 0);
@@ -480,6 +516,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
           } catch (e) {
             console.warn('[PositionAnalysisPage] Parallel load notice:', e);
           }
+        } else if (isMounted && (!domains || domains.length === 0)) {
+          if (isVendor) {
+            setUnauthorizedModal({
+              show: true,
+              message: `You are not authorized to view this project data or no setup data exists in the system.`
+            });
+          }
         }
       } catch (err) {
         console.error('Error loading projects:', err);
@@ -489,7 +532,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     }
     loadData();
     return () => { isMounted = false; };
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -526,9 +569,22 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   }, [highlightedCountryIndex]);
 
   const handleSelectProject = async (slug) => {
+    const isVendor = user?.category === 'Vendor' || user?.role?.toUpperCase() === 'VENDOR';
+    const vendorProjectName = isVendor && user?.assigned_project && user.assigned_project !== 'All Projects' ? user.assigned_project : null;
+
+    const p = projects.find(item => item.slug === slug);
+    if (!p) return;
+
+    if (vendorProjectName && p.name?.toLowerCase() !== vendorProjectName.toLowerCase() && p.slug?.toLowerCase() !== vendorProjectName.toLowerCase() && p.domain?.toLowerCase() !== vendorProjectName.toLowerCase()) {
+      setUnauthorizedModal({
+        show: true,
+        message: `You are not authorized to view data for project "${p.name || slug}". Your vendor profile is restricted to "${vendorProjectName}".`
+      });
+      return;
+    }
+
     setSelectedSlug(slug);
     localStorage.setItem('bd_selected_project', slug);
-    const p = projects.find(item => item.slug === slug);
     if (p) {
       setActiveProject(p);
       try {
@@ -2964,6 +3020,74 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 }}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Vendor Project Scoping - Unauthorized Popup Modal */}
+      {unauthorizedModal.show && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(15, 23, 42, 0.75)',
+          backdropFilter: 'blur(6px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999,
+          padding: 20
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 20,
+            maxWidth: 460,
+            width: '100%',
+            padding: 32,
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            textAlign: 'center',
+            border: '1px solid #fee2e2',
+            animation: 'fadeIn 0.2s ease-out'
+          }}>
+            <div style={{
+              width: 64,
+              height: 64,
+              borderRadius: '50%',
+              background: '#fef2f2',
+              color: '#dc2626',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 20px auto',
+              border: '1px solid #fca5a5'
+            }}>
+              <Lock size={32} />
+            </div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: '0 0 12px 0', fontFamily: 'var(--font-display, inherit)' }}>
+              You Are Not Authorized
+            </h2>
+            <p style={{ fontSize: 14, color: '#475569', margin: '0 0 26px 0', lineHeight: 1.6 }}>
+              {unauthorizedModal.message || 'You are not authorized to view this project data or no data is available for your assigned project.'}
+            </p>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <button
+                onClick={() => setUnauthorizedModal({ show: false, message: '' })}
+                style={{
+                  flex: 1,
+                  padding: '11px 20px',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: '#ffffff',
+                  background: '#dc2626',
+                  border: 'none',
+                  borderRadius: 10,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(220, 38, 38, 0.25)',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                Acknowledge
               </button>
             </div>
           </div>
