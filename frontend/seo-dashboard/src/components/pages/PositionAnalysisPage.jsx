@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ExternalLink, Search, ChevronDown, CheckCircle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi } from '../../lib/projectsApi';
+import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi, fetchDomainMetricsApi } from '../../lib/projectsApi';
 import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions, canRunBrandDiscovery, isAssociateUser } from '../../lib/permissions';
 
 function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 100, projectTotalKeywords = 514 }) {
@@ -607,9 +607,26 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     setClosedCards(prev => ({ ...prev, [cardId]: true }));
   };
 
-  // Load cached AI analysis results from localStorage for all tabs whenever project changes
+  // Load cached AI analysis results & live domain metrics from localStorage whenever project changes
   useEffect(() => {
     if (!activeProject?.slug) return;
+    
+    // Restore cached live DA & Traffic if present
+    const metricCacheKey = `bd_domain_metrics_${activeProject.slug}`;
+    try {
+      const cachedMetrics = localStorage.getItem(metricCacheKey);
+      if (cachedMetrics) {
+        const parsed = JSON.parse(cachedMetrics);
+        if (parsed) {
+          setActiveProject(prev => prev ? {
+            ...prev,
+            da: parsed.da ?? prev.da,
+            traffic: parsed.traffic ?? prev.traffic
+          } : prev);
+        }
+      }
+    } catch (e) {}
+
     const tabs = ['overview', 'chatgpt', 'gemini', 'ai overview'];
     const newResults = {};
     tabs.forEach(tabKey => {
@@ -694,6 +711,33 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     const domain = activeProject.domain || activeProject.name || '';
     const countryObj = COUNTRY_OPTIONS.find(c => c.code === selectedRegion);
     const countryName = countryObj ? countryObj.name : selectedRegion || 'India';
+
+    // Fetch live Authority Score (DA) and Organic Traffic from RapidAPI via backend
+    if (domain) {
+      fetchDomainMetricsApi(domain)
+        .then((liveMetrics) => {
+          if (liveMetrics) {
+            setActiveProject(prev => {
+              if (!prev) return prev;
+              const updatedDa = liveMetrics.da ?? prev.da;
+              const updatedTraffic = liveMetrics.traffic ?? prev.traffic;
+              
+              // Persist in localStorage so it doesn't vanish on page navigation
+              if (prev.slug) {
+                localStorage.setItem(`bd_domain_metrics_${prev.slug}`, JSON.stringify({
+                  da: updatedDa,
+                  traffic: updatedTraffic
+                }));
+              }
+              
+              return { ...prev, da: updatedDa, traffic: updatedTraffic };
+            });
+          }
+        })
+        .catch((err) => {
+          console.warn("[Brand Discovery] Live domain metrics fetch warning:", err);
+        });
+    }
 
     // Analyze top 2 keywords per category
     let kwList = topKeywords;
@@ -1584,7 +1628,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       }}>
         {[
           { label: 'Authority Score', value: activeProject?.da || 'N/A' },
-          { label: 'Organic Traffic', value: activeProject?.traffic ? Number(activeProject.traffic).toLocaleString() : '0' },
+          { label: 'Organic Traffic', value: activeProject?.traffic ? (isNaN(activeProject.traffic) ? activeProject.traffic : Number(activeProject.traffic).toLocaleString()) : '0' },
           { label: 'Keywords', value: (kwCount || activeProject?.keywords || 0).toLocaleString() },
           { label: 'Total Pages', value: (pageCount || activeProject?.targetPages || 0).toLocaleString() },
           { label: 'Total Blogs', value: (blogCount || activeProject?.blogPages || 0).toLocaleString() },

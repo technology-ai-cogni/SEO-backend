@@ -8,3 +8,12 @@ __pycache__/
 *.xlsx
 *.tar.gz
 quora_cookies.json
+
+# Ignored scripts
+backend/scripts/apify.py
+backend/scripts/agentic_rank_checker.py
+backend/scripts/crawl4ai_scraper.py
+backend/scripts/da_check.py
+backend/scripts/moz_domain_checker.py
+backend/scripts/quora.py
+backend/scripts/reddit.py

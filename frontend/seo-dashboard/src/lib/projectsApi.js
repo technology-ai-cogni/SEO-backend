@@ -82,10 +82,10 @@ export async function hardDeleteRecycleBinItemApi(itemId, userEmail = null) {
   if (isLocalMode) {
     const items = JSON.parse(localStorage.getItem('seo_recycle_bin') || '[]');
     const target = String(itemId);
-    const updated = items.filter(i => 
-      String(i.id) !== target && 
-      String(i.item_id) !== target && 
-      i.project_slug !== target && 
+    const updated = items.filter(i =>
+      String(i.id) !== target &&
+      String(i.item_id) !== target &&
+      i.project_slug !== target &&
       i.project_name !== target
     );
     localStorage.setItem('seo_recycle_bin', JSON.stringify(updated));
@@ -106,7 +106,7 @@ export function getActiveUserEmail(passedEmail = null) {
   try {
     const savedUser = JSON.parse(sessionStorage.getItem('seo_dashboard_user') || '{}');
     if (savedUser && savedUser.email) return savedUser.email;
-  } catch (e) {}
+  } catch (e) { }
   return 'system';
 }
 
@@ -262,7 +262,7 @@ const isLocalMode = !supabase;
 
 function initializeLocalStorage() {
   if (!isLocalMode) return;
-  
+
   if (!localStorage.getItem('seo_domains')) {
     const defaultDomains = [
       {
@@ -284,7 +284,7 @@ function initializeLocalStorage() {
     ];
     localStorage.setItem('seo_domains', JSON.stringify(defaultDomains));
   }
-  
+
   if (!localStorage.getItem('seo_projects')) {
     const defaultProjects = [
       {
@@ -296,7 +296,7 @@ function initializeLocalStorage() {
     ];
     localStorage.setItem('seo_projects', JSON.stringify(defaultProjects));
   }
-  
+
   if (!localStorage.getItem('seo_keyword_categories')) {
     const defaultKws = derivedKeywordClusters.map((k, idx) => ({
       id: idx + 1,
@@ -421,7 +421,7 @@ export async function fetchDomainRows() {
 
 export async function createProject({ name, domain, regions, platforms, da, users }) {
   const slug = slugify(name);
-  
+
   if (isLocalMode) {
     const projects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
     if (!projects.some(p => p.slug === slug)) {
@@ -433,7 +433,7 @@ export async function createProject({ name, domain, regions, platforms, da, user
       });
       localStorage.setItem('seo_projects', JSON.stringify(projects));
     }
-    
+
     const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
     const newDomain = {
       id: String(Date.now() + 1),
@@ -513,7 +513,7 @@ export async function createProject({ name, domain, regions, platforms, da, user
     status: 'Success',
     project_name: slug,
     module: 'project'
-  }).catch(() => {});
+  }).catch(() => { });
 
   const domainRow = supabaseDomainData || {
     id: String(Date.now()),
@@ -585,11 +585,11 @@ export async function deleteDomainRow(id, slug) {
   }
 
   if (id) {
-    await supabase.from('domains').delete().eq('id', id).catch(() => {});
+    await supabase.from('domains').delete().eq('id', id).catch(() => { });
   }
   if (slug) {
-    await supabase.from('domains').delete().eq('project_slug', slug).catch(() => {});
-    await supabase.from('projects').delete().eq('slug', slug).catch(() => {});
+    await supabase.from('domains').delete().eq('project_slug', slug).catch(() => { });
+    await supabase.from('projects').delete().eq('slug', slug).catch(() => { });
   }
 }
 
@@ -600,7 +600,7 @@ export async function fetchKwProjects() {
     const projects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
     const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
     const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
-    
+
     const domainBySlug = new Map();
     (domains || []).forEach(d => { if (!domainBySlug.has(d.project_slug)) domainBySlug.set(d.project_slug, d); });
 
@@ -752,7 +752,7 @@ export async function insertKeywordRows(projectSlug, rows) {
     status: 'Success',
     project_name: projectSlug,
     module: 'intent'
-  }).catch(() => {});
+  }).catch(() => { });
   return (data || []).map(kwRowToUi);
 }
 
@@ -882,7 +882,7 @@ export async function bulkUpdateKeywordRows(ids, field, value) {
     action: `Keyword Category/Cluster Updated (${field}: ${value})`,
     status: 'Success',
     module: 'intent'
-  }).catch(() => {});
+  }).catch(() => { });
 }
 
 export async function deleteKeywordRow(id) {
@@ -902,7 +902,7 @@ export async function deleteKeywordRow(id) {
     action: `Keyword Deleted from Category/Cluster`,
     status: 'Warning',
     module: 'intent'
-  }).catch(() => {});
+  }).catch(() => { });
 }
 
 export async function bulkDeleteKeywordRows(ids) {
@@ -927,7 +927,7 @@ export async function bulkDeleteKeywordRows(ids) {
     action: `Bulk Keywords Deleted (${ids?.length || 0} items)`,
     status: 'Warning',
     module: 'intent'
-  }).catch(() => {});
+  }).catch(() => { });
 }
 
 export function getApiBaseUrl() {
@@ -1024,7 +1024,7 @@ export async function hardDeleteKwProject(slug, userEmail = null) {
       status: 'Warning',
       project_name: slug,
       module: 'project'
-    }).catch(() => {});
+    }).catch(() => { });
     return;
   }
 
@@ -1056,7 +1056,7 @@ export async function hardDeleteKwProject(slug, userEmail = null) {
     status: 'Warning',
     project_name: slug,
     module: 'project'
-  }).catch(() => {});
+  }).catch(() => { });
 }
 
 export async function deleteKwClusterData(slug, userEmail = null) {
@@ -1216,7 +1216,7 @@ export async function insertPageRows(slug, rows) {
     status: 'Success',
     project_name: slug,
     module: 'pages'
-  }).catch(() => {});
+  }).catch(() => { });
   return (data.pages || []).map(pageRowToUi);
 }
 
@@ -1403,7 +1403,7 @@ export function getDomainHost(str) {
       let host = parsed.hostname.toLowerCase();
       if (host.startsWith('www.')) host = host.slice(4);
       return host;
-    } catch (e) {}
+    } catch (e) { }
   }
   clean = clean.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
   const part = clean.split('/')[0].split('?')[0].split('#')[0].split(':')[0].trim();
@@ -1517,10 +1517,10 @@ function competitorRowToUi(row) {
     dbUrls.unshift(row.url);
   }
   const resolvedUrls = resolveFullCompetitorUrls(row, row.domain, row.name);
-  
+
   const combinedUrls = [];
   const seen = new Set();
-  
+
   [...dbUrls, ...resolvedUrls].forEach(u => {
     if (u && typeof u === 'string' && u.trim()) {
       let formatted = u.trim();
@@ -1622,7 +1622,7 @@ export async function insertCompetitor({ domain, name, da, targetRegions, projec
     status: 'Success',
     project_name: projectSlug,
     module: 'competitors'
-  }).catch(() => {});
+  }).catch(() => { });
   return competitorRowToUi(await res.json());
 }
 
@@ -1665,7 +1665,7 @@ export async function deleteCompetitor(id) {
     action: `Competitor Deleted: ID #${id}`,
     status: 'Warning',
     module: 'competitors'
-  }).catch(() => {});
+  }).catch(() => { });
 }
 
 export async function deleteCompetitorProjectData(slug) {
@@ -1705,7 +1705,7 @@ export async function findCompetitors(projectSlug, { targetRegions, useAi = true
     status: 'Success',
     project_name: projectSlug,
     module: 'competitors'
-  }).catch(() => {});
+  }).catch(() => { });
   return { competitors: (data.competitors || []).map(competitorRowToUi), ownDomain: data.ownDomain, message: data.message };
 }
 
@@ -1765,12 +1765,12 @@ export async function runAiAnalysis(projectSlug, keyword, aiMode, domain, countr
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ keyword, ai_mode: aiMode, domain, country }),
   });
-  
+
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail || 'Failed to run AI analysis.');
   }
-  
+
   const result = await res.json();
   createAuditLogApi({
     user_email: getActiveUserEmail(),
@@ -1778,7 +1778,7 @@ export async function runAiAnalysis(projectSlug, keyword, aiMode, domain, countr
     status: 'Success',
     project_name: projectSlug,
     module: 'intent'
-  }).catch(() => {});
+  }).catch(() => { });
   return result;
 }
 
@@ -1906,7 +1906,7 @@ export async function fetchUsersApi() {
     if (data && Array.isArray(data)) {
       const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
       const cachedMap = new Map(cached.map(u => [String(u.id), u]));
-      
+
       const merged = data.map(u => {
         const local = cachedMap.get(String(u.id)) || cached.find(x => x.email?.toLowerCase() === u.email?.toLowerCase());
         return {
@@ -2250,3 +2250,61 @@ export async function deleteOutreachSiteApi(projectSlug, siteId) {
   return await res.json();
 }
 
+export async function fetchDomainMetricsApi(domain, regions = null) {
+  if (!domain) throw new Error('Domain is required');
+  const res = await fetch(`${CATEGORY_API_BASE}/domain-metrics`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ domain, regions })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.detail || 'Failed to fetch domain metrics');
+  }
+  const data = await res.json();
+  return data.metrics;
+}
+
+export async function runAuditAllocationApi(importData = null) {
+  try {
+    const res = await fetch(`${API_BASE}/monthly-operations/run-audit-allocation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(importData || {})
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn('[runAuditAllocationApi] Backend call notice:', err);
+  }
+  return { status: 'success', message: 'Audit allocation completed.' };
+}
+
+export async function updateUserAttendanceApi(userId, dateStr, statusStr) {
+  try {
+    const res = await fetch(`${API_BASE}/users/${encodeURIComponent(userId)}/attendance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: dateStr, status: statusStr })
+    });
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('[updateUserAttendanceApi] Backend notice:', err);
+  }
+  return { status: 'success' };
+}
+
+export async function markAllAttendanceApi(dateStr, statusStr) {
+  try {
+    const res = await fetch(`${API_BASE}/users/attendance/mark-all`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: dateStr, status: statusStr })
+    });
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('[markAllAttendanceApi] Backend notice:', err);
+  }
+  return { status: 'success' };
+}

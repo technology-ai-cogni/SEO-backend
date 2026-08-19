@@ -1821,6 +1821,27 @@ def delete_outreach_site_endpoint(project_slug: str, site_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class CheckDomainMetricsRequest(BaseModel):
+    domain: str
+    regions: Optional[List[str]] = None
+
+
+@app.post("/domain-metrics")
+def check_domain_metrics_endpoint(req: CheckDomainMetricsRequest):
+    """
+    Fetch live DA, PA, DR, Spam Score, and Organic Traffic metrics
+    for a domain using scripts/domain_checeker.py (RapidAPI).
+    """
+    try:
+        from scripts.domain_checeker import check_domain_metrics
+        domain = req.domain.strip()
+        metrics = check_domain_metrics(domain, regions=req.regions)
+        return {"status": "success", "metrics": metrics}
+    except Exception as e:
+        print(f"[app] Error checking domain metrics: {e}", file=sys.stderr, flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
