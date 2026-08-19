@@ -1985,13 +1985,14 @@ export async function updateUserStatusApi(userId, status) {
   }
 }
 
-export async function updateUserRoleApi(userId, role, category = null, section_access = null, permissions = null) {
+export async function updateUserRoleApi(userId, role, category = null, section_access = null, permissions = null, assigned_project = null) {
   try {
     const payload = {
       role,
       category: category ?? null,
       section_access: section_access ?? null,
-      permissions: permissions ?? null
+      permissions: permissions ?? null,
+      assigned_project: assigned_project ?? null
     };
 
     const res = await fetchAuthEndpoint(`/auth/users/${userId}/role`, {
@@ -2013,6 +2014,7 @@ export async function updateUserRoleApi(userId, role, category = null, section_a
       if (category) target.category = category;
       if (section_access) target.section_access = section_access;
       if (permissions) target.permissions = permissions;
+      if (assigned_project) target.assigned_project = assigned_project;
     }
     localStorage.setItem('seo_users_list', JSON.stringify(list));
     return target;

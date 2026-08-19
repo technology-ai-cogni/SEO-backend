@@ -11,6 +11,7 @@ import {
   createScheduledActivityApi, 
   deleteScheduledActivityApi 
 } from '../../lib/projectsApi';
+import { isReadOnlyUser } from '../../lib/permissions';
 
 // Reusable Modal Component matching Project Setup style
 function Modal({ open, onClose, title, children, footer }) {
@@ -153,8 +154,19 @@ function normalizeRow(item, index) {
   };
 }
 
-export default function OffPageSchedulerPage() {
+export default function OffPageSchedulerPage({ user }) {
   const [activeTab, setActiveTab] = useState('import'); // 'import' or 'scheduler'
+  
+  // Viewer & Vendor Scoping Filters
+  const isViewer = isReadOnlyUser(user);
+  const isVendor = user?.category === 'Vendor' || user?.role?.toUpperCase() === 'VENDOR';
+  const vendorProject = isVendor && user?.assigned_project && user.assigned_project !== 'All Projects' ? user.assigned_project : null;
+  
+  useEffect(() => {
+    if (isViewer && activeTab === 'scheduler') {
+      setActiveTab('import');
+    }
+  }, [isViewer, activeTab]);
   
   // Modals & Details Visibility
   const [showImportModal, setShowImportModal] = useState(false);
@@ -332,7 +344,16 @@ export default function OffPageSchedulerPage() {
     { slug: 'testing308', name: 'testing308', domain: 'testing308.com', status: 'Active' }
   ];
 
-  const projectList = (dbProjects.length > 0 ? dbProjects : mockProjects).filter(p => p.status !== 'Inactive' && p.isActive !== false);
+  const projectList = useMemo(() => {
+    const rawList = (dbProjects.length > 0 ? dbProjects : mockProjects).filter(p => p.status !== 'Inactive' && p.isActive !== false);
+    if (!vendorProject) return rawList;
+    const vProjLower = vendorProject.toLowerCase().trim();
+    const filtered = rawList.filter(p => {
+      const pName = String(p.name || p.project_name || p.domain || p.slug || '').toLowerCase();
+      return pName.includes(vProjLower) || vProjLower.includes(pName);
+    });
+    return filtered.length > 0 ? filtered : [{ slug: 'vendor-assigned', name: vendorProject, domain: vendorProject, status: 'Active' }];
+  }, [dbProjects, vendorProject]);
 
   // --- Initial Mock Data for Imports ---
   const initialImports = [
@@ -524,10 +545,49 @@ export default function OffPageSchedulerPage() {
     return () => { isMounted = false; };
   }, []);
 
+  // Vendor project scoped datasets & schedules
+  const filteredImports = useMemo(() => {
+    if (!vendorProject) return imports;
+    const vProjLower = vendorProject.toLowerCase().trim();
+    return imports.filter(imp => {
+      const pName = String(imp.project || imp.project_name || imp.domain || '').toLowerCase();
+      return pName.includes(vProjLower) || vProjLower.includes(pName);
+    });
+  }, [imports, vendorProject]);
+
+  const filteredSchedules = useMemo(() => {
+    if (!vendorProject) return schedules;
+    const vProjLower = vendorProject.toLowerCase().trim();
+    return schedules.filter(sch => {
+      const pName = String(sch.project || sch.project_name || sch.domain || '').toLowerCase();
+      return pName.includes(vProjLower) || vProjLower.includes(pName);
+    });
+  }, [schedules, vendorProject]);
+
   // Persist local backup
   useEffect(() => {
     localStorage.setItem('seo_imported_datasets', JSON.stringify(imports));
   }, [imports]);
+
+  useEffect(() => {
+    if (vendorProject) {
+      setSelectedImportProject(vendorProject);
+      setSelectedSchedProject(vendorProject);
+    }
+  }, [vendorProject]);
+
+  useEffect(() => {
+    if (vendorProject) {
+      if (filteredImports && filteredImports.length > 0) {
+        const isCurrentValid = selectedDataset && filteredImports.some(imp => imp.id === selectedDataset.id);
+        if (!isCurrentValid) {
+          setSelectedDataset(filteredImports[0]);
+        }
+      } else {
+        setSelectedDataset(null);
+      }
+    }
+  }, [vendorProject, filteredImports, selectedDataset]);
 
   useEffect(() => {
     localStorage.setItem('seo_scheduled_actions', JSON.stringify(schedules));
@@ -717,13 +777,7 @@ export default function OffPageSchedulerPage() {
       return;
     }
 
-    const chosenTime = new Date(scheduleDate).getTime();
-    if (chosenTime < Date.now()) {
-      setSchedMsg({ type: 'error', text: 'Cannot schedule events in the past. Choose an upcoming date.' });
-      return;
-    }
-
-    const newSchedule = {
+    const newSched = {
       id: Date.now(),
       action: scheduleAction,
       project: selectedSchedProject,
@@ -732,27 +786,26 @@ export default function OffPageSchedulerPage() {
       status: 'Scheduled'
     };
 
-    // Sync to DB
-    createScheduledActivityApi(newSchedule).then(res => {
-      if (res && res.id) {
-        setSchedules(current => current.map(item => item.id === newSchedule.id ? { ...item, id: res.id } : item));
-      }
-    }).catch(err => console.warn('Failed to create schedule in DB:', err));
+    setSchedules(prev => [newSched, ...prev]);
 
-    const updated = [...schedules, newSchedule].sort((a, b) => new Date(a.datetime) - new Date(b.datetime));
-    setSchedules(updated);
-    setScheduleDate('');
-    setSchedMsg({ type: '', text: '' });
+    createScheduledActivityApi({
+      action_name: scheduleAction,
+      project: selectedSchedProject,
+      datetime_str: scheduleDate,
+      frequency: scheduleFreq,
+      status: 'Scheduled'
+    }).catch(err => console.warn('[Scheduler] Failed to save scheduled activity to DB:', err));
+
     setShowScheduleModal(false);
   };
 
   const handleDeleteSchedule = (id) => {
-    setSchedules(schedules.filter(sch => sch.id !== id));
-    deleteScheduledActivityApi(id).catch(err => console.warn('Failed to delete schedule from DB:', err));
+    setSchedules(prev => prev.filter(sch => sch.id !== id));
+    deleteScheduledActivityApi(id).catch(err => console.warn('[Scheduler] Failed to delete scheduled activity from DB:', err));
   };
 
   const handleRunNow = (id) => {
-    setSchedules(schedules.map(sch => {
+    setSchedules(prev => prev.map(sch => {
       if (sch.id === id) {
         return { ...sch, status: 'Completed' };
       }
@@ -762,7 +815,8 @@ export default function OffPageSchedulerPage() {
 
   const handleRowChange = (datasetId, rowIndex, field, value) => {
     const todayStr = getTodayFormatted();
-    let updatedRows = [];
+    let updatedRows = null;
+
     setImports(prevImports => 
       prevImports.map(imp => {
         if (imp.id !== datasetId) return imp;
@@ -779,13 +833,15 @@ export default function OffPageSchedulerPage() {
     );
     if (selectedDataset && selectedDataset.id === datasetId) {
       setSelectedDataset(prev => {
-        const newRowsData = [...prev.rowsData];
-        newRowsData[rowIndex] = { 
-          ...newRowsData[rowIndex], 
-          [field]: value,
-          updatedDate: todayStr,
-          updated_date: todayStr
-        };
+        const newRowsData = updatedRows || [...prev.rowsData];
+        if (!updatedRows) {
+           newRowsData[rowIndex] = { 
+            ...newRowsData[rowIndex], 
+            [field]: value,
+            updatedDate: todayStr,
+            updated_date: todayStr
+          };
+        }
         return { ...prev, rowsData: newRowsData };
       });
     }
@@ -929,6 +985,23 @@ export default function OffPageSchedulerPage() {
       if (filterEndDate && rDate && rDate > filterEndDate) return false;
       if ((filterStartDate || filterEndDate) && !rDate) return false;
 
+      // Activity Name filter
+      if (filterActivity && filterActivity !== 'ALL') {
+        const actVal = String(r.activityName || r.activity || '').trim();
+        if (actVal.toLowerCase() !== filterActivity.toLowerCase()) {
+          return false;
+        }
+      }
+
+      // Status filter
+      if (filterStatus && filterStatus !== 'ALL') {
+        const statusVal = String(r.status || '').trim();
+        if (statusVal.toLowerCase() !== filterStatus.toLowerCase()) {
+          return false;
+        }
+      }
+
+      // Field Filters from Filter Popover
       for (const [key, filterVal] of Object.entries(fieldFilters)) {
         if (!filterVal || filterVal === 'ALL') continue;
         const rawVal = String(r[key] ?? r[key.replace(/([A-Z])/g, "_$1").toLowerCase()] ?? '').trim();
@@ -943,36 +1016,38 @@ export default function OffPageSchedulerPage() {
     return (
       <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 0 }}>
         {/* Back Link */}
-        <div style={{ marginBottom: 16 }}>
-          <button 
-            onClick={() => { 
-              handleAttemptLeaveDataset(() => {
-                setSelectedDataset(null); 
-                setDatasetSearch(''); 
-                setFilterActivity('ALL');
-                setFilterStatus('ALL');
-                setShowFilterPopover(false);
-                setSelectedRowIndices([]);
-              });
-            }}
-            style={{ 
-              background: 'none', 
-              border: 'none', 
-              color: 'var(--accent)', 
-              fontSize: 13.5, 
-              fontWeight: 600, 
-              cursor: 'pointer', 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: 6,
-              padding: 0
-            }}
-            onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
-            onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
-          >
-            ← Back to Import Logs
-          </button>
-        </div>
+        {!vendorProject && (
+          <div style={{ marginBottom: 16 }}>
+            <button 
+              onClick={() => { 
+                handleAttemptLeaveDataset(() => {
+                  setSelectedDataset(null); 
+                  setDatasetSearch(''); 
+                  setFilterActivity('ALL');
+                  setFilterStatus('ALL');
+                  setShowFilterPopover(false);
+                  setSelectedRowIndices([]);
+                });
+              }}
+              style={{ 
+                background: 'none', 
+                border: 'none', 
+                color: 'var(--accent)', 
+                fontSize: 13.5, 
+                fontWeight: 600, 
+                cursor: 'pointer', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 6,
+                padding: 0
+              }}
+              onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+              onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+            >
+              ← Back to Import Logs
+            </button>
+          </div>
+        )}
         {/* Header Title info & Save Changes Button */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
           <div>
@@ -986,30 +1061,32 @@ export default function OffPageSchedulerPage() {
 
           {/* Save Changes & Run Audit Buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button
-              onClick={handleRunAudit}
-              disabled={auditAllocating}
-              style={{
-                background: '#ffffff',
-                color: '#0f172a',
-                border: '1.5px solid #cbd5e1',
-                borderRadius: 10,
-                padding: '9px 18px',
-                fontSize: 13.5,
-                fontWeight: 700,
-                cursor: auditAllocating ? 'wait' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-              onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
-            >
-              <ShieldCheck size={16} color="var(--accent)" />
-              {auditAllocating ? 'Allocating Associates...' : 'Run Audit Allocation'}
-            </button>
+            {!isVendor && (
+              <button
+                onClick={handleRunAudit}
+                disabled={auditAllocating}
+                style={{
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  border: '1.5px solid #cbd5e1',
+                  borderRadius: 10,
+                  padding: '9px 18px',
+                  fontSize: 13.5,
+                  fontWeight: 700,
+                  cursor: auditAllocating ? 'wait' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
+              >
+                <ShieldCheck size={16} color="var(--accent)" />
+                {auditAllocating ? 'Allocating Associates...' : 'Run Audit Allocation'}
+              </button>
+            )}
 
             {hasUnsavedChanges && (
               <span style={{ fontSize: 12.5, fontWeight: 600, color: '#d97706', background: '#fef3c7', padding: '5px 12px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #fde68a' }}>
@@ -1017,34 +1094,36 @@ export default function OffPageSchedulerPage() {
               </span>
             )}
             
-            <button
-              onClick={handleSaveChanges}
-              disabled={savingState === 'saving'}
-              style={{
-                background: hasUnsavedChanges ? 'var(--accent)' : savingState === 'saved' ? '#16a34a' : 'var(--surface-2)',
-                color: (hasUnsavedChanges || savingState === 'saved') ? '#ffffff' : 'var(--text-secondary)',
-                border: (hasUnsavedChanges || savingState === 'saved') ? 'none' : '1.5px solid var(--border)',
-                borderRadius: 10,
-                padding: '9px 20px',
-                fontSize: 13.5,
-                fontWeight: 700,
-                cursor: savingState === 'saving' ? 'wait' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                boxShadow: hasUnsavedChanges ? '0 4px 14px rgba(37, 99, 235, 0.25)' : 'none',
-                transition: 'all 0.2s ease'
-              }}
-              onMouseEnter={e => {
-                if (hasUnsavedChanges) e.currentTarget.style.opacity = '0.9';
-              }}
-              onMouseLeave={e => {
-                if (hasUnsavedChanges) e.currentTarget.style.opacity = '1';
-              }}
-            >
-              <Save size={16} />
-              {savingState === 'saving' ? 'Saving...' : savingState === 'saved' ? 'Saved!' : 'Save Changes'}
-            </button>
+            {!isVendor && (
+              <button
+                onClick={handleSaveChanges}
+                disabled={savingState === 'saving'}
+                style={{
+                  background: hasUnsavedChanges ? 'var(--accent)' : savingState === 'saved' ? '#16a34a' : 'var(--surface-2)',
+                  color: (hasUnsavedChanges || savingState === 'saved') ? '#ffffff' : 'var(--text-secondary)',
+                  border: (hasUnsavedChanges || savingState === 'saved') ? 'none' : '1.5px solid var(--border)',
+                  borderRadius: 10,
+                  padding: '9px 20px',
+                  fontSize: 13.5,
+                  fontWeight: 700,
+                  cursor: savingState === 'saving' ? 'wait' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  boxShadow: hasUnsavedChanges ? '0 4px 14px rgba(37, 99, 235, 0.25)' : 'none',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={e => {
+                  if (hasUnsavedChanges) e.currentTarget.style.opacity = '0.9';
+                }}
+                onMouseLeave={e => {
+                  if (hasUnsavedChanges) e.currentTarget.style.opacity = '1';
+                }}
+              >
+                <Save size={16} />
+                {savingState === 'saving' ? 'Saving...' : savingState === 'saved' ? 'Saved!' : 'Save Changes'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -1310,7 +1389,7 @@ export default function OffPageSchedulerPage() {
           </div>
 
           {/* Actions Button & Dropdown matching screenshot */}
-          {selectedRowIndices.length > 0 ? (
+          {(!isVendor && selectedRowIndices.length > 0) ? (
             <div ref={actionsRef} style={{ position: 'relative' }}>
               <button
                 onClick={() => setShowActionsDropdown(!showActionsDropdown)}
@@ -1431,20 +1510,22 @@ export default function OffPageSchedulerPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 2600 }}>
               <thead>
                 <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 10 }}>
-                  <th style={{ padding: '12px 16px', width: 44, textAlign: 'center' }}>
-                    <input
-                      type="checkbox"
-                      checked={filteredRows.length > 0 && filteredRows.every((_, idx) => selectedRowIndices.includes(idx))}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedRowIndices(filteredRows.map((_, idx) => idx));
-                        } else {
-                          setSelectedRowIndices([]);
-                        }
-                      }}
-                      style={{ cursor: 'pointer', width: 16, height: 16, accentColor: 'var(--accent)' }}
-                    />
-                  </th>
+                  {!isVendor && (
+                    <th style={{ padding: '12px 16px', width: 44, textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={filteredRows.length > 0 && filteredRows.every((_, idx) => selectedRowIndices.includes(idx))}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedRowIndices(filteredRows.map((_, idx) => idx));
+                          } else {
+                            setSelectedRowIndices([]);
+                          }
+                        }}
+                        style={{ cursor: 'pointer', width: 16, height: 16, accentColor: 'var(--accent)' }}
+                      />
+                    </th>
+                  )}
                   {[
                     'UID', 'Period', 'Scheduled Date', 'Keyword 1', 'Keyword 2', 'Cluster', 
                     'KW Category', 'Activity Name', 'Word Count', 'Content SPOC', 'Topic', 
@@ -1468,7 +1549,7 @@ export default function OffPageSchedulerPage() {
               <tbody>
                 {filteredRows.length === 0 ? (
                   <tr>
-                    <td colSpan={21} style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+                    <td colSpan={isVendor ? 20 : 21} style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
                       No matching records found in this dataset.
                     </td>
                   </tr>
@@ -1477,20 +1558,22 @@ export default function OffPageSchedulerPage() {
                     <tr key={rIdx} style={{ borderBottom: '1px solid var(--border)', background: selectedRowIndices.includes(rIdx) ? '#f0f9ff' : 'transparent' }}
                       onMouseEnter={e => e.currentTarget.style.background = selectedRowIndices.includes(rIdx) ? '#e0f2fe' : '#fafbfc'}
                       onMouseLeave={e => e.currentTarget.style.background = selectedRowIndices.includes(rIdx) ? '#f0f9ff' : 'transparent'}>
-                      <td style={{ padding: '14px 16px', textAlign: 'center' }}>
-                        <input
-                          type="checkbox"
-                          checked={selectedRowIndices.includes(rIdx)}
-                          onChange={() => {
-                            if (selectedRowIndices.includes(rIdx)) {
-                              setSelectedRowIndices(selectedRowIndices.filter(i => i !== rIdx));
-                            } else {
-                              setSelectedRowIndices([...selectedRowIndices, rIdx]);
-                            }
-                          }}
-                          style={{ cursor: 'pointer', width: 16, height: 16, accentColor: 'var(--accent)' }}
-                        />
-                      </td>
+                      {!isVendor && (
+                        <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedRowIndices.includes(rIdx)}
+                            onChange={() => {
+                              if (selectedRowIndices.includes(rIdx)) {
+                                setSelectedRowIndices(selectedRowIndices.filter(i => i !== rIdx));
+                              } else {
+                                setSelectedRowIndices([...selectedRowIndices, rIdx]);
+                              }
+                            }}
+                            style={{ cursor: 'pointer', width: 16, height: 16, accentColor: 'var(--accent)' }}
+                          />
+                        </td>
+                      )}
                       <td style={{ padding: '14px 16px', fontSize: 12.5, fontFamily: 'monospace', color: '#475569', fontWeight: 700, whiteSpace: 'nowrap' }}>
                         {row.uid || `MO-${(rIdx + 1).toString().padStart(4, '0')}`}
                       </td>
@@ -1514,25 +1597,31 @@ export default function OffPageSchedulerPage() {
                       <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.cluster || 'N/A'}</td>
                       <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.kwCategory || 'N/A'}</td>
                       <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
-                        <select
-                          value={['Forum Quora', 'Forum Reddit', 'Paid Guest Post', 'Business Listing', 'Brand Mention'].includes(row.activityName) ? row.activityName : 'Forum Quora'}
-                          onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'activityName', e.target.value)}
-                          style={{
-                            padding: '5px 10px',
-                            fontSize: 12.5,
-                            fontWeight: 600,
-                            borderRadius: 6,
-                            border: '1px solid #cbd5e1',
-                            background: '#ffffff',
-                            color: '#0f172a',
-                            outline: 'none',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {['Forum Quora', 'Forum Reddit', 'Paid Guest Post', 'Business Listing', 'Brand Mention'].map(opt => (
-                            <option key={opt} value={opt}>{opt}</option>
-                          ))}
-                        </select>
+                        {isVendor ? (
+                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                            {row.activityName || 'N/A'}
+                          </span>
+                        ) : (
+                          <select
+                            value={['Forum Quora', 'Forum Reddit', 'Paid Guest Post', 'Business Listing', 'Brand Mention'].includes(row.activityName) ? row.activityName : 'Forum Quora'}
+                            onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'activityName', e.target.value)}
+                            style={{
+                              padding: '5px 10px',
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              borderRadius: 6,
+                              border: '1px solid #cbd5e1',
+                              background: '#ffffff',
+                              color: '#0f172a',
+                              outline: 'none',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {['Forum Quora', 'Forum Reddit', 'Paid Guest Post', 'Business Listing', 'Brand Mention'].map(opt => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        )}
                       </td>
                       <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.wordCount || 'N/A'}</td>
                       <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.contentSpoc || 'N/A'}</td>
@@ -1559,38 +1648,47 @@ export default function OffPageSchedulerPage() {
                         ) : 'N/A'}
                       </td>
                       <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
-                        <select
-                          value={['Audited-LQ', 'Audited-Indexed', 'Published-Indexed', 'Published Non-Indexed'].includes(row.status) ? row.status : 'Published-Indexed'}
-                          onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'status', e.target.value)}
-                          style={{
-                            padding: '5px 10px',
+                        {isVendor ? (
+                          <span style={{
+                            padding: '4px 9px',
                             fontSize: 12,
                             fontWeight: 700,
                             borderRadius: 6,
-                            border: '1px solid #cbd5e1',
                             background: row.status === 'Published-Indexed' ? '#ecfdf5' : row.status === 'Audited-Indexed' ? '#eff6ff' : row.status === 'Audited-LQ' ? '#fef2f2' : '#fff7ed',
-                            color: row.status === 'Published-Indexed' ? '#047857' : row.status === 'Audited-Indexed' ? '#1d4ed8' : row.status === 'Audited-LQ' ? '#b91c1c' : '#c2410c',
-                            outline: 'none',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {['Audited-LQ', 'Audited-Indexed', 'Published-Indexed', 'Published Non-Indexed'].map(opt => (
-                            <option key={opt} value={opt} style={{ background: '#fff', color: '#0f172a', fontWeight: 500 }}>{opt}</option>
-                          ))}
-                        </select>
+                            color: row.status === 'Published-Indexed' ? '#047857' : row.status === 'Audited-Indexed' ? '#1d4ed8' : row.status === 'Audited-LQ' ? '#b91c1c' : '#c2410c'
+                          }}>
+                            {row.status || 'Published-Indexed'}
+                          </span>
+                        ) : (
+                          <select
+                            value={['Audited-LQ', 'Audited-Indexed', 'Published-Indexed', 'Published Non-Indexed'].includes(row.status) ? row.status : 'Published-Indexed'}
+                            onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'status', e.target.value)}
+                            style={{
+                              padding: '5px 10px',
+                              fontSize: 12,
+                              fontWeight: 700,
+                              borderRadius: 6,
+                              border: '1px solid #cbd5e1',
+                              background: row.status === 'Published-Indexed' ? '#ecfdf5' : row.status === 'Audited-Indexed' ? '#eff6ff' : row.status === 'Audited-LQ' ? '#fef2f2' : '#fff7ed',
+                              color: row.status === 'Published-Indexed' ? '#047857' : row.status === 'Audited-Indexed' ? '#1d4ed8' : row.status === 'Audited-LQ' ? '#b91c1c' : '#c2410c',
+                              outline: 'none',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {['Audited-LQ', 'Audited-Indexed', 'Published-Indexed', 'Published Non-Indexed'].map(opt => (
+                              <option key={opt} value={opt} style={{ background: '#fff', color: '#0f172a', fontWeight: 500 }}>{opt}</option>
+                            ))}
+                          </select>
+                        )}
                       </td>
                       <td style={{ padding: '12px 16px', fontSize: 13, whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                             {row.publisher || 'Unassigned'}
                           </span>
-                          {(row.verified === true || row.verified === 'true') ? (
-                            <button
-                              onClick={() => {
-                                handleRowChange(selectedDataset.id, rIdx, 'verified', false);
-                              }}
-                              title="Click to Unverify"
-                              style={{ 
+                          {isVendor ? (
+                            (row.verified === true || row.verified === 'true') && (
+                              <span style={{ 
                                 display: 'inline-flex', 
                                 alignItems: 'center', 
                                 gap: 4, 
@@ -1600,51 +1698,74 @@ export default function OffPageSchedulerPage() {
                                 fontWeight: 700, 
                                 background: '#dcfce7', 
                                 color: '#15803d',
-                                border: '1px solid #bbf7d0',
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease'
-                              }}
-                              onMouseEnter={e => {
-                                e.currentTarget.style.background = '#fef2f2';
-                                e.currentTarget.style.color = '#dc2626';
-                                e.currentTarget.style.borderColor = '#fca5a5';
-                              }}
-                              onMouseLeave={e => {
-                                e.currentTarget.style.background = '#dcfce7';
-                                e.currentTarget.style.color = '#15803d';
-                                e.currentTarget.style.borderColor = '#bbf7d0';
-                              }}
-                            >
-                              <CheckCircle size={13} /> Verified ✓
-                            </button>
+                                border: '1px solid #bbf7d0'
+                              }}>
+                                <CheckCircle size={13} /> Verified ✓
+                              </span>
+                            )
                           ) : (
-                            <button
-                              onClick={() => {
-                                handleRowChange(selectedDataset.id, rIdx, 'verified', true);
-                              }}
-                              title="Click to Verify"
-                              style={{
-                                padding: '4px 10px',
-                                fontSize: 11.5,
-                                fontWeight: 700,
-                                borderRadius: 6,
-                                border: '1px solid var(--accent)',
-                                background: '#eff6ff',
-                                color: 'var(--accent)',
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease'
-                              }}
-                              onMouseEnter={e => {
-                                e.currentTarget.style.background = 'var(--accent)';
-                                e.currentTarget.style.color = '#ffffff';
-                              }}
-                              onMouseLeave={e => {
-                                e.currentTarget.style.background = '#eff6ff';
-                                e.currentTarget.style.color = 'var(--accent)';
-                              }}
-                            >
-                              Verify
-                            </button>
+                            (row.verified === true || row.verified === 'true') ? (
+                              <button
+                                onClick={() => {
+                                  handleRowChange(selectedDataset.id, rIdx, 'verified', false);
+                                }}
+                                title="Click to Unverify"
+                                style={{ 
+                                  display: 'inline-flex', 
+                                  alignItems: 'center', 
+                                  gap: 4, 
+                                  padding: '3px 8px', 
+                                  borderRadius: 6, 
+                                  fontSize: 11.5, 
+                                  fontWeight: 700, 
+                                  background: '#dcfce7', 
+                                  color: '#15803d',
+                                  border: '1px solid #bbf7d0',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease'
+                                }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.background = '#fef2f2';
+                                  e.currentTarget.style.color = '#dc2626';
+                                  e.currentTarget.style.borderColor = '#fca5a5';
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.background = '#dcfce7';
+                                  e.currentTarget.style.color = '#15803d';
+                                  e.currentTarget.style.borderColor = '#bbf7d0';
+                                }}
+                              >
+                                <CheckCircle size={13} /> Verified ✓
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  handleRowChange(selectedDataset.id, rIdx, 'verified', true);
+                                }}
+                                title="Click to Verify"
+                                style={{
+                                  padding: '4px 10px',
+                                  fontSize: 11.5,
+                                  fontWeight: 700,
+                                  borderRadius: 6,
+                                  border: '1px solid var(--accent)',
+                                  background: '#eff6ff',
+                                  color: 'var(--accent)',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease'
+                                }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.background = 'var(--accent)';
+                                  e.currentTarget.style.color = '#ffffff';
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.background = '#eff6ff';
+                                  e.currentTarget.style.color = 'var(--accent)';
+                                }}
+                              >
+                                Verify
+                              </button>
+                            )
                           )}
                         </div>
                       </td>
@@ -1995,42 +2116,74 @@ export default function OffPageSchedulerPage() {
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button
-            onClick={handleRunAudit}
-            disabled={auditAllocating}
-            style={{
-              background: '#ffffff',
-              color: '#0f172a',
-              border: '1.5px solid #cbd5e1',
-              borderRadius: 10,
-              padding: '10px 18px',
-              fontSize: 13.5,
-              fontWeight: 700,
-              cursor: auditAllocating ? 'wait' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-              transition: 'all 0.15s ease'
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-            onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
-          >
-            <ShieldCheck size={16} color="var(--accent)" />
-            {auditAllocating ? 'Allocating...' : 'Run Audit Allocation'}
-          </button>
+          {!isVendor && (
+            <button
+              onClick={handleRunAudit}
+              disabled={auditAllocating}
+              style={{
+                background: '#ffffff',
+                color: '#0f172a',
+                border: '1.5px solid #cbd5e1',
+                borderRadius: 10,
+                padding: '10px 18px',
+                fontSize: 13.5,
+                fontWeight: 700,
+                cursor: auditAllocating ? 'wait' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+              onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
+            >
+              <ShieldCheck size={16} color="var(--accent)" />
+              {auditAllocating ? 'Allocating...' : 'Run Audit Allocation'}
+            </button>
+          )}
 
           {activeTab === 'import' ? (
-            <Btn variant="accent" onClick={() => { setImportMsg({ type: '', text: '' }); setImportFile(null); setShowImportModal(true); }}>
-              <UploadCloud size={16} /> Import Data
-            </Btn>
+            !isVendor && (
+              <Btn variant="accent" onClick={() => { setImportMsg({ type: '', text: '' }); setImportFile(null); setShowImportModal(true); }}>
+                <UploadCloud size={16} /> Import Data
+              </Btn>
+            )
           ) : (
-            <Btn variant="accent" onClick={() => { setSchedMsg({ type: '', text: '' }); setScheduleDate(''); setShowScheduleModal(true); }}>
-              <Calendar size={16} /> Schedule Activity
-            </Btn>
+            !isViewer && (
+              <Btn variant="accent" onClick={() => { setSchedMsg({ type: '', text: '' }); setScheduleDate(''); setShowScheduleModal(true); }}>
+                <Calendar size={16} /> Schedule Activity
+              </Btn>
+            )
           )}
         </div>
       </div>
+
+      {/* Vendor Project Scope Alert Banner */}
+      {vendorProject && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          background: '#fff7ed',
+          border: '1.5px solid #fed7aa',
+          padding: '12px 18px',
+          borderRadius: 12,
+          marginBottom: 20,
+          color: '#c2410c',
+          boxShadow: '0 2px 4px rgba(249, 115, 22, 0.08)'
+        }}>
+          <ShieldCheck size={20} color="#ea580c" />
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: '#9a3412' }}>
+              Vendor Project Scope Active
+            </div>
+            <div style={{ fontSize: 12.5, color: '#c2410c', marginTop: 2 }}>
+              Your vendor profile is scoped to <strong>"{vendorProject}"</strong>. Showing monthly operations data and datasets for this assigned project only.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modern Tabs Navigation */}
       <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid var(--border)', marginBottom: 24 }}>
@@ -2055,27 +2208,29 @@ export default function OffPageSchedulerPage() {
           <UploadCloud size={16} />
           Data
         </button>
-        <button
-          onClick={() => setActiveTab('scheduler')}
-          style={{
-            padding: '12px 20px',
-            fontSize: 14.5,
-            fontWeight: 600,
-            color: activeTab === 'scheduler' ? 'var(--accent)' : 'var(--text-muted)',
-            background: 'none',
-            border: 'none',
-            borderBottom: activeTab === 'scheduler' ? '2.5px solid var(--accent)' : '2.5px solid transparent',
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-            outline: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8
-          }}
-        >
-          <Calendar size={16} />
-          Scheduler Calendar
-        </button>
+        {!isViewer && (
+          <button
+            onClick={() => setActiveTab('scheduler')}
+            style={{
+              padding: '12px 20px',
+              fontSize: 14.5,
+              fontWeight: 600,
+              color: activeTab === 'scheduler' ? 'var(--accent)' : 'var(--text-muted)',
+              background: 'none',
+              border: 'none',
+              borderBottom: activeTab === 'scheduler' ? '2.5px solid var(--accent)' : '2.5px solid transparent',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+              outline: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8
+            }}
+          >
+            <Calendar size={16} />
+            Scheduler Calendar
+          </button>
+        )}
       </div>
 
       {/* CONTENT PANEL */}
@@ -2091,7 +2246,7 @@ export default function OffPageSchedulerPage() {
           {(() => {
             const globalCounts = {};
             let totalRes = 0;
-            (imports || []).forEach(imp => {
+            (filteredImports || []).forEach(imp => {
               (imp.rowsData || []).forEach(r => {
                 totalRes += 1;
                 const pub = r.publisher && r.publisher.trim() !== '' ? r.publisher : 'Unassigned';
@@ -2117,18 +2272,6 @@ export default function OffPageSchedulerPage() {
                 boxShadow: '0 2px 6px rgba(0,0,0,0.03)'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  {/* <div style={{ 
-                    width: 42, 
-                    height: 42, 
-                    borderRadius: 12, 
-                    background: '#eff6ff', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center',
-                    border: '1px solid #bfdbfe'
-                  }}>
-                    <Users size={20} color="#2563eb" />
-                  </div> */}
                   <div>
                     <h4 style={{ margin: 0, fontSize: 14.5, fontWeight: 800, color: 'var(--text-primary)' }}>
                       
@@ -2172,9 +2315,9 @@ export default function OffPageSchedulerPage() {
               </div>
             );
           })()}
-          {imports.length === 0 ? (
+          {filteredImports.length === 0 ? (
             <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-              No spreadsheets imported yet. Click <strong>+ Import Data</strong> to get started.
+              {vendorProject ? `No datasets found for project "${vendorProject}".` : 'No spreadsheets imported yet. Click + Import Data to get started.'}
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
@@ -2189,7 +2332,7 @@ export default function OffPageSchedulerPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {imports.map(imp => (
+                  {filteredImports.map(imp => (
                     <tr 
                       key={imp.id} 
                       onClick={() => setSelectedDataset(imp)}
@@ -2210,35 +2353,37 @@ export default function OffPageSchedulerPage() {
                       </td>
                       <td style={{ padding: '14px 18px', fontSize: 13.5, color: 'var(--text-muted)' }}>{imp.date}</td>
                       <td style={{ padding: '14px 18px', textAlign: 'right' }}>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteConfirmImport(imp);
-                          }}
-                          title="Delete Dataset"
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: '#ef4444',
-                            cursor: 'pointer',
-                            padding: '6px',
-                            borderRadius: 6,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            transition: 'all 0.15s ease'
-                          }}
-                          onMouseEnter={e => {
-                            e.currentTarget.style.background = '#fef2f2';
-                            e.currentTarget.style.color = '#dc2626';
-                          }}
-                          onMouseLeave={e => {
-                            e.currentTarget.style.background = 'none';
-                            e.currentTarget.style.color = '#ef4444';
-                          }}
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        {!isVendor && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteConfirmImport(imp);
+                            }}
+                            title="Delete Dataset"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: '#ef4444',
+                              cursor: 'pointer',
+                              padding: '6px',
+                              borderRadius: 6,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              transition: 'all 0.15s ease'
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.background = '#fef2f2';
+                              e.currentTarget.style.color = '#dc2626';
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.background = 'none';
+                              e.currentTarget.style.color = '#ef4444';
+                            }}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -2261,9 +2406,9 @@ export default function OffPageSchedulerPage() {
               Active Scheduler Tasks
             </h2>
 
-            {schedules.length === 0 ? (
+            {filteredSchedules.length === 0 ? (
               <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-                No scheduled activities found. Click <strong>+ Schedule Activity</strong> to get started.
+                {vendorProject ? `No scheduled tasks found for project "${vendorProject}".` : 'No scheduled activities found. Click + Schedule Activity to get started.'}
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
@@ -2279,7 +2424,7 @@ export default function OffPageSchedulerPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {schedules.map(sch => (
+                    {filteredSchedules.map(sch => (
                       <tr key={sch.id} style={{ borderBottom: '1px solid var(--border)' }}
                         onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
@@ -2359,13 +2504,13 @@ export default function OffPageSchedulerPage() {
               Upcoming Activity Timeline
             </h2>
 
-            {schedules.filter(sch => sch.status === 'Scheduled').length === 0 ? (
+            {filteredSchedules.filter(sch => sch.status === 'Scheduled').length === 0 ? (
               <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13.5 }}>
                 No upcoming activities scheduled.
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                {schedules.filter(sch => sch.status === 'Scheduled').slice(0, 3).map((sch, idx, arr) => (
+                {filteredSchedules.filter(sch => sch.status === 'Scheduled').slice(0, 3).map((sch, idx, arr) => (
                   <div key={sch.id} style={{ display: 'flex', gap: 16, position: 'relative' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                       <div style={{
@@ -2469,6 +2614,7 @@ export default function OffPageSchedulerPage() {
               <select
                 value={selectedImportProject}
                 onChange={(e) => setSelectedImportProject(e.target.value)}
+                disabled={Boolean(vendorProject)}
                 style={{
                   width: '100%',
                   padding: '10px 14px',
@@ -2600,6 +2746,7 @@ export default function OffPageSchedulerPage() {
             <select
               value={selectedSchedProject}
               onChange={(e) => setSelectedSchedProject(e.target.value)}
+              disabled={Boolean(vendorProject)}
               style={{
                 width: '100%',
                 padding: '10px 14px',

@@ -92,6 +92,7 @@ def login(payload: LoginRequest):
             status=user.get("status", "Active"),
             section_access=user.get("section_access", "Default"),
             permissions=user.get("permissions", "Default"),
+            assigned_project=user.get("assigned_project", "All Projects"),
             created_at=user.get("created_at")
         )
     )
@@ -114,6 +115,7 @@ def get_users():
             section_access=u.get("section_access", "Default"),
             permissions=u.get("permissions", "Default"),
             attendance=u.get("attendance", "Not Present"),
+            assigned_project=u.get("assigned_project", "All Projects"),
             created_at=u.get("created_at")
         )
         for u in users
@@ -141,10 +143,16 @@ def admin_create_user(payload: CreateUserRequest):
         category=payload.category or "Internal",
         status=payload.status or "Active",
         section_access=payload.section_access or "Default",
-        permissions=payload.permissions or "Default"
+        permissions=payload.permissions or "Default",
+        assigned_project=payload.assigned_project or "All Projects"
     )
 
-    insert_audit_log(user_email="admin", action=f"Admin Created User Credential: {clean_email}", status="Success")
+    insert_audit_log(
+        user_email="admin", 
+        action=f"Created User Account ({clean_email}): Role='{payload.role or 'INTERNAL_ASSOCIATE'}', Category='{payload.category or 'Internal'}', Section Access='{payload.section_access or 'Default'}', Action Permissions='{payload.permissions or 'Default'}', Assigned Project='{payload.assigned_project or 'All Projects'}'", 
+        status="Success",
+        module="RBAC / User Management"
+    )
 
     return AuthResponse(
         status="success",
@@ -158,6 +166,7 @@ def admin_create_user(payload: CreateUserRequest):
             status=new_user.get("status", "Active"),
             section_access=new_user.get("section_access", "Default"),
             permissions=new_user.get("permissions", "Default"),
+            assigned_project=new_user.get("assigned_project", "All Projects"),
             created_at=new_user.get("created_at")
         )
     )
@@ -172,8 +181,9 @@ def update_status_endpoint(user_id: int, payload: UpdateUserStatusRequest):
     
     insert_audit_log(
         user_email="admin", 
-        action=f"Changed User Status ({updated['email']}) to {payload.status}", 
-        status="Warning" if payload.status == "Disabled" else "Success"
+        action=f"Changed Account Status ({updated['email']}) to '{payload.status}'", 
+        status="Warning" if payload.status == "Disabled" else "Success",
+        module="RBAC / User Management"
     )
     return UserResponse(
         id=updated["id"],
@@ -184,24 +194,31 @@ def update_status_endpoint(user_id: int, payload: UpdateUserStatusRequest):
         status=updated.get("status", "Active"),
         section_access=updated.get("section_access", "Default"),
         permissions=updated.get("permissions", "Default"),
+        assigned_project=updated.get("assigned_project", "All Projects"),
         created_at=updated.get("created_at")
     )
 
 
 @router.put("/users/{user_id}/role", response_model=UserResponse)
 def update_role_endpoint(user_id: int, payload: UpdateUserRoleRequest):
-    """Change user role, category, section_access, and permissions."""
+    """Change user role, category, section_access, permissions, and assigned_project."""
     updated = update_user_role(
         user_id, 
         payload.role, 
         payload.category, 
         payload.section_access, 
-        payload.permissions
+        payload.permissions,
+        payload.assigned_project
     )
     if not updated:
         raise HTTPException(status_code=404, detail="User not found.")
     
-    insert_audit_log(user_email="admin", action=f"Updated User Settings ({updated['email']})", status="Success")
+    insert_audit_log(
+        user_email="admin", 
+        action=f"Updated User RBAC Profile ({updated['email']}): Role='{payload.role}', Category='{payload.category}', Section Access='{payload.section_access}', Action Permissions='{payload.permissions}', Assigned Project='{payload.assigned_project or updated.get('assigned_project', 'All Projects')}'", 
+        status="Success",
+        module="RBAC / User Management"
+    )
     return UserResponse(
         id=updated["id"],
         name=updated["name"],
@@ -212,6 +229,7 @@ def update_role_endpoint(user_id: int, payload: UpdateUserRoleRequest):
         section_access=updated.get("section_access", "Default"),
         permissions=updated.get("permissions", "Default"),
         attendance=updated.get("attendance", "Not Present"),
+        assigned_project=updated.get("assigned_project", "All Projects"),
         created_at=updated.get("created_at")
     )
 
@@ -223,7 +241,12 @@ def update_user_attendance_endpoint(user_id: int, payload: UpdateAttendanceReque
     if not updated:
         raise HTTPException(status_code=404, detail="User not found.")
     
-    insert_audit_log(user_email="admin", action=f"Updated User Attendance ({updated['email']}: {payload.attendance})", status="Success")
+    insert_audit_log(
+        user_email="admin", 
+        action=f"Updated User Attendance ({updated['email']}: {payload.attendance})", 
+        status="Success",
+        module="RBAC / User Management"
+    )
     return UserResponse(
         id=updated["id"],
         name=updated["name"],
@@ -242,18 +265,28 @@ def update_user_attendance_endpoint(user_id: int, payload: UpdateAttendanceReque
 def mark_all_attendance_endpoint(payload: MarkAllAttendanceRequest):
     """Bulk update attendance for all users in Supabase DB."""
     update_all_users_attendance(payload.attendance)
-    insert_audit_log(user_email="admin", action=f"Bulk Updated All Users Attendance: {payload.attendance}", status="Success")
+    insert_audit_log(
+        user_email="admin", 
+        action=f"Bulk Updated All Users Attendance: {payload.attendance}", 
+        status="Success",
+        module="RBAC / User Management"
+    )
     return {"message": f"Successfully updated attendance for all users to '{payload.attendance}' in Supabase DB."}
 
 
 @router.delete("/users/{user_id}")
 def delete_user_endpoint(user_id: int):
     """Delete user profile permanently."""
-    success = delete_user_by_id(user_id)
-    if not success:
+    deleted_email = delete_user_by_id(user_id)
+    if not deleted_email:
         raise HTTPException(status_code=404, detail="User not found.")
     
-    insert_audit_log(user_email="admin", action=f"Deleted User Account ID {user_id}", status="Warning")
+    insert_audit_log(
+        user_email="admin", 
+        action=f"Deleted User Account ({deleted_email})", 
+        status="Warning",
+        module="RBAC / User Management"
+    )
     return {"status": "success", "message": "User profile deleted."}
 
 

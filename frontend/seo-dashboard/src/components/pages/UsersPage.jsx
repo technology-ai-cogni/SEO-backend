@@ -6,7 +6,7 @@ import {
 import {
   hasPermission, PERMISSIONS, CATEGORIES, ROLES, ROLE_DISPLAY_NAMES, CATEGORY_ROLES_MAP
 } from '../../lib/permissions';
-import { fetchUsersApi, createUserApi, updateUserStatusApi, updateUserRoleApi, deleteUserApi, updateUserAttendanceApi, markAllAttendanceApi } from '../../lib/projectsApi';
+import { fetchUsersApi, createUserApi, updateUserStatusApi, updateUserRoleApi, deleteUserApi, updateUserAttendanceApi, markAllAttendanceApi, fetchDomainRows } from '../../lib/projectsApi';
 
 const SECTION_ACCESS_OPTIONS = [
   'Default',
@@ -22,7 +22,6 @@ const PERMISSION_OPTIONS = [
   'View + Edit',
   'View + Edit + Delete',
   'View + Edit + Delete + Update',
-  'Full Control',
 ];
 
 function ModuleAccessMultiSelect({ value = 'Default', onChange }) {
@@ -176,12 +175,263 @@ export function deriveCategoryFromRole(role, category) {
   return category || CATEGORIES.INTERNAL;
 }
 
+function RolePermissionMatrixView() {
+  const MATRIX_DATA = [
+    {
+      category: 'Admin',
+      badgeColor: '#7c3aed',
+      badgeBg: '#f3e8ff',
+      roles: [
+        {
+          name: 'Admin',
+          roleKey: 'ADMIN',
+          defaultActionPerm: 'Full Control',
+          defaultSectionAccess: 'All Sections (Access All)',
+          description: 'Unrestricted system access to all projects, user management, audit logs, and settings.',
+          capabilities: {
+            viewDashboard: true,
+            uploadData: true,
+            runAnalysis: true,
+            deleteRecords: true,
+            manageUsers: true,
+            viewLogs: true
+          }
+        }
+      ]
+    },
+    {
+      category: 'Internal',
+      badgeColor: '#2563eb',
+      badgeBg: '#eff6ff',
+      roles: [
+        {
+          name: 'Team Lead',
+          roleKey: 'INTERNAL_TEAM_LEAD',
+          defaultActionPerm: 'View + Edit + Run Analysis',
+          defaultSectionAccess: 'All Modules (Default)',
+          description: 'Full workspace access to all modules, data upload, analysis execution, and project setup.',
+          capabilities: {
+            viewDashboard: true,
+            uploadData: true,
+            runAnalysis: true,
+            deleteRecords: false,
+            manageUsers: false,
+            viewLogs: false
+          }
+        },
+        {
+          name: 'Sr. Associate',
+          roleKey: 'INTERNAL_SR_ASSOCIATE',
+          defaultActionPerm: 'View + Edit',
+          defaultSectionAccess: 'All Modules (Default)',
+          description: 'Read and edit access across workspace modules and dataset uploads.',
+          capabilities: {
+            viewDashboard: true,
+            uploadData: true,
+            runAnalysis: false,
+            deleteRecords: false,
+            manageUsers: false,
+            viewLogs: false
+          }
+        },
+        {
+          name: 'Associate',
+          roleKey: 'INTERNAL_ASSOCIATE',
+          defaultActionPerm: 'View Only',
+          defaultSectionAccess: 'All Modules (Default)',
+          description: 'Read-only viewer for workspace reports, keyword rankings, and dashboards.',
+          capabilities: {
+            viewDashboard: true,
+            uploadData: false,
+            runAnalysis: false,
+            deleteRecords: false,
+            manageUsers: false,
+            viewLogs: false
+          }
+        }
+      ]
+    },
+    {
+      category: 'Client Access',
+      badgeColor: '#059669',
+      badgeBg: '#ecfdf5',
+      roles: [
+        {
+          name: 'Client Team Lead',
+          roleKey: 'CLIENT_TEAM_LEAD',
+          defaultActionPerm: 'View + Edit + Run Analysis',
+          defaultSectionAccess: 'Search, AI & Content Engine',
+          description: 'Client lead view with edit and analysis permissions for search visibility & content engine.',
+          capabilities: {
+            viewDashboard: true,
+            uploadData: true,
+            runAnalysis: true,
+            deleteRecords: false,
+            manageUsers: false,
+            viewLogs: false
+          }
+        },
+        {
+          name: 'Client Sr. Associate',
+          roleKey: 'CLIENT_SR_ASSOCIATE',
+          defaultActionPerm: 'View + Edit',
+          defaultSectionAccess: 'Search & AI Visibility',
+          description: 'Client senior access with read/edit access to performance metrics and search visibility.',
+          capabilities: {
+            viewDashboard: true,
+            uploadData: true,
+            runAnalysis: false,
+            deleteRecords: false,
+            manageUsers: false,
+            viewLogs: false
+          }
+        },
+        {
+          name: 'Client Associate',
+          roleKey: 'CLIENT_ASSOCIATE',
+          defaultActionPerm: 'View Only',
+          defaultSectionAccess: 'Search Visibility',
+          description: 'Read-only view of client search performance and keyword position reports.',
+          capabilities: {
+            viewDashboard: true,
+            uploadData: false,
+            runAnalysis: false,
+            deleteRecords: false,
+            manageUsers: false,
+            viewLogs: false
+          }
+        }
+      ]
+    },
+    {
+      category: 'Vendor',
+      badgeColor: '#d97706',
+      badgeBg: '#fffbe6',
+      roles: [
+        {
+          name: 'Vendor',
+          roleKey: 'VENDOR',
+          defaultActionPerm: 'View Only',
+          defaultSectionAccess: 'Monthly Operations (Scheduler)',
+          description: 'External link-building and outreach vendor scoped exclusively to Monthly Operations.',
+          capabilities: {
+            viewDashboard: true,
+            uploadData: false,
+            runAnalysis: false,
+            deleteRecords: false,
+            manageUsers: false,
+            viewLogs: false
+          }
+        }
+      ]
+    }
+  ];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Overview Card */}
+      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '20px 24px' }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: '0 0 6px 0' }}>
+          Role & Default Permission Reference Grid
+        </h3>
+        <p style={{ fontSize: 13, color: '#64748b', margin: 0, lineHeight: 1.5 }}>
+          This reference matrix outlines standard default capabilities for each platform role. Admins can override individual user permissions, section access, and categories directly in the <strong>User Accounts & Access</strong> tab.
+        </p>
+      </div>
+
+      {/* Role Categories */}
+      {MATRIX_DATA.map((catGroup) => (
+        <div key={catGroup.category} style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+          <div style={{ padding: '14px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: catGroup.badgeColor, background: catGroup.badgeBg, padding: '3px 10px', borderRadius: 6, border: `1px solid ${catGroup.badgeColor}33` }}>
+                {catGroup.category} Category
+              </span>
+              <span style={{ fontSize: 12.5, color: '#64748b' }}>
+                ({catGroup.roles.length} {catGroup.roles.length === 1 ? 'Role' : 'Roles'})
+              </span>
+            </div>
+          </div>
+
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0', color: '#475569', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  <th style={{ padding: '12px 20px', textAlign: 'left', width: 180 }}>Role</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', width: 220 }}>Default Action Permission</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', width: 220 }}>Default Section Access</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center' }}>View Reports</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center' }}>Upload Data</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center' }}>Run Analysis</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center' }}>Delete Records</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center' }}>Manage Users</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center' }}>View Audit Logs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {catGroup.roles.map((role) => (
+                  <tr key={role.roleKey} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '14px 20px', fontWeight: 700, color: '#0f172a' }}>
+                      {role.name}
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <span style={{ fontWeight: 600, fontSize: 12, background: '#f1f5f9', color: '#334155', padding: '3px 8px', borderRadius: 6, border: '1px solid #cbd5e1' }}>
+                        {role.defaultActionPerm}
+                      </span>
+                    </td>
+                    <td style={{ padding: '14px 16px', color: '#475569', fontWeight: 500 }}>
+                      {role.defaultSectionAccess}
+                    </td>
+                    <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                      {role.capabilities.viewDashboard ? <CheckCircle size={16} color="#16a34a" style={{ margin: '0 auto' }} /> : <span style={{ color: '#cbd5e1' }}>—</span>}
+                    </td>
+                    <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                      {role.capabilities.uploadData ? <CheckCircle size={16} color="#16a34a" style={{ margin: '0 auto' }} /> : <span style={{ color: '#cbd5e1' }}>—</span>}
+                    </td>
+                    <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                      {role.capabilities.runAnalysis ? <CheckCircle size={16} color="#16a34a" style={{ margin: '0 auto' }} /> : <span style={{ color: '#cbd5e1' }}>—</span>}
+                    </td>
+                    <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                      {role.capabilities.deleteRecords ? <CheckCircle size={16} color="#16a34a" style={{ margin: '0 auto' }} /> : <span style={{ color: '#cbd5e1' }}>—</span>}
+                    </td>
+                    <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                      {role.capabilities.manageUsers ? <CheckCircle size={16} color="#16a34a" style={{ margin: '0 auto' }} /> : <span style={{ color: '#cbd5e1' }}>—</span>}
+                    </td>
+                    <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                      {role.capabilities.viewLogs ? <CheckCircle size={16} color="#16a34a" style={{ margin: '0 auto' }} /> : <span style={{ color: '#cbd5e1' }}>—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function UsersPage({ user, onNavigate }) {
+  const [subTab, setSubTab] = useState('users'); // 'users' | 'matrix'
   const [usersList, setUsersList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [savingUserId, setSavingUserId] = useState(null);
   const [alertMsg, setAlertMsg] = useState({ type: '', text: '' });
+  const [projectOptions, setProjectOptions] = useState(() => {
+    try {
+      const cachedDomains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
+      const cachedProjects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
+      const names = [
+        ...cachedDomains.map(d => d.project_name || d.name || d.domain),
+        ...cachedProjects.map(p => p.name || p.project_name || p.domain)
+      ].filter(Boolean);
+      const unique = Array.from(new Set(['All Projects', ...names]));
+      return unique.length > 1 ? unique : ['All Projects', 'OWIS', 'Stamford American', 'testing308'];
+    } catch (_) {
+      return ['All Projects', 'OWIS', 'Stamford American', 'testing308'];
+    }
+  });
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -189,7 +439,7 @@ export default function UsersPage({ user, onNavigate }) {
   const [roleFilter, setRoleFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  // Inline User Edits Map { userId: { category, role, section_access, permissions, isDirty } }
+  // Inline User Edits Map { userId: { category, role, section_access, permissions, assigned_project, isDirty } }
   const [editedUsers, setEditedUsers] = useState({});
 
   // Modal State
@@ -204,6 +454,22 @@ export default function UsersPage({ user, onNavigate }) {
       return {};
     }
   });
+
+  useEffect(() => {
+    async function loadProjects() {
+      try {
+        const domainRows = await fetchDomainRows();
+        if (domainRows && domainRows.length > 0) {
+          const names = domainRows.map(d => d.name || d.project_name || d.domain).filter(Boolean);
+          const unique = Array.from(new Set(['All Projects', ...names]));
+          setProjectOptions(unique);
+        }
+      } catch (err) {
+        console.warn('[UsersPage] Failed to load projects from Project Setup:', err);
+      }
+    }
+    loadProjects();
+  }, []);
 
   const handleMarkAttendance = async (userId, status) => {
     const updated = {
@@ -244,6 +510,7 @@ export default function UsersPage({ user, onNavigate }) {
     role: ROLES.INTERNAL_ASSOCIATE,
     section_access: 'Default',
     permissions: 'Default',
+    assigned_project: 'All Projects',
     status: 'Active'
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -268,6 +535,7 @@ export default function UsersPage({ user, onNavigate }) {
           role: uRole,
           section_access: u.section_access || 'Default',
           permissions: u.permissions || 'Default',
+          assigned_project: u.assigned_project || 'All Projects',
           isDirty: false
         };
       });
@@ -404,14 +672,21 @@ export default function UsersPage({ user, onNavigate }) {
       category: targetUser.category || 'Internal',
       role: targetUser.role || 'INTERNAL_ASSOCIATE',
       section_access: targetUser.section_access || 'Default',
-      permissions: targetUser.permissions || 'Default'
+      permissions: targetUser.permissions || 'Default',
+      assigned_project: targetUser.assigned_project || 'All Projects'
     } : {});
 
+    let newCategory = current.category || 'Internal';
+    if (field === 'role') {
+      newCategory = deriveCategoryFromRole(value, newCategory);
+    }
+
     const updated = {
-      category: current.category || 'Internal',
+      category: newCategory,
       role: current.role || 'INTERNAL_ASSOCIATE',
       section_access: current.section_access || 'Default',
       permissions: current.permissions || 'Default',
+      assigned_project: current.assigned_project || 'All Projects',
       [field]: value,
       isDirty: true
     };
@@ -429,12 +704,20 @@ export default function UsersPage({ user, onNavigate }) {
     setSavingUserId(targetUser.id);
     setAlertMsg({ type: '', text: '' });
     try {
-      const updatedUser = await updateUserRoleApi(targetUser.id, edits.role, edits.category, edits.section_access, edits.permissions);
+      const updatedUser = await updateUserRoleApi(
+        targetUser.id,
+        edits.role,
+        edits.category,
+        edits.section_access,
+        edits.permissions,
+        edits.assigned_project
+      );
 
       const newSec = updatedUser?.section_access || edits.section_access || 'Default';
       const newPerm = updatedUser?.permissions || edits.permissions || 'Default';
       const newCat = updatedUser?.category || edits.category || 'Internal';
       const newRole = updatedUser?.role || edits.role || 'INTERNAL_ASSOCIATE';
+      const newProj = updatedUser?.assigned_project || edits.assigned_project || 'All Projects';
 
       // 1. Local storage cache sync
       const cachedList = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
@@ -444,6 +727,7 @@ export default function UsersPage({ user, onNavigate }) {
         cachedUser.role = newRole;
         cachedUser.section_access = newSec;
         cachedUser.permissions = newPerm;
+        cachedUser.assigned_project = newProj;
         localStorage.setItem('seo_users_list', JSON.stringify(cachedList));
       }
 
@@ -455,7 +739,8 @@ export default function UsersPage({ user, onNavigate }) {
           category: newCat,
           role: newRole,
           section_access: newSec,
-          permissions: newPerm
+          permissions: newPerm,
+          assigned_project: newProj
         }));
       }
 
@@ -465,7 +750,8 @@ export default function UsersPage({ user, onNavigate }) {
         category: newCat,
         role: newRole,
         section_access: newSec,
-        permissions: newPerm
+        permissions: newPerm,
+        assigned_project: newProj
       } : u));
 
       setEditedUsers(prev => ({
@@ -475,13 +761,14 @@ export default function UsersPage({ user, onNavigate }) {
           role: newRole,
           section_access: newSec,
           permissions: newPerm,
+          assigned_project: newProj,
           isDirty: false
         }
       }));
 
       setAlertMsg({
         type: 'success',
-        text: 'Saved'
+        text: `Saved user settings (Assigned Project: ${newProj})`
       });
     } catch (err) {
       setAlertMsg({ type: 'error', text: err.message || 'Failed to update user settings in database.' });
@@ -738,419 +1025,508 @@ export default function UsersPage({ user, onNavigate }) {
           </div>
         )}
 
-        {/* Summary Metric Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 24 }}>
-          {[
-            { label: 'Total Users', value: totalUsers, color: 'var(--text-primary)', bg: 'var(--surface-2)' },
-            { label: 'Active Profiles', value: activeCount, color: '#16a34a', bg: '#f0fdf4' },
-            { label: 'Disabled Profiles', value: disabledCount, color: '#dc2626', bg: '#fef2f2' },
-            { label: 'Admin Accounts', value: adminCount, color: '#7c3aed', bg: '#f5f3ff' },
-          ].map(card => (
-            <div key={card.label} style={{
-              background: card.bg,
-              border: '1px solid var(--border)',
-              borderRadius: 10,
-              padding: '14px 18px'
-            }}>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, marginBottom: 4 }}>{card.label}</div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: card.color }}>{card.value}</div>
-            </div>
-          ))}
+        {/* Navigation Subtabs */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, borderBottom: '1.5px solid var(--border, #e2e8f0)', paddingBottom: 10 }}>
+          <button
+            onClick={() => setSubTab('users')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '9px 18px',
+              fontSize: 13,
+              fontWeight: 700,
+              borderRadius: 8,
+              border: 'none',
+              cursor: 'pointer',
+              background: subTab === 'users' ? 'var(--accent, #7c3aed)' : 'var(--surface-2, #f1f5f9)',
+              color: subTab === 'users' ? '#ffffff' : '#64748b',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <User size={15} />
+            <span>User Accounts & Access</span>
+          </button>
+
+          <button
+            onClick={() => setSubTab('matrix')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '9px 18px',
+              fontSize: 13,
+              fontWeight: 700,
+              borderRadius: 8,
+              border: 'none',
+              cursor: 'pointer',
+              background: subTab === 'matrix' ? 'var(--accent, #7c3aed)' : 'var(--surface-2, #f1f5f9)',
+              color: subTab === 'matrix' ? '#ffffff' : '#64748b',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <Layers size={15} />
+            <span>Role & Permission Matrix</span>
+          </button>
         </div>
 
-        {/* Search & Category/Role/Status Filters */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          marginBottom: 20,
-          flexWrap: 'wrap',
-          background: 'var(--surface-2)',
-          padding: '12px 16px',
-          borderRadius: 10,
-          border: '1px solid var(--border)'
-        }}>
-          <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--text-muted)' }} />
-            <input
-              type="text"
-              placeholder="Search user by username or email..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '7px 12px 7px 32px',
-                fontSize: 13,
-                borderRadius: 6,
-                border: '1px solid var(--border)',
-                background: 'var(--surface)',
-                color: 'var(--text-primary)',
-                outline: 'none'
-              }}
-            />
-          </div>
-
-          {/* Category Filter */}
-          <select
-            value={categoryFilter}
-            onChange={e => setCategoryFilter(e.target.value)}
-            style={{
-              padding: '7px 12px',
-              fontSize: 12.5,
-              fontWeight: 600,
-              borderRadius: 6,
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
-              color: 'var(--text-secondary)'
-            }}
-          >
-            <option value="all">All Categories</option>
-            <option value="Internal">Internal</option>
-            <option value="Client Access">Client Access</option>
-            <option value="Vendor">Vendor</option>
-            <option value="Admin">Admin</option>
-          </select>
-
-          {/* Role Filter */}
-          <select
-            value={roleFilter}
-            onChange={e => setRoleFilter(e.target.value)}
-            style={{
-              padding: '7px 12px',
-              fontSize: 12.5,
-              fontWeight: 600,
-              borderRadius: 6,
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
-              color: 'var(--text-secondary)'
-            }}
-          >
-            <option value="all">All Roles</option>
-            <option value="ADMIN">Admin</option>
-            <option value="INTERNAL_TEAM_LEAD">Internal Team Lead</option>
-            <option value="INTERNAL_SR_ASSOCIATE">Internal Sr. Associate</option>
-            <option value="INTERNAL_ASSOCIATE">Internal Associate</option>
-            <option value="CLIENT_TEAM_LEAD">Client Team Lead</option>
-            <option value="CLIENT_SR_ASSOCIATE">Client Sr. Associate</option>
-            <option value="CLIENT_ASSOCIATE">Client Associate</option>
-            <option value="VENDOR">Vendor</option>
-          </select>
-
-          {/* Status Filter */}
-          <select
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-            style={{
-              padding: '7px 12px',
-              fontSize: 12.5,
-              fontWeight: 600,
-              borderRadius: 6,
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
-              color: 'var(--text-secondary)'
-            }}
-          >
-            <option value="all">All Statuses</option>
-            <option value="active">Active</option>
-            <option value="disabled">Disabled</option>
-          </select>
-        </div>
-
-        {/* ─── ADMIN USER ACCESS CONTROL TABLE ───────────────────────────────── */}
-        {loading ? (
-          <div style={{ padding: '36px 0', textAlign: 'center', fontSize: 13.5, color: 'var(--text-muted)' }}>
-            Loading user profiles...
-          </div>
-        ) : filteredUsers.length === 0 ? (
-          <div style={{ padding: '40px 16px', textAlign: 'center', fontSize: 13.5, color: 'var(--text-muted)', background: 'var(--surface-2)', border: '1.5px dashed var(--border)', borderRadius: 12 }}>
-            No user profiles found matching your search.
-          </div>
+        {subTab === 'matrix' ? (
+          <RolePermissionMatrixView />
         ) : (
-          <div style={{ overflowX: 'auto', borderRadius: 10, border: '1px solid var(--border)' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Username</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Email Address</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Category</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Role</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Module Access</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700, width: 145 }}>Permissions</th>
-                  <th style={{ padding: '10px 16px', fontWeight: 700, textAlign: 'center' }}>
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      <span>Attendance</span>
-                      <button
-                        onClick={handleMarkAllPresent}
-                        title="Mark all associates present in Supabase database"
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 4,
-                          padding: '3px 8px',
-                          fontSize: 10.5,
-                          fontWeight: 700,
-                          color: '#15803d',
-                          background: '#f0fdf4',
-                          border: '1px solid #bbf7d0',
-                          borderRadius: 6,
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                          textTransform: 'none'
-                        }}
-                      >
-                        <CheckCircle size={12} />
-                        <span>Mark All Present</span>
-                      </button>
-                    </div>
-                  </th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700, textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredUsers.map(u => {
-                  const isActive = (u.status || 'Active') === 'Active';
-                  const initials = u.name ? u.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'U';
+          <>
+            {/* Summary Metric Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 24 }}>
+              {[
+                { label: 'Total Users', value: totalUsers, color: 'var(--text-primary)', bg: 'var(--surface-2)' },
+                { label: 'Active Profiles', value: activeCount, color: '#16a34a', bg: '#f0fdf4' },
+                { label: 'Disabled Profiles', value: disabledCount, color: '#dc2626', bg: '#fef2f2' },
+                { label: 'Admin Accounts', value: adminCount, color: '#7c3aed', bg: '#f5f3ff' },
+              ].map(card => (
+                <div key={card.label} style={{
+                  background: card.bg,
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  padding: '14px 18px'
+                }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, marginBottom: 4 }}>{card.label}</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: card.color }}>{card.value}</div>
+                </div>
+              ))}
+            </div>
 
-                  const uRole = u.role || 'INTERNAL_ASSOCIATE';
-                  const uCat = deriveCategoryFromRole(uRole, u.category);
+            {/* Search & Category/Role/Status Filters */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              marginBottom: 20,
+              flexWrap: 'wrap',
+              background: 'var(--surface-2)',
+              padding: '12px 16px',
+              borderRadius: 10,
+              border: '1px solid var(--border)'
+            }}>
+              {/* Search */}
+              <div style={{ position: 'relative', flex: 1, minWidth: 240 }}>
+                <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <input
+                  type="text"
+                  placeholder="Search users by name or email..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px 8px 36px',
+                    fontSize: 13,
+                    borderRadius: 6,
+                    border: '1px solid var(--border)',
+                    background: 'var(--surface)',
+                    color: 'var(--text-primary)',
+                    outline: 'none'
+                  }}
+                />
+              </div>
 
-                  const currentEdit = editedUsers[u.id] || {
-                    category: uCat,
-                    role: uRole,
-                    section_access: u.section_access || 'Default',
-                    permissions: u.permissions || 'Default',
-                    isDirty: false
-                  };
+              {/* Category Filter */}
+              <select
+                value={categoryFilter}
+                onChange={e => setCategoryFilter(e.target.value)}
+                style={{
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  borderRadius: 6,
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface)',
+                  color: 'var(--text-primary)',
+                  outline: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                <option value="all">All Categories</option>
+                <option value={CATEGORIES.ADMIN}>Admin</option>
+                <option value={CATEGORIES.INTERNAL}>Internal</option>
+                <option value={CATEGORIES.CLIENT_ACCESS}>Client Access</option>
+                <option value={CATEGORIES.VENDOR}>Vendor</option>
+              </select>
 
-                  const effectiveCategory = deriveCategoryFromRole(currentEdit.role, currentEdit.category);
-                  const availableRoles = CATEGORY_ROLES_MAP[effectiveCategory] || [ROLES.INTERNAL_ASSOCIATE];
-                  const isSaving = savingUserId === u.id;
+              {/* Role Filter */}
+              <select
+                value={roleFilter}
+                onChange={e => setRoleFilter(e.target.value)}
+                style={{
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  borderRadius: 6,
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface)',
+                  color: 'var(--text-primary)',
+                  outline: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                <option value="all">All Roles</option>
+                {Object.keys(ROLE_DISPLAY_NAMES).map(rKey => (
+                  <option key={rKey} value={rKey}>{ROLE_DISPLAY_NAMES[rKey]}</option>
+                ))}
+              </select>
 
-                  return (
-                    <tr key={u.id} style={{ borderBottom: '1px solid var(--border)', background: currentEdit.isDirty ? '#fffbeb' : 'var(--surface)' }}>
+              {/* Status Filter */}
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+                style={{
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  borderRadius: 6,
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface)',
+                  color: 'var(--text-primary)',
+                  outline: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                <option value="all">All Statuses</option>
+                <option value="Active">Active</option>
+                <option value="Disabled">Disabled</option>
+              </select>
 
-                      {/* USERNAME */}
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <div style={{
-                            width: 34,
-                            height: 34,
-                            borderRadius: '50%',
-                            background: currentEdit.role === 'ADMIN' ? '#f5f3ff' : '#f0f9ff',
-                            color: currentEdit.role === 'ADMIN' ? '#7c3aed' : '#0284c7',
-                            border: `1px solid ${currentEdit.role === 'ADMIN' ? '#ddd6fe' : '#bae6fd'}`,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontWeight: 800,
-                            fontSize: 12.5,
-                            position: 'relative'
-                          }}>
-                            {initials}
-                            <span style={{
-                              position: 'absolute',
-                              bottom: 0,
-                              right: 0,
-                              width: 9,
-                              height: 9,
-                              borderRadius: '50%',
-                              background: isActive ? '#16a34a' : '#dc2626',
-                              border: '2px solid #ffffff'
-                            }} />
-                          </div>
-                          <div>
-                            <strong style={{ fontSize: 13.5, color: 'var(--text-primary)', display: 'block' }}>{u.name}</strong>
-                            {user?.email?.toLowerCase() === u.email?.toLowerCase() && (
-                              <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--accent)' }}>(You)</span>
-                            )}
-                          </div>
-                        </div>
-                      </td>
+              {/* Mark All Present */}
+              <button
+                onClick={handleMarkAllPresent}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '8px 14px',
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: '#15803d',
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  marginLeft: 'auto'
+                }}
+                title="Mark all users present for today"
+              >
+                <CheckCircle size={14} />
+                <span>Mark All Present</span>
+              </button>
+            </div>
 
-                      {/* EMAIL ADDRESS */}
-                      <td style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontWeight: 500, fontSize: 12.5 }}>
-                        {u.email}
-                      </td>
+            {/* Main Admin User Control Table */}
+            {loading ? (
+              <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
+                <RefreshCw size={24} className="spin" style={{ margin: '0 auto 12px auto', color: 'var(--accent)' }} />
+                <div style={{ fontSize: 14, fontWeight: 600 }}>Loading user accounts...</div>
+              </div>
+            ) : filteredUsers.length === 0 ? (
+              <div style={{ padding: 60, textAlign: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}>
+                <Users size={32} style={{ margin: '0 auto 12px auto', color: 'var(--text-muted)' }} />
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>No Users Found</div>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No platform users match the selected search or filter criteria.</div>
+              </div>
+            ) : (
+              <div style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 12,
+                overflow: 'hidden',
+                boxShadow: 'var(--shadow-sm)'
+              }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        <th style={{ padding: '12px 16px', textAlign: 'left' }}>User Info</th>
+                        <th style={{ padding: '12px 16px', textAlign: 'left', width: 135 }}>Category</th>
+                        <th style={{ padding: '12px 16px', textAlign: 'left', width: 155 }}>Role</th>
+                        <th style={{ padding: '12px 16px', textAlign: 'left', width: 175 }}>Assigned Project</th>
+                        <th style={{ padding: '12px 16px', textAlign: 'left', width: 185 }}>Section Access</th>
+                        <th style={{ padding: '12px 16px', textAlign: 'left', width: 140 }}>Permissions</th>
+                        <th style={{ padding: '12px 16px', textAlign: 'center', width: 115 }}>Attendance</th>
+                        <th style={{ padding: '12px 16px', textAlign: 'right', width: 140 }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredUsers.map((u) => {
+                        const currentEdit = editedUsers[u.id] || {
+                          category: u.category || 'Internal',
+                          role: u.role || 'INTERNAL_ASSOCIATE',
+                          section_access: u.section_access || 'Default',
+                          permissions: u.permissions || 'Default',
+                          assigned_project: u.assigned_project || 'All Projects'
+                        };
+                        const isActive = u.status !== 'Disabled';
+                        const currentRoleKey = (currentEdit.role || 'INTERNAL_ASSOCIATE').toUpperCase();
+                        const categoryRoles = CATEGORY_ROLES_MAP[currentEdit.category] || [ROLES.INTERNAL_ASSOCIATE];
+                        const rolesForCategory = categoryRoles.includes(currentRoleKey) ? categoryRoles : [currentRoleKey, ...categoryRoles];
+                        const isVendor = currentEdit.category === 'Vendor' || currentEdit.role === 'VENDOR' || currentRoleKey === 'VENDOR';
 
-                      {/* CATEGORY DROPDOWN */}
-                      <td style={{ padding: '12px 16px' }}>
-                        <select
-                          value={currentEdit.category}
-                          onChange={e => handleInlineCategoryChange(u.id, e.target.value)}
-                          style={{
-                            padding: '6px 10px',
-                            fontSize: 12,
-                            fontWeight: 700,
-                            borderRadius: 6,
-                            border: '1px solid #cbd5e1',
-                            background: currentEdit.category === 'Admin' ? '#fef3c7' : currentEdit.category === 'Client Access' ? '#ccfbf1' : currentEdit.category === 'Vendor' ? '#ffedd5' : '#e0e7ff',
-                            color: currentEdit.category === 'Admin' ? '#b45309' : currentEdit.category === 'Client Access' ? '#0f766e' : currentEdit.category === 'Vendor' ? '#c2410c' : '#3730a3',
-                            cursor: 'pointer',
-                            outline: 'none'
-                          }}
-                        >
-                          <option value={CATEGORIES.INTERNAL}>Internal</option>
-                          <option value={CATEGORIES.CLIENT_ACCESS}>Client Access</option>
-                          <option value={CATEGORIES.VENDOR}>Vendor</option>
-                          <option value={CATEGORIES.ADMIN}>Admin</option>
-                        </select>
-                      </td>
-
-                      {/* ROLE DROPDOWN */}
-                      <td style={{ padding: '12px 16px' }}>
-                        <select
-                          value={currentEdit.role}
-                          onChange={e => handleInlineFieldChange(u.id, 'role', e.target.value)}
-                          style={{
-                            padding: '6px 10px',
-                            fontSize: 12,
-                            fontWeight: 600,
-                            borderRadius: 6,
-                            border: '1px solid #cbd5e1',
-                            background: '#ffffff',
-                            color: '#334155',
-                            cursor: 'pointer',
-                            outline: 'none'
-                          }}
-                        >
-                          {availableRoles.map(rKey => (
-                            <option key={rKey} value={rKey}>
-                              {ROLE_DISPLAY_NAMES[rKey] || rKey}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-
-                      {/* MODULE ACCESS MULTI-SELECT */}
-                      <td style={{ padding: '12px 16px' }}>
-                        <ModuleAccessMultiSelect
-                          value={currentEdit.section_access}
-                          onChange={val => handleInlineFieldChange(u.id, 'section_access', val)}
-                        />
-                      </td>
-
-                      {/* PERMISSIONS DROPDOWN */}
-                      <td style={{ padding: '12px 16px', width: 145 }}>
-                        <select
-                          value={currentEdit.permissions}
-                          onChange={e => handleInlineFieldChange(u.id, 'permissions', e.target.value)}
-                          style={{
-                            padding: '6px 8px',
-                            fontSize: 12,
-                            fontWeight: 600,
-                            borderRadius: 6,
-                            border: '1px solid #cbd5e1',
-                            background: '#ffffff',
-                            color: '#0f172a',
-                            cursor: 'pointer',
-                            outline: 'none',
-                            width: 145,
-                            maxWidth: 145,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap'
-                          }}
-                        >
-                          {PERMISSION_OPTIONS.map(opt => (
-                            <option key={opt} value={opt}>{opt}</option>
-                          ))}
-                        </select>
-                      </td>
-
-                      {/* ATTENDANCE CHECKBOX COLUMN */}
-                      {(() => {
-                        const currentAttendance = attendanceRecords[u.id]?.status || u.attendance || 'Not Present';
-                        const isPresent = currentAttendance === 'Present';
                         return (
-                          <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                            <label
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 6,
-                                cursor: 'pointer',
-                                fontSize: 11.5,
-                                fontWeight: 600,
-                                userSelect: 'none',
-                                background: isPresent ? '#f0fdf4' : '#fef2f2',
-                                color: isPresent ? '#15803d' : '#dc2626',
-                                border: `1px solid ${isPresent ? '#bbf7d0' : '#fca5a5'}`,
-                                padding: '4px 8px',
-                                borderRadius: 6,
-                                transition: 'all 0.15s ease'
-                              }}
-                              title={`Toggle attendance status for ${u.name}`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isPresent}
-                                onChange={(e) => {
-                                  handleMarkAttendance(u.id, e.target.checked ? 'Present' : 'Not Present');
+                          <tr key={u.id} style={{ borderBottom: '1px solid var(--border)', opacity: isActive ? 1 : 0.65 }}>
+                            {/* USER INFO */}
+                            <td style={{ padding: '12px 16px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <div style={{
+                                  width: 36,
+                                  height: 36,
+                                  borderRadius: '50%',
+                                  background: isActive ? 'var(--accent-light)' : '#f1f5f9',
+                                  color: isActive ? 'var(--accent)' : '#94a3b8',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontWeight: 700,
+                                  fontSize: 14
+                                }}>
+                                  {u.name ? u.name.charAt(0).toUpperCase() : u.email.charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                  <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: 13.5 }}>{u.name || 'User'}</div>
+                                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{u.email}</div>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* CATEGORY DROPDOWN */}
+                            <td style={{ padding: '12px 16px', width: 135 }}>
+                              <select
+                                value={currentEdit.category}
+                                onChange={e => handleInlineCategoryChange(u.id, e.target.value)}
+                                style={{
+                                  padding: '6px 8px',
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                  borderRadius: 6,
+                                  border: '1px solid #cbd5e1',
+                                  background: '#ffffff',
+                                  color: '#0f172a',
+                                  cursor: 'pointer',
+                                  outline: 'none',
+                                  width: '100%',
+                                  minWidth: 100
                                 }}
-                                style={{ cursor: 'pointer', accentColor: '#16a34a', width: 13, height: 13 }}
+                              >
+                                {Object.values(CATEGORIES).map(cat => (
+                                  <option key={cat} value={cat}>{cat}</option>
+                                ))}
+                              </select>
+                            </td>
+
+                            {/* ROLE DROPDOWN */}
+                            <td style={{ padding: '12px 16px', width: 155 }}>
+                              <select
+                                value={currentRoleKey}
+                                onChange={e => handleInlineFieldChange(u.id, 'role', e.target.value)}
+                                style={{
+                                  padding: '6px 8px',
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                  borderRadius: 6,
+                                  border: '1px solid #cbd5e1',
+                                  background: '#ffffff',
+                                  color: '#0f172a',
+                                  cursor: 'pointer',
+                                  outline: 'none',
+                                  width: '100%',
+                                  minWidth: 120
+                                }}
+                              >
+                                {rolesForCategory.map(rKey => (
+                                  <option key={rKey} value={rKey}>{ROLE_DISPLAY_NAMES[rKey] || rKey}</option>
+                                ))}
+                              </select>
+                            </td>
+
+                            {/* ASSIGNED PROJECT (VENDOR SCOPED) */}
+                            <td style={{ padding: '12px 16px', width: 175 }}>
+                              {isVendor ? (
+                                <select
+                                  value={currentEdit.assigned_project || 'All Projects'}
+                                  onChange={e => handleInlineFieldChange(u.id, 'assigned_project', e.target.value)}
+                                  style={{
+                                    padding: '6px 8px',
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    borderRadius: 6,
+                                    border: '1.5px solid #f97316',
+                                    background: '#fff7ed',
+                                    color: '#c2410c',
+                                    cursor: 'pointer',
+                                    outline: 'none',
+                                    width: '100%'
+                                  }}
+                                  title="Project scope for Vendor Monthly Operations"
+                                >
+                                  {projectOptions.map(pName => (
+                                    <option key={pName} value={pName}>{pName}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic', fontWeight: 500 }}>
+                                  All Projects
+                                </span>
+                              )}
+                            </td>
+
+                            {/* SECTION ACCESS (MULTI-SELECT) */}
+                            <td style={{ padding: '12px 16px', width: 190 }}>
+                              <ModuleAccessMultiSelect
+                                value={currentEdit.section_access}
+                                onChange={val => handleInlineFieldChange(u.id, 'section_access', val)}
                               />
-                              <span>{isPresent ? 'Present' : 'Not Present'}</span>
-                            </label>
-                          </td>
+                            </td>
+
+                            {/* PERMISSIONS DROPDOWN */}
+                            <td style={{ padding: '12px 16px', width: 145 }}>
+                              <select
+                                value={currentEdit.permissions}
+                                onChange={e => handleInlineFieldChange(u.id, 'permissions', e.target.value)}
+                                style={{
+                                  padding: '6px 8px',
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                  borderRadius: 6,
+                                  border: '1px solid #cbd5e1',
+                                  background: '#ffffff',
+                                  color: '#0f172a',
+                                  cursor: 'pointer',
+                                  outline: 'none',
+                                  width: 145,
+                                  maxWidth: 145,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
+                                {PERMISSION_OPTIONS.map(opt => (
+                                  <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                              </select>
+                            </td>
+
+                            {/* ATTENDANCE CHECKBOX COLUMN */}
+                            {(() => {
+                              const currentAttendance = attendanceRecords[u.id]?.status || u.attendance || 'Not Present';
+                              const isPresent = currentAttendance === 'Present';
+                              return (
+                                <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                                  <label
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 6,
+                                      cursor: 'pointer',
+                                      fontSize: 11.5,
+                                      fontWeight: 600,
+                                      userSelect: 'none',
+                                      background: isPresent ? '#f0fdf4' : '#fef2f2',
+                                      color: isPresent ? '#15803d' : '#dc2626',
+                                      border: `1px solid ${isPresent ? '#bbf7d0' : '#fca5a5'}`,
+                                      padding: '4px 8px',
+                                      borderRadius: 6,
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                    title={`Toggle attendance status for ${u.name}`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isPresent}
+                                      onChange={(e) => {
+                                        handleMarkAttendance(u.id, e.target.checked ? 'Present' : 'Not Present');
+                                      }}
+                                      style={{ cursor: 'pointer', accentColor: '#16a34a', width: 13, height: 13 }}
+                                    />
+                                    <span>{isPresent ? 'Present' : 'Not Present'}</span>
+                                  </label>
+                                </td>
+                              );
+                            })()}
+
+                            {/* ACTIONS */}
+                            <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+
+                                {/* SAVE BUTTON */}
+                                {editedUsers[u.id]?.isDirty && (
+                                  <button
+                                    onClick={() => handleSaveUserSettings(u)}
+                                    disabled={savingUserId === u.id}
+                                    title="Save user role, section access, and permissions to database"
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 4,
+                                      padding: '5px 9px',
+                                      fontSize: 11.5,
+                                      fontWeight: 600,
+                                      borderRadius: 6,
+                                      cursor: savingUserId === u.id ? 'not-allowed' : 'pointer',
+                                      background: '#2563eb',
+                                      color: '#ffffff',
+                                      border: 'none',
+                                      boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                  >
+                                    <Save size={13} />
+                                    <span>{savingUserId === u.id ? 'Saving…' : 'Save'}</span>
+                                  </button>
+                                )}
+
+                                {/* TOGGLE STATUS */}
+                                <button
+                                  onClick={() => handleToggleStatus(u)}
+                                  disabled={actionLoading}
+                                  title={isActive ? 'Disable User Profile' : 'Enable User Profile'}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    padding: '5px 9px',
+                                    fontSize: 11.5,
+                                    fontWeight: 600,
+                                    borderRadius: 6,
+                                    cursor: actionLoading ? 'not-allowed' : 'pointer',
+                                    background: isActive ? '#fef2f2' : '#f0fdf4',
+                                    color: isActive ? '#dc2626' : '#166534',
+                                    border: `1px solid ${isActive ? '#fca5a5' : '#bbf7d0'}`
+                                  }}
+                                >
+                                  {isActive ? <UserX size={13} /> : <UserCheck size={13} />}
+                                  <span>{isActive ? 'Disable' : 'Enable'}</span>
+                                </button>
+
+                                {/* DELETE PROFILE */}
+                                <button
+                                  onClick={() => { setSelectedUser(u); setShowDeleteModal(true); }}
+                                  disabled={actionLoading}
+                                  title="Delete User"
+                                  style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: '#94a3b8',
+                                    cursor: actionLoading ? 'not-allowed' : 'pointer',
+                                    padding: 6,
+                                    borderRadius: 6
+                                  }}
+                                  onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
+                                  onMouseLeave={e => e.currentTarget.style.color = '#94a3b8'}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
                         );
-                      })()}
-
-                      {/* ACTIONS */}
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-
-                          {/* SAVE BUTTON */}
-
-                          {/* TOGGLE STATUS */}
-                          <button
-                            onClick={() => handleToggleStatus(u)}
-                            disabled={actionLoading}
-                            title={isActive ? 'Disable User Profile' : 'Enable User Profile'}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              padding: '5px 9px',
-                              fontSize: 11.5,
-                              fontWeight: 600,
-                              borderRadius: 6,
-                              cursor: actionLoading ? 'not-allowed' : 'pointer',
-                              background: isActive ? '#fef2f2' : '#f0fdf4',
-                              color: isActive ? '#dc2626' : '#166534',
-                              border: `1px solid ${isActive ? '#fca5a5' : '#bbf7d0'}`
-                            }}
-                          >
-                            {isActive ? <UserX size={13} /> : <UserCheck size={13} />}
-                            <span>{isActive ? 'Disable' : 'Enable'}</span>
-                          </button>
-
-                          {/* DELETE PROFILE */}
-                          <button
-                            onClick={() => { setSelectedUser(u); setShowDeleteModal(true); }}
-                            disabled={actionLoading}
-                            title="Delete User"
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              color: '#94a3b8',
-                              cursor: actionLoading ? 'not-allowed' : 'pointer',
-                              padding: 6,
-                              borderRadius: 6
-                            }}
-                            onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
-                            onMouseLeave={e => e.currentTarget.style.color = '#94a3b8'}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -1399,6 +1775,34 @@ export default function UsersPage({ user, onNavigate }) {
                   </select>
                 </div>
               </div>
+
+              {/* Assigned Project selector for Vendor role */}
+              {(formData.category === 'Vendor' || formData.role === 'VENDOR') && (
+                <div style={{ marginTop: 12 }}>
+                  <label style={{ fontSize: 12.5, fontWeight: 700, color: '#c2410c', display: 'block', marginBottom: 5 }}>
+                    Assigned Project (Vendor Access Scope)
+                  </label>
+                  <select
+                    value={formData.assigned_project || 'All Projects'}
+                    onChange={e => setFormData({ ...formData, assigned_project: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      fontSize: 13,
+                      fontWeight: 700,
+                      borderRadius: 8,
+                      border: '1.5px solid #f97316',
+                      background: '#fff7ed',
+                      color: '#c2410c',
+                      outline: 'none'
+                    }}
+                  >
+                    {projectOptions.map(pName => (
+                      <option key={pName} value={pName}>{pName}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 12 }}>
                 <button

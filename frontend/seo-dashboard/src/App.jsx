@@ -20,10 +20,167 @@ import LandingPage from './components/pages/LandingPage';
 import LogsPage from './components/pages/LogsPage';
 import RecycleBinPage from './components/pages/RecycleBinPage';
 import UsersPage from './components/pages/UsersPage';
-import { Lock } from 'lucide-react';
+import { Lock, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { totalKeywordCount, topKeywords } from './data/mockData';
 import { fetchUsersApi } from './lib/projectsApi';
 import { canAccessRoute } from './lib/permissions';
+
+function AccountUpdateModal({ open, onClose, data }) {
+  if (!open || !data) return null;
+
+  const { isDisabled, changes = [] } = data;
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(15, 23, 42, 0.65)',
+        backdropFilter: 'blur(4px)',
+        zIndex: 99999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20
+      }}
+    >
+      <div
+        style={{
+          background: '#ffffff',
+          borderRadius: 20,
+          width: '100%',
+          maxWidth: 480,
+          padding: '28px 32px',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          textAlign: 'center'
+        }}
+      >
+        {isDisabled ? (
+          <>
+            <div
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: '50%',
+                background: '#fef2f2',
+                color: '#dc2626',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 18,
+                border: '1px solid #fca5a5'
+              }}
+            >
+              <ShieldAlert size={32} />
+            </div>
+            <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 10px 0', fontFamily: 'var(--font-display, inherit)' }}>
+              Account Profile Disabled
+            </h2>
+            <p style={{ fontSize: 14, color: '#475569', margin: '0 0 24px 0', lineHeight: 1.5 }}>
+              Your account profile has been disabled by an administrator. You have been logged out.
+            </p>
+            <button
+              onClick={onClose}
+              style={{
+                width: '100%',
+                padding: '12px 20px',
+                fontSize: 14,
+                fontWeight: 700,
+                color: '#ffffff',
+                background: '#dc2626',
+                border: 'none',
+                borderRadius: 10,
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(220, 38, 38, 0.3)'
+              }}
+            >
+              Acknowledge & Exit
+            </button>
+          </>
+        ) : (
+          <>
+            <div
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: '50%',
+                background: '#eff6ff',
+                color: '#2563eb',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 18,
+                border: '1px solid #bfdbfe'
+              }}
+            >
+              <ShieldCheck size={32} />
+            </div>
+            <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0', fontFamily: 'var(--font-display, inherit)' }}>
+              Account Permissions Updated
+            </h2>
+            <p style={{ fontSize: 13.5, color: '#64748b', margin: '0 0 20px 0', lineHeight: 1.5 }}>
+              An administrator has updated your account profile permissions:
+            </p>
+            
+            <div
+              style={{
+                width: '100%',
+                background: '#f8fafc',
+                borderRadius: 12,
+                padding: '16px 20px',
+                border: '1px solid #e2e8f0',
+                marginBottom: 24,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+                textAlign: 'left'
+              }}
+            >
+              {changes.map((chg, idx) => (
+                <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13 }}>
+                  <span style={{ fontWeight: 600, color: '#334155' }}>{chg.label}:</span>
+                  <span
+                    style={{
+                      fontWeight: 700,
+                      color: '#2563eb',
+                      background: '#dbeafe',
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      fontSize: 12
+                    }}
+                  >
+                    {chg.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={onClose}
+              style={{
+                width: '100%',
+                padding: '12px 20px',
+                fontSize: 14,
+                fontWeight: 700,
+                color: '#ffffff',
+                background: '#2563eb',
+                border: 'none',
+                borderRadius: 10,
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)'
+              }}
+            >
+              Got It
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const mockProject = {
   domain: "owis.org",
@@ -195,16 +352,18 @@ export default function App() {
     }
   });
 
+  const [accountUpdateModal, setAccountUpdateModal] = useState(null);
+
   // Track user in a ref to avoid stale closures during async redirects (like LoginPage timeout)
   const userRef = useRef(user);
   const justLoggedInRef = useRef(false);
 
   useEffect(() => {
     userRef.current = user;
-    if (user?.role?.toUpperCase() === 'VENDOR' && activePath !== 'search-visibility/off-page-scheduler' && activePath !== 'profile') {
+    if (user?.role?.toUpperCase() === 'VENDOR' && activePath !== 'search-visibility/off-page-scheduler' && activePath !== 'profile' && activePath !== 'help' && activePath !== 'notifications') {
       setActivePath('search-visibility/off-page-scheduler');
     }
-  }, [user]);
+  }, [user, activePath]);
 
   // Periodically & on page navigation, verify logged-in user account status & sync live permissions
   useEffect(() => {
@@ -219,7 +378,7 @@ export default function App() {
         if (currentRecord) {
           if (currentRecord.status === 'Disabled') {
             handleLogout();
-            alert('Your account profile has been disabled by an administrator. You have been logged out.');
+            setAccountUpdateModal({ isDisabled: true });
             return;
           }
 
@@ -227,22 +386,36 @@ export default function App() {
           const freshCategory = currentRecord.category || user.category;
           const freshSec = currentRecord.section_access || user.section_access || 'Default';
           const freshPerm = currentRecord.permissions || user.permissions || 'Default';
+          const freshProject = currentRecord.assigned_project || user.assigned_project || 'All Projects';
 
           if (
             user.role !== freshRole ||
             user.category !== freshCategory ||
             user.section_access !== freshSec ||
-            user.permissions !== freshPerm
+            user.permissions !== freshPerm ||
+            user.assigned_project !== freshProject
           ) {
+            const changes = [];
+            if (user.permissions !== freshPerm) changes.push({ label: 'Action Permissions', value: freshPerm });
+            if (user.section_access !== freshSec) changes.push({ label: 'Section Access', value: freshSec });
+            if (user.role !== freshRole) changes.push({ label: 'Role', value: freshRole });
+            if (user.category !== freshCategory) changes.push({ label: 'Category', value: freshCategory });
+            if (user.assigned_project !== freshProject) changes.push({ label: 'Assigned Project', value: freshProject });
+
             const updatedUser = {
               ...user,
               role: freshRole,
               category: freshCategory,
               section_access: freshSec,
-              permissions: freshPerm
+              permissions: freshPerm,
+              assigned_project: freshProject
             };
             setUser(updatedUser);
             sessionStorage.setItem('seo_dashboard_user', JSON.stringify(updatedUser));
+
+            if (changes.length > 0) {
+              setAccountUpdateModal({ isDisabled: false, changes });
+            }
           }
         }
       } catch (e) {}
@@ -258,7 +431,7 @@ export default function App() {
 
   const handleNavigate = (path) => {
     const currentUser = userRef.current;
-    if (currentUser?.role?.toUpperCase() === 'VENDOR' && path !== 'profile' && path !== 'notifications' && path !== 'help') {
+    if (currentUser?.role?.toUpperCase() === 'VENDOR' && path !== 'profile' && path !== 'notifications' && path !== 'help' && path !== 'search-visibility/off-page-scheduler') {
       setActivePath('search-visibility/off-page-scheduler');
       return;
     }
@@ -317,7 +490,12 @@ export default function App() {
   const pageInfo = PAGE_TITLES[activePath] || { title: activePath, subtitle: '' };
 
   if (isAuthPage) {
-    return renderPage(activePath, handleNavigate, user, handleLoginSuccess, handleLogout);
+    return (
+      <>
+        {renderPage(activePath, handleNavigate, user, handleLoginSuccess, handleLogout)}
+        <AccountUpdateModal open={Boolean(accountUpdateModal)} data={accountUpdateModal} onClose={() => setAccountUpdateModal(null)} />
+      </>
+    );
   }
 
   return (
@@ -336,7 +514,7 @@ export default function App() {
           {renderPage(activePath, handleNavigate, user, handleLoginSuccess, handleLogout)}
         </main>
       </div>
+      <AccountUpdateModal open={Boolean(accountUpdateModal)} data={accountUpdateModal} onClose={() => setAccountUpdateModal(null)} />
     </div>
   );
 }
-
