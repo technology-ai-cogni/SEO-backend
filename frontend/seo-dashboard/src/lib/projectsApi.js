@@ -2228,12 +2228,12 @@ export async function fetchOutreachSitesApi(projectSlug) {
   return data.sites || [];
 }
 
-export async function addOutreachSiteApi(projectSlug, url, regions = null) {
+export async function addOutreachSiteApi(projectSlug, url, regions = null, type = 'Paid Guest') {
   if (!projectSlug) throw new Error('Project slug is required');
   const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, regions })
+    body: JSON.stringify({ url, regions, type })
   });
   if (!res.ok) {
     const err = await res.json().catch(() => null);

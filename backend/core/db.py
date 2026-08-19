@@ -521,6 +521,7 @@ def init_db():
                 project_slug TEXT NOT NULL REFERENCES projects(slug),
                 url TEXT NOT NULL,
                 domain TEXT NOT NULL,
+                type TEXT,
                 da INTEGER,
                 pa INTEGER,
                 ss TEXT,
@@ -534,6 +535,7 @@ def init_db():
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
+        conn.execute(text("ALTER TABLE outreach_sites ADD COLUMN IF NOT EXISTS type TEXT"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_outreach_sites_project ON outreach_sites (project_slug)"))
 
 
@@ -546,7 +548,7 @@ def list_outreach_sites(project_slug: str):
     with engine.connect() as conn:
         res = conn.execute(
             text("""
-                SELECT id, project_slug, url, domain, da, pa, ss, traffic,
+                SELECT id, project_slug, url, domain, type, da, pa, ss, traffic,
                        total_traffic, region1_traffic, region2_traffic, region3_traffic,
                        metrics_json, created_at
                 FROM outreach_sites
@@ -566,11 +568,11 @@ def insert_outreach_site(project_slug: str, site_data: dict):
         res = conn.execute(
             text("""
                 INSERT INTO outreach_sites (
-                    project_slug, url, domain, da, pa, ss, traffic,
+                    project_slug, url, domain, type, da, pa, ss, traffic,
                     total_traffic, region1_traffic, region2_traffic, region3_traffic, metrics_json
                 )
                 VALUES (
-                    :project_slug, :url, :domain, :da, :pa, :ss, :traffic,
+                    :project_slug, :url, :domain, :type, :da, :pa, :ss, :traffic,
                     :total_traffic, :region1_traffic, :region2_traffic, :region3_traffic, :metrics_json
                 )
                 RETURNING id, created_at
@@ -579,6 +581,7 @@ def insert_outreach_site(project_slug: str, site_data: dict):
                 "project_slug": project_slug,
                 "url": site_data.get("url"),
                 "domain": site_data.get("domain"),
+                "type": site_data.get("type"),
                 "da": site_data.get("da"),
                 "pa": site_data.get("pa"),
                 "ss": site_data.get("ss"),
