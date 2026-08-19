@@ -11,7 +11,7 @@ import {
   fetchCompetitorPageRows, insertCompetitorPageRows, updateCompetitorPageRow, deleteCompetitorPageRow,
   fetchCompetitors, insertCompetitor, updateCompetitor, deleteCompetitor, deleteCompetitorProjectData,
   findCompetitors, fetchCompetitorSnapshots, classifyCompetitorUrls,
-  fetchOutreachSitesApi, addOutreachSiteApi, deleteOutreachSiteApi
+  fetchOutreachSitesApi, addOutreachSiteApi, deleteOutreachSiteApi, getApiBaseUrl
 } from '../../lib/projectsApi';
 import { isReadOnlyUser, canEdit, canDelete } from '../../lib/permissions';
 
@@ -983,7 +983,7 @@ function AddPagesModal({ open, onClose, projects, onImportPages, lockedProject, 
 
 // ─── Add Keywords Modal ──────────────────────────────────────────────────────
 
-const CATEGORY_API_BASE = import.meta.env.VITE_API_BASE || 'http://3.94.159.201:8000';
+const CATEGORY_API_BASE = getApiBaseUrl();
 
 function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedProject }) {
   const [project, setProject] = useState('');
@@ -5969,9 +5969,94 @@ export default function ProjectSetupPage({ tab, user }) {
   const [outreachLoading, setOutreachLoading] = useState(false);
   const [showAddOutreach, setShowAddOutreach] = useState(false);
   const [newOutreachLink, setNewOutreachLink] = useState('');
+  const [newOutreachType, setNewOutreachType] = useState('Paid Guest');
+  const [outreachCsvRows, setOutreachCsvRows] = useState([]);
+  const [outreachFileName, setOutreachFileName] = useState('');
   const [outreachError, setOutreachError] = useState('');
   const [addingOutreach, setAddingOutreach] = useState(false);
   const [deletingOutreachLink, setDeletingOutreachLink] = useState(null);
+
+  const downloadOutreachSampleTemplate = async () => {
+    const headers = ['URL', 'Type'];
+    const sampleRows = [
+      ['https://example.com/outreach', 'Paid Guest'],
+      ['https://businessdirectory.org/listing', 'Business Listing'],
+    ];
+
+    const thinGrayBorder = { style: 'thin', color: { argb: 'FF999999' } };
+    const cellBorder = { top: thinGrayBorder, left: thinGrayBorder, bottom: thinGrayBorder, right: thinGrayBorder };
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Outreach Sites');
+    sheet.columns = headers.map(h => ({ header: h, width: Math.max(14, h.length + 4) }));
+
+    sheet.getRow(1).eachCell(cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC0C000' } };
+      cell.font = { bold: true, color: { argb: 'FF000000' } };
+      cell.border = cellBorder;
+    });
+
+    sampleRows.forEach(rowValues => {
+      const row = sheet.addRow(rowValues);
+      row.eachCell(cell => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC8C8C8' } };
+        cell.border = cellBorder;
+      });
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'outreach-sites-template.xlsx';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const parseOutreachDelimited = (text, delimiter) => {
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length <= 1) return [];
+    return lines.slice(1).map(line => {
+      const cols = line.split(delimiter).map(c => c.trim().replace(/^"|"$/g, ''));
+      return { url: cols[0] || '', type: cols[1] || 'Paid Guest' };
+    }).filter(r => r.url);
+  };
+
+  const parseOutreachExcel = (buffer) => {
+    const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    return rows.slice(1).map(cols => ({
+      url: String(cols[0] ?? '').trim(),
+      type: String(cols[1] ?? '').trim() || 'Paid Guest',
+    })).filter(r => r.url);
+  };
+
+  const handleOutreachFileUpload = (file) => {
+    if (!file) return;
+    setOutreachFileName(file.name);
+    const ext = file.name.split('.').pop().toLowerCase();
+
+    if (ext === 'xlsx' || ext === 'xls') {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const rows = parseOutreachExcel(e.target.result);
+        setOutreachCsvRows(rows);
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const delimiter = ext === 'tsv' ? '\t' : ',';
+        const rows = parseOutreachDelimited(e.target.result, delimiter);
+        setOutreachCsvRows(rows);
+      };
+      reader.readAsText(file);
+    }
+  };
 
   // Determine active project for Outreach
   const activeProject = useMemo(() => {
@@ -6000,6 +6085,7 @@ export default function ProjectSetupPage({ tab, user }) {
             id: s.id,
             url: s.url,
             domain: s.domain,
+            type: s.type || s.site_type || s.website_type || 'Paid Guest',
             da: s.da,
             pa: s.pa,
             ss: s.ss,
@@ -6024,6 +6110,55 @@ export default function ProjectSetupPage({ tab, user }) {
   const handleAddOutreachLink = async (e) => {
     if (e) e.preventDefault();
     setOutreachError('');
+
+    const pSlug = activeProject?.project_slug || activeProject?.slug;
+    if (!pSlug) {
+      setOutreachError('Please select or create a project first.');
+      return;
+    }
+
+    const targetRegions = activeProject?.target_regions || ['in', 'us', 'uk'];
+
+    if (outreachCsvRows.length > 0) {
+      setAddingOutreach(true);
+      try {
+        const newMappedSites = [];
+        for (const r of outreachCsvRows) {
+          let link = r.url;
+          if (!/^https?:\/\//i.test(link)) link = 'https://' + link;
+          try {
+            const newSite = await addOutreachSiteApi(pSlug, link, targetRegions, r.type || 'Paid Guest');
+            newMappedSites.push({
+              id: newSite.id,
+              url: newSite.url,
+              domain: newSite.domain,
+              type: newSite.type || r.type || 'Paid Guest',
+              da: newSite.da,
+              pa: newSite.pa,
+              ss: newSite.ss,
+              traffic: newSite.traffic,
+              totalTraffic: newSite.total_traffic || newSite.totalTraffic,
+              region1Traffic: newSite.region1_traffic || newSite.region1Traffic,
+              region2Traffic: newSite.region2_traffic || newSite.region2Traffic,
+              region3Traffic: newSite.region3_traffic || newSite.region3Traffic
+            });
+          } catch (err) {
+            console.error('Failed to import outreach site:', link, err);
+          }
+        }
+        setOutreachLinks(prev => [...newMappedSites, ...prev]);
+        setNewOutreachLink('');
+        setOutreachCsvRows([]);
+        setOutreachFileName('');
+        setShowAddOutreach(false);
+      } catch (err) {
+        setOutreachError(err.message || 'Failed to import outreach sites.');
+      } finally {
+        setAddingOutreach(false);
+      }
+      return;
+    }
+
     let link = newOutreachLink.trim();
     if (!link) {
       setOutreachError('Link cannot be empty.');
@@ -6047,21 +6182,15 @@ export default function ProjectSetupPage({ tab, user }) {
       return;
     }
 
-    const pSlug = activeProject?.project_slug || activeProject?.slug;
-    if (!pSlug) {
-      setOutreachError('Please select or create a project first.');
-      return;
-    }
-
     setAddingOutreach(true);
     try {
-      const targetRegions = activeProject?.target_regions || ['in', 'us', 'uk'];
-      const newSite = await addOutreachSiteApi(pSlug, link, targetRegions);
+      const newSite = await addOutreachSiteApi(pSlug, link, targetRegions, newOutreachType || 'Paid Guest');
       
       const mappedSite = {
         id: newSite.id,
         url: newSite.url,
         domain: newSite.domain,
+        type: newSite.type || newOutreachType || 'Paid Guest',
         da: newSite.da,
         pa: newSite.pa,
         ss: newSite.ss,
@@ -6074,6 +6203,7 @@ export default function ProjectSetupPage({ tab, user }) {
 
       setOutreachLinks(prev => [mappedSite, ...prev]);
       setNewOutreachLink('');
+      setNewOutreachType('Paid Guest');
       setShowAddOutreach(false);
     } catch (err) {
       setOutreachError(err.message || 'Failed to add outreach site & fetch metrics.');
@@ -6924,17 +7054,7 @@ export default function ProjectSetupPage({ tab, user }) {
                 )}
               </div>
 
-              <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-                {filterTabs.map(f => (
-                  <button key={f} onClick={() => setFilter(prev => prev === f ? null : f)} style={{
-                    padding: '7px 16px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500,
-                    fontFamily: 'var(--font-body)', transition: 'all 0.15s',
-                    background: filter === f ? '#0f1523' : '#fff',
-                    color: filter === f ? '#fff' : 'var(--text-secondary)',
-                    borderRight: f !== 'Gemini' ? '1px solid var(--border)' : 'none',
-                  }}>{f}</button>
-                ))}
-              </div>
+
             </div>
           )}
 
@@ -7132,8 +7252,11 @@ export default function ProjectSetupPage({ tab, user }) {
                   <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 950 }}>
                     <thead>
                       <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
-                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 320 }}>
-                          Domain
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 280 }}>
+                          Site
+                        </th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 120 }}>
+                          Type
                         </th>
                         <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
                           DA
@@ -7166,7 +7289,7 @@ export default function ProjectSetupPage({ tab, user }) {
                         <tr key={lnk.id} style={{ borderBottom: '1px solid var(--border)' }}
                           onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
                           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                          <td style={{ padding: '14px 16px', fontSize: 13.5, width: 320, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <td style={{ padding: '14px 16px', fontSize: 13.5, width: 280, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             <a href={lnk.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}
                               onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
                               onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
@@ -7183,6 +7306,19 @@ export default function ProjectSetupPage({ tab, user }) {
                                 }
                               })()}
                             </a>
+                          </td>
+                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                            <span style={{
+                              display: 'inline-block',
+                              padding: '2px 8px',
+                              borderRadius: 12,
+                              fontSize: 12,
+                              fontWeight: 500,
+                              background: '#e0f2fe',
+                              color: '#0369a1'
+                            }}>
+                              {lnk.type || lnk.site_type || lnk.website_type || 'Blog'}
+                            </span>
                           </td>
                           <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
                             {lnk.da || '-'}
@@ -7333,6 +7469,8 @@ export default function ProjectSetupPage({ tab, user }) {
           setShowAddOutreach(false);
           setOutreachError('');
           setNewOutreachLink('');
+          setOutreachCsvRows([]);
+          setOutreachFileName('');
         }}
         title="Add Outreach Sites"
         footer={<>
@@ -7342,6 +7480,8 @@ export default function ProjectSetupPage({ tab, user }) {
                 <RefreshCw size={14} className="spin" style={{ animation: 'spin 1s linear infinite' }} />
                 Fetching Metrics...
               </span>
+            ) : outreachCsvRows.length > 0 ? (
+              `Import ${outreachCsvRows.length} Site${outreachCsvRows.length !== 1 ? 's' : ''}`
             ) : (
               'Add Site'
             )}
@@ -7351,6 +7491,8 @@ export default function ProjectSetupPage({ tab, user }) {
               setShowAddOutreach(false);
               setOutreachError('');
               setNewOutreachLink('');
+              setOutreachCsvRows([]);
+              setOutreachFileName('');
             }
           }} style={{ flex: 'none', padding: '10px 28px' }} disabled={addingOutreach}>Cancel</Btn>
         </>}
@@ -7369,31 +7511,114 @@ export default function ProjectSetupPage({ tab, user }) {
             {outreachError}
           </div>
         )}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
-            Outreach Site*
-          </label>
-          <input
-            type="text"
-            value={newOutreachLink}
-            onChange={(e) => { setNewOutreachLink(e.target.value); setOutreachError(''); }}
-            style={{
-              width: '100%',
-              padding: '10px 14px',
-              fontSize: 13.5,
-              background: 'var(--surface)',
-              border: '1.5px solid var(--border)',
-              borderRadius: 8,
-              color: 'var(--text-primary)',
-              outline: 'none'
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleAddOutreachLink();
-            }}
-          />
-          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-            Supports full URLs and plain domains (e.g. google.com)
-          </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+              Outreach Site*
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. https://example.com/outreach"
+              value={newOutreachLink}
+              onChange={(e) => { setNewOutreachLink(e.target.value); setOutreachError(''); }}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                fontSize: 13.5,
+                background: 'var(--surface)',
+                border: '1.5px solid var(--border)',
+                borderRadius: 8,
+                color: 'var(--text-primary)',
+                outline: 'none'
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleAddOutreachLink();
+              }}
+            />
+            <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+              Supports full URLs and plain domains (e.g. google.com)
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+              Type*
+            </label>
+            <select
+              value={newOutreachType}
+              onChange={(e) => setNewOutreachType(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                fontSize: 13.5,
+                background: 'var(--surface)',
+                border: '1.5px solid var(--border)',
+                borderRadius: 8,
+                color: 'var(--text-primary)',
+                outline: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="Paid Guest">Paid Guest</option>
+              <option value="Business Listing">Business Listing</option>
+            </select>
+          </div>
+
+          <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+
+          {/* Import Outreach Sites section */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Import Outreach Sites</span>
+              <button
+                type="button"
+                onClick={downloadOutreachSampleTemplate}
+                style={{ border: 'none', background: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)', fontSize: 12.5, padding: 0 }}
+              >
+                Download sample template
+              </button>
+            </div>
+            <input
+              type="file"
+              accept=".csv,.tsv,.xls,.xlsx"
+              id="outreach-csv-upload"
+              style={{ display: 'none' }}
+              onChange={e => { handleOutreachFileUpload(e.target.files[0]); e.target.value = ''; }}
+            />
+            <div
+              style={{
+                border: `2px dashed ${outreachFileName ? 'var(--accent)' : '#d1d5db'}`,
+                borderRadius: 10,
+                padding: '20px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 8,
+                background: outreachFileName ? 'var(--accent-light)' : 'var(--surface-2)',
+                cursor: 'pointer'
+              }}
+              onClick={() => document.getElementById('outreach-csv-upload').click()}
+              onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--accent)'; }}
+              onDragLeave={e => { e.currentTarget.style.borderColor = outreachFileName ? 'var(--accent)' : '#d1d5db'; }}
+              onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--accent)'; handleOutreachFileUpload(e.dataTransfer.files[0]); }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+              onMouseLeave={e => { if (!outreachFileName) e.currentTarget.style.borderColor = '#d1d5db'; }}
+            >
+              {outreachFileName ? (
+                <>
+                  <Check size={20} color="var(--accent)" />
+                  <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>{outreachFileName}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{outreachCsvRows.length} site{outreachCsvRows.length !== 1 ? 's' : ''} ready to import</span>
+                </>
+              ) : (
+                <>
+                  <Upload size={20} color="var(--text-muted)" />
+                  <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>Click to upload or drag a file</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>CSV, TSV, Excel · Columns: URL, Type</span>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       </Modal>
       {deletingOutreachLink && (

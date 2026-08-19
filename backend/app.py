@@ -2014,6 +2014,8 @@ def classify_competitor_urls_endpoint(req: ClassifyUrlsRequest):
 
 class AddOutreachSiteRequest(BaseModel):
     url: str
+    type: Optional[str] = None
+    site_type: Optional[str] = None
     regions: Optional[List[str]] = None
 
 
@@ -2039,10 +2041,12 @@ def add_outreach_site_endpoint(project_slug: str, req: AddOutreachSiteRequest):
         url = req.url.strip()
         metrics = check_domain_metrics(url, regions=req.regions)
 
+        site_type = req.type or req.site_type or "Paid Guest"
 
         site_payload = {
             "url": metrics["url"],
             "domain": metrics["domain"],
+            "type": site_type,
             "da": metrics["da"],
             "pa": metrics["pa"],
             "ss": metrics["ss"],

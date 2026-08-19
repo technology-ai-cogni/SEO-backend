@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Search, ChevronDown, ExternalLink, Sparkles, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Search, ChevronDown, ExternalLink, Sparkles, RefreshCw, Filter, Download } from 'lucide-react';
 import {
   fetchDomainRows,
   fetchKeywordRows,
@@ -24,6 +24,17 @@ export default function AiAnalysisPage({ user }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [intentFilter, setIntentFilter] = useState('all'); // 'all' | 'informational' | 'commercial'
   const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'landing' | 'blog'
+
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const [columnFilters, setColumnFilters] = useState({
+    cluster: 'all',
+    category: 'all',
+    type: 'all',
+    targetType: 'all',
+    targetSubtype: 'all',
+    targetGeo: 'all',
+    priority: 'all'
+  });
 
   // Region and date state
   const [selectedRegion, setSelectedRegion] = useState('IN');
@@ -76,6 +87,65 @@ export default function AiAnalysisPage({ user }) {
     } catch (e) {
       console.error('[AiAnalysisPage] Error loading project data:', e);
     }
+  };
+
+  
+  const handleDownloadCsv = () => {
+    const isMentions = activeSubTab === 'mentions';
+    const rows = isMentions ? filteredMentions : filteredCitations;
+    if (!rows || rows.length === 0) {
+      alert('No data available to download.');
+      return;
+    }
+
+    let csvContent = '';
+    if (isMentions) {
+      const headers = ['Keyword', 'SV', 'Rank', 'Cluster', 'Category', 'Type', 'Target Subtype', 'Landing Page URL', 'Target Type', 'Target Geo', 'Priority'];
+      csvContent += headers.map(h => `"${h}"`).join(',') + '\n';
+      rows.forEach(r => {
+        const rowData = [
+          r.keyword || '',
+          r.sv || '',
+          r.rank || '',
+          r.cluster || '',
+          r.category || '',
+          r.type || '',
+          r.targetSubtype || '',
+          r.url || '',
+          r.targetType || '',
+          r.targetGeo || '',
+          r.priority || ''
+        ];
+        csvContent += rowData.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',') + '\n';
+      });
+    } else {
+      const headers = ['Keyword', 'Cited URL', 'Page Name', 'Cluster', 'Category', 'Target Type', 'Target Geo', 'Priority'];
+      csvContent += headers.map(h => `"${h}"`).join(',') + '\n';
+      rows.forEach(r => {
+        const rowData = [
+          r.keyword || '',
+          r.url || '',
+          r.pageName || '',
+          r.cluster || '',
+          r.category || '',
+          r.targetType || '',
+          r.targetGeo || '',
+          r.priority || ''
+        ];
+        csvContent += rowData.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',') + '\n';
+      });
+    }
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const filename = `${activeProject?.slug || 'seo'}_${selectedEngine.replace(/\s+/g, '_')}_${activeSubTab}.csv`;
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleSelectProject = async (proj) => {
@@ -208,9 +278,15 @@ export default function AiAnalysisPage({ user }) {
         sv: displaySv,
         rank: rankNum ? `#${rankNum}` : '—',
         rankNum: rankNum,
+        cluster: matchInKws?.cluster || 'General',
+        category: matchInKws?.category || 'General',
+        type: matchInKws?.type || 'Informational',
         intent: matchInKws?.targetSubtype || matchInKws?.subtype || (idx % 2 === 0 ? 'Commercial' : 'Informational'),
+        targetSubtype: matchInKws?.targetSubtype || matchInKws?.subtype || 'Informational',
         url: matchInKws?.landingPage || (activeProject?.domain ? `https://www.${activeProject.domain.replace(/^https?:\/\//i, '')}/` : '—'),
-        targetType: matchInKws?.targetType || (idx % 3 === 0 ? 'Blogs' : 'Landing Page')
+        targetType: matchInKws?.targetType || (idx % 3 === 0 ? 'Blogs' : 'Landing Page'),
+        targetGeo: matchInKws?.targetGeo || 'India',
+        priority: matchInKws?.priority || 'Medium'
       };
     });
   };
@@ -240,37 +316,92 @@ export default function AiAnalysisPage({ user }) {
     });
 
     return Array.from(uniqueCitedUrlsMap.entries()).map(([url, count], idx) => {
-      const matchingKw = kws.find(k => (k.landingPage || '').toLowerCase().includes(url.toLowerCase())) || {};
+      const matchingKw = kws.find(k => (k.landingPage || '').toLowerCase().includes(url.toLowerCase()) || (k.kw || k.keyword || '').toLowerCase().includes(url.toLowerCase())) || {};
       const pageName = url.split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ').toUpperCase() || 'HOME PAGE';
+
+      // Determine keyword for citation
+      const kwVal = matchingKw.kw || matchingKw.keyword || (activeRes.mentioned_keywords && activeRes.mentioned_keywords[idx % activeRes.mentioned_keywords.length]) || '—';
 
       return {
         id: url,
+        keyword: kwVal,
         pageName: pageName,
         url: url,
         citationsCount: count,
+        cluster: matchingKw.cluster || 'General',
+        category: matchingKw.category || 'General',
+        type: matchingKw.type || 'Informational',
         intent: matchingKw.targetSubtype || matchingKw.subtype || (idx % 2 === 0 ? 'Commercial' : 'Informational'),
-        targetType: matchingKw.targetType || (idx % 3 === 0 ? 'Blogs' : 'Landing Page')
+        targetSubtype: matchingKw.targetSubtype || matchingKw.subtype || 'Informational',
+        targetType: matchingKw.targetType || (idx % 3 === 0 ? 'Blogs' : 'Landing Page'),
+        targetGeo: matchingKw.targetGeo || 'India',
+        priority: matchingKw.priority || 'Medium'
       };
     });
   };
 
-  const mentionsData = getEngineMentions();
-  const citationsData = getEngineCitations();
+  const mentionsData = useMemo(() => getEngineMentions(), [selectedEngine, activeProject?.slug, projectKeywords, history]);
+  const citationsData = useMemo(() => getEngineCitations(), [selectedEngine, activeProject?.slug, projectKeywords, history]);
 
-  // Apply filters
-  const filteredMentions = mentionsData.filter(m => {
-    const matchSearch = searchQuery === '' || m.keyword.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchIntent = intentFilter === 'all' || m.intent.toLowerCase() === intentFilter.toLowerCase();
-    const matchType = typeFilter === 'all' || (typeFilter === 'landing' ? m.targetType.toLowerCase().includes('landing') : m.targetType.toLowerCase().includes('blog'));
-    return matchSearch && matchIntent && matchType;
-  });
+  // Unique filter values memoized
+  const { uniqueClusters, uniqueCategories, uniqueTypes, uniqueTargetTypes, uniqueTargetSubtypes, uniqueTargetGeos, uniquePriorities } = useMemo(() => {
+    const allItems = [...mentionsData, ...citationsData, ...(projectKeywords || [])];
+    return {
+      uniqueClusters: Array.from(new Set(allItems.map(i => i.cluster).filter(Boolean))).sort(),
+      uniqueCategories: Array.from(new Set(allItems.map(i => i.category).filter(Boolean))).sort(),
+      uniqueTypes: Array.from(new Set(allItems.map(i => i.type).filter(Boolean))).sort(),
+      uniqueTargetTypes: Array.from(new Set(allItems.map(i => i.targetType).filter(Boolean))).sort(),
+      uniqueTargetSubtypes: Array.from(new Set(allItems.map(i => i.targetSubtype || i.subtype || i.intent).filter(Boolean))).sort(),
+      uniqueTargetGeos: Array.from(new Set(allItems.map(i => i.targetGeo).filter(Boolean))).sort(),
+      uniquePriorities: Array.from(new Set(allItems.map(i => i.priority).filter(Boolean))).sort(),
+    };
+  }, [mentionsData, citationsData, projectKeywords]);
 
-  const filteredCitations = citationsData.filter(c => {
-    const matchSearch = searchQuery === '' || c.pageName.toLowerCase().includes(searchQuery.toLowerCase()) || c.url.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchIntent = intentFilter === 'all' || c.intent.toLowerCase() === intentFilter.toLowerCase();
-    const matchType = typeFilter === 'all' || (typeFilter === 'landing' ? c.targetType.toLowerCase().includes('landing') : c.targetType.toLowerCase().includes('blog'));
-    return matchSearch && matchIntent && matchType;
-  });
+  const hasActiveFilters = Object.values(columnFilters).some(v => v !== 'all') || intentFilter !== 'all' || typeFilter !== 'all';
+  const resetAllFilters = () => {
+    setColumnFilters({
+      cluster: 'all',
+      category: 'all',
+      type: 'all',
+      targetType: 'all',
+      targetSubtype: 'all',
+      targetGeo: 'all',
+      priority: 'all'
+    });
+    setIntentFilter('all');
+    setTypeFilter('all');
+  };
+
+  // Apply filters memoized
+  const filteredMentions = useMemo(() => {
+    return mentionsData.filter(m => {
+      const matchSearch = searchQuery === '' || m.keyword.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchCluster = columnFilters.cluster === 'all' || m.cluster === columnFilters.cluster;
+      const matchCategory = columnFilters.category === 'all' || m.category === columnFilters.category;
+      const matchType = columnFilters.type === 'all' || m.type === columnFilters.type;
+      const matchTargetType = columnFilters.targetType === 'all' ? (typeFilter === 'all' ? true : (typeFilter === 'landing' ? m.targetType.toLowerCase().includes('landing') : m.targetType.toLowerCase().includes('blog'))) : m.targetType === columnFilters.targetType;
+      const matchTargetSubtype = columnFilters.targetSubtype === 'all' ? (intentFilter === 'all' ? true : m.intent.toLowerCase().includes(intentFilter.toLowerCase())) : (m.targetSubtype === columnFilters.targetSubtype || m.intent === columnFilters.targetSubtype);
+      const matchTargetGeo = columnFilters.targetGeo === 'all' || m.targetGeo === columnFilters.targetGeo;
+      const matchPriority = columnFilters.priority === 'all' || m.priority === columnFilters.priority;
+
+      return matchSearch && matchCluster && matchCategory && matchType && matchTargetType && matchTargetSubtype && matchTargetGeo && matchPriority;
+    });
+  }, [mentionsData, searchQuery, columnFilters, typeFilter, intentFilter]);
+
+  const filteredCitations = useMemo(() => {
+    return citationsData.filter(c => {
+      const matchSearch = searchQuery === '' || (c.keyword && c.keyword.toLowerCase().includes(searchQuery.toLowerCase())) || c.pageName.toLowerCase().includes(searchQuery.toLowerCase()) || c.url.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchCluster = columnFilters.cluster === 'all' || c.cluster === columnFilters.cluster;
+      const matchCategory = columnFilters.category === 'all' || c.category === columnFilters.category;
+      const matchType = columnFilters.type === 'all' || c.type === columnFilters.type;
+      const matchTargetType = columnFilters.targetType === 'all' ? (typeFilter === 'all' ? true : (typeFilter === 'landing' ? c.targetType.toLowerCase().includes('landing') : c.targetType.toLowerCase().includes('blog'))) : c.targetType === columnFilters.targetType;
+      const matchTargetSubtype = columnFilters.targetSubtype === 'all' ? (intentFilter === 'all' ? true : c.intent.toLowerCase().includes(intentFilter.toLowerCase())) : (c.targetSubtype === columnFilters.targetSubtype || c.intent === columnFilters.targetSubtype);
+      const matchTargetGeo = columnFilters.targetGeo === 'all' || c.targetGeo === columnFilters.targetGeo;
+      const matchPriority = columnFilters.priority === 'all' || c.priority === columnFilters.priority;
+
+      return matchSearch && matchCluster && matchCategory && matchType && matchTargetType && matchTargetSubtype && matchTargetGeo && matchPriority;
+    });
+  }, [citationsData, searchQuery, columnFilters, typeFilter, intentFilter]);
 
   const currentDomainDisplay = activeProject?.domain || activeProject?.name || (projects && projects[0] ? projects[0].domain || projects[0].name : '');
 
@@ -668,64 +799,240 @@ export default function AiAnalysisPage({ user }) {
           )}
         </div>
 
-        {/* Row 2: Search Input & Dropdown Filters */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 260, position: 'relative' }}>
-            <Search size={15} color="#94a3b8" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
+        {/* Row 2: Pill Search Bar with Download & Filter Buttons Beside It */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ width: 280, maxWidth: '100%', position: 'relative' }}>
+            <Search size={16} color="#94a3b8" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
             <input
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Filter mentioned keywords..."
+              placeholder={activeSubTab === 'mentions' ? "Filter mentioned keywords..." : "Search citations..."}
               style={{
                 width: '100%',
-                padding: '8px 12px 8px 36px',
-                fontSize: 13,
-                borderRadius: 8,
-                border: '1px solid #cbd5e1',
+                padding: '9px 16px 9px 40px',
+                fontSize: 13.5,
+                borderRadius: 12,
+                border: '1.5px solid #e2e8f0',
                 outline: 'none',
-                background: '#ffffff'
+                background: '#f8fafc',
+                color: '#334155',
+                transition: 'all 0.15s ease'
               }}
             />
           </div>
 
-          <select
-            value={intentFilter}
-            onChange={e => setIntentFilter(e.target.value)}
+          {/* Download CSV Button */}
+          <button
+            onClick={handleDownloadCsv}
+            title="Download CSV"
             style={{
-              padding: '8px 12px',
-              fontSize: 12.5,
-              fontWeight: 600,
-              borderRadius: 8,
-              border: '1px solid #cbd5e1',
-              color: '#334155',
-              background: '#ffffff',
-              cursor: 'pointer'
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: '#f8fafc',
+              color: '#64748b',
+              border: '1.5px solid #e2e8f0',
+              borderRadius: 12,
+              padding: '9px 14px',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              transition: 'all 0.15s ease'
             }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }}
           >
-            <option value="all">All Target Subtypes</option>
-            <option value="commercial">Commercial</option>
-            <option value="informational">Informational</option>
-          </select>
+            <Download size={16} />
+          </button>
 
-          <select
-            value={typeFilter}
-            onChange={e => setTypeFilter(e.target.value)}
-            style={{
-              padding: '8px 12px',
-              fontSize: 12.5,
-              fontWeight: 600,
-              borderRadius: 8,
-              border: '1px solid #cbd5e1',
-              color: '#334155',
-              background: '#ffffff',
-              cursor: 'pointer'
-            }}
-          >
-            <option value="all">All Target Types</option>
-            <option value="landing">Landing Page</option>
-            <option value="blog">Blogs</option>
-          </select>
+          {/* Filter Trigger Button & Popover */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setFilterMenuOpen(!filterMenuOpen)}
+              title="Filter options"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                background: hasActiveFilters ? '#f5f3ff' : '#f8fafc',
+                color: hasActiveFilters ? '#7c3aed' : '#64748b',
+                border: hasActiveFilters ? '1.5px solid #7c3aed' : '1.5px solid #e2e8f0',
+                borderRadius: 12,
+                padding: '9px 14px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => {
+                if (!hasActiveFilters) { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }
+              }}
+              onMouseLeave={e => {
+                if (!hasActiveFilters) { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }
+              }}
+            >
+              <Filter size={16} />
+              {hasActiveFilters && (
+                <span style={{
+                  background: '#7c3aed',
+                  color: '#ffffff',
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  borderRadius: 99,
+                  width: 17,
+                  height: 17,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  {Object.values(columnFilters).filter(v => v !== 'all').length + (intentFilter !== 'all' ? 1 : 0) + (typeFilter !== 'all' ? 1 : 0)}
+                </span>
+              )}
+            </button>
+
+
+            {filterMenuOpen && (
+              <div style={{
+                position: 'absolute',
+                right: 0,
+                top: '110%',
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderRadius: 10,
+                boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
+                zIndex: 100,
+                padding: 16,
+                width: 320,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Filter Keywords</span>
+                  {hasActiveFilters && (
+                    <button
+                      onClick={resetAllFilters}
+                      style={{ fontSize: 11, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                    >
+                      Reset All
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter Options Grid */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 320, overflowY: 'auto', paddingRight: 4 }}>
+                  {/* Cluster */}
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>CLUSTER</label>
+                    <select
+                      value={columnFilters.cluster}
+                      onChange={e => setColumnFilters({ ...columnFilters, cluster: e.target.value })}
+                      style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
+                    >
+                      <option value="all">All Clusters</option>
+                      {uniqueClusters.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+
+                  {/* Category */}
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>CATEGORY</label>
+                    <select
+                      value={columnFilters.category}
+                      onChange={e => setColumnFilters({ ...columnFilters, category: e.target.value })}
+                      style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
+                    >
+                      <option value="all">All Categories</option>
+                      {uniqueCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+
+                  {/* Type */}
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TYPE</label>
+                    <select
+                      value={columnFilters.type}
+                      onChange={e => setColumnFilters({ ...columnFilters, type: e.target.value })}
+                      style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
+                    >
+                      <option value="all">All Types</option>
+                      {uniqueTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+
+                  {/* Target Type */}
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET TYPE</label>
+                    <select
+                      value={columnFilters.targetType}
+                      onChange={e => setColumnFilters({ ...columnFilters, targetType: e.target.value })}
+                      style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
+                    >
+                      <option value="all">All Target Types</option>
+                      {uniqueTargetTypes.map(tt => <option key={tt} value={tt}>{tt}</option>)}
+                    </select>
+                  </div>
+
+                  {/* Target Subtype */}
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET SUBTYPE</label>
+                    <select
+                      value={columnFilters.targetSubtype}
+                      onChange={e => setColumnFilters({ ...columnFilters, targetSubtype: e.target.value })}
+                      style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
+                    >
+                      <option value="all">All Subtypes</option>
+                      {uniqueTargetSubtypes.map(ts => <option key={ts} value={ts}>{ts}</option>)}
+                    </select>
+                  </div>
+
+                  {/* Target Geo */}
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET GEO</label>
+                    <select
+                      value={columnFilters.targetGeo}
+                      onChange={e => setColumnFilters({ ...columnFilters, targetGeo: e.target.value })}
+                      style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
+                    >
+                      <option value="all">All Geos</option>
+                      {uniqueTargetGeos.map(g => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                  </div>
+
+                  {/* Priority */}
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>PRIORITY</label>
+                    <select
+                      value={columnFilters.priority}
+                      onChange={e => setColumnFilters({ ...columnFilters, priority: e.target.value })}
+                      style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
+                    >
+                      <option value="all">All Priorities</option>
+                      {uniquePriorities.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setFilterMenuOpen(false)}
+                  style={{
+                    width: '100%',
+                    padding: '7px',
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    color: '#ffffff',
+                    background: '#7c3aed',
+                    border: 'none',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    marginTop: 4
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -761,7 +1068,19 @@ export default function AiAnalysisPage({ user }) {
                   filteredMentions.map((row, idx) => (
                     <tr key={row.id || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '12px 16px', fontWeight: 700, color: '#0f172a' }}>
-                        {row.keyword}
+                        {row.url && row.url !== '—' ? (
+                          <a
+                            href={row.url.startsWith('http') ? row.url : `https://${row.url}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
+                          >
+                            {row.keyword}
+                            <ExternalLink size={12} />
+                          </a>
+                        ) : (
+                          row.keyword
+                        )}
                       </td>
                       <td style={{ padding: '12px 16px', fontWeight: 600, color: '#334155' }}>
                         {row.sv}
@@ -796,8 +1115,8 @@ export default function AiAnalysisPage({ user }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Keyword</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Cited Page (URL)</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Citations Count</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Target Subtype</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Target Type</th>
                 </tr>
@@ -812,14 +1131,26 @@ export default function AiAnalysisPage({ user }) {
                 ) : (
                   filteredCitations.map((row, idx) => (
                     <tr key={row.id || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '12px 16px', fontWeight: 700, color: '#0f172a' }}>
+                        {row.url && row.url !== '—' ? (
+                          <a
+                            href={row.url.startsWith('http') ? row.url : `https://${row.url}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
+                          >
+                            {row.keyword}
+                            <ExternalLink size={12} />
+                          </a>
+                        ) : (
+                          row.keyword
+                        )}
+                      </td>
                       <td style={{ padding: '12px 16px', color: '#2563eb', maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         <a href={row.url} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
                           {row.url}
                           <ExternalLink size={12} />
                         </a>
-                      </td>
-                      <td style={{ padding: '12px 16px', fontWeight: 800, color: '#7c3aed' }}>
-                        {row.citationsCount}
                       </td>
                       <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: 600 }}>
                         {row.intent}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, ChevronDown, ExternalLink, Download, KeyRound, Filter } from 'lucide-react';
+import { Search, ChevronDown, ExternalLink, Download, KeyRound, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fetchDomainRows, fetchKeywordRows } from '../../lib/projectsApi';
 
 export default function KeywordsPage() {
@@ -11,6 +11,8 @@ export default function KeywordsPage() {
   const [keywordsData, setKeywordsData] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRows, setSelectedRows] = useState([]);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 100;
 
   // Filter List Popover State & Options
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
@@ -152,6 +154,10 @@ export default function KeywordsPage() {
 
     return matchSearch && matchCluster && matchCategory && matchType && matchTargetType && matchTargetSubtype && matchTargetGeo && matchPriority;
   });
+
+  const pageCount = Math.max(1, Math.ceil(filteredKeywords.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const pagedKeywords = filteredKeywords.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   // Calculate Metrics
   const totalKeywordsCount = keywordsData.length;
@@ -531,7 +537,7 @@ export default function KeywordsPage() {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #e2e8f0', paddingLeft: 8 }}>
               <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Top 10</span>
-              <span style={{ fontSize: 18, fontWeight: 800, color: '#dc2626' }}>{top10Count}</span>
+              <span style={{ fontSize: 18, fontWeight: 800, color: '#7c3aed' }}>{top10Count}</span>
             </div>
           </div>
         </div>
@@ -781,7 +787,7 @@ export default function KeywordsPage() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 12.5 }}>
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.03em', whiteSpace: 'nowrap' }}>
 
                 {/* CHECKBOX */}
                 <th style={{ padding: '12px 14px', width: 36, textAlign: 'center' }}>
@@ -821,8 +827,8 @@ export default function KeywordsPage() {
                   </td>
                 </tr>
               ) : (
-                filteredKeywords.map(row => (
-                  <tr key={row.id} style={{ borderBottom: '1px solid #f1f5f9', background: selectedRows.includes(row.id) ? '#f5f3ff' : 'transparent' }}>
+                pagedKeywords.map(row => (
+                  <tr key={row.id} style={{ borderBottom: '1px solid #f1f5f9', background: selectedRows.includes(row.id) ? '#f5f3ff' : 'transparent', whiteSpace: 'nowrap' }}>
 
                     {/* CHECKBOX */}
                     <td style={{ padding: '12px 14px', textAlign: 'center' }}>
@@ -835,22 +841,22 @@ export default function KeywordsPage() {
                     </td>
 
                     {/* KW */}
-                    <td style={{ padding: '12px 14px', fontWeight: 700, color: '#0f172a', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '12px 14px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {row.kw}
                     </td>
 
                     {/* RANK */}
-                    <td style={{ padding: '12px 14px', fontWeight: 800, color: '#0f172a' }}>
+                    <td style={{ padding: '12px 14px', fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {row.rank > 0 ? row.rank : <span style={{ color: '#94a3b8', fontWeight: 400 }}>—</span>}
                     </td>
 
                     {/* SV */}
-                    <td style={{ padding: '12px 14px', fontWeight: 800, color: '#0f172a' }}>
+                    <td style={{ padding: '12px 14px', fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {row.sv.toLocaleString()}
                     </td>
 
                     {/* KW DIFF */}
-                    <td style={{ padding: '12px 14px' }}>
+                    <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         {row.kd !== null ? (
                           <>
@@ -871,46 +877,54 @@ export default function KeywordsPage() {
                     </td>
 
                     {/* CLUSTER */}
-                    <td style={{ padding: '12px 14px', color: '#0f172a', fontWeight: 500 }}>
+                    <td style={{ padding: '12px 14px', color: '#0f172a', fontWeight: 500, whiteSpace: 'nowrap' }}>
                       {row.cluster}
                     </td>
 
                     {/* CATEGORY */}
-                    <td style={{ padding: '12px 14px', color: '#0f172a', fontWeight: 500 }}>
+                    <td style={{ padding: '12px 14px', color: '#0f172a', fontWeight: 500, whiteSpace: 'nowrap' }}>
                       {row.category}
                     </td>
 
                     {/* TYPE */}
-                    <td style={{ padding: '12px 14px', color: '#0f172a', fontWeight: 500 }}>
+                    <td style={{ padding: '12px 14px', color: '#0f172a', fontWeight: 500, whiteSpace: 'nowrap' }}>
                       {row.type}
                     </td>
 
                     {/* TARGET TYPE */}
-                    <td style={{ padding: '12px 14px', color: '#0f172a', fontWeight: 500 }}>
+                    <td style={{ padding: '12px 14px', color: '#0f172a', fontWeight: 500, whiteSpace: 'nowrap' }}>
                       {row.targetType}
                     </td>
 
                     {/* TARGET SUBTYPE */}
-                    <td style={{ padding: '12px 14px', color: '#0f172a', fontWeight: 500 }}>
+                    <td style={{ padding: '12px 14px', color: '#0f172a', fontWeight: 500, whiteSpace: 'nowrap' }}>
                       {row.targetSubtype}
                     </td>
 
                     {/* TARGET GEO */}
-                    <td style={{ padding: '12px 14px', color: '#0f172a', fontWeight: 500 }}>
+                    <td style={{ padding: '12px 14px', color: '#0f172a', fontWeight: 500, whiteSpace: 'nowrap' }}>
                       {row.targetGeo}
                     </td>
 
                     {/* PRIORITY */}
-                    <td style={{ padding: '12px 14px', color: '#0f172a', fontWeight: 500 }}>
+                    <td style={{ padding: '12px 14px', color: '#0f172a', fontWeight: 500, whiteSpace: 'nowrap' }}>
                       {row.priority}
                     </td>
 
                     {/* LANDING PAGE */}
-                    <td style={{ padding: '12px 14px', color: '#2563eb', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '12px 14px', color: '#2563eb', maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {row.landingPage ? (
-                        <a href={row.landingPage} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          {row.landingPage}
-                          <ExternalLink size={11} />
+                        <a
+                          href={row.landingPage}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={row.landingPage}
+                          style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600, maxWidth: '100%' }}
+                        >
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {row.landingPage}
+                          </span>
+                          <ExternalLink size={12} style={{ flexShrink: 0 }} />
                         </a>
                       ) : (
                         <span style={{ color: '#94a3b8' }}>—</span>
@@ -923,6 +937,86 @@ export default function KeywordsPage() {
             </tbody>
           </table>
         </div>
+          {/* Pagination Controls */}
+          {filteredKeywords.length > 0 && (
+            <div style={{
+              padding: '12px 20px',
+              background: '#ffffff',
+              borderTop: '1px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: 13,
+              color: '#64748b'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={safePage <= 1}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 28,
+                    height: 28,
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 6,
+                    background: '#ffffff',
+                    color: safePage <= 1 ? '#cbd5e1' : '#475569',
+                    cursor: safePage <= 1 ? 'default' : 'pointer',
+                    opacity: safePage <= 1 ? 0.5 : 1
+                  }}
+                >
+                  <ChevronLeft size={14} />
+                </button>
+                <span style={{ fontSize: 13, color: '#64748b', fontWeight: 500 }}>Page:</span>
+                <input
+                  type="text"
+                  value={safePage}
+                  onChange={e => {
+                    const n = parseInt(e.target.value, 10);
+                    if (!Number.isNaN(n)) setPage(Math.min(Math.max(1, n), pageCount));
+                  }}
+                  style={{
+                    width: 38,
+                    height: 28,
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 6,
+                    padding: '2px 4px',
+                    textAlign: 'center',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#0f172a',
+                    outline: 'none',
+                    background: '#ffffff'
+                  }}
+                />
+                <span style={{ fontSize: 13, color: '#64748b', fontWeight: 500 }}>of {pageCount}</span>
+                <button
+                  onClick={() => setPage(p => Math.min(pageCount, p + 1))}
+                  disabled={safePage >= pageCount}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 28,
+                    height: 28,
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 6,
+                    background: '#ffffff',
+                    color: safePage >= pageCount ? '#cbd5e1' : '#475569',
+                    cursor: safePage >= pageCount ? 'default' : 'pointer',
+                    opacity: safePage >= pageCount ? 0.5 : 1
+                  }}
+                >
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+              <div style={{ fontSize: 12.5, color: '#94a3b8', fontWeight: 500 }}>
+                100 per page
+              </div>
+            </div>
+          )}
       </div>
 
     </div>
