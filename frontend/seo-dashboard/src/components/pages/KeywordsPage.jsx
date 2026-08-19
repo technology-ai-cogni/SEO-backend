@@ -728,18 +728,12 @@ export default function KeywordsPage({ user }) {
         padding: '14px 20px',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 12,
+        gap: 10,
         flexWrap: 'wrap'
       }}>
-        <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>
-          All Keywords
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, maxWidth: 620, justifyContent: 'flex-end' }}>
           {/* Search Box */}
-          <div style={{ position: 'relative', flex: 1, maxWidth: 320 }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: 9, color: '#94a3b8' }} />
+          <div style={{ position: 'relative', flex: 1, maxWidth: 280 }}>
+            <Search size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
             <input
               type="text"
               placeholder="Search keywords, cluster, category, landing page..."
@@ -747,16 +741,43 @@ export default function KeywordsPage({ user }) {
               onChange={e => setSearchQuery(e.target.value)}
               style={{
                 width: '100%',
-                padding: '6px 12px 6px 32px',
-                fontSize: 12.5,
-                borderRadius: 6,
-                border: '1px solid #cbd5e1',
-                outline: 'none'
+                padding: '9px 14px 9px 36px',
+                fontSize: 13,
+                borderRadius: 12,
+                border: '1.5px solid #e2e8f0',
+                background: '#f8fafc',
+                outline: 'none',
+                color: '#0f172a'
               }}
             />
           </div>
 
-          {/* Filter List Popover Button (Icon Only) */}
+          {/* Download CSV Button */}
+          {userCanDownload && (
+            <button
+              onClick={handleExportCSV}
+              title="Export CSV Data"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#f8fafc',
+                color: '#64748b',
+                border: '1.5px solid #e2e8f0',
+                borderRadius: 12,
+                padding: '9px 14px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }}
+            >
+              <Download size={16} />
+            </button>
+          )}
+
+          {/* Filter List Popover Button */}
           <div style={{ position: 'relative' }}>
             <button
               onClick={() => setFilterMenuOpen(!filterMenuOpen)}
@@ -765,15 +786,24 @@ export default function KeywordsPage({ user }) {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: hasActiveFilters ? '#7c3aed' : '#475569',
-                background: hasActiveFilters ? '#f5f3ff' : '#ffffff',
-                border: `1px solid ${hasActiveFilters ? '#a78bfa' : '#cbd5e1'}`,
-                borderRadius: 6,
-                padding: '7px 10px',
-                cursor: 'pointer'
+                gap: 6,
+                background: hasActiveFilters ? '#f5f3ff' : '#f8fafc',
+                color: hasActiveFilters ? '#7c3aed' : '#64748b',
+                border: hasActiveFilters ? '1.5px solid #7c3aed' : '1.5px solid #e2e8f0',
+                borderRadius: 12,
+                padding: '9px 14px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => {
+                if (!hasActiveFilters) { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }
+              }}
+              onMouseLeave={e => {
+                if (!hasActiveFilters) { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }
               }}
             >
-              <Filter size={15} />
+              <Filter size={16} />
             </button>
 
             {/* Filter List Dropdown Panel */}
@@ -919,32 +949,6 @@ export default function KeywordsPage({ user }) {
               </div>
             )}
           </div>
-
-          {/* Export CSV Button (Visible only if userCanDownload is true) */}
-          {userCanDownload && (
-            <button
-              onClick={handleExportCSV}
-              title="Export CSV Data"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '7px 12px',
-                fontSize: 12.5,
-                fontWeight: 600,
-                color: '#475569',
-                background: '#ffffff',
-                border: '1px solid #cbd5e1',
-                borderRadius: 6,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              <Download size={15} />
-              <span>Export CSV</span>
-            </button>
-          )}
-        </div>
       </div>
 
       {/* ─── KEYWORDS DATA TABLE ───────────────────────────────────────────── */}

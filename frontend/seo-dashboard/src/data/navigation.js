@@ -31,8 +31,8 @@ export const NAV_STRUCTURE = [
         items: [
           { id: 'position-analysis', label: 'Brand Discovery', path: 'search-visibility/position-analysis' },
           { id: 'ai-analysis', label: 'Top Pages (AI)', path: 'search-visibility/ai-analysis' },
-          { id: 'keywords', label: 'Keywords', path: 'search-visibility/keywords' },
           { id: 'top-pages', label: 'Top Pages (Organic)', path: 'search-visibility/top-pages' },
+          { id: 'keywords', label: 'Keywords', path: 'search-visibility/keywords' },
           { id: 'competitors', label: 'Competitors', path: 'search-visibility/competitors' },
         ],
       },

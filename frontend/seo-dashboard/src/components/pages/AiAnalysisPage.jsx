@@ -1300,19 +1300,7 @@ export default function AiAnalysisPage({ user }) {
                   filteredCitations.map((row, idx) => (
                     <tr key={row.id || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '12px 16px', fontWeight: 700, color: '#0f172a' }}>
-                        {row.url && row.url !== '—' ? (
-                          <a
-                            href={row.url.startsWith('http') ? row.url : `https://${row.url}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
-                          >
-                            {row.keyword}
-                            <ExternalLink size={12} />
-                          </a>
-                        ) : (
-                          row.keyword
-                        )}
+                        {row.keyword}
                       </td>
                       <td style={{ padding: '12px 16px', color: '#2563eb', maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         <a href={row.url} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>

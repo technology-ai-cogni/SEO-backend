@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, ChevronDown, ExternalLink, FileText, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, ChevronDown, ExternalLink, FileText, Filter, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { canDownload } from '../../lib/permissions';
 import { fetchDomainRows, fetchPageRows, fetchKeywordRows, fetchDomainMetricsApi } from '../../lib/projectsApi';
 
 // MultiSelectField Component for Popover Filters
@@ -146,7 +147,8 @@ function ColumnHeaderFilter({ title, options = [], selectedValues, onChange }) {
   );
 }
 
-export default function TopPagesPage() {
+export default function TopPagesPage({ user }) {
+  const userCanDownload = canDownload(user);
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -177,6 +179,43 @@ export default function TopPagesPage() {
   const PAGE_SIZE = 100; // 'all' | 'landing' | 'blog'
 
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const handleExportCSV = () => {
+    if (!filteredPages || filteredPages.length === 0) {
+      alert('No data available to download.');
+      return;
+    }
+    const headers = ['Page URL', 'SV', 'Rank', 'Keyword', 'KW Diff', 'Cluster', 'Category', 'Type', 'Target Type', 'Target Subtype', 'Target Geo', 'Priority'];
+    let csvContent = headers.map(h => `"${h}"`).join(',') + '\n';
+    filteredPages.forEach(r => {
+      const rowData = [
+        r.url || '',
+        r.sv || 0,
+        r.rank || '',
+        r.pageName || '',
+        r.kwDiff || 'n/a',
+        r.cluster || '',
+        r.category || '',
+        r.type || '',
+        r.targetType || '',
+        r.targetSubtype || '',
+        r.targetGeo || '',
+        r.priority || ''
+      ];
+      csvContent += rowData.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',') + '\n';
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const filename = `${activeProject?.slug || 'top_pages'}_organic.csv`;
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const [columnFilters, setColumnFilters] = useState({
     cluster: [],
     category: [],
@@ -973,8 +1012,8 @@ export default function TopPagesPage() {
         flexWrap: 'wrap'
       }}>
         {/* Search Box */}
-        <div style={{ position: 'relative', flex: '0 1 320px', maxWidth: 320 }}>
-          <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: '#94a3b8' }} />
+        <div style={{ position: 'relative', flex: 1, maxWidth: 280 }}>
+          <Search size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
           <input
             type="text"
             placeholder="Search pages by name, URL, category, or cluster..."
@@ -982,33 +1021,69 @@ export default function TopPagesPage() {
             onChange={e => setSearchQuery(e.target.value)}
             style={{
               width: '100%',
-              padding: '7px 12px 7px 32px',
-              fontSize: 12.5,
-              borderRadius: 6,
-              border: '1px solid #cbd5e1',
-              outline: 'none'
+              padding: '9px 14px 9px 36px',
+              fontSize: 13,
+              borderRadius: 12,
+              border: '1.5px solid #e2e8f0',
+              background: '#f8fafc',
+              outline: 'none',
+              color: '#0f172a'
             }}
           />
         </div>
+
+        {/* Download CSV Button */}
+        {userCanDownload && (
+          <button
+            onClick={handleExportCSV}
+            title="Export CSV Data"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: '#f8fafc',
+              color: '#64748b',
+              border: '1.5px solid #e2e8f0',
+              borderRadius: 12,
+              padding: '9px 14px',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }}
+          >
+            <Download size={16} />
+          </button>
+        )}
 
         {/* Filter Trigger Button & Popover */}
         <div style={{ position: 'relative' }}>
           <button
             onClick={() => setFilterMenuOpen(!filterMenuOpen)}
-            title="Filter List"
+            title="Filter options"
             style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: hasActiveFilters ? '#7c3aed' : '#475569',
-              background: hasActiveFilters ? '#f5f3ff' : '#ffffff',
-              border: `1px solid ${hasActiveFilters ? '#a78bfa' : '#cbd5e1'}`,
-              borderRadius: 6,
-              padding: '7px 10px',
-              cursor: 'pointer'
+              gap: 6,
+              background: hasActiveFilters ? '#f5f3ff' : '#f8fafc',
+              color: hasActiveFilters ? '#7c3aed' : '#64748b',
+              border: hasActiveFilters ? '1.5px solid #7c3aed' : '1.5px solid #e2e8f0',
+              borderRadius: 12,
+              padding: '9px 14px',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={e => {
+              if (!hasActiveFilters) { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }
+            }}
+            onMouseLeave={e => {
+              if (!hasActiveFilters) { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }
             }}
           >
-            <Filter size={15} />
+            <Filter size={16} />
           </button>
 
           {filterMenuOpen && (
