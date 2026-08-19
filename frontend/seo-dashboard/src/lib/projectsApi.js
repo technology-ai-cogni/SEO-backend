@@ -2254,19 +2254,36 @@ export async function deleteOutreachSiteApi(projectSlug, siteId) {
 
 export async function fetchDomainMetricsApi(domain, regions = null) {
   if (!domain) throw new Error('Domain is required');
+  const cleanDomain = String(domain).replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim();
   const res = await fetch(`${CATEGORY_API_BASE}/domain-metrics`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ domain, regions })
+    body: JSON.stringify({ domain: cleanDomain, regions })
   });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
     throw new Error(err?.detail || 'Failed to fetch domain metrics');
   }
   const data = await res.json();
-  return data.metrics;
-}
+  const m = data.metrics || {};
 
+  let numericTraffic = 0;
+  if (m.traffic_data && m.traffic_data.length > 0 && m.traffic_data[0].organic_traffic) {
+    numericTraffic = Number(m.traffic_data[0].organic_traffic);
+  } else if (m.da_metrics?.org_traffic) {
+    numericTraffic = Number(m.da_metrics.org_traffic);
+  } else if (m.traffic) {
+    const parsed = parseInt(String(m.traffic).replace(/[^0-9]/g, ''), 10);
+    if (!isNaN(parsed)) numericTraffic = parsed;
+  }
+
+  return {
+    ...m,
+    da: m.da ?? m.da_metrics?.da ?? 0,
+    traffic: numericTraffic,
+    rawTrafficStr: m.traffic
+  };
+}
 export async function runAuditAllocationApi(importData = null) {
   try {
     const res = await fetch(`${API_BASE}/monthly-operations/run-audit-allocation`, {
@@ -2310,3 +2327,4 @@ export async function markAllAttendanceApi(dateStr, statusStr) {
   }
   return { status: 'success' };
 }
+

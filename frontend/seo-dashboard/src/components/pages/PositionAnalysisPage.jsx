@@ -6,6 +6,19 @@ import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions, canRunBrandD
 
 function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 100, projectTotalKeywords = 514 }) {
   const [hoverType, setHoverType] = useState(null); // null | 'mentions' | 'cited'
+  const hoverTimeoutRef = useRef(null);
+
+  const handleMouseEnter = (type) => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    setHoverType(type);
+  };
+
+  const handleMouseLeave = () => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoverType(null);
+    }, 300);
+  };
 
   const runKeywords = totalKeywords || 0;
   const projectTotal = projectTotalKeywords || runKeywords || 100;
@@ -97,8 +110,8 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
           {/* Mentions Metric Box */}
           <div
             style={{ position: 'relative' }}
-            onMouseEnter={() => setHoverType('mentions')}
-            onMouseLeave={() => setHoverType(null)}
+            onMouseEnter={() => handleMouseEnter('mentions')}
+            onMouseLeave={handleMouseLeave}
           >
             <div style={{
               display: 'flex',
@@ -118,14 +131,18 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
 
             {/* Mentions Hover Keywords Popover */}
             {hoverType === 'mentions' && (
-              <div style={{
-                position: 'absolute',
-                bottom: '105%',
-                left: '50%',
-                transform: 'translateX(-50%)',
-                paddingBottom: 6,
-                zIndex: 1000
-              }}>
+              <div
+                onMouseEnter={() => handleMouseEnter('mentions')}
+                onMouseLeave={handleMouseLeave}
+                style={{
+                  position: 'absolute',
+                  bottom: '105%',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  paddingBottom: 6,
+                  zIndex: 1000
+                }}
+              >
                 <div style={{
                   backgroundColor: '#ffffff',
                   border: '1px solid #cbd5e1',
@@ -158,8 +175,8 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
           {/* Cited Pages Metric Box */}
           <div
             style={{ position: 'relative' }}
-            onMouseEnter={() => setHoverType('cited')}
-            onMouseLeave={() => setHoverType(null)}
+            onMouseEnter={() => handleMouseEnter('cited')}
+            onMouseLeave={handleMouseLeave}
           >
             <div style={{
               display: 'flex',
@@ -179,13 +196,17 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
 
             {/* Cited Pages Hover Keywords Popover */}
             {hoverType === 'cited' && (
-              <div style={{
-                position: 'absolute',
-                bottom: '105%',
-                right: 0,
-                paddingBottom: 6,
-                zIndex: 1000
-              }}>
+              <div
+                onMouseEnter={() => handleMouseEnter('cited')}
+                onMouseLeave={handleMouseLeave}
+                style={{
+                  position: 'absolute',
+                  bottom: '105%',
+                  right: 0,
+                  paddingBottom: 6,
+                  zIndex: 1000
+                }}
+              >
                 <div style={{
                   backgroundColor: '#ffffff',
                   border: '1px solid #cbd5e1',
@@ -328,12 +349,25 @@ const COUNTRY_OPTIONS = [
 
 function RankHoverCell({ count, kwList, title, color }) {
   const [isHovered, setIsHovered] = useState(false);
+  const timeoutRef = useRef(null);
   const list = kwList || [];
+
+  const handleMouseEnter = () => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    setIsHovered(true);
+  };
+
+  const handleMouseLeave = () => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      setIsHovered(false);
+    }, 300);
+  };
 
   return (
     <div
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
       style={{ position: 'relative', display: 'inline-block', cursor: count > 0 ? 'pointer' : 'default' }}
     >
       <span style={{
@@ -345,32 +379,37 @@ function RankHoverCell({ count, kwList, title, color }) {
       </span>
 
       {isHovered && list.length > 0 && (
-        <div style={{
-          position: 'absolute',
-          bottom: '120%',
-          right: 0,
-          background: '#0f172a',
-          color: '#ffffff',
-          padding: '10px 14px',
-          borderRadius: 8,
-          fontSize: 12,
-          boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
-          zIndex: 9999,
-          whiteSpace: 'nowrap',
-          maxHeight: 220,
-          overflowY: 'auto',
-          minWidth: 200,
-          border: '1px solid #334155',
-          textAlign: 'left'
-        }}>
-          <div style={{ fontWeight: 800, color: '#38bdf8', marginBottom: 6, fontSize: 11.5, borderBottom: '1px solid #334155', paddingBottom: 4 }}>
+        <div
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          style={{
+            position: 'absolute',
+            bottom: '120%',
+            right: 0,
+            background: '#ffffff',
+            color: '#0f172a',
+            padding: '10px 14px',
+            borderRadius: 8,
+            fontSize: 12,
+            boxShadow: '0 10px 25px rgba(0,0,0,0.12)',
+            zIndex: 9999,
+            whiteSpace: 'nowrap',
+            maxHeight: 220,
+            overflowY: 'auto',
+            minWidth: 200,
+            border: '1px solid #cbd5e1',
+            textAlign: 'left',
+            pointerEvents: 'auto'
+          }}
+        >
+          <div style={{ fontWeight: 800, color: '#2563eb', marginBottom: 6, fontSize: 11.5, borderBottom: '1px solid #e2e8f0', paddingBottom: 4 }}>
             {title} ({list.length})
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {list.map((k, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}>
-                <span style={{ color: '#f8fafc', fontWeight: 600 }}>{k.kw}</span>
-                <span style={{ color: '#a7f3d0', fontWeight: 700 }}>{k.rank}</span>
+                <span style={{ color: '#1e293b', fontWeight: 600 }}>{k.kw}</span>
+                <span style={{ color: '#16a34a', fontWeight: 700 }}>{k.rank}</span>
               </div>
             ))}
           </div>
@@ -738,16 +777,16 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
 
     const hitObj = {
       timestamp: new Date().toISOString(),
-      dateStr: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      dateStr: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       result: visibilityResult,
       clusterCounts
     };
 
     hits.push(hitObj);
 
-    // FIFO Sliding Window: Max 3 periods (P1, P2, P3)
-    if (hits.length > 3) {
-      hits = hits.slice(-3); // Discards oldest hit: Hit 2 -> P1, Hit 3 -> P2, Hit 4 -> P3
+    // FIFO Sliding Window: Max 15 periods (P1 to P15)
+    if (hits.length > 15) {
+      hits = hits.slice(-15); // Discards oldest hit once > 15
     }
 
     localStorage.setItem(storageKey, JSON.stringify(hits));
@@ -2047,7 +2086,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       ))}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 4 }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 4 }}>
                     <button
                       onClick={() => onNavigate && onNavigate('search-visibility/ai-analysis')}
                       onMouseEnter={(e) => {
@@ -2073,7 +2112,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                         transition: 'all 0.15s ease-in-out'
                       }}
                     >
-                      View all &gt;
+                      View all
                     </button>
                   </div>
                 </div>
@@ -2180,7 +2219,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               const shoppingCounts = kws.length > 0 ? calculateRanges(shoppingKws) : { top1: 0, top1Kws: [], top5: 0, top5Kws: [], top10: 0, top10Kws: [] };
 
               const rows = [
-                { id: 'links', label: 'Links', ...linksCounts, color: '#16a34a' },
+                { id: 'links', label: 'Organic', ...linksCounts, color: '#16a34a' },
                 { id: 'local', label: 'Local', ...localCounts, color: '#7c3aed' },
                 { id: 'shopping', label: 'Google Shopping', ...shoppingCounts, color: '#94a3b8' }
               ];
@@ -2727,13 +2766,14 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
 
               const uniqueClusters = Object.keys(clusterCounts);
 
-              const periods = ['P1', 'P2', 'P3'];
+              const periods = Array.from({ length: 15 }, (_, i) => `P${i + 1}`);
               // Determine how many analysis runs / period hits have actually been recorded
-              const recordedHitsCount = savedHits.length;
+              const effectiveHits = savedHits.length > 0 ? savedHits : [{ dateStr: 'Hit 1', clusterCounts }];
+              const recordedHitsCount = effectiveHits.length;
 
               const clusterTrendData = periods.map((period, wIdx) => {
                 const row = { period };
-                const hit = savedHits[wIdx];
+                const hit = effectiveHits[wIdx];
 
                 uniqueClusters.forEach((cName) => {
                   if (wIdx < recordedHitsCount && hit) {
@@ -2757,52 +2797,52 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               }));
 
               return (
-                <div style={{ display: 'flex', flexDirection: 'column', width: '100%', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', gap: 12, width: '100%', height: 210, marginTop: 20, alignItems: 'center' }}>
-                    {/* Cluster Color Code Legend List on Left Side */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, justifyContent: 'center', minWidth: 110, paddingRight: 4 }}>
-                      {legendPages.map((clusterItem, idx) => {
-                        const isHovered = hoveredChartLine === clusterItem.name;
-                        return (
-                          <div
-                            key={idx}
-                            onMouseEnter={() => setHoveredChartLine(clusterItem.name)}
-                            onMouseLeave={() => setHoveredChartLine(null)}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 6,
-                              fontSize: 11,
-                              fontWeight: isHovered ? 800 : 600,
-                              color: isHovered ? clusterItem.color : '#334155',
-                              cursor: 'pointer',
-                              transition: 'all 0.15s ease',
-                              opacity: hoveredChartLine && !isHovered ? 0.35 : 1
-                            }}
-                          >
-                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: clusterItem.color, display: 'inline-block', flexShrink: 0 }} />
-                            <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 95 }} title={clusterItem.name}>
-                              {clusterItem.name}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Line Graph Tracking Cluster */}
-                    <div style={{ flex: 1, height: '100%' }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart
-                          data={clusterTrendData}
-                          margin={{ top: 15, right: 15, left: 20, bottom: 20 }}
+                <div style={{ display: 'flex', flexDirection: 'column', width: '100%', alignItems: 'stretch' }}>
+                  {/* Cluster Color Code Legend List (Horizontal Row Above Chart) */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, justifyContent: 'flex-start', paddingLeft: 35, marginBottom: 8 }}>
+                    {legendPages.map((clusterItem, idx) => {
+                      const isHovered = hoveredChartLine === clusterItem.name;
+                      return (
+                        <div
+                          key={idx}
+                          onMouseEnter={() => setHoveredChartLine(clusterItem.name)}
                           onMouseLeave={() => setHoveredChartLine(null)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            fontSize: 11.5,
+                            fontWeight: isHovered ? 800 : 600,
+                            color: isHovered ? clusterItem.color : '#334155',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                            opacity: hoveredChartLine && !isHovered ? 0.35 : 1
+                          }}
                         >
+                          <span style={{ width: 9, height: 9, borderRadius: '50%', background: clusterItem.color, display: 'inline-block', flexShrink: 0 }} />
+                          <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 120 }} title={clusterItem.name}>
+                            {clusterItem.name}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Line Graph Tracking Cluster */}
+                  <div style={{ width: '100%', height: 210 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart
+                        data={clusterTrendData}
+                        margin={{ top: 10, right: 15, left: 15, bottom: 20 }}
+                        onMouseLeave={() => setHoveredChartLine(null)}
+                      >
                           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                           <XAxis
                             dataKey="period"
                             stroke="#94a3b8"
-                            fontSize={10.5}
+                            fontSize={9.5}
                             tickLine={false}
+                            interval={0}
                             label={{ value: 'Periods', position: 'insideBottom', offset: -12, fill: '#64748b', fontSize: 11, fontWeight: 700 }}
                           />
                           <YAxis
@@ -2840,7 +2880,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                                     </div>
                                     {hitObj?.dateStr && (
                                       <div style={{ fontSize: 10, color: '#64748b', marginBottom: 4, borderBottom: '1px solid #f1f5f9', paddingBottom: 4 }}>
-                                        {hitObj.dateStr}
+                                        {hitObj.dateStr.replace(/,?\s*\d{1,2}:\d{2}.*/i, '')}
                                       </div>
                                     )}
                                     {validPayload.map((entry, idx) => (
@@ -2881,30 +2921,28 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
-                  </div>
 
-                  {/* Centered Aligned Title Below Graph */}
-                  <div style={{
-                    fontSize: 12,
-                    fontWeight: 800,
-                    color: '#0f172a',
-                    letterSpacing: '0.5px',
-                    textTransform: 'uppercase',
-                    marginTop: 10,
-                    textAlign: 'center',
-                    width: '100%',
-                    paddingLeft: 110
-                  }}>
-                    CLUSTER TREND TRACKING
+                    {/* Centered Aligned Title Below Graph */}
+                    <div style={{
+                      fontSize: 12,
+                      fontWeight: 800,
+                      color: '#0f172a',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      marginTop: 10,
+                      textAlign: 'center',
+                      width: '100%'
+                    }}>
+                      PAGE ANALYSIS
+                    </div>
                   </div>
-                </div>
               );
             })()}
           </div>
         </div>
 
         {/* View all button redirecting to Top Pages tab */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12, paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12, paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
           <button
             onClick={() => onNavigate && onNavigate('search-visibility/top-pages')}
             onMouseEnter={(e) => {
@@ -2930,7 +2968,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               transition: 'all 0.15s ease-in-out'
             }}
           >
-            View all &gt;
+            View all
           </button>
         </div>
       </div>

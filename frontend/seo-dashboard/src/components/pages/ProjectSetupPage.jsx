@@ -6924,17 +6924,7 @@ export default function ProjectSetupPage({ tab, user }) {
                 )}
               </div>
 
-              <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-                {filterTabs.map(f => (
-                  <button key={f} onClick={() => setFilter(prev => prev === f ? null : f)} style={{
-                    padding: '7px 16px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500,
-                    fontFamily: 'var(--font-body)', transition: 'all 0.15s',
-                    background: filter === f ? '#0f1523' : '#fff',
-                    color: filter === f ? '#fff' : 'var(--text-secondary)',
-                    borderRight: f !== 'Gemini' ? '1px solid var(--border)' : 'none',
-                  }}>{f}</button>
-                ))}
-              </div>
+
             </div>
           )}
 
