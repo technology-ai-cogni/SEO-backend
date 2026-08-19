@@ -1,8 +1,154 @@
 import { useState, useEffect } from 'react';
 import { Search, ChevronDown, ExternalLink, Download, KeyRound, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fetchDomainRows, fetchKeywordRows } from '../../lib/projectsApi';
+import { canDownload } from '../../lib/permissions';
 
-export default function KeywordsPage() {
+// MultiSelectField Component for Popover Filters
+function MultiSelectField({ label, options, selectedValues = [], onChange }) {
+  const [open, setOpen] = useState(false);
+  const isAll = !selectedValues || selectedValues.length === 0;
+
+  const toggleOption = (val) => {
+    if (selectedValues.includes(val)) {
+      onChange(selectedValues.filter(v => v !== val));
+    } else {
+      onChange([...selectedValues, val]);
+    }
+  };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>
+        {label} {selectedValues.length > 0 && <span style={{ color: '#7c3aed', fontWeight: 800 }}>({selectedValues.length})</span>}
+      </label>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        style={{
+          width: '100%',
+          fontSize: 12,
+          padding: '6px 10px',
+          borderRadius: 6,
+          border: selectedValues.length > 0 ? '1px solid #7c3aed' : '1px solid #cbd5e1',
+          background: selectedValues.length > 0 ? '#f5f3ff' : '#ffffff',
+          color: selectedValues.length > 0 ? '#7c3aed' : '#334155',
+          textAlign: 'left',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontWeight: selectedValues.length > 0 ? 700 : 500
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {isAll ? `All ${label}s` : selectedValues.join(', ')}
+        </span>
+        <ChevronDown size={14} color="#64748b" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: '105%',
+          background: '#ffffff',
+          border: '1px solid #cbd5e1',
+          borderRadius: 8,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+          zIndex: 200,
+          padding: 6,
+          maxHeight: 180,
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2
+        }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '4px 6px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, background: isAll ? '#f1f5f9' : 'transparent', color: isAll ? '#7c3aed' : '#475569' }}>
+            <input
+              type="checkbox"
+              checked={isAll}
+              onChange={() => onChange([])}
+              style={{ accentColor: '#7c3aed' }}
+            />
+            All {label}s
+          </label>
+          {options.map(opt => {
+            const isChecked = selectedValues.includes(opt);
+            return (
+              <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '4px 6px', borderRadius: 4, cursor: 'pointer', background: isChecked ? '#f5f3ff' : 'transparent', color: isChecked ? '#7c3aed' : '#0f172a', fontWeight: isChecked ? 600 : 400 }}>
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={() => toggleOption(opt)}
+                  style={{ accentColor: '#7c3aed' }}
+                />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{opt}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ColumnHeaderFilter Component for Pill-Style Single Select Header Dropdown
+function ColumnHeaderFilter({ title, options = [], selectedValues, onChange }) {
+  const currentValue = Array.isArray(selectedValues)
+    ? (selectedValues.length === 1 ? selectedValues[0] : (selectedValues.length > 1 ? selectedValues[0] : 'all'))
+    : (selectedValues || 'all');
+
+  return (
+    <th style={{ padding: '8px 12px', fontWeight: 600 }}>
+      <div style={{ position: 'relative', display: 'inline-block' }}>
+        <select
+          value={currentValue}
+          onChange={(e) => {
+            const val = e.target.value;
+            onChange(val === 'all' ? [] : [val]);
+          }}
+          style={{
+            padding: '6px 28px 6px 12px',
+            borderRadius: 10,
+            border: currentValue !== 'all' ? '1px solid #7c3aed' : '1px solid #e2e8f0',
+            background: currentValue !== 'all' ? '#f5f3ff' : '#ffffff',
+            color: currentValue !== 'all' ? '#7c3aed' : '#64748b',
+            fontSize: 12,
+            fontWeight: 600,
+            outline: 'none',
+            cursor: 'pointer',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+            appearance: 'none',
+            WebkitAppearance: 'none',
+            MozAppearance: 'none'
+          }}
+        >
+          <option value="all">{title}</option>
+          {options.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))}
+        </select>
+        <ChevronDown
+          size={13}
+          color={currentValue !== 'all' ? '#7c3aed' : '#94a3b8'}
+          style={{
+            position: 'absolute',
+            right: 10,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            pointerEvents: 'none'
+          }}
+        />
+      </div>
+    </th>
+  );
+}
+
+export default function KeywordsPage({ user }) {
+  const userCanDownload = canDownload(user);
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -17,13 +163,13 @@ export default function KeywordsPage() {
   // Filter List Popover State & Options
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [columnFilters, setColumnFilters] = useState({
-    cluster: 'all',
-    category: 'all',
-    type: 'all',
-    targetType: 'all',
-    targetSubtype: 'all',
-    targetGeo: 'all',
-    priority: 'all'
+    cluster: [],
+    category: [],
+    type: [],
+    targetType: [],
+    targetSubtype: [],
+    targetGeo: [],
+    priority: []
   });
 
   // Region and date state
@@ -44,17 +190,17 @@ export default function KeywordsPage() {
     { code: 'FR', name: 'France' }
   ];
 
-  const hasActiveFilters = Object.values(columnFilters).some(v => v !== 'all');
+  const hasActiveFilters = Object.values(columnFilters).some(v => Array.isArray(v) ? v.length > 0 : v !== 'all');
 
   const resetAllFilters = () => {
     setColumnFilters({
-      cluster: 'all',
-      category: 'all',
-      type: 'all',
-      targetType: 'all',
-      targetSubtype: 'all',
-      targetGeo: 'all',
-      priority: 'all'
+      cluster: [],
+      category: [],
+      type: [],
+      targetType: [],
+      targetSubtype: [],
+      targetGeo: [],
+      priority: []
     });
   };
 
@@ -144,13 +290,13 @@ export default function KeywordsPage() {
       k.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
       k.landingPage.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchCluster = columnFilters.cluster === 'all' || k.cluster === columnFilters.cluster;
-    const matchCategory = columnFilters.category === 'all' || k.category === columnFilters.category;
-    const matchType = columnFilters.type === 'all' || k.type === columnFilters.type;
-    const matchTargetType = columnFilters.targetType === 'all' || k.targetType === columnFilters.targetType;
-    const matchTargetSubtype = columnFilters.targetSubtype === 'all' || k.targetSubtype === columnFilters.targetSubtype;
-    const matchTargetGeo = columnFilters.targetGeo === 'all' || k.targetGeo === columnFilters.targetGeo;
-    const matchPriority = columnFilters.priority === 'all' || k.priority === columnFilters.priority;
+    const matchCluster = !columnFilters.cluster || columnFilters.cluster.length === 0 || columnFilters.cluster.includes(k.cluster);
+    const matchCategory = !columnFilters.category || columnFilters.category.length === 0 || columnFilters.category.includes(k.category);
+    const matchType = !columnFilters.type || columnFilters.type.length === 0 || columnFilters.type.includes(k.type);
+    const matchTargetType = !columnFilters.targetType || columnFilters.targetType.length === 0 || columnFilters.targetType.includes(k.targetType);
+    const matchTargetSubtype = !columnFilters.targetSubtype || columnFilters.targetSubtype.length === 0 || columnFilters.targetSubtype.includes(k.targetSubtype);
+    const matchTargetGeo = !columnFilters.targetGeo || columnFilters.targetGeo.length === 0 || columnFilters.targetGeo.includes(k.targetGeo);
+    const matchPriority = !columnFilters.priority || columnFilters.priority.length === 0 || columnFilters.priority.includes(k.priority);
 
     return matchSearch && matchCluster && matchCategory && matchType && matchTargetType && matchTargetSubtype && matchTargetGeo && matchPriority;
   });
@@ -582,18 +728,12 @@ export default function KeywordsPage() {
         padding: '14px 20px',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 12,
+        gap: 10,
         flexWrap: 'wrap'
       }}>
-        <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>
-          All Keywords
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, maxWidth: 620, justifyContent: 'flex-end' }}>
           {/* Search Box */}
-          <div style={{ position: 'relative', flex: 1, maxWidth: 320 }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: 9, color: '#94a3b8' }} />
+          <div style={{ position: 'relative', flex: 1, maxWidth: 280 }}>
+            <Search size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
             <input
               type="text"
               placeholder="Search keywords, cluster, category, landing page..."
@@ -601,16 +741,43 @@ export default function KeywordsPage() {
               onChange={e => setSearchQuery(e.target.value)}
               style={{
                 width: '100%',
-                padding: '6px 12px 6px 32px',
-                fontSize: 12.5,
-                borderRadius: 6,
-                border: '1px solid #cbd5e1',
-                outline: 'none'
+                padding: '9px 14px 9px 36px',
+                fontSize: 13,
+                borderRadius: 12,
+                border: '1.5px solid #e2e8f0',
+                background: '#f8fafc',
+                outline: 'none',
+                color: '#0f172a'
               }}
             />
           </div>
 
-          {/* Filter List Popover Button (Icon Only) */}
+          {/* Download CSV Button */}
+          {userCanDownload && (
+            <button
+              onClick={handleExportCSV}
+              title="Export CSV Data"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#f8fafc',
+                color: '#64748b',
+                border: '1.5px solid #e2e8f0',
+                borderRadius: 12,
+                padding: '9px 14px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }}
+            >
+              <Download size={16} />
+            </button>
+          )}
+
+          {/* Filter List Popover Button */}
           <div style={{ position: 'relative' }}>
             <button
               onClick={() => setFilterMenuOpen(!filterMenuOpen)}
@@ -619,15 +786,24 @@ export default function KeywordsPage() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: hasActiveFilters ? '#7c3aed' : '#475569',
-                background: hasActiveFilters ? '#f5f3ff' : '#ffffff',
-                border: `1px solid ${hasActiveFilters ? '#a78bfa' : '#cbd5e1'}`,
-                borderRadius: 6,
-                padding: '7px 10px',
-                cursor: 'pointer'
+                gap: 6,
+                background: hasActiveFilters ? '#f5f3ff' : '#f8fafc',
+                color: hasActiveFilters ? '#7c3aed' : '#64748b',
+                border: hasActiveFilters ? '1.5px solid #7c3aed' : '1.5px solid #e2e8f0',
+                borderRadius: 12,
+                padding: '9px 14px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => {
+                if (!hasActiveFilters) { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }
+              }}
+              onMouseLeave={e => {
+                if (!hasActiveFilters) { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }
               }}
             >
-              <Filter size={15} />
+              <Filter size={16} />
             </button>
 
             {/* Filter List Dropdown Panel */}
@@ -773,7 +949,6 @@ export default function KeywordsPage() {
               </div>
             )}
           </div>
-        </div>
       </div>
 
       {/* ─── KEYWORDS DATA TABLE ───────────────────────────────────────────── */}
@@ -805,9 +980,24 @@ export default function KeywordsPage() {
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>KW DIFF</th>
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>CLUSTER</th>
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>CATEGORY</th>
-                <th style={{ padding: '12px 14px', fontWeight: 700 }}>TYPE</th>
-                <th style={{ padding: '12px 14px', fontWeight: 700 }}>TARGET TYPE</th>
-                <th style={{ padding: '12px 14px', fontWeight: 700 }}>TARGET SUBTYPE</th>
+                <ColumnHeaderFilter
+                  title="Type"
+                  options={uniqueTypes}
+                  selectedValues={columnFilters.type}
+                  onChange={val => setColumnFilters({ ...columnFilters, type: val })}
+                />
+                <ColumnHeaderFilter
+                  title="Target Type"
+                  options={uniqueTargetTypes}
+                  selectedValues={columnFilters.targetType}
+                  onChange={val => setColumnFilters({ ...columnFilters, targetType: val })}
+                />
+                <ColumnHeaderFilter
+                  title="Target Subtype"
+                  options={uniqueTargetSubtypes}
+                  selectedValues={columnFilters.targetSubtype}
+                  onChange={val => setColumnFilters({ ...columnFilters, targetSubtype: val })}
+                />
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>TARGET GEO</th>
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>PRIORITY</th>
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>LANDING PAGE</th>

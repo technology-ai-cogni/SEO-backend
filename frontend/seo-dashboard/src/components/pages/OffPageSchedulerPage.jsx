@@ -13,7 +13,7 @@ import {
   deleteScheduledActivityApi,
   fetchUsersApi
 } from '../../lib/projectsApi';
-import { isReadOnlyUser } from '../../lib/permissions';
+import { isReadOnlyUser, canDownload, canEdit, canUpdate } from '../../lib/permissions';
 
 // Reusable Modal Component matching Project Setup style
 function Modal({ open, onClose, title, children, footer }) {
@@ -163,6 +163,8 @@ export default function OffPageSchedulerPage({ user }) {
   const isViewer = isReadOnlyUser(user);
   const isVendor = user?.category === 'Vendor' || user?.role?.toUpperCase() === 'VENDOR';
   const vendorProject = isVendor && user?.assigned_project && user.assigned_project !== 'All Projects' ? user.assigned_project : null;
+  const userCanEdit = canEdit(user);
+  const userCanUpdate = canUpdate(user);
   
   useEffect(() => {
     if (isViewer && activeTab === 'scheduler') {
@@ -2377,7 +2379,7 @@ export default function OffPageSchedulerPage({ user }) {
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {!isVendor && (
+          {!isVendor && userCanUpdate && (
             <button
               onClick={handleRunAudit}
               disabled={auditAllocating}
@@ -2405,7 +2407,7 @@ export default function OffPageSchedulerPage({ user }) {
           )}
 
           {activeTab === 'import' ? (
-            !isVendor && (
+            !isVendor && userCanEdit && (
               <Btn variant="accent" onClick={() => { setImportMsg({ type: '', text: '' }); setImportFile(null); setShowImportModal(true); }}>
                 <UploadCloud size={16} /> Import Data
               </Btn>
@@ -2918,14 +2920,16 @@ export default function OffPageSchedulerPage({ user }) {
 
           {/* Import Keywords Header & Template Link */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 13.5, fontWeight: 600, color: '#0f172a' }}>Import Data</span>
-            <button
-              type="button"
-              onClick={downloadTemplateCSV}
-              style={{ background: 'none', border: 'none', color: '#6366f1', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}
-            >
-              Download sample template
-            </button>
+            <span style={{ fontSize: 13.5, fontWeight: 600, color: '#0f172a' }}>Import Keywords</span>
+            {canDownload(user) && (
+              <button
+                type="button"
+                onClick={downloadTemplateCSV}
+                style={{ background: 'none', border: 'none', color: '#6366f1', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}
+              >
+                Download sample template
+              </button>
+            )}
           </div>
 
           {/* Drag Uploader */}

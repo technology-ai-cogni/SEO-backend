@@ -13,7 +13,7 @@ import {
   findCompetitors, fetchCompetitorSnapshots, classifyCompetitorUrls,
   fetchOutreachSitesApi, addOutreachSiteApi, deleteOutreachSiteApi, getApiBaseUrl
 } from '../../lib/projectsApi';
-import { isReadOnlyUser, canEdit, canDelete } from '../../lib/permissions';
+import { isReadOnlyUser, canEdit, canDelete, canDownload, canUpdate } from '../../lib/permissions';
 
 // ─── shared tiny components ────────────────────────────────────────────────
 
@@ -2231,23 +2231,27 @@ function ActionsDropdown({ selectedCount, onBulkEdit, onBulkDelete }) {
             boxShadow: '0 8px 24px rgba(0,0,0,0.18)', minWidth: 160, overflow: 'hidden',
           }}
         >
-          <button
-            onClick={() => { setOpen(false); onBulkEdit(); }}
-            style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--text-primary)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
-            onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >
-            <Edit2 size={14} color="var(--text-muted)" /> Bulk Edit
-          </button>
-          <div style={{ height: 1, background: 'var(--border)' }} />
-          <button
-            onClick={() => { setOpen(false); onBulkDelete(); }}
-            style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--red)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
-            onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >
-            <Trash2 size={14} /> Bulk Delete
-          </button>
+          {onBulkEdit && (
+            <button
+              onClick={() => { setOpen(false); onBulkEdit(); }}
+              style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--text-primary)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <Edit2 size={14} color="var(--text-muted)" /> Bulk Edit
+            </button>
+          )}
+          {onBulkEdit && onBulkDelete && <div style={{ height: 1, background: 'var(--border)' }} />}
+          {onBulkDelete && (
+            <button
+              onClick={() => { setOpen(false); onBulkDelete(); }}
+              style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--red)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
+              onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <Trash2 size={14} /> Bulk Delete
+            </button>
+          )}
         </div>,
         document.body
       )}
@@ -2269,13 +2273,13 @@ function HeaderQuickSelect({ placeholder, options, onSet, value }) {
 function PageDetailView({ project, onBack, onUpdatePages, user }) {
   const userCanEdit = canEdit(user);
   const userCanDelete = canDelete(user);
+  const userCanDownload = canDownload(user);
   const [rows, setRows] = useState(project.detailPages || []);
   const loading = project.detailPages === undefined;
   const error = project.detailPagesError || '';
   const [selectedRows, setSelectedRows] = useState(new Set());
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
-  const [editingPage, setEditingPage] = useState(null);
   const [pendingUpdates, setPendingUpdates] = useState(new Map());
   const [pendingDeleteIds, setPendingDeleteIds] = useState(new Set());
   const [saving, setSaving] = useState(false);
@@ -2407,11 +2411,6 @@ function PageDetailView({ project, onBack, onUpdatePages, user }) {
     }
   };
 
-  // Auto-refresh: silently re-pulls this project's pages every 10s while
-  // this view is open, on top of the manual refresh icon. Skips a cycle
-  // (rather than discarding anything) if a save/refresh is already in
-  // flight or there are unsaved local edits -- it never overwrites those
-  // without the explicit confirm the manual button already asks for.
   useEffect(() => {
     const AUTO_REFRESH_MS = 10000;
     const interval = setInterval(() => {
@@ -2467,21 +2466,23 @@ function PageDetailView({ project, onBack, onUpdatePages, user }) {
             onBulkDelete={() => setShowBulkDelete(true)}
           />
         )}
-        <button
-          onClick={() => downloadCSV(`${project?.name || 'pages'}_detail`, filteredRows)}
-          title="Download CSV"
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'var(--surface-2)', color: 'var(--text-secondary)',
-            border: '1px solid var(--border)', borderRadius: 8,
-            padding: '7px 10px', cursor: 'pointer',
-            fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-          }}
-          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-        >
-          <Download size={14} />
-        </button>
+        {userCanDownload && (
+          <button
+            onClick={() => downloadCSV(`${project?.name || 'pages'}_detail`, filteredRows)}
+            title="Download CSV"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--surface-2)', color: 'var(--text-secondary)',
+              border: '1px solid var(--border)', borderRadius: 8,
+              padding: '7px 10px', cursor: 'pointer',
+              fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+          >
+            <Download size={14} />
+          </button>
+        )}
         <div style={{ flex: 1 }} />
         {saveError && (
           <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError}</span>
@@ -2595,6 +2596,8 @@ const KW_PAGE_SIZE = 100;
 function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }) {
   const userCanEdit = canEdit(user);
   const userCanDelete = canDelete(user);
+  const userCanDownload = canDownload(user);
+  const userCanUpdate = canUpdate(user);
   const [rows, setRows] = useState(project.detailKeywords || []);
   const loading = project.detailKeywords === undefined;
   const error = project.detailKeywordsError || '';
@@ -3249,21 +3252,23 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
               onFiltersChange={setTableFilters}
             />
 
-            <button
-              onClick={() => downloadCSV(`${project?.name || 'keywords'}_clusters`, visibleRows)}
-              title="Download CSV"
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'var(--surface-2)', color: 'var(--text-secondary)',
-                border: '1px solid var(--border)', borderRadius: 8,
-                padding: '7px 10px', cursor: 'pointer',
-                fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-              }}
-              onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-            >
-              <Download size={14} />
-            </button>
+            {userCanDownload && (
+              <button
+                onClick={() => downloadCSV(`${project?.name || 'keywords'}_clusters`, visibleRows)}
+                title="Download CSV"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'var(--surface-2)', color: 'var(--text-secondary)',
+                  border: '1px solid var(--border)', borderRadius: 8,
+                  padding: '7px 10px', cursor: 'pointer',
+                  fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+              >
+                <Download size={14} />
+              </button>
+            )}
           </>
         )}
 
@@ -3280,8 +3285,8 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
 
         {userCanEdit && rows.length > 0 && selectedRows.size === 0 && (
           <>
-            {/* Check initial ranking button -- visible ONLY when ALL keywords have both cluster and category */}
-            {rows.length > 0 && rows.every(r => Boolean(r.cluster && String(r.cluster).trim()) && Boolean(r.category && String(r.category).trim())) && (
+            {/* Check initial ranking button -- visible ONLY when user has View + Edit + Delete + Update and ALL keywords have both cluster and category */}
+            {userCanUpdate && rows.length > 0 && rows.every(r => Boolean(r.cluster && String(r.cluster).trim()) && Boolean(r.category && String(r.category).trim())) && (
               <button
                 onClick={handleCheckRanking}
                 disabled={rankChecking}
@@ -3462,34 +3467,36 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
           </>
         )}
 
-        {userCanDelete && rows.length > 0 && (
+        {userCanEdit && rows.length > 0 && (
           <>
             <ActionsDropdown
               selectedCount={selectedRows.size}
               onBulkEdit={() => setShowBulkEdit(true)}
-              onBulkDelete={() => setShowBulkDelete(true)}
+              onBulkDelete={userCanDelete ? () => setShowBulkDelete(true) : undefined}
             />
 
             {/* Robot Face AI Cluster Button */}
-            <button
-              onClick={handleRunClustering}
-              disabled={clustering}
-              style={{
-                background: 'linear-gradient(135deg, var(--accent), var(--accent-hover))',
-                border: 'none', cursor: clustering ? 'default' : 'pointer',
-                display: 'flex', alignItems: 'center', gap: 3,
-                padding: '7px 16px 7px 10px', borderRadius: 999, transition: 'transform 0.15s, box-shadow 0.15s',
-                opacity: clustering ? 0.75 : 1,
-                boxShadow: '0 2px 10px rgba(92, 74, 242, 0.35)',
-              }}
-              onMouseEnter={e => { if (!clustering) { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(92, 74, 242, 0.45)'; } }}
-              onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 2px 10px rgba(92, 74, 242, 0.35)'; }}
-            >
-              <RobotClusterIcon busy={clustering} size={24} />
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>
-                {clustering ? 'Clustering keywords…' : '   AI-Clustering'}
-              </span>
-            </button>
+            {userCanUpdate && (
+              <button
+                onClick={handleRunClustering}
+                disabled={clustering}
+                style={{
+                  background: 'linear-gradient(135deg, var(--accent), var(--accent-hover))',
+                  border: 'none', cursor: clustering ? 'default' : 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 3,
+                  padding: '7px 16px 7px 10px', borderRadius: 999, transition: 'transform 0.15s, box-shadow 0.15s',
+                  opacity: clustering ? 0.75 : 1,
+                  boxShadow: '0 2px 10px rgba(92, 74, 242, 0.35)',
+                }}
+                onMouseEnter={e => { if (!clustering) { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(92, 74, 242, 0.45)'; } }}
+                onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 2px 10px rgba(92, 74, 242, 0.35)'; }}
+              >
+                <RobotClusterIcon busy={clustering} size={24} />
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>
+                  {clustering ? 'Clustering keywords…' : '   AI-Clustering'}
+                </span>
+              </button>
+            )}
           </>
         )}
 
@@ -3705,7 +3712,8 @@ function RegionTags({ regions }) {
   );
 }
 
-function CompetitorDetailView({ competitor, onBack }) {
+function CompetitorDetailView({ competitor, onBack, user }) {
+  const userCanDownload = canDownload(user);
   const [details, setDetails] = useState([]);
   const [detailsLoading, setDetailsLoading] = useState(true);
   const [kwPage, setKwPage] = useState(1);
@@ -3743,35 +3751,37 @@ function CompetitorDetailView({ competitor, onBack }) {
         <div>
           <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
         </div>
-        <button
-          onClick={() => {
-            const rowsToExport = details.map(d => ({
-              Domain: d.domain,
-              Name: d.name,
-              Regions: (d.regions || []).join('; '),
-              DA: d.da ?? '',
-              'Ranking Keywords': d.rankingKeywords,
-              Location: d.location,
-              'Common KWs': Math.round(((d.commonKw ?? 0) / 100) * d.totalKw),
-              'Total KWs': d.totalKw,
-              'SERP Comp Level': d.serpCompLevel,
-              'Comp Level': d.compLevel,
-            }));
-            downloadCSV(`${title}_competitor_detail`, rowsToExport);
-          }}
-          title="Download CSV"
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'var(--surface-2)', color: 'var(--text-secondary)',
-            border: '1px solid var(--border)', borderRadius: 8,
-            padding: '7px 10px', cursor: 'pointer',
-            fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-          }}
-          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-        >
-          <Download size={14} />
-        </button>
+        {userCanDownload && (
+          <button
+            onClick={() => {
+              const rowsToExport = details.map(d => ({
+                Domain: d.domain,
+                Name: d.name,
+                Regions: (d.regions || []).join('; '),
+                DA: d.da ?? '',
+                'Ranking Keywords': d.rankingKeywords,
+                Location: d.location,
+                'Common KWs': Math.round(((d.commonKw ?? 0) / 100) * d.totalKw),
+                'Total KWs': d.totalKw,
+                'SERP Comp Level': d.serpCompLevel,
+                'Comp Level': d.compLevel,
+              }));
+              downloadCSV(`${title}_competitor_detail`, rowsToExport);
+            }}
+            title="Download CSV"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--surface-2)', color: 'var(--text-secondary)',
+              border: '1px solid var(--border)', borderRadius: 8,
+              padding: '7px 10px', cursor: 'pointer',
+              fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+          >
+            <Download size={14} />
+          </button>
+        )}
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{details.length} entr{details.length !== 1 ? 'ies' : 'y'}</span>
       </div>
@@ -4043,7 +4053,8 @@ function getSyncUniqueCounts(slug, competitors) {
   return { categoryCount: catSet.size, clusterCount: clusSet.size };
 }
 
-function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDeleteProject, loading, error, search }) {
+function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDeleteProject, loading, error, search, user }) {
+  const userCanDelete = canDelete(user);
   const [page, setPage] = useState(1);
   const [deletingProject, setDeletingProject] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -4194,28 +4205,30 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{p.competitorCount}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p.updated}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeletingProject(p);
-                    }}
-                    title="Delete project competitor data"
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justify: 'center',
-                      color: 'var(--text-muted)',
-                      padding: '4px',
-                      transition: 'color 0.15s'
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
-                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                  {userCanDelete && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeletingProject(p);
+                      }}
+                      title="Delete project competitor data"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justify: 'center',
+                        color: 'var(--text-muted)',
+                        padding: '4px',
+                        transition: 'color 0.15s'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
+                      onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -4953,6 +4966,8 @@ function formatCleanName(raw) {
 
 function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, onBack, onSelectCompetitor, onSelectKwDetail, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, onFindCompetitors, onAddPages, hasPendingChanges, saving, saveError, onSaveChanges, loading, error, top3KwByCategory, top3KwLoading, search, findingCompetitors, user }) {
   const userCanEdit = canEdit(user);
+  const userCanUpdate = canUpdate(user);
+  const userCanDownload = canDownload(user);
   const [editingIdx, setEditingIdx] = useState(null);
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -5255,34 +5270,36 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                   onBulkEdit={() => setShowBulkEdit(true)}
                   onBulkDelete={() => setShowBulkDelete(true)}
                 />
-                <button
-                  onClick={() => {
-                    const rowsToExport = filtered.map(c => ({
-                      Competitor: c.name || c.domain,
-                      Domain: c.domain,
-                      Device: c.device || 'Desktop',
-                      Location: c.location,
-                      DA: c.da ?? '',
-                      'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
-                      'Total KWs': c.totalKw,
-                      'SERP Comp Level': c.serpCompLevel,
-                      'Comp Level': c.compLevel,
-                    }));
-                    downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
-                  }}
-                  title="Download CSV"
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: 'var(--surface-2)', color: 'var(--text-secondary)',
-                    border: '1px solid var(--border)', borderRadius: 8,
-                    padding: '7px 10px', cursor: 'pointer',
-                    fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-                >
-                  <Download size={14} />
-                </button>
+                {userCanDownload && (
+                  <button
+                    onClick={() => {
+                      const rowsToExport = filtered.map(c => ({
+                        Competitor: c.name || c.domain,
+                        Domain: c.domain,
+                        Device: c.device || 'Desktop',
+                        Location: c.location,
+                        DA: c.da ?? '',
+                        'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
+                        'Total KWs': c.totalKw,
+                        'SERP Comp Level': c.serpCompLevel,
+                        'Comp Level': c.compLevel,
+                      }));
+                      downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
+                    }}
+                    title="Download CSV"
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: 'var(--surface-2)', color: 'var(--text-secondary)',
+                      border: '1px solid var(--border)', borderRadius: 8,
+                      padding: '7px 10px', cursor: 'pointer',
+                      fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+                    onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                  >
+                    <Download size={14} />
+                  </button>
+                )}
               </>
             )}
             <div style={{ flex: 1 }} />
@@ -5311,53 +5328,59 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
           </div>
 
           {/* Row 2: Find Competitors and Add Pages buttons below Project Name */}
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', paddingTop: 2 }}>
-            <button
-              onClick={() => {
-                if (subView === 'competitors') {
-                  onFindCompetitors?.();
-                } else {
-                  setSubView('competitors');
-                }
-              }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                background: subView === 'competitors' ? '#0f1523' : '#fff',
-                color: subView === 'competitors' ? '#fff' : '#0f1523',
-                border: subView === 'competitors' ? 'none' : '1.5px solid #0f1523',
-                borderRadius: 8,
-                padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                fontFamily: 'var(--font-body)', transition: 'all 0.15s',
-              }}
-              onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
-              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-            >
-              Find Competitors
-            </button>
-            <button
-              onClick={() => {
-                if (subView === 'pages') {
-                  onAddPages?.();
-                } else {
-                  setSubView('pages');
-                }
-              }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                background: subView === 'pages' ? '#0f1523' : '#fff',
-                color: subView === 'pages' ? '#fff' : '#0f1523',
-                border: subView === 'pages' ? 'none' : '1.5px solid #0f1523',
-                borderRadius: 8,
-                padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                fontFamily: 'var(--font-body)', transition: 'all 0.15s',
-              }}
-              onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
-              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-            >
-              <Plus size={14} />
-              Add Pages
-            </button>
-          </div>
+          {(userCanUpdate || userCanEdit) && (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', paddingTop: 2 }}>
+              {userCanUpdate && (
+                <button
+                  onClick={() => {
+                    if (subView === 'competitors') {
+                      onFindCompetitors?.();
+                    } else {
+                      setSubView('competitors');
+                    }
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    background: subView === 'competitors' ? '#0f1523' : '#fff',
+                    color: subView === 'competitors' ? '#fff' : '#0f1523',
+                    border: subView === 'competitors' ? 'none' : '1.5px solid #0f1523',
+                    borderRadius: 8,
+                    padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                    fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                >
+                  Find Competitors
+                </button>
+              )}
+              {userCanEdit && (
+                <button
+                  onClick={() => {
+                    if (subView === 'pages') {
+                      onAddPages?.();
+                    } else {
+                      setSubView('pages');
+                    }
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    background: subView === 'pages' ? '#0f1523' : '#fff',
+                    color: subView === 'pages' ? '#fff' : '#0f1523',
+                    border: subView === 'pages' ? 'none' : '1.5px solid #0f1523',
+                    borderRadius: 8,
+                    padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                    fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                >
+                  <Plus size={14} />
+                  Add Pages
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -5757,6 +5780,7 @@ export default function ProjectSetupPage({ tab, user }) {
   const isReadOnly = isReadOnlyUser(user);
   const userCanEdit = canEdit(user);
   const userCanDelete = canDelete(user);
+  const userCanDownload = canDownload(user);
   const [activeTab, setActiveTab] = useState(tab || 'Domain');
   useEffect(() => { if (tab) { setActiveTab(tab); setSelectedPageProject(null); setSelectedCompetitor(null); setSelectedCompetitorProject(null); setSelectedKwProject(null); setSearch(''); } }, [tab]);
   const [filter, setFilter] = useState(null);
@@ -7058,7 +7082,7 @@ export default function ProjectSetupPage({ tab, user }) {
             </div>
           )}
 
-          {!isInDetailView && (
+          {!isInDetailView && userCanDownload && (
             <button
               onClick={handleDownloadMainTab}
               title="Download CSV"
@@ -7201,6 +7225,7 @@ export default function ProjectSetupPage({ tab, user }) {
                 onDeleteProject={handleDeleteCompetitorProject}
                 loading={competitorsLoading}
                 error={competitorsError}
+                user={user}
               />
             )}
             {activeTab === 'Competitors' && selectedCompetitorProject !== null && (
