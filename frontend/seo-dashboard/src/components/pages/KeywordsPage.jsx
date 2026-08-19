@@ -3,6 +3,150 @@ import { Search, ChevronDown, ExternalLink, Download, KeyRound, Filter, ChevronL
 import { fetchDomainRows, fetchKeywordRows } from '../../lib/projectsApi';
 import { canDownload } from '../../lib/permissions';
 
+// MultiSelectField Component for Popover Filters
+function MultiSelectField({ label, options, selectedValues = [], onChange }) {
+  const [open, setOpen] = useState(false);
+  const isAll = !selectedValues || selectedValues.length === 0;
+
+  const toggleOption = (val) => {
+    if (selectedValues.includes(val)) {
+      onChange(selectedValues.filter(v => v !== val));
+    } else {
+      onChange([...selectedValues, val]);
+    }
+  };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>
+        {label} {selectedValues.length > 0 && <span style={{ color: '#7c3aed', fontWeight: 800 }}>({selectedValues.length})</span>}
+      </label>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        style={{
+          width: '100%',
+          fontSize: 12,
+          padding: '6px 10px',
+          borderRadius: 6,
+          border: selectedValues.length > 0 ? '1px solid #7c3aed' : '1px solid #cbd5e1',
+          background: selectedValues.length > 0 ? '#f5f3ff' : '#ffffff',
+          color: selectedValues.length > 0 ? '#7c3aed' : '#334155',
+          textAlign: 'left',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontWeight: selectedValues.length > 0 ? 700 : 500
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {isAll ? `All ${label}s` : selectedValues.join(', ')}
+        </span>
+        <ChevronDown size={14} color="#64748b" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: '105%',
+          background: '#ffffff',
+          border: '1px solid #cbd5e1',
+          borderRadius: 8,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+          zIndex: 200,
+          padding: 6,
+          maxHeight: 180,
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2
+        }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '4px 6px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, background: isAll ? '#f1f5f9' : 'transparent', color: isAll ? '#7c3aed' : '#475569' }}>
+            <input
+              type="checkbox"
+              checked={isAll}
+              onChange={() => onChange([])}
+              style={{ accentColor: '#7c3aed' }}
+            />
+            All {label}s
+          </label>
+          {options.map(opt => {
+            const isChecked = selectedValues.includes(opt);
+            return (
+              <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '4px 6px', borderRadius: 4, cursor: 'pointer', background: isChecked ? '#f5f3ff' : 'transparent', color: isChecked ? '#7c3aed' : '#0f172a', fontWeight: isChecked ? 600 : 400 }}>
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={() => toggleOption(opt)}
+                  style={{ accentColor: '#7c3aed' }}
+                />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{opt}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ColumnHeaderFilter Component for Pill-Style Single Select Header Dropdown
+function ColumnHeaderFilter({ title, options = [], selectedValues, onChange }) {
+  const currentValue = Array.isArray(selectedValues)
+    ? (selectedValues.length === 1 ? selectedValues[0] : (selectedValues.length > 1 ? selectedValues[0] : 'all'))
+    : (selectedValues || 'all');
+
+  return (
+    <th style={{ padding: '8px 12px', fontWeight: 600 }}>
+      <div style={{ position: 'relative', display: 'inline-block' }}>
+        <select
+          value={currentValue}
+          onChange={(e) => {
+            const val = e.target.value;
+            onChange(val === 'all' ? [] : [val]);
+          }}
+          style={{
+            padding: '6px 28px 6px 12px',
+            borderRadius: 10,
+            border: currentValue !== 'all' ? '1px solid #7c3aed' : '1px solid #e2e8f0',
+            background: currentValue !== 'all' ? '#f5f3ff' : '#ffffff',
+            color: currentValue !== 'all' ? '#7c3aed' : '#64748b',
+            fontSize: 12,
+            fontWeight: 600,
+            outline: 'none',
+            cursor: 'pointer',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+            appearance: 'none',
+            WebkitAppearance: 'none',
+            MozAppearance: 'none'
+          }}
+        >
+          <option value="all">{title}</option>
+          {options.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))}
+        </select>
+        <ChevronDown
+          size={13}
+          color={currentValue !== 'all' ? '#7c3aed' : '#94a3b8'}
+          style={{
+            position: 'absolute',
+            right: 10,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            pointerEvents: 'none'
+          }}
+        />
+      </div>
+    </th>
+  );
+}
+
 export default function KeywordsPage({ user }) {
   const userCanDownload = canDownload(user);
   const [projects, setProjects] = useState([]);
@@ -19,13 +163,13 @@ export default function KeywordsPage({ user }) {
   // Filter List Popover State & Options
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [columnFilters, setColumnFilters] = useState({
-    cluster: 'all',
-    category: 'all',
-    type: 'all',
-    targetType: 'all',
-    targetSubtype: 'all',
-    targetGeo: 'all',
-    priority: 'all'
+    cluster: [],
+    category: [],
+    type: [],
+    targetType: [],
+    targetSubtype: [],
+    targetGeo: [],
+    priority: []
   });
 
   // Region and date state
@@ -46,17 +190,17 @@ export default function KeywordsPage({ user }) {
     { code: 'FR', name: 'France' }
   ];
 
-  const hasActiveFilters = Object.values(columnFilters).some(v => v !== 'all');
+  const hasActiveFilters = Object.values(columnFilters).some(v => Array.isArray(v) ? v.length > 0 : v !== 'all');
 
   const resetAllFilters = () => {
     setColumnFilters({
-      cluster: 'all',
-      category: 'all',
-      type: 'all',
-      targetType: 'all',
-      targetSubtype: 'all',
-      targetGeo: 'all',
-      priority: 'all'
+      cluster: [],
+      category: [],
+      type: [],
+      targetType: [],
+      targetSubtype: [],
+      targetGeo: [],
+      priority: []
     });
   };
 
@@ -146,13 +290,13 @@ export default function KeywordsPage({ user }) {
       k.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
       k.landingPage.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchCluster = columnFilters.cluster === 'all' || k.cluster === columnFilters.cluster;
-    const matchCategory = columnFilters.category === 'all' || k.category === columnFilters.category;
-    const matchType = columnFilters.type === 'all' || k.type === columnFilters.type;
-    const matchTargetType = columnFilters.targetType === 'all' || k.targetType === columnFilters.targetType;
-    const matchTargetSubtype = columnFilters.targetSubtype === 'all' || k.targetSubtype === columnFilters.targetSubtype;
-    const matchTargetGeo = columnFilters.targetGeo === 'all' || k.targetGeo === columnFilters.targetGeo;
-    const matchPriority = columnFilters.priority === 'all' || k.priority === columnFilters.priority;
+    const matchCluster = !columnFilters.cluster || columnFilters.cluster.length === 0 || columnFilters.cluster.includes(k.cluster);
+    const matchCategory = !columnFilters.category || columnFilters.category.length === 0 || columnFilters.category.includes(k.category);
+    const matchType = !columnFilters.type || columnFilters.type.length === 0 || columnFilters.type.includes(k.type);
+    const matchTargetType = !columnFilters.targetType || columnFilters.targetType.length === 0 || columnFilters.targetType.includes(k.targetType);
+    const matchTargetSubtype = !columnFilters.targetSubtype || columnFilters.targetSubtype.length === 0 || columnFilters.targetSubtype.includes(k.targetSubtype);
+    const matchTargetGeo = !columnFilters.targetGeo || columnFilters.targetGeo.length === 0 || columnFilters.targetGeo.includes(k.targetGeo);
+    const matchPriority = !columnFilters.priority || columnFilters.priority.length === 0 || columnFilters.priority.includes(k.priority);
 
     return matchSearch && matchCluster && matchCategory && matchType && matchTargetType && matchTargetSubtype && matchTargetGeo && matchPriority;
   });
@@ -832,9 +976,24 @@ export default function KeywordsPage({ user }) {
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>KW DIFF</th>
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>CLUSTER</th>
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>CATEGORY</th>
-                <th style={{ padding: '12px 14px', fontWeight: 700 }}>TYPE</th>
-                <th style={{ padding: '12px 14px', fontWeight: 700 }}>TARGET TYPE</th>
-                <th style={{ padding: '12px 14px', fontWeight: 700 }}>TARGET SUBTYPE</th>
+                <ColumnHeaderFilter
+                  title="Type"
+                  options={uniqueTypes}
+                  selectedValues={columnFilters.type}
+                  onChange={val => setColumnFilters({ ...columnFilters, type: val })}
+                />
+                <ColumnHeaderFilter
+                  title="Target Type"
+                  options={uniqueTargetTypes}
+                  selectedValues={columnFilters.targetType}
+                  onChange={val => setColumnFilters({ ...columnFilters, targetType: val })}
+                />
+                <ColumnHeaderFilter
+                  title="Target Subtype"
+                  options={uniqueTargetSubtypes}
+                  selectedValues={columnFilters.targetSubtype}
+                  onChange={val => setColumnFilters({ ...columnFilters, targetSubtype: val })}
+                />
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>TARGET GEO</th>
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>PRIORITY</th>
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>LANDING PAGE</th>

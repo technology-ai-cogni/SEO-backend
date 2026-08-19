@@ -2085,7 +2085,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       ))}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 4 }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 4 }}>
                     <button
                       onClick={() => onNavigate && onNavigate('search-visibility/ai-analysis')}
                       onMouseEnter={(e) => {
@@ -2111,7 +2111,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                         transition: 'all 0.15s ease-in-out'
                       }}
                     >
-                      View all
+                      View all &gt;
                     </button>
                   </div>
                 </div>
@@ -2943,7 +2943,15 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         {/* View all button redirecting to Top Pages tab */}
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12, paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
           <button
-            onClick={() => onNavigate && onNavigate('search-visibility/top-pages')}
+            onClick={() => {
+            if (onNavigate) {
+              if (pageAnalysisLlm === 'organic') {
+                onNavigate('search-visibility/top-pages');
+              } else {
+                onNavigate('search-visibility/ai-analysis');
+              }
+            }
+          }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = '#f1f5f9';
               e.currentTarget.style.color = '#7c3aed';
