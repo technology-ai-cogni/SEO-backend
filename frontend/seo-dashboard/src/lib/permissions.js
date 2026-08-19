@@ -348,13 +348,45 @@ export function canUpdate(user) {
 
 /**
  * Determines whether a user can download data files (CSV, Excel).
- * Triggered by: 'View + Edit', 'View + Edit + Delete', 'View + Edit + Delete + Update', 'Full Control'
+ * Requires explicit 'View + Edit + Delete + Update' or 'Full Control' permissions,
+ * or Admin / Team Lead default roles. Internal Associates and viewers do NOT get download permission by default.
  *
  * @param {Object} user - Logged in user context.
  * @returns {boolean} True if user is allowed to download CSV/Excel data.
  */
 export function canDownload(user) {
-  return canEdit(user);
+  if (!user || !user.role) return false;
+  const role = user.role.toUpperCase();
+  if (role === 'ADMIN') return true;
+
+  const permissions = (user.permissions || 'Default').trim().toLowerCase();
+
+  // Explicit permission overrides:
+  if (permissions === 'view only' || permissions === 'view') return false;
+  if (
+    permissions.includes('update') ||
+    permissions.includes('full control') ||
+    permissions.includes('download')
+  ) {
+    return true;
+  }
+
+  // Internal Associates, Sr Associates, Client Associates, Vendors default to NO download capability
+  if (
+    role === 'INTERNAL_ASSOCIATE' ||
+    role === 'INTERNAL_SR_ASSOCIATE' ||
+    role === 'CLIENT_ASSOCIATE' ||
+    role === 'CLIENT_SR_ASSOCIATE' ||
+    role === 'VENDOR' ||
+    role === 'USER'
+  ) {
+    return false;
+  }
+
+  // Role-Based Defaults: Team Leads get download permission by default
+  if (role === 'INTERNAL_TEAM_LEAD' || role === 'CLIENT_TEAM_LEAD') return true;
+
+  return false;
 }
 
 /**
@@ -447,6 +479,63 @@ export function canRunBrandDiscovery(user, projectSlug) {
   }
 
   return false;
+}
+
+/**
+ * Determines whether a user can run/trigger AI model analysis on Brand Discovery or AI Analysis pages.
+ * Default Permission Rules for Associates:
+ * - Admin, Team Leads, or Full Control: Continuous access to Analyze / Re-analyze anytime.
+ * - Associates: Allowed to hit Analyze ONCE per model per project. Once data comes back (hasData === true)
+ *   or if analysis was previously run, the button gets HIDDEN.
+ *
+ * @param {Object} user - Logged in user context.
+ * @param {string} projectSlug - The active project identifier.
+ * @param {string} engineName - Model identifier ('chatgpt', 'gemini', 'ai overview', 'all').
+ * @param {boolean} hasData - Whether data is currently available for this model/project.
+ * @returns {boolean} True if the Analyze button should be visible.
+ */
+export function canRunAiModelAnalysis(user, projectSlug, engineName = 'all', hasData = false) {
+  if (!user || !user.role) return false;
+  const role = user.role.toUpperCase();
+  if (role === 'ADMIN' || role === 'INTERNAL_TEAM_LEAD' || role === 'CLIENT_TEAM_LEAD') return true;
+
+  const permissions = (user.permissions || 'Default').trim().toLowerCase();
+  if (permissions.includes('full control')) return true;
+  if (permissions === 'view only' || permissions === 'view') return false;
+
+  if (isAssociateUser(user)) {
+    // If data is already present for this model/project, hide the Analyze button for associates
+    if (hasData) return false;
+
+    const userId = user.id || user.username || user.email || 'user';
+    const slug = projectSlug || 'default';
+    const eng = (engineName || 'all').toLowerCase().trim().replace(/\s+/g, '_');
+    
+    // Check general project run flag or specific engine run flag
+    const genKey = `bd_analyzed_associate_${userId}_${slug}`;
+    const engKey = `ai_analyzed_associate_${userId}_${slug}_${eng}`;
+    
+    const hasGenRun = localStorage.getItem(genKey) === 'true';
+    const hasEngRun = localStorage.getItem(engKey) === 'true';
+
+    if (eng === 'all' && (hasGenRun || hasEngRun)) return false;
+    return !hasEngRun;
+  }
+
+  return true;
+}
+
+export function recordAiModelAnalysisRun(user, projectSlug, engineName = 'all') {
+  if (!user) return;
+  const userId = user.id || user.username || user.email || 'user';
+  const slug = projectSlug || 'default';
+  const eng = (engineName || 'all').toLowerCase().trim().replace(/\s+/g, '_');
+
+  const genKey = `bd_analyzed_associate_${userId}_${slug}`;
+  const engKey = `ai_analyzed_associate_${userId}_${slug}_${eng}`;
+
+  localStorage.setItem(genKey, 'true');
+  localStorage.setItem(engKey, 'true');
 }
 
 

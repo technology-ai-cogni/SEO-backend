@@ -7,7 +7,7 @@ import {
   runAiVisibilityAnalysis
 } from '../../lib/projectsApi';
 import { supabase } from '../../lib/supabaseClient';
-import { hasPermission, PERMISSIONS, canRunActions } from '../../lib/permissions';
+import { hasPermission, PERMISSIONS, canRunActions, canRunAiModelAnalysis, recordAiModelAnalysisRun } from '../../lib/permissions';
 
 export default function AiAnalysisPage({ user }) {
   const userCanRunActions = canRunActions(user);
@@ -157,7 +157,10 @@ export default function AiAnalysisPage({ user }) {
 
   const handleRunAnalysis = async () => {
     if (!activeProject?.slug || analyzing) return;
-    if (!userCanRunActions || !hasPermission(user, PERMISSIONS.RUN_ANALYSIS)) {
+    const engineResult = getActiveEngineResult();
+    const hasEngineData = !!engineResult;
+
+    if (!canRunAiModelAnalysis(user, activeProject.slug, selectedEngine, hasEngineData)) {
       alert('Permission Denied: You do not have permission to run AI analysis.');
       return;
     }
@@ -194,6 +197,7 @@ export default function AiAnalysisPage({ user }) {
         }
       }
       
+      recordAiModelAnalysisRun(user, activeProject.slug, selectedEngine);
       await loadProjectData(activeProject.slug);
     } catch (err) {
       console.error('[AiAnalysisPage] Analysis run error:', err);
@@ -774,7 +778,7 @@ export default function AiAnalysisPage({ user }) {
           </div>
 
           {/* Right Side: Re-analyze Button */}
-          {userCanRunActions && (
+          {userCanRunActions && canRunAiModelAnalysis(user, activeProject?.slug, selectedEngine, !!getActiveEngineResult()) && (
             <button
               onClick={handleRunAnalysis}
               disabled={analyzing}

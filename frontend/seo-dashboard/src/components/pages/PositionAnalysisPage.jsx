@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ExternalLink, Search, ChevronDown, CheckCircle, Lock, ShieldAlert } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi, fetchDomainMetricsApi } from '../../lib/projectsApi';
-import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions, canRunBrandDiscovery, isAssociateUser } from '../../lib/permissions';
+import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions, canRunBrandDiscovery, isAssociateUser, canRunAiModelAnalysis, recordAiModelAnalysisRun } from '../../lib/permissions';
 
 function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 100, projectTotalKeywords = 514 }) {
   const [hoverType, setHoverType] = useState(null); // null | 'mentions' | 'cited'
@@ -797,12 +797,15 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     if (e && e.preventDefault) e.preventDefault();
     if (!activeProject) return;
 
-    if (!userCanRunActions || !hasPermission(user, PERMISSIONS.RUN_ANALYSIS)) {
+    const { targetEngine = null, analyzeAll = false } = options;
+    const targetModel = analyzeAll ? 'all' : (targetEngine || aiTab || 'all').toLowerCase();
+    const currentModelResults = tabResults[targetModel] || [];
+    const hasModelData = currentModelResults.length > 0;
+
+    if (!canRunAiModelAnalysis(user, activeProject.slug, targetModel, hasModelData)) {
       setAnalysisError('Permission Denied: You do not have permission to run AI analysis.');
       return;
     }
-
-    const { targetEngine = null, analyzeAll = false } = options;
     const domain = activeProject.domain || activeProject.name || '';
     const countryObj = COUNTRY_OPTIONS.find(c => c.code === selectedRegion);
     const countryName = countryObj ? countryObj.name : selectedRegion || 'India';
@@ -918,9 +921,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         setTabResults(prev => ({ ...prev, ...newTabResults }));
 
         if (isAssociateUser(user)) {
-          const userId = user?.id || user?.username || user?.email || 'user';
-          const storageKey = `bd_analyzed_associate_${userId}_${activeProject?.slug || 'default'}`;
-          localStorage.setItem(storageKey, 'true');
+          recordAiModelAnalysisRun(user, activeProject?.slug, 'all');
           setAssociateAnalyzed(true);
         }
       } catch (err) {
@@ -963,9 +964,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         saveHitToPeriodHistory(activeProject.slug, engineKey, visibilityResult);
 
         if (isAssociateUser(user)) {
-          const userId = user?.id || user?.username || user?.email || 'user';
-          const storageKey = `bd_analyzed_associate_${userId}_${activeProject?.slug || 'default'}`;
-          localStorage.setItem(storageKey, 'true');
+          recordAiModelAnalysisRun(user, activeProject?.slug, engineKey);
           setAssociateAnalyzed(true);
         }
       } catch (err) {
@@ -1682,7 +1681,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
           justifyContent: 'flex-end',
           gap: 10
         }}>
-          {userCanRunActions && (
+          {userCanRunActions && canRunAiModelAnalysis(user, activeProject?.slug, 'all', Object.values(tabResults).some(r => r && r.length > 0)) && (
             <button
               onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
               disabled={Object.values(analyzingTabs).some(Boolean)}
@@ -1835,7 +1834,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       padding: '28px 12px',
                       textAlign: 'center'
                     }}>
-                      {userCanRunActions && (
+                      {userCanRunActions && canRunAiModelAnalysis(user, activeProject?.slug, aiTab, currentTabResults.length > 0) && (
                         <button
                           onClick={(e) => handleAiAnalysis(e, { targetEngine: aiTab.toLowerCase() })}
                           disabled={isCurrentTabAnalyzing || !topKeywords.length}

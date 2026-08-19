@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Search, ChevronDown, ExternalLink, Download, KeyRound, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fetchDomainRows, fetchKeywordRows } from '../../lib/projectsApi';
+import { canDownload } from '../../lib/permissions';
 
-export default function KeywordsPage() {
+export default function KeywordsPage({ user }) {
+  const userCanDownload = canDownload(user);
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -773,6 +775,31 @@ export default function KeywordsPage() {
               </div>
             )}
           </div>
+
+          {/* Export CSV Button (Visible only if userCanDownload is true) */}
+          {userCanDownload && (
+            <button
+              onClick={handleExportCSV}
+              title="Export CSV Data"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '7px 12px',
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: '#475569',
+                background: '#ffffff',
+                border: '1px solid #cbd5e1',
+                borderRadius: 6,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <Download size={15} />
+              <span>Export CSV</span>
+            </button>
+          )}
         </div>
       </div>
 
