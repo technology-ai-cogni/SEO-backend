@@ -4927,8 +4927,26 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
       </div>
     </div>
   )}
-</>
+  </>
   );
+}
+
+function resolveFullCompetitorUrl(c, domain, name) {
+  if (!c && !domain && !name) return '';
+  if (typeof c === 'string') return c;
+  const target = c?.url || c?.fullUrl || c?.link || domain || name || '';
+  if (!target) return '';
+  if (target.startsWith('http://') || target.startsWith('https://')) return target;
+  if (target.includes('.')) return `https://${target}`;
+  return target;
+}
+
+function formatCleanName(raw) {
+  if (!raw) return '';
+  let str = String(raw).trim();
+  str = str.replace(/^https?:\/\/(www\.)?/, '');
+  str = str.split('/')[0];
+  return str || raw;
 }
 
 function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, onBack, onSelectCompetitor, onSelectKwDetail, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, onFindCompetitors, onAddPages, hasPendingChanges, saving, saveError, onSaveChanges, loading, error, top3KwByCategory, top3KwLoading, search, findingCompetitors, user }) {
@@ -5130,10 +5148,10 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
       }
       if (categoryFilter) {
         const filterLower = categoryFilter.trim().toLowerCase();
-        const cCats = (c.category || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+        const cCats = (c.category || c.targetSubtype || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
         const cClus = (c.cluster || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-        const matches = cCats.some(cat => cat === filterLower || cat.includes(filterLower)) ||
-                        cClus.some(clus => clus === filterLower || clus.includes(filterLower));
+        const matches = cCats.some(cat => cat === filterLower || cat.includes(filterLower) || filterLower.includes(cat)) ||
+                        cClus.some(clus => clus === filterLower || clus.includes(filterLower) || filterLower.includes(clus));
         if (!matches) return false;
       }
       if (tableFilters.category?.length) {
@@ -5416,7 +5434,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
             </tbody>
           </table>
         </div>
-      ) : (categoryFilter === null || loading || findingCompetitors || baseFiltered.length < 10) ? (
+      ) : categoryFilter === null ? (
         <CategoryBasedCompetitorsTable
           rows={displayedCategorySummaryRows}
           loading={categorySummaryLoading || loading || findingCompetitors}
@@ -5535,11 +5553,11 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={7} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading competitors…</td></tr>
+                  <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading competitors…</td></tr>
                 ) : error ? (
-                  <tr><td colSpan={7} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
+                  <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
                 ) : paged.length === 0 ? (
-                  <tr><td colSpan={7} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors found for category "{categoryFilter}".</td></tr>
+                  <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No competitors found for category "{categoryFilter}".</td></tr>
                 ) : paged.map((c, i) => {
                   const catList = c.category ? c.category.split(',').map(s => s.trim()).filter(Boolean) : [];
                   const clusList = c.cluster ? c.cluster.split(',').map(s => s.trim()).filter(Boolean) : [];

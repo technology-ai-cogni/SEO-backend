@@ -216,28 +216,43 @@ class UndetectedQuoraScraper:
     async def fetch_quora_post(self, url: str) -> dict:
         result = {"url": url, "scraped_answers": [], "error": None}
         try:
-            print(f"\nNavigating to topic URL: {url}...")
+            print(f"\n[Step 1] Navigating & waiting for full page load: {url}...")
             self.driver.get(url)
             time.sleep(3)
 
-            print("Scrolling to load answers...")
+            print("Scrolling full page to load all dynamic content...")
             for i in range(5):
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)
+                time.sleep(1.5)
 
-            # Click collapsed answers buttons
-            try:
-                collapsed_btns = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'answers collapsed') or contains(text(), 'answer collapsed') or contains(text(), 'collapsed')]")
-                for btn in collapsed_btns:
-                    try:
-                        if btn.is_displayed() and "collapsed" in btn.text.lower():
-                            print(f"Clicking collapsed answers button ('{btn.text.strip()}')...")
-                            btn.click()
-                            time.sleep(2)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            print("Waiting up to 7 seconds for collapsed answers button (e.g. '8 answers collapsed') to appear...")
+            clicked_collapsed = False
+            for attempt in range(7):
+                try:
+                    clicked_count = self.driver.execute_script("""
+                        let clicked = 0;
+                        const targets = Array.from(document.querySelectorAll('.q-click-wrapper, div, span, button'));
+                        for (const el of targets) {
+                            if (el.children.length > 3) continue;
+                            const txt = (el.innerText || "").trim();
+                            if (/\\d+\\s+answers?\\s+collapsed/i.test(txt) || (txt.toLowerCase().includes('collapsed') && txt.toLowerCase().includes('answer'))) {
+                                el.scrollIntoView({ behavior: 'instant', block: 'center' });
+                                el.click();
+                                clicked++;
+                            }
+                        }
+                        return clicked;
+                    """)
+                    if clicked_count > 0:
+                        print(f"[OK] Successfully clicked {clicked_count} collapsed answers button(s) (e.g. '.q-click-wrapper')!")
+                        clicked_collapsed = True
+                        break
+                except Exception:
+                    pass
+                time.sleep(1)
+
+            if not clicked_collapsed:
+                print("Collapsed answers button did not appear within 7 seconds (or none on page).")
 
             # Click (more) expand buttons
             try:
@@ -252,8 +267,8 @@ class UndetectedQuoraScraper:
             except Exception:
                 pass
 
-            print("[PAUSE] Pausing 5 seconds for collapsed answers content to render before link extraction...")
-            time.sleep(5)
+            print("[PAUSE] Waiting 7 seconds after expanding collapsed answers before fetching data...")
+            time.sleep(7)
 
             topic_path = normalize_quora_url(url)
             expected_prefix = f"{topic_path}/answer/" if topic_path else ""
@@ -499,39 +514,45 @@ class QuoraScraper:
         result = {"url": url, "scraped_answers": [], "error": None}
         
         try:
-            print(f"\nNavigating to topic URL: {url}...")
+            print(f"\n[Step 1] Navigating & waiting for full page load: {url}...")
             await self.page.goto(url, timeout=60000, wait_until="domcontentloaded")
             await self.page.wait_for_timeout(3000)
             
-            print("Scrolling to load answers...")
+            print("Scrolling full page to load all dynamic content...")
             for i in range(5):
                 await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await self.page.wait_for_timeout(2000)
+                await self.page.wait_for_timeout(1500)
 
-            # 1. Click on collapsed answers elements (e.g. "4 answers collapsed")
-            try:
-                collapsed_selectors = [
-                    'div:has-text("answers collapsed")',
-                    'div:has-text("answer collapsed")',
-                    'div:has-text("collapsed")',
-                    '.q-click-wrapper:has-text("collapsed")',
-                    'span:has-text("collapsed")'
-                ]
-                for sel in collapsed_selectors:
-                    collapsed_btns = await self.page.query_selector_all(sel)
-                    for btn in collapsed_btns:
-                        try:
-                            btn_text = await btn.inner_text()
-                            if "collapsed" in btn_text.lower():
-                                print(f"Found collapsed answers button ('{btn_text.strip()}'), clicking to reveal...")
-                                await btn.click(timeout=2000)
-                                await self.page.wait_for_timeout(2000)
-                        except Exception:
-                            pass
-            except Exception as e:
-                print(f"Notice: Collapsed answers click step: {str(e)}")
+            print("Waiting up to 7 seconds for collapsed answers button (e.g. '8 answers collapsed') to appear...")
+            clicked_collapsed = False
+            for attempt in range(7):
+                try:
+                    clicked_count = await self.page.evaluate("""() => {
+                        let clicked = 0;
+                        const targets = Array.from(document.querySelectorAll('.q-click-wrapper, div, span, button'));
+                        for (const el of targets) {
+                            if (el.children.length > 3) continue;
+                            const txt = (el.innerText || "").trim();
+                            if (/\\d+\\s+answers?\\s+collapsed/i.test(txt) || (txt.toLowerCase().includes('collapsed') && txt.toLowerCase().includes('answer'))) {
+                                el.scrollIntoView({ behavior: 'instant', block: 'center' });
+                                el.click();
+                                clicked++;
+                            }
+                        }
+                        return clicked;
+                    }""")
+                    if clicked_count > 0:
+                        print(f"[OK] Successfully clicked {clicked_count} collapsed answers button(s) (e.g. '.q-click-wrapper')!")
+                        clicked_collapsed = True
+                        break
+                except Exception:
+                    pass
+                await self.page.wait_for_timeout(1000)
 
-            # 2. Click any '(more)' expand buttons to reveal full answer text and links
+            if not clicked_collapsed:
+                print("Collapsed answers button did not appear within 7 seconds (or none on page).")
+
+            # 3. Click any '(more)' expand buttons to reveal full text
             try:
                 more_btns = await self.page.query_selector_all('div:has-text("(more)"), span:has-text("(more)")')
                 for btn in more_btns[:15]:
@@ -542,8 +563,9 @@ class QuoraScraper:
             except Exception:
                 pass
 
-            print("[PAUSE] Pausing 5 seconds for collapsed answers content to render before link extraction...")
-            await self.page.wait_for_timeout(5000)
+            # 4. Wait 7 seconds after expanding collapsed answers before fetching data
+            print("[PAUSE] Waiting 7 seconds after expanding collapsed answers before fetching data...")
+            await self.page.wait_for_timeout(7000)
 
             topic_path = normalize_quora_url(url)
             if not topic_path:
@@ -554,6 +576,8 @@ class QuoraScraper:
             extract_script = """(expectedPrefix) => {
                 const results = [];
                 const seenPaths = new Set();
+                const seenContainers = new Set();
+                
                 let links = Array.from(document.querySelectorAll('a[href*="/answer/"], a[href*="/profile/"]'));
                 
                 for (let link of links) {
@@ -567,13 +591,11 @@ class QuoraScraper:
                     
                     let path = urlObj.pathname.replace(/^\\//, '');
                     
-                    // Must belong to this specific question if answer link
                     if (href.includes('/answer/') && expectedPrefix && !path.toLowerCase().includes(expectedPrefix.toLowerCase())) continue;
                     
                     if (seenPaths.has(path)) continue;
                     seenPaths.add(path);
                     
-                    // Find container: walk up until we hit a container that has an upvote button
                     let container = link;
                     let upvotes = "0";
                     for (let i = 0; i < 15; i++) {
@@ -593,8 +615,8 @@ class QuoraScraper:
                         }
                         container = container.parentElement;
                     }
+                    if (container) seenContainers.add(container);
                     
-                    // Extract external links inside answer text body
                     let externalLinks = [];
                     let authorUrl = "";
                     if (container) {
@@ -624,6 +646,51 @@ class QuoraScraper:
                         external_links: externalLinks
                     });
                 }
+
+                // Parse standalone collapsed answer containers
+                let upvoteButtons = Array.from(document.querySelectorAll('button')).filter(b => 
+                    (b.innerText && b.innerText.includes('Upvote')) || 
+                    (b.getAttribute('aria-label') && b.getAttribute('aria-label').includes('Upvote'))
+                );
+                for (let btn of upvoteButtons) {
+                    let container = btn;
+                    for (let i = 0; i < 10; i++) {
+                        if (!container || container === document.body) break;
+                        if (container.parentElement && container.parentElement.innerText.length > container.innerText.length + 100) {
+                            break;
+                        }
+                        container = container.parentElement;
+                    }
+                    if (container && !seenContainers.has(container)) {
+                        seenContainers.add(container);
+                        let text = container.innerText || "";
+                        if (text.length > 50) {
+                            let externalLinks = [];
+                            let authorUrl = "";
+                            let innerLinks = container.querySelectorAll('a[href]');
+                            for (let a of innerLinks) {
+                                let aHref = a.getAttribute('href');
+                                if (!aHref) continue;
+                                if (aHref.includes('quora.com') && aHref.includes('/profile/')) {
+                                    if (!authorUrl) authorUrl = aHref;
+                                } else if (!aHref.startsWith('#') && !aHref.startsWith('javascript:') && !aHref.includes('quora.com')) {
+                                    externalLinks.push(aHref);
+                                }
+                            }
+                            let match = (btn.innerText || "").match(/([\\d\\.]+[KMBkmb]?)/);
+                            let upvotes = match ? match[1] : "0";
+                            results.push({
+                                url: authorUrl ? authorUrl.replace(/^.*quora\\.com\\//, '') : "",
+                                full_url: authorUrl || "",
+                                author_url: authorUrl,
+                                upvotes: upvotes,
+                                text: text.substring(0, 3000),
+                                external_links: externalLinks
+                            });
+                        }
+                    }
+                }
+
                 return results;
             }"""
 
@@ -741,19 +808,29 @@ async def main():
                             # Find our mapped answer in the list
                             our_answer = None
                             our_rank = None
+                            landing_page = row.get("Landing Page", "").strip()
+                            landing_domain = landing_page.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower() if landing_page else ""
+
                             for i, ans in enumerate(scraped):
                                 ans_url = ans.get("url", "")
                                 ans_full = ans.get("full_url", "")
                                 ans_author = ans.get("author_url", "")
+                                ans_text_lower = ans.get("text", "").lower()
+                                ext_links = [l.lower() for l in ans.get("external_links", [])]
                                 
                                 is_match = False
-                                if live_path and (live_path in ans_url or ans_url in live_path):
+                                if live_path and (live_path.lower() in ans_url.lower() or ans_url.lower() in live_path.lower()):
                                     is_match = True
-                                elif live and (live in ans_full or live in ans_author):
+                                elif live and (live.lower() in ans_full.lower() or live.lower() in ans_author.lower()):
                                     is_match = True
                                 elif live_path and ("/" in live_path):
-                                    author_segment = live_path.split("/")[-1]
-                                    if author_segment and (author_segment in ans_url or author_segment in ans_author or author_segment in ans_full):
+                                    author_segment = live_path.split("/")[-1].replace("-", " ").lower()
+                                    if author_segment and (author_segment in ans_url.lower() or author_segment in ans_author.lower() or author_segment in ans_full.lower() or author_segment in ans_text_lower):
+                                        is_match = True
+                                
+                                # Match by Landing Page URL or Domain in external links or answer body text
+                                if not is_match and landing_page:
+                                    if any(landing_page.lower() in l or l in landing_page.lower() for l in ext_links) or (landing_domain and landing_domain in ans_text_lower):
                                         is_match = True
                                 
                                 if is_match:

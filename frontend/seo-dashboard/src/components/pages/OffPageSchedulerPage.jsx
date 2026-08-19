@@ -9,7 +9,8 @@ import {
   runAuditAllocationApi,
   fetchScheduledActivitiesApi, 
   createScheduledActivityApi, 
-  deleteScheduledActivityApi 
+  deleteScheduledActivityApi,
+  fetchUsersApi
 } from '../../lib/projectsApi';
 
 // Reusable Modal Component matching Project Setup style
@@ -503,18 +504,31 @@ export default function OffPageSchedulerPage() {
   const [scheduleFreq, setScheduleFreq] = useState('One-Time');
   const [schedMsg, setSchedMsg] = useState({ type: '', text: '' });
 
-  // Load monthly operations data from DB on mount
+  const [systemAssociates, setSystemAssociates] = useState([]);
+
+  // Load monthly operations data and system associates from DB on mount
   useEffect(() => {
     let isMounted = true;
     async function loadData() {
       try {
-        const [dbImports, dbSchedules] = await Promise.all([
+        const [dbImports, dbSchedules, dbUsers] = await Promise.all([
           fetchMonthlyImportsApi().catch(() => null),
-          fetchScheduledActivitiesApi().catch(() => null)
+          fetchScheduledActivitiesApi().catch(() => null),
+          fetchUsersApi().catch(() => null)
         ]);
         if (isMounted) {
           if (dbImports && dbImports.length > 0) setImports(dbImports);
           if (dbSchedules && dbSchedules.length > 0) setSchedules(dbSchedules);
+          if (dbUsers && Array.isArray(dbUsers)) {
+            const associates = dbUsers
+              .filter(u => {
+                const r = (u.role || '').toUpperCase();
+                return r.includes('ASSOCIATE');
+              })
+              .map(u => (u.name || u.email || '').trim())
+              .filter(Boolean);
+            setSystemAssociates(associates);
+          }
         }
       } catch (err) {
         console.warn('[OffPageSchedulerPage] Failed to load DB monthly operations:', err);
@@ -868,14 +882,59 @@ export default function OffPageSchedulerPage() {
     setAuditAllocating(true);
     try {
       const datasetId = selectedDataset ? selectedDataset.id : null;
-      const res = await runAuditAllocationApi(datasetId, 22);
+      
+      const assocMap = new Map();
+      (systemAssociates || []).forEach(name => {
+        if (name && name.trim() && name.toLowerCase() !== 'unassigned') {
+          const key = name.trim().toLowerCase();
+          if (!assocMap.has(key)) {
+            assocMap.set(key, name.trim());
+          }
+        }
+      });
+
+      if (assocMap.size === 0 && selectedDataset) {
+        const currentRows = [...(selectedDataset.rowsData || [])];
+        currentRows.forEach(r => {
+          const raw = (r.publisher || r.associate || '').trim();
+          if (raw && raw.toLowerCase() !== 'unassigned') {
+            const key = raw.toLowerCase();
+            if (!assocMap.has(key)) {
+              assocMap.set(key, raw);
+            }
+          }
+        });
+      }
+
+      const activeAssociates = Array.from(assocMap.values());
+
+      if (selectedDataset && activeAssociates.length > 0) {
+        const currentRows = [...(selectedDataset.rowsData || [])];
+        const updatedRows = currentRows.map((row, idx) => {
+          const assignedAssoc = activeAssociates[idx % activeAssociates.length];
+          return { ...row, publisher: assignedAssoc };
+        });
+
+        setSelectedDataset(prev => ({ ...prev, rowsData: updatedRows }));
+        setIsDirty(true);
+
+        await updateMonthlyImportApi(selectedDataset.id, {
+          project: selectedDataset.project || selectedDataset.project_name,
+          filename: selectedDataset.filename,
+          rows: updatedRows.length,
+          rowsData: updatedRows
+        });
+      }
+
+      const res = await runAuditAllocationApi({ dataset_id: datasetId, days: 22, system_associates: activeAssociates });
       const freshImports = await fetchMonthlyImportsApi();
       setImports(freshImports);
       if (selectedDataset) {
         const updatedDs = freshImports.find(imp => imp.id === selectedDataset.id || imp.project === selectedDataset.project);
         if (updatedDs) setSelectedDataset(updatedDs);
       }
-      setAuditSuccessMsg(res.message || 'Audit allocation completed successfully!');
+      setAuditSuccessMsg(res.message || 'Equal resource allocation completed across all associates!');
+      setTimeout(() => setAuditSuccessMsg(''), 4000);
     } catch (err) {
       setAuditSuccessMsg(`Audit allocation notice: ${err.message}`);
     } finally {
@@ -1050,14 +1109,28 @@ export default function OffPageSchedulerPage() {
 
         {/* Associate Resource Breakdown Summary Card */}
         {(() => {
-          const assocCounts = (rows || []).reduce((acc, r) => {
-            const pub = r.publisher && r.publisher.trim() !== '' ? r.publisher : 'Unassigned';
-            acc[pub] = (acc[pub] || 0) + 1;
-            return acc;
-          }, {});
-          const assocEntries = Object.entries(assocCounts);
+          const nameMap = new Map();
+          (systemAssociates || []).forEach(name => {
+            if (name && name.trim() && name.toLowerCase() !== 'unassigned') {
+              const key = name.trim().toLowerCase();
+              if (!nameMap.has(key)) {
+                nameMap.set(key, { name: name.trim(), count: 0 });
+              }
+            }
+          });
+          const hasSystemAssocs = systemAssociates && systemAssociates.length > 0;
+          (rows || []).forEach(r => {
+            const raw = r.publisher && r.publisher.trim() !== '' ? r.publisher.trim() : 'Unassigned';
+            const key = raw.toLowerCase();
+            if (nameMap.has(key)) {
+              nameMap.get(key).count += 1;
+            } else if (!hasSystemAssocs) {
+              nameMap.set(key, { name: raw, count: 1 });
+            }
+          });
+          const assocEntries = Array.from(nameMap.values()).map(item => [item.name, item.count]);
           if (assocEntries.length === 0) return null;
-          const assignedCount = assocEntries.filter(([n]) => n !== 'Unassigned').length;
+          const assignedCount = assocEntries.filter(([n]) => n.toLowerCase() !== 'unassigned').length;
 
           return (
             <div style={{
@@ -2089,18 +2162,32 @@ export default function OffPageSchedulerPage() {
         }}>
           {/* Global Associate Resource Breakdown Card in Main View */}
           {(() => {
-            const globalCounts = {};
+            const nameMap = new Map();
+            (systemAssociates || []).forEach(name => {
+              if (name && name.trim() && name.toLowerCase() !== 'unassigned') {
+                const key = name.trim().toLowerCase();
+                if (!nameMap.has(key)) {
+                  nameMap.set(key, { name: name.trim(), count: 0 });
+                }
+              }
+            });
+            const hasSystemAssocs = systemAssociates && systemAssociates.length > 0;
             let totalRes = 0;
             (imports || []).forEach(imp => {
               (imp.rowsData || []).forEach(r => {
                 totalRes += 1;
-                const pub = r.publisher && r.publisher.trim() !== '' ? r.publisher : 'Unassigned';
-                globalCounts[pub] = (globalCounts[pub] || 0) + 1;
+                const raw = r.publisher && r.publisher.trim() !== '' ? r.publisher.trim() : 'Unassigned';
+                const key = raw.toLowerCase();
+                if (nameMap.has(key)) {
+                  nameMap.get(key).count += 1;
+                } else if (!hasSystemAssocs) {
+                  nameMap.set(key, { name: raw, count: 1 });
+                }
               });
             });
-            const globalEntries = Object.entries(globalCounts);
+            const globalEntries = Array.from(nameMap.values()).map(item => [item.name, item.count]);
             if (globalEntries.length === 0) return null;
-            const assignedCount = globalEntries.filter(([n]) => n !== 'Unassigned').length;
+            const assignedCount = globalEntries.filter(([n]) => n.toLowerCase() !== 'unassigned').length;
 
             return (
               <div style={{

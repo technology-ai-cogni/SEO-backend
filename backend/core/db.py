@@ -2724,6 +2724,24 @@ def delete_scheduled_activity(schedule_id):
         conn.execute(text("DELETE FROM scheduled_activities WHERE id = :id"), {"id": schedule_id})
 
 
+def list_users() -> list:
+    """List all registered users from Supabase users table or Postgres database."""
+    if supabase:
+        try:
+            res = supabase.from_("users").select("*").execute()
+            if res.data:
+                return _clean_for_json(res.data)
+        except Exception as e:
+            print(f"[db] Notice in list_users Supabase fetch: {e}")
+    with engine.begin() as conn:
+        try:
+            res = conn.execute(text("SELECT * FROM users ORDER BY created_at DESC"))
+            rows = [dict(r._mapping) for r in res]
+            return _clean_for_json(rows)
+        except Exception:
+            return []
+
+
 if __name__ == "__main__":
     # Create/update the shared tables (run from the `backend/` directory):
     #   python -m core.db
