@@ -358,6 +358,12 @@ class UndetectedQuoraScraper:
                 pass
 
 class QuoraScraper:
+    def __init__(self):
+        self.playwright = None
+        self.browser = None
+        self.context = None
+        self.page = None
+
     async def start(self, use_bright_data=True, headless=False):
         self.playwright = await async_playwright().start()
 
@@ -369,7 +375,7 @@ class QuoraScraper:
         else:
             print(f"Launching local browser (headless={headless})...")
             self.browser = await self.playwright.chromium.launch(
-                headless=False,
+                headless=headless,
                 args=[
                     "--no-sandbox", 
                     "--disable-dev-shm-usage",
@@ -710,9 +716,14 @@ class QuoraScraper:
 
     async def close(self):
         try:
-            await self.context.close()
-            await self.browser.close()
-            await self.playwright.stop()
+            if self.page:
+                await self.page.close()
+            if self.context:
+                await self.context.close()
+            if self.browser:
+                await self.browser.close()
+            if self.playwright:
+                await self.playwright.stop()
         except Exception as e:
             print(f"Error during cleanup: {str(e)}")
 

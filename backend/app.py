@@ -523,7 +523,7 @@ def run_audit_allocation_endpoint(payload: AuditAllocationRequest):
     except Exception as e:
         print(f"[app] Error in audit allocation: {e}", file=sys.stderr, flush=True)
         return {"status": "success", "message": "Audit allocation completed."}
-
+import os
 # --- AI Status Check Endpoint ---
 import importlib.util
 
@@ -566,7 +566,10 @@ async def run_ai_status_check_endpoint(payload: AiStatusCheckRequest):
             try:
                 scraper = QuoraScraper()
                 await scraper.start(use_bright_data=False, headless=True)
-                await scraper.login_quora()
+                try:
+                    await scraper.login_quora()
+                except Exception as le:
+                    print(f"[app] Quora login notice: {le}", file=sys.stderr, flush=True)
             except Exception as se:
                 print(f"[app] Scraper init notice: {se}", file=sys.stderr, flush=True)
 
@@ -594,12 +597,12 @@ async def run_ai_status_check_endpoint(payload: AiStatusCheckRequest):
                     continue
 
                 scraped_answers = []
-                if scraper:
+                if scraper and getattr(scraper, "page", None):
                     try:
                         scrape_data = await scraper.fetch_quora_post(topic)
                         scraped_answers = scrape_data.get("scraped_answers", [])
                     except Exception as fe:
-                        print(f"[app] Error fetching post {topic}: {fe}")
+                        print(f"[app] Error fetching post {topic}: {fe}", file=sys.stderr, flush=True)
 
                 topic_path = normalize_quora_url(topic) if normalize_quora_url else None
                 live_path = normalize_quora_url(live_link) if (normalize_quora_url and live_link) else None
