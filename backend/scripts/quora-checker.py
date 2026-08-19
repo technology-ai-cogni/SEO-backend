@@ -67,6 +67,53 @@ Analyze the difference. Why is our answer ranked lower? Is it primarily because 
     except Exception as e:
         return f"LLM Analysis failed: {str(e)}"
 
+async def analyze_content_to_add(topic, top_answer, our_answer, kw1="", landing_domain=""):
+    """
+    Analyzes what content to add to our Quora answer (strictly max 15 words).
+    """
+    top_text = top_answer.get("text", "").strip() if top_answer else ""
+    our_text = our_answer.get("text", "").strip() if our_answer else ""
+    top_upvotes = int(top_answer.get("upvotes", 0) or 0) if top_answer else 0
+    our_upvotes = int(our_answer.get("upvotes", 0) or 0) if our_answer else 0
+
+    if os.getenv("OPENAI_API_KEY") and openai_client:
+        prompt = f"""Question: "{topic}"
+Target Keyword: "{kw1}"
+Rank 1 Answer: {top_text[:500]}
+Our Answer: {our_text[:500]}
+
+Specify what content to add to beat Rank 1. STRICT REQUIREMENT: Max 12 words."""
+        try:
+            res = await openai_client.chat.completions.create(
+                model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=60,
+                temperature=0.3
+            )
+            analysis = res.choices[0].message.content.strip()
+            if analysis:
+                words = analysis.split()
+                return " ".join(words[:15])
+        except Exception as e:
+            print(f"[quora-checker] LLM gap analysis notice: {e}")
+
+    top_words = len(top_text.split())
+    our_words = len(our_text.split())
+
+    if kw1 and kw1.lower() not in our_text.lower():
+        advice = f"Add target keyword '{kw1}' and bullet points to match Rank #1."
+    elif top_upvotes > our_upvotes:
+        advice = f"Add {top_upvotes - our_upvotes} upvotes and expand explanation to match Rank #1."
+    elif our_words < top_words:
+        advice = f"Add ~{top_words - our_words} words covering key details from Rank #1 answer."
+    elif landing_domain and landing_domain not in our_text.lower():
+        advice = f"Include brand reference for {landing_domain} with structural subheadings."
+    else:
+        advice = "Add comparison tables, updated facts, and clear bullet points."
+
+    words = advice.split()
+    return " ".join(words[:15])
+
 class UndetectedQuoraScraper:
     def __init__(self):
         self.driver = None
@@ -95,7 +142,13 @@ class UndetectedQuoraScraper:
     async def login_quora(self, email: str = None, password: str = None):
         email = email or os.getenv("QUORA_EMAIL")
         password = password or os.getenv("QUORA_PASSWORD")
-        cookie_file = "quora_cookies.json"
+        candidate_cookie_paths = [
+            "quora_cookies.json",
+            os.path.join(os.path.dirname(__file__), "..", "..", "quora_cookies.json"),
+            os.path.join(os.path.dirname(__file__), "..", "quora_cookies.json"),
+            os.path.join(os.path.dirname(__file__), "quora_cookies.json")
+        ]
+        cookie_file = next((p for p in candidate_cookie_paths if os.path.exists(p)), "quora_cookies.json")
 
         # 1. Try loading saved cookies first
         if os.path.exists(cookie_file):
@@ -400,7 +453,13 @@ class QuoraScraper:
         """Navigate to Quora home and wait for input fields before logging in."""
         email = email or os.getenv("QUORA_EMAIL")
         password = password or os.getenv("QUORA_PASSWORD")
-        cookie_file = "quora_cookies.json"
+        candidate_cookie_paths = [
+            "quora_cookies.json",
+            os.path.join(os.path.dirname(__file__), "..", "..", "quora_cookies.json"),
+            os.path.join(os.path.dirname(__file__), "..", "quora_cookies.json"),
+            os.path.join(os.path.dirname(__file__), "quora_cookies.json")
+        ]
+        cookie_file = next((p for p in candidate_cookie_paths if os.path.exists(p)), "quora_cookies.json")
 
         # 1. Try loading saved session cookies first
         if os.path.exists(cookie_file):

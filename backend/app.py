@@ -190,6 +190,12 @@ class CreateDomainRequest(BaseModel):
     target_regions: Optional[List[str]] = None
     platforms: Optional[List[str]] = None
     domain_authority: Optional[str] = None
+    nap_business_centre: Optional[str] = None
+    nap_phone: Optional[str] = None
+    nap_website: Optional[str] = None
+    nap_address: Optional[str] = None
+    nap_email: Optional[str] = None
+    branded_terms: Optional[str] = None
     users: Optional[List[DomainUser]] = None
 
 
@@ -399,6 +405,12 @@ def create_domain(payload: CreateDomainRequest):
         project_slug = db.create_domain(
             payload.domain, payload.project_name, payload.target_regions,
             payload.platforms, payload.domain_authority, users_payload,
+            nap_business_centre=payload.nap_business_centre,
+            nap_phone=payload.nap_phone,
+            nap_website=payload.nap_website,
+            nap_address=payload.nap_address,
+            nap_email=payload.nap_email,
+            branded_terms=payload.branded_terms,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -544,159 +556,221 @@ class AiStatusCheckRequest(BaseModel):
     dataset_id: Optional[int] = None
     rows: Optional[List[Dict[str, Any]]] = None
 
+def run_in_proactor_loop(async_coro_fn, *args):
+    """
+    Runs an async coroutine inside a dedicated worker thread with a Windows Proactor event loop.
+    Resolves Uvicorn SelectorEventLoop NotImplementedError on Windows Python when Playwright spawns subprocesses.
+    """
+    import threading
+    import sys
+    import asyncio
+    result_container = {}
+
+    def thread_worker():
+        if sys.platform == 'win32':
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            res = loop.run_until_complete(async_coro_fn(*args))
+            result_container['result'] = res
+        except Exception as e:
+            result_container['error'] = e
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
+
+    t = threading.Thread(target=thread_worker)
+    t.start()
+    t.join()
+
+    if 'error' in result_container:
+        raise result_container['error']
+    return result_container.get('result')
+
+
+async def _do_status_check_async(dataset_id: Optional[int], rows_payload: Optional[List[Dict[str, Any]]]):
+    imports = db.list_monthly_imports()
+    target_imports = [imp for imp in imports if imp["id"] == dataset_id] if dataset_id else imports
+
+    if not target_imports and rows_payload:
+        target_imports = [{"id": dataset_id or 0, "rowsData": rows_payload}]
+
+    total_checked = 0
+    QuoraScraper = getattr(quora_checker_module, "QuoraScraper", None) if quora_checker_module else None
+    normalize_quora_url = getattr(quora_checker_module, "normalize_quora_url", None) if quora_checker_module else None
+
+    scraper = None
+    if QuoraScraper:
+        try:
+            scraper = QuoraScraper()
+            await scraper.start(use_bright_data=False, headless=False)
+            try:
+                await scraper.login_quora()
+            except Exception as le:
+                print(f"[app] Quora login notice: {le}", file=sys.stderr, flush=True)
+        except Exception as se:
+            print(f"[app] Scraper init notice: {se}", file=sys.stderr, flush=True)
+
+    for imp in target_imports:
+        rows = imp.get("rowsData") or []
+        if not rows:
+            continue
+
+        for r in rows:
+            activity = str(r.get("activityName") or r.get("activity") or "").strip()
+            topic = str(r.get("topic") or "").strip()
+            live_link = str(r.get("liveLink") or r.get("link") or "").strip()
+            landing_page = str(r.get("landingPage") or r.get("page") or "").strip()
+            kw1 = str(r.get("keyword1") or "").strip()
+
+            if not ("quora" in activity.lower() or "quora.com" in topic.lower()):
+                continue
+
+            total_checked += 1
+
+            if not topic or not topic.startswith("http"):
+                r["status"] = "Flagged-Indexation"
+                r["remarks"] = "Flagged-Indexation (Invalid Topic URL)"
+                r["solution"] = "Quora : Reddit- Post New Answer"
+                continue
+
+            scraped_answers = []
+            if scraper and getattr(scraper, "page", None):
+                try:
+                    scrape_data = await scraper.fetch_quora_post(topic)
+                    scraped_answers = scrape_data.get("scraped_answers", [])
+                except Exception as fe:
+                    print(f"[app] Error fetching post {topic}: {fe}", file=sys.stderr, flush=True)
+
+            topic_path = normalize_quora_url(topic) if normalize_quora_url else None
+            live_path = normalize_quora_url(live_link) if (normalize_quora_url and live_link) else None
+            landing_domain = landing_page.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower() if landing_page else ""
+
+            our_answer = None
+            our_rank = None
+
+            for idx, ans in enumerate(scraped_answers):
+                ans_url = ans.get("url", "")
+                ans_full = ans.get("full_url", "")
+                ans_author = ans.get("author_url", "")
+                ans_text_lower = ans.get("text", "").lower()
+                ext_links = [l.lower() for l in ans.get("external_links", [])]
+
+                is_match = False
+                if live_path and (live_path.lower() in ans_url.lower() or ans_url.lower() in live_path.lower()):
+                    is_match = True
+                elif live_link and (live_link.lower() in ans_full.lower() or live_link.lower() in ans_author.lower()):
+                    is_match = True
+                elif live_path and ("/" in live_path):
+                    author_seg = live_path.split("/")[-1].replace("-", " ").lower()
+                    if author_seg and (author_seg in ans_url.lower() or author_seg in ans_author.lower() or author_seg in ans_full.lower() or author_seg in ans_text_lower):
+                        is_match = True
+
+                if not is_match and landing_page:
+                    if any(landing_page.lower() in l or l in landing_page.lower() for l in ext_links) or (landing_domain and landing_domain in ans_text_lower):
+                        is_match = True
+
+                if is_match:
+                    our_answer = ans
+                    our_rank = idx + 1
+                    break
+
+            if our_answer:
+                our_upvotes = int(our_answer.get("upvotes", 0) or 0)
+                ans_text = our_answer.get("text", "")
+                brand_mentioned = bool(landing_domain and landing_domain in ans_text.lower())
+                kw_present = bool(kw1 and kw1.lower() in ans_text.lower())
+
+                if our_rank == 1:
+                    r["status"] = "Audited-Indexed"
+                    r["solution"] = "fixed"
+                    narration = f"No Issues (Rank #1, Upvotes: {our_upvotes}"
+                    if brand_mentioned: narration += ", Brand mentioned"
+                    if kw_present: narration += ", Anchor text matched"
+                    narration += ")"
+                    r["remarks"] = narration
+                else:
+                    r["status"] = "Audited-LQ"
+                    top_answer = scraped_answers[0] if scraped_answers else {}
+                    top_upvotes = int(top_answer.get("upvotes", 0) or 0)
+
+                    analyze_content_fn = getattr(quora_checker_module, "analyze_content_to_add", None)
+                    detailed_advice = ""
+                    if analyze_content_fn:
+                        try:
+                            detailed_advice = await analyze_content_fn(topic, top_answer, our_answer, kw1, landing_domain)
+                        except Exception as ae:
+                            print(f"[app] Advice generation notice: {ae}")
+
+                    if not detailed_advice:
+                        if our_upvotes < top_upvotes:
+                            detailed_advice = f"Add {top_upvotes - our_upvotes} upvotes and detail to match Rank #1."
+                        else:
+                            detailed_advice = f"Add target keyword '{kw1}' and bullet points to match Rank #1."
+
+                    advice_words = detailed_advice.split()
+                    if len(advice_words) > 15:
+                        detailed_advice = " ".join(advice_words[:15])
+
+                    r["remarks"] = detailed_advice
+                    
+                    if our_upvotes < top_upvotes:
+                        r["solution"] = "Quora : Reddit- Add More Upvotes"
+                    else:
+                        r["solution"] = "Content Replace"
+            else:
+                r["status"] = "Flagged-Indexation"
+                if not live_link:
+                    r["remarks"] = "Wrong url Targeted"
+                    r["solution"] = "Link Replace"
+                else:
+                    r["remarks"] = "Flagged-Indexation (Live link / answer not present)"
+                    r["solution"] = "Quora : Reddit- Post New Answer"
+
+            now_date = time.strftime("%Y-%m-%d")
+            r["updatedDate"] = now_date
+            r["updated_date"] = now_date
+            r["lastActivity"] = f"AI Status Checked on {now_date}"
+
+        imp["rowsData"] = rows
+
+        if imp.get("id") is not None and str(imp.get("id")) != '0':
+            db.update_monthly_import(
+                import_id=imp["id"],
+                rows_data=rows,
+                filename=imp.get("filename"),
+                rows=len(rows),
+                date=imp.get("date"),
+                project_name=imp.get("project_name")
+            )
+
+    if scraper:
+        try:
+            await scraper.close()
+        except:
+            pass
+
+    return {
+        "status": "success",
+        "message": f"AI Status Check completed across {total_checked} Quora activities!",
+        "rowsData": target_imports[0].get("rowsData") if target_imports else []
+    }
+import asyncio
+
 @app.post("/monthly-operations/run-ai-status-check")
 async def run_ai_status_check_endpoint(payload: AiStatusCheckRequest):
     """
     Triggers AI Status Check for Forum Quora activities in monthly operations dataset.
-    Takes Topic, Live Link, Landing Page, Activity Name and determines Status, Remarks, Solution, and Narration.
     """
     try:
-        imports = db.list_monthly_imports()
-        target_imports = [imp for imp in imports if imp["id"] == payload.dataset_id] if payload.dataset_id else imports
-
-        if not target_imports and payload.rows:
-            target_imports = [{"id": payload.dataset_id or 0, "rowsData": payload.rows}]
-
-        total_checked = 0
-        QuoraScraper = getattr(quora_checker_module, "QuoraScraper", None) if quora_checker_module else None
-        normalize_quora_url = getattr(quora_checker_module, "normalize_quora_url", None) if quora_checker_module else None
-
-        scraper = None
-        if QuoraScraper:
-            try:
-                scraper = QuoraScraper()
-                await scraper.start(use_bright_data=False, headless=True)
-                try:
-                    await scraper.login_quora()
-                except Exception as le:
-                    print(f"[app] Quora login notice: {le}", file=sys.stderr, flush=True)
-            except Exception as se:
-                print(f"[app] Scraper init notice: {se}", file=sys.stderr, flush=True)
-
-        for imp in target_imports:
-            rows = imp.get("rowsData") or []
-            if not rows:
-                continue
-
-            for r in rows:
-                activity = str(r.get("activityName") or r.get("activity") or "").strip()
-                topic = str(r.get("topic") or "").strip()
-                live_link = str(r.get("liveLink") or r.get("link") or "").strip()
-                landing_page = str(r.get("landingPage") or r.get("page") or "").strip()
-                kw1 = str(r.get("keyword1") or "").strip()
-
-                if not ("quora" in activity.lower() or "quora.com" in topic.lower()):
-                    continue
-
-                total_checked += 1
-
-                if not topic or not topic.startswith("http"):
-                    r["status"] = "Flagged-Indexation"
-                    r["remarks"] = "Flagged-Indexation (Invalid Topic URL)"
-                    r["solution"] = "Quora : Reddit- Post New Answer"
-                    continue
-
-                scraped_answers = []
-                if scraper and getattr(scraper, "page", None):
-                    try:
-                        scrape_data = await scraper.fetch_quora_post(topic)
-                        scraped_answers = scrape_data.get("scraped_answers", [])
-                    except Exception as fe:
-                        print(f"[app] Error fetching post {topic}: {fe}", file=sys.stderr, flush=True)
-
-                topic_path = normalize_quora_url(topic) if normalize_quora_url else None
-                live_path = normalize_quora_url(live_link) if (normalize_quora_url and live_link) else None
-                landing_domain = landing_page.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower() if landing_page else ""
-
-                our_answer = None
-                our_rank = None
-
-                for idx, ans in enumerate(scraped_answers):
-                    ans_url = ans.get("url", "")
-                    ans_full = ans.get("full_url", "")
-                    ans_author = ans.get("author_url", "")
-                    ans_text_lower = ans.get("text", "").lower()
-                    ext_links = [l.lower() for l in ans.get("external_links", [])]
-
-                    is_match = False
-                    if live_path and (live_path.lower() in ans_url.lower() or ans_url.lower() in live_path.lower()):
-                        is_match = True
-                    elif live_link and (live_link.lower() in ans_full.lower() or live_link.lower() in ans_author.lower()):
-                        is_match = True
-                    elif live_path and ("/" in live_path):
-                        author_seg = live_path.split("/")[-1].replace("-", " ").lower()
-                        if author_seg and (author_seg in ans_url.lower() or author_seg in ans_author.lower() or author_seg in ans_full.lower() or author_seg in ans_text_lower):
-                            is_match = True
-
-                    if not is_match and landing_page:
-                        if any(landing_page.lower() in l or l in landing_page.lower() for l in ext_links) or (landing_domain and landing_domain in ans_text_lower):
-                            is_match = True
-
-                    if is_match:
-                        our_answer = ans
-                        our_rank = idx + 1
-                        break
-
-                if our_answer:
-                    our_upvotes = int(our_answer.get("upvotes", 0) or 0)
-                    ans_text = our_answer.get("text", "")
-                    brand_mentioned = bool(landing_domain and landing_domain in ans_text.lower())
-                    kw_present = bool(kw1 and kw1.lower() in ans_text.lower())
-
-                    if our_rank == 1:
-                        r["status"] = "Audited-Indexed"
-                        r["solution"] = "fixed"
-                        narration = f"No Issues (Rank #1, Upvotes: {our_upvotes}"
-                        if brand_mentioned: narration += ", Brand mentioned"
-                        if kw_present: narration += ", Anchor text matched"
-                        narration += ")"
-                        r["remarks"] = narration
-                    else:
-                        r["status"] = "Audited-LQ"
-                        top_answer = scraped_answers[0] if scraped_answers else {}
-                        top_upvotes = int(top_answer.get("upvotes", 0) or 0)
-                        
-                        if our_upvotes < top_upvotes:
-                            r["remarks"] = f"Optimized (Rank #{our_rank}, Our Upvotes: {our_upvotes}, Top Answer Upvotes: {top_upvotes})"
-                            r["solution"] = "Quora : Reddit- Add More Upvotes"
-                        else:
-                            r["remarks"] = f"Optimized (Rank #{our_rank}, Needs better formatting/content to match Rank #1)"
-                            r["solution"] = "Content Replace"
-                else:
-                    r["status"] = "Flagged-Indexation"
-                    if not live_link:
-                        r["remarks"] = "Wrong url Targeted"
-                        r["solution"] = "Link Replace"
-                    else:
-                        r["remarks"] = "Flagged-Indexation (Live link / answer not present)"
-                        r["solution"] = "Quora : Reddit- Post New Answer"
-
-                now_date = time.strftime("%Y-%m-%d")
-                r["updatedDate"] = now_date
-                r["updated_date"] = now_date
-                r["lastActivity"] = f"AI Status Checked on {now_date}"
-
-            if imp.get("id"):
-                db.update_monthly_import(
-                    import_id=imp["id"],
-                    rows_data=rows,
-                    filename=imp.get("filename"),
-                    rows=len(rows),
-                    date=imp.get("date"),
-                    project_name=imp.get("project_name")
-                )
-
-        if scraper:
-            try:
-                await scraper.close()
-            except:
-                pass
-
-        return {
-            "status": "success",
-            "message": f"AI Status Check completed across {total_checked} Quora activities!",
-            "rowsData": target_imports[0].get("rowsData") if target_imports else []
-        }
+        res = await asyncio.to_thread(run_in_proactor_loop, _do_status_check_async, payload.dataset_id, payload.rows)
+        return res
+    except Exception as e:
+        print(f"[app] Error in AI status check: {e}", file=sys.stderr, flush=True)
+        return {"status": "error", "message": f"AI Status Check error: {str(e)}"}
     except Exception as e:
         print(f"[app] Error in AI status check: {e}", file=sys.stderr, flush=True)
         return {"status": "error", "message": f"AI Status Check error: {str(e)}"}
@@ -2071,6 +2145,46 @@ def delete_outreach_site_endpoint(project_slug: str, site_id: int):
     try:
         db.delete_outreach_site(site_id)
         return {"status": "success", "id": site_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class UpdateOutreachSiteRequest(BaseModel):
+    updates: dict
+
+@app.patch("/projects/{project_slug}/outreach/{site_id}")
+@app.put("/projects/{project_slug}/outreach/{site_id}")
+def update_outreach_site_endpoint(project_slug: str, site_id: int, req: UpdateOutreachSiteRequest):
+    """Update fields for a specific outreach site."""
+    try:
+        db.update_outreach_site(site_id, req.updates)
+        return {"status": "success", "id": site_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class BulkOutreachRequest(BaseModel):
+    ids: List[int]
+    updates: Optional[dict] = None
+
+@app.post("/projects/{project_slug}/outreach/bulk-delete")
+def bulk_delete_outreach_endpoint(project_slug: str, req: BulkOutreachRequest):
+    """Bulk delete outreach sites."""
+    try:
+        db.bulk_delete_outreach_sites(req.ids)
+        return {"status": "success", "count": len(req.ids)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/projects/{project_slug}/outreach/bulk-update")
+def bulk_update_outreach_endpoint(project_slug: str, req: BulkOutreachRequest):
+    """Bulk update outreach sites."""
+    try:
+        if req.updates:
+            for s_id in req.ids:
+                db.update_outreach_site(s_id, req.updates)
+        return {"status": "success", "count": len(req.ids)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

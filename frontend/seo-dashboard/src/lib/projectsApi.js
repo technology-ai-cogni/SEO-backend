@@ -254,6 +254,12 @@ function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
     isActive: status === 'Active',
     updated: timeAgo(row.updated_at),
     targetPlatforms,
+    napBusinessCentre: row.nap_business_centre || null,
+    napPhone: row.nap_phone || null,
+    napWebsite: row.nap_website || null,
+    napAddress: row.nap_address || null,
+    napEmail: row.nap_email || null,
+    brandedTerms: row.branded_terms || null,
   };
 }
 
@@ -419,7 +425,7 @@ export async function fetchDomainRows() {
   return mergedDomains.map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
 }
 
-export async function createProject({ name, domain, regions, platforms, da, users }) {
+export async function createProject({ name, domain, regions, platforms, da, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, branded_terms, users }) {
   const slug = slugify(name);
 
   if (isLocalMode) {
@@ -443,6 +449,12 @@ export async function createProject({ name, domain, regions, platforms, da, user
       target_regions: regions || [],
       platforms: (platforms || []).map(v => PLATFORM_LABELS[v] || v),
       domain_authority: da != null ? String(da) : null,
+      nap_business_centre: nap_business_centre || null,
+      nap_phone: nap_phone || null,
+      nap_website: nap_website || null,
+      nap_address: nap_address || null,
+      nap_email: nap_email || null,
+      branded_terms: branded_terms || null,
       users: users || [],
       traffic: '0',
       keywords_count: '0',
@@ -468,6 +480,12 @@ export async function createProject({ name, domain, regions, platforms, da, user
         target_regions: regions || [],
         platforms: (platforms || []).map(v => PLATFORM_LABELS[v] || v),
         domain_authority: da != null ? String(da) : null,
+        nap_business_centre: nap_business_centre || null,
+        nap_phone: nap_phone || null,
+        nap_website: nap_website || null,
+        nap_address: nap_address || null,
+        nap_email: nap_email || null,
+        branded_terms: branded_terms || null,
         users: users || [],
       }),
     });
@@ -494,6 +512,12 @@ export async function createProject({ name, domain, regions, platforms, da, user
         target_regions: regions || [],
         platforms: (platforms || []).map(v => PLATFORM_LABELS[v] || v),
         domain_authority: da != null ? String(da) : null,
+        nap_business_centre: nap_business_centre || null,
+        nap_phone: nap_phone || null,
+        nap_website: nap_website || null,
+        nap_address: nap_address || null,
+        nap_email: nap_email || null,
+        branded_terms: branded_terms || null,
         users: users || [],
         traffic: '0',
         keywords_count: '0',
@@ -933,16 +957,16 @@ export async function bulkDeleteKeywordRows(ids) {
 export function getApiBaseUrl() {
   // Respect .env VITE_API_BASE first (covers local dev on any port)
   const envBase = import.meta.env.VITE_API_BASE;
-  if (envBase) return envBase;
+  if (envBase) return envBase.replace('0.0.0.0', '127.0.0.1');
 
   if (typeof window !== 'undefined' && window.location && window.location.hostname) {
     const host = window.location.hostname;
     if (host === 'localhost' || host === '127.0.0.1') {
-      return 'http://127.0.0.1:8000';
+      return 'http://127.0.0.1:5000';
     }
-    return `${window.location.protocol}//${host}:8000`;
+    return `${window.location.protocol}//${host}:5000`;
   }
-  return 'http://52.44.80.193:8000';
+  return 'http://127.0.0.1:5000';
 }
 
 const CATEGORY_API_BASE = getApiBaseUrl();
@@ -2040,7 +2064,7 @@ export async function deleteUserApi(userId) {
 // ─── AI Analysis & Supabase API ─────────────────────────────────────────────
 
 export async function fetchProjectSummaryApi(projectSlug) {
-  const apiBase = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000').replace('0.0.0.0', '127.0.0.1');
+  const apiBase = getApiBaseUrl();
   try {
     const res = await fetch(`${apiBase}/projects/${encodeURIComponent(projectSlug)}/summary`);
     if (res.ok) {
@@ -2053,7 +2077,7 @@ export async function fetchProjectSummaryApi(projectSlug) {
 }
 
 export async function runAiVisibilityAnalysis(projectSlug, domain, country, keywords, engine = 'chatgpt') {
-  const apiBase = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000').replace('0.0.0.0', '127.0.0.1');
+  const apiBase = getApiBaseUrl();
 
   let resultData = null;
 
@@ -2252,6 +2276,39 @@ export async function deleteOutreachSiteApi(projectSlug, siteId) {
   return await res.json();
 }
 
+export async function updateOutreachSiteApi(projectSlug, siteId, updates) {
+  if (!projectSlug || !siteId) return;
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach/${siteId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updates })
+  });
+  if (!res.ok) throw new Error('Failed to update outreach site');
+  return await res.json();
+}
+
+export async function bulkDeleteOutreachSitesApi(projectSlug, ids) {
+  if (!projectSlug || !ids || !ids.length) return;
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach/bulk-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids })
+  });
+  if (!res.ok) throw new Error('Failed to bulk delete outreach sites');
+  return await res.json();
+}
+
+export async function bulkUpdateOutreachSitesApi(projectSlug, ids, updates) {
+  if (!projectSlug || !ids || !ids.length) return;
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach/bulk-update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids, updates })
+  });
+  if (!res.ok) throw new Error('Failed to bulk update outreach sites');
+  return await res.json();
+}
+
 export async function fetchDomainMetricsApi(domain, regions = null) {
   if (!domain) throw new Error('Domain is required');
   const cleanDomain = String(domain).replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim();
@@ -2313,7 +2370,7 @@ export async function runAiStatusCheckApi(importData = null) {
   } catch (err) {
     console.warn('[runAiStatusCheckApi] Backend call notice:', err);
   }
-  return { status: 'success', message: 'AI Status Check completed.' };
+  return { status: 'success', message: 'AI Audit completed.' };
 }
 
 export async function updateUserAttendanceApi(userId, dateStr, statusStr) {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Calendar, UploadCloud, Clock, Trash2, Play, CheckCircle, AlertCircle, FileSpreadsheet, X, Upload, ChevronDown, Filter, Pencil, Save, ShieldCheck, Users, Sparkles } from 'lucide-react';
+import { Calendar, UploadCloud, Clock, Trash2, Play, CheckCircle, AlertCircle, FileSpreadsheet, X, Upload, ChevronDown, Filter, Pencil, Save, ShieldCheck, Users, Sparkles, Download } from 'lucide-react';
+import ExcelJS from 'exceljs';
 import { 
   fetchDomainRows, 
   fetchMonthlyImportsApi, 
@@ -47,7 +48,7 @@ function Modal({ open, onClose, title, children, footer }) {
 function Btn({ children, variant = 'primary', onClick, style = {} }) {
   const styles = {
     primary: { background: '#0f1523', color: '#fff', border: 'none' },
-    outline: { background: '#fff', color: '#0f1523', border: '1.5px solid #d1d5db' },
+    outline: { background: '#000000ff', color: '#040509ff', border: '1.5px solid #d1d5db' },
     accent: { background: 'var(--accent)', color: '#fff', border: 'none' },
   };
   return (
@@ -616,6 +617,93 @@ export default function OffPageSchedulerPage({ user }) {
     });
   }, [schedules, vendorProject]);
 
+  const handleDownloadMonthlyOperations = async () => {
+    try {
+      const allRows = [];
+      (filteredImports || []).forEach(imp => {
+        const rows = imp.rowsData || [];
+        if (rows.length > 0) {
+          rows.forEach(r => {
+            allRows.push({
+              'Associated Project': imp.project || '',
+              'Dataset Filename': imp.filename || '',
+              'Import Date': imp.date || '',
+              'UID': r.uid || '',
+              'Keyword 1': r.keyword1 || r.keyword || '',
+              'Keyword 2': r.keyword2 || '',
+              'Landing Page': r.landingPage || '',
+              'Cluster': r.cluster || '',
+              'KW Category': r.kwCategory || '',
+              'Activity Name': r.activityName || '',
+              'Word Count': r.wordCount || '',
+              'Content SPOC': r.contentSpoc || '',
+              'Topic': r.topic || '',
+              'Content Doc': r.contentDoc || '',
+              'Status': r.status || '',
+              'Publisher / POC': r.publisher || '',
+              'PG Site Domain': r.pgSiteDomain || '',
+              'Domain Utilization': r.domainUtilizationForKw || '',
+              'Live Link': r.liveLink || '',
+              'Remarks': r.remarks || '',
+              'Solution': r.solution || '',
+              'Last Activity': r.lastActivity || '',
+              'Scheduled Date': r.scheduledDate || '',
+              'Updated Date': r.updatedDate || '',
+            });
+          });
+        } else {
+          allRows.push({
+            'Associated Project': imp.project || '',
+            'Dataset Filename': imp.filename || '',
+            'Import Date': imp.date || '',
+            'Records Count': imp.rows || 0,
+          });
+        }
+      });
+
+      if (allRows.length === 0) {
+        alert('No Monthly Operations data available to download.');
+        return;
+      }
+
+      const headers = Object.keys(allRows[0]);
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('Monthly Operations');
+      sheet.columns = headers.map(h => ({ header: h, width: Math.max(14, h.length + 4) }));
+
+      const thinBorder = { style: 'thin', color: { argb: 'FFD1D5DB' } };
+      const cellBorder = { top: thinBorder, left: thinBorder, bottom: thinBorder, right: thinBorder };
+
+      sheet.getRow(1).eachCell(cell => {
+        cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        cell.border = cellBorder;
+      });
+
+      allRows.forEach(r => {
+        const row = sheet.addRow(headers.map(h => r[h]));
+        row.eachCell(cell => {
+          cell.font = { name: 'Calibri', size: 10 };
+          cell.border = cellBorder;
+        });
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `monthly-operations-db-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export Monthly Operations data:', err);
+    }
+  };
+
   // Persist local backup
   useEffect(() => {
     localStorage.setItem('seo_imported_datasets', JSON.stringify(imports));
@@ -1044,16 +1132,30 @@ export default function OffPageSchedulerPage({ user }) {
         dataset_id: selectedDataset.id,
         rows: selectedDataset.rowsData
       });
-      const freshImports = await fetchMonthlyImportsApi();
-      setImports(freshImports);
-      if (selectedDataset) {
-        const updatedDs = freshImports.find(imp => imp.id === selectedDataset.id || imp.project === selectedDataset.project);
-        if (updatedDs) setSelectedDataset(updatedDs);
+
+      if (res && res.rowsData && res.rowsData.length > 0) {
+        setSelectedDataset(prev => ({
+          ...prev,
+          rowsData: res.rowsData
+        }));
+        setOriginalRowsData(JSON.parse(JSON.stringify(res.rowsData)));
+        setIsDirty(false);
       }
-      setAuditSuccessMsg(res.message || 'AI Status Check completed successfully!');
+
+      const freshImports = await fetchMonthlyImportsApi();
+      if (freshImports && freshImports.length > 0) {
+        setImports(freshImports);
+        const updatedDs = freshImports.find(imp => String(imp.id) === String(selectedDataset.id) || imp.project === selectedDataset.project);
+        if (updatedDs && updatedDs.rowsData) {
+          setSelectedDataset(updatedDs);
+          setOriginalRowsData(JSON.parse(JSON.stringify(updatedDs.rowsData)));
+        }
+      }
+
+      setAuditSuccessMsg(res.message || 'AI Audit Check completed successfully!');
       setTimeout(() => setAuditSuccessMsg(''), 5000);
     } catch (err) {
-      setAuditSuccessMsg(`AI Status Check notice: ${err.message}`);
+      setAuditSuccessMsg(`AI Audit Check notice: ${err.message}`);
     } finally {
       setAiChecking(false);
     }
@@ -1230,7 +1332,7 @@ export default function OffPageSchedulerPage({ user }) {
               onMouseLeave={e => e.currentTarget.style.opacity = '1'}
             >
               <Sparkles size={16} color="#ffffff" />
-              {aiChecking ? 'Running AI Status Check...' : 'AI Status Check'}
+              {aiChecking ? 'Running AI Audit Check...' : 'AI Audit Check'}
             </button>
 
             {hasUnsavedChanges && (
@@ -2379,6 +2481,23 @@ export default function OffPageSchedulerPage({ user }) {
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            onClick={handleDownloadMonthlyOperations}
+            title="Download Monthly Operations Data (Excel)"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: '#ffffff', color: '#0f172a',
+              border: '1.5px solid #cbd5e1', borderRadius: 10,
+              padding: '10px 14px', cursor: 'pointer',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+            onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
+          >
+            <Download size={16} color="var(--accent)" />
+          </button>
+
           {!isVendor && userCanUpdate && (
             <button
               onClick={handleRunAudit}

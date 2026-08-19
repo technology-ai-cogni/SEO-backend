@@ -11,7 +11,9 @@ import {
   fetchCompetitorPageRows, insertCompetitorPageRows, updateCompetitorPageRow, deleteCompetitorPageRow,
   fetchCompetitors, insertCompetitor, updateCompetitor, deleteCompetitor, deleteCompetitorProjectData,
   findCompetitors, fetchCompetitorSnapshots, classifyCompetitorUrls,
-  fetchOutreachSitesApi, addOutreachSiteApi, deleteOutreachSiteApi, getApiBaseUrl
+  fetchOutreachSitesApi, addOutreachSiteApi, deleteOutreachSiteApi,
+  updateOutreachSiteApi, bulkDeleteOutreachSitesApi, bulkUpdateOutreachSitesApi,
+  getApiBaseUrl
 } from '../../lib/projectsApi';
 import { isReadOnlyUser, canEdit, canDelete, canDownload, canUpdate } from '../../lib/permissions';
 
@@ -65,16 +67,14 @@ function Input({ label, hint, placeholder, required, value, onChange, type = 'te
           {hint && <HelpCircle size={13} color="var(--text-muted)" />}
         </div>
       )}
-      {hint === 'domain' && (
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -2 }}>Enter a domain or subdomain. </span>
-      )}
+      
       <input
         type={type}
         value={value}
         onChange={e => onChange?.(e.target.value)}
         placeholder={placeholder}
         style={{
-          width: '100%', border: '1.5px solid #5c4af2', borderRadius: 8,
+          width: '100%', border: '1.5px solid #d1d5db', borderRadius: 8,
           padding: '10px 14px', fontSize: 14, outline: 'none',
           fontFamily: 'var(--font-body)', color: 'var(--text-primary)',
           background: '#fff', transition: 'border-color 0.15s',
@@ -589,13 +589,13 @@ function RobotClusterIcon({ busy, size = 26 }) {
 
 // ─── Modal wrapper ──────────────────────────────────────────────────────────
 
-function Modal({ open, onClose, title, children, footer }) {
+function Modal({ open, onClose, title, children, footer, maxWidth = 520, style = {} }) {
   if (!open) return null;
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
       onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 520, maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.18)', position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '24px 28px 16px' }}>
+      <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth, maxHeight: '92vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.18)', position: 'relative', ...style }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 28px 14px', borderBottom: '1px solid var(--border, #e5e7eb)', flexShrink: 0 }}>
           <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 800, color: 'var(--text-primary)' }}>{title}</h2>
           <button onClick={onClose} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6, display: 'flex' }}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
@@ -603,11 +603,11 @@ function Modal({ open, onClose, title, children, footer }) {
             <X size={20} />
           </button>
         </div>
-        <div style={{ padding: '0 28px 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div style={{ padding: '20px 28px 20px', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto', flex: 1 }}>
           {children}
         </div>
         {footer && (
-          <div style={{ padding: '16px 28px 24px', display: 'flex', gap: 12 }}>
+          <div style={{ padding: '14px 28px 20px', display: 'flex', gap: 12, borderTop: '1px solid var(--border, #e5e7eb)', flexShrink: 0 }}>
             {footer}
           </div>
         )}
@@ -645,11 +645,18 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
   const [regions, setRegions] = useState([]);
   const [platforms, setPlatforms] = useState([]);
   const [da, setDa] = useState('');
+  const [napBusinessCentre, setNapBusinessCentre] = useState('');
+  const [napPhone, setNapPhone] = useState('');
+  const [napWebsite, setNapWebsite] = useState('');
+  const [napAddress, setNapAddress] = useState('');
+  const [napEmail, setNapEmail] = useState('');
+  const [brandedTerms, setBrandedTerms] = useState('');
   const [userType, setUserType] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const [users, setUsers] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [apiError, setApiError] = useState('');
+  const [btnActive, setBtnActive] = useState(false);
 
   const platformOptions = [
     { value: 'ai_mode', label: 'AI Mode' },
@@ -675,7 +682,10 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
 
   const resetForm = () => {
     setDomain(''); setName(''); setShare(false); setRegions([]);
-    setPlatforms([]); setDa(''); setUserType(''); setUserEmail(''); setUsers([]);
+    setPlatforms([]); setDa('');
+    setNapBusinessCentre(''); setNapPhone(''); setNapWebsite(''); setNapAddress(''); setNapEmail('');
+    setBrandedTerms('');
+    setUserType(''); setUserEmail(''); setUsers([]);
     setSubmitting(false); setApiError('');
   };
 
@@ -690,6 +700,12 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
         regions,
         platforms,
         da: da || null,
+        nap_business_centre: napBusinessCentre.trim(),
+        nap_phone: napPhone.trim(),
+        nap_website: napWebsite.trim(),
+        nap_address: napAddress.trim(),
+        nap_email: napEmail.trim(),
+        branded_terms: brandedTerms.trim(),
         users,
         share,
       });
@@ -702,67 +718,103 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Create project"
-      footer={<><Btn variant="primary" onClick={handleCreate} style={submitting ? { opacity: 0.6, pointerEvents: 'none' } : {}}>{submitting ? 'Creating…' : 'Create SEO project'}</Btn><Btn variant="outline" onClick={onClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
+    <Modal open={open} onClose={onClose} title="Create project" maxWidth={920}
+      footer={<>
+        <Btn
+          variant="primary"
+          onClick={handleCreate}
+          style={{
+            background: (submitting || btnActive) ? '#0f1523' : '#6b7280',
+            color: '#ffffff',
+            transition: 'background-color 0.15s ease, opacity 0.15s ease',
+            ...(submitting ? { opacity: 0.6, pointerEvents: 'none' } : {})
+          }}
+          onMouseDown={() => setBtnActive(true)}
+          onMouseUp={() => setBtnActive(false)}
+          onMouseLeave={() => setBtnActive(false)}
+        >
+          {submitting ? 'Creating…' : 'Create SEO project'}
+        </Btn>
+        <Btn variant="outline" onClick={onClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
+      </>}
     >
       {apiError && (
         <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{apiError}</span>
       )}
-      <Input label="Domain" hint="domain" placeholder="domain.com" value={domain} onChange={setDomain} />
-      <Input label="Project Name" placeholder="Auto-generated if left blank" value={name} onChange={setName} />
-      <div style={{ height: 1, background: 'var(--border)' }} />
 
-      <CountryTagInput
-        label="Target Regions"
-        tags={regions}
-        onAdd={r => setRegions(p => [...p, r])}
-        onRemove={r => setRegions(p => p.filter(x => x !== r))}
-        placeholder="e.g. India, Singapore, USA"
-      />
-
-      <MultiSelect
-        label="Platforms"
-        options={platformOptions}
-        selected={platforms}
-        onToggle={togglePlatform}
-      />
-
-      <Input label="Domain Authority" placeholder="e.g. 42" value={da} onChange={setDa} type="number" />
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Add Users</span>
-
-        {users.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {users.map((u, idx) => (
-              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'var(--surface-2)', borderRadius: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', background: 'var(--accent-light)', borderRadius: 99, padding: '2px 8px' }}>
-                  {userTypeLabels[u.type] || u.type}
-                </span>
-                <span style={{ fontSize: 13, color: 'var(--text-primary)', flex: 1 }}>{u.email}</span>
-                <button onClick={() => removeUser(idx)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2, lineHeight: 1, fontSize: 16 }}>×</button>
-              </div>
-            ))}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, alignItems: 'start' }}>
+        {/* Left Side: Basic Info & Team */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent, #5c4af2)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Basic Information
           </div>
-        )}
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <Select
-            placeholder="Type"
-            value={userType}
-            onChange={setUserType}
-            options={[
-              { value: 'agency', label: 'Agency' },
-              { value: 'cxo', label: 'CXO' },
-              { value: 'project_head', label: 'Project Head' },
-              { value: 'team_member', label: 'Team Member' },
-            ]}
+          <Input label="Domain *" placeholder="domain.com" value={domain} onChange={setDomain} />
+          <Input label="Project Name" placeholder="Auto-generated if left blank" value={name} onChange={setName} />
+          <CountryTagInput
+            label="Target Regions"
+            tags={regions}
+            onAdd={r => setRegions(p => [...p, r])}
+            onRemove={r => setRegions(p => p.filter(x => x !== r))}
+            placeholder="e.g. India, Singapore, USA"
           />
-          <Input placeholder="User (Email ID)" value={userEmail} onChange={setUserEmail} type="email" />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Input label="Domain Authority" placeholder="e.g. 42" value={da} onChange={setDa} type="number" />
+            <MultiSelect
+              label="Platforms"
+              options={platformOptions}
+              selected={platforms}
+              onToggle={togglePlatform}
+            />
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Add Users</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <Select
+                placeholder="Type"
+                value={userType}
+                onChange={setUserType}
+                options={[
+                  { value: 'agency', label: 'Agency' },
+                  { value: 'cxo', label: 'CXO' },
+                  { value: 'project_head', label: 'Project Head' },
+                  { value: 'team_member', label: 'Team Member' },
+                ]}
+              />
+              <Input placeholder="User (Email ID)" value={userEmail} onChange={setUserEmail} type="email" />
+            </div>
+            <button onClick={addUser} style={{ alignSelf: 'flex-start', fontSize: 12.5, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)', fontWeight: 600, padding: '2px 0' }}>
+              + Add another user
+            </button>
+
+            {users.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 100, overflowY: 'auto' }}>
+                {users.map((u, idx) => (
+                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: 'var(--surface-2)', borderRadius: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'var(--accent-light)', borderRadius: 99, padding: '2px 6px' }}>
+                      {userTypeLabels[u.type] || u.type}
+                    </span>
+                    <span style={{ fontSize: 12, color: 'var(--text-primary)', flex: 1, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{u.email}</span>
+                    <button onClick={() => removeUser(idx)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0, lineHeight: 1, fontSize: 14 }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-        <button onClick={addUser} style={{ alignSelf: 'flex-start', fontSize: 12.5, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)', fontWeight: 600, padding: '2px 0' }}>
-          + Add another user
-        </button>
+
+        {/* Right Side: NAP & Branding Info */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent, #5c4af2)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            NAP & Branding
+          </div>
+          <Input label="Business Centre" placeholder="Business centre" value={napBusinessCentre} onChange={setNapBusinessCentre} />
+          <Input label="Phone" placeholder="e.g. +1 234 567 8900" value={napPhone} onChange={setNapPhone} />
+          <Input label="Website" placeholder="e.g. https://domain.com" value={napWebsite} onChange={setNapWebsite} />
+          <Input label="Address" placeholder="Full business address" value={napAddress} onChange={setNapAddress} />
+          <Input label="Email ID" placeholder="contact@domain.com" value={napEmail} onChange={setNapEmail} type="email" />
+          <Input label="Branded Terms" placeholder="e.g. Brand1, Brand2" value={brandedTerms} onChange={setBrandedTerms} />
+        </div>
       </div>
 
     </Modal>
@@ -984,7 +1036,6 @@ function AddPagesModal({ open, onClose, projects, onImportPages, lockedProject, 
 // ─── Add Keywords Modal ──────────────────────────────────────────────────────
 
 const CATEGORY_API_BASE = getApiBaseUrl();
-
 function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedProject }) {
   const [project, setProject] = useState('');
   const [share, setShare] = useState(false);
@@ -1890,11 +1941,11 @@ function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, tot
 
   const visiblePages = search && search.trim()
     ? pages.filter(p => {
-        const q = search.trim().toLowerCase();
-        const n = (p.name || '').toLowerCase();
-        const d = (p.domain || '').toLowerCase();
-        return n.includes(q) || d.includes(q);
-      })
+      const q = search.trim().toLowerCase();
+      const n = (p.name || '').toLowerCase();
+      const d = (p.domain || '').toLowerCase();
+      return n.includes(q) || d.includes(q);
+    })
     : pages;
 
   return (
@@ -2832,7 +2883,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
             status: 'Success',
             project_name: project.slug,
             module: 'intent'
-          }).catch(() => {});
+          }).catch(() => { });
           return;
         }
         if (job?.status === 'failed' || job?.error) {
@@ -2845,7 +2896,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
             status: 'Warning',
             project_name: project.slug,
             module: 'intent'
-          }).catch(() => {});
+          }).catch(() => { });
           return;
         }
         if (attempt >= MAX_ATTEMPTS) {
@@ -2871,7 +2922,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
       status: 'Success',
       project_name: project.slug,
       module: 'intent'
-    }).catch(() => {});
+    }).catch(() => { });
     try {
       const country = project.location && project.location !== 'Global' ? project.location : '';
       // Categorizes keywords ALREADY sitting in this project -- never
@@ -2897,7 +2948,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
         status: 'Warning',
         project_name: project.slug,
         module: 'intent'
-      }).catch(() => {});
+      }).catch(() => { });
     }
   };
 
@@ -2965,7 +3016,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
             status: 'Success',
             project_name: project.slug,
             module: 'rank_check'
-          }).catch(() => {});
+          }).catch(() => { });
           return;
         }
       } catch {
@@ -2988,7 +3039,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
       status: 'Success',
       project_name: project.slug,
       module: 'rank_check'
-    }).catch(() => {});
+    }).catch(() => { });
     try {
       if (!project.slug) {
         throw new Error("This project is missing its backend project reference -- reload the page and try again.");
@@ -3022,7 +3073,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
         status: 'Warning',
         project_name: project.slug,
         module: 'rank_check'
-      }).catch(() => {});
+      }).catch(() => { });
     }
   };
 
@@ -3092,7 +3143,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
             onUpdateKeywords(freshRows);
           }
         })
-        .catch(() => {});
+        .catch(() => { });
       return () => { cancelled = true; };
     }
   }, [project?.slug]);
@@ -3973,7 +4024,7 @@ function EditCompetitorModal({ open, onClose, competitor, onSave, onDelete }) {
           {competitor?.domain}
         </div>
       </div>
-      
+
       <Input label="DA" placeholder="e.g. 45" value={da} onChange={setDa} type="number" />
       <Select
         label="Type"
@@ -4748,201 +4799,201 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
         </div>
       ) : (
         <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', marginBottom: 20 }}>
-      <div style={{
-        padding: '14px 20px',
-        borderBottom: '1px solid var(--border)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        background: '#fafbfc'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>Cluster & Category</span>
-          <span style={{
-            fontSize: 11.5,
-            fontWeight: 600,
-            color: 'var(--text-muted)',
-            background: 'var(--surface-2)',
-            padding: '2px 8px',
-            borderRadius: 12,
-            border: '1px solid var(--border)'
+          <div style={{
+            padding: '14px 20px',
+            borderBottom: '1px solid var(--border)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: '#fafbfc'
           }}>
-            {clusterGroups.length} {clusterGroups.length === 1 ? 'Cluster' : 'Clusters'}
-          </span>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={expandAll}
-            style={{
-              padding: '5px 12px',
-              fontSize: 12,
-              fontWeight: 600,
-              background: '#fff',
-              border: '1px solid var(--border)',
-              borderRadius: 6,
-              cursor: 'pointer',
-              color: 'var(--text-secondary)'
-            }}
-          >
-            Expand All
-          </button>
-          <button
-            onClick={collapseAll}
-            style={{
-              padding: '5px 12px',
-              fontSize: 12,
-              fontWeight: 600,
-              background: '#fff',
-              border: '1px solid var(--border)',
-              borderRadius: 6,
-              cursor: 'pointer',
-              color: 'var(--text-secondary)'
-            }}
-          >
-            Collapse All
-          </button>
-        </div>
-      </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>Cluster & Category</span>
+              <span style={{
+                fontSize: 11.5,
+                fontWeight: 600,
+                color: 'var(--text-muted)',
+                background: 'var(--surface-2)',
+                padding: '2px 8px',
+                borderRadius: 12,
+                border: '1px solid var(--border)'
+              }}>
+                {clusterGroups.length} {clusterGroups.length === 1 ? 'Cluster' : 'Clusters'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={expandAll}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  background: '#fff',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  color: 'var(--text-secondary)'
+                }}
+              >
+                Expand All
+              </button>
+              <button
+                onClick={collapseAll}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  background: '#fff',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  color: 'var(--text-secondary)'
+                }}
+              >
+                Collapse All
+              </button>
+            </div>
+          </div>
 
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 850 }}>
-          <thead>
-            <tr style={{ background: 'var(--surface-2, #f8fafc)', borderBottom: '1px solid var(--border)' }}>
-              <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Category / Cluster</th>
-              <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>No. of Categories</th>
-              <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Location</th>
-              <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Total No. of Competitors</th>
-              <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Total No. of Keywords</th>
-              <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px', width: 130 }}>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {clusterGroups.map((group) => {
-              const isExpanded = expandedClusters.has(group.clusterName);
-              const clusFilter = group.clusterName.trim().toLowerCase();
-              const uniqueClusterComps = new Set(
-                scopedCompetitors.filter(c => {
-                  if (!c.cluster) return false;
-                  const clusList = c.cluster.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-                  return clusList.some(clus => clus === clusFilter || clus.includes(clusFilter));
-                }).map(c => (c.domain || c.name || c.url || '').toLowerCase()).filter(Boolean)
-              );
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 850 }}>
+              <thead>
+                <tr style={{ background: 'var(--surface-2, #f8fafc)', borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Category / Cluster</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>No. of Categories</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Location</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Total No. of Competitors</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px' }}>Total No. of Keywords</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 12, letterSpacing: '0.3px', width: 130 }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {clusterGroups.map((group) => {
+                  const isExpanded = expandedClusters.has(group.clusterName);
+                  const clusFilter = group.clusterName.trim().toLowerCase();
+                  const uniqueClusterComps = new Set(
+                    scopedCompetitors.filter(c => {
+                      if (!c.cluster) return false;
+                      const clusList = c.cluster.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+                      return clusList.some(clus => clus === clusFilter || clus.includes(clusFilter));
+                    }).map(c => (c.domain || c.name || c.url || '').toLowerCase()).filter(Boolean)
+                  );
 
-              return (
-                <Fragment key={group.clusterName}>
-                  {/* Cluster Parent Row */}
-                  <tr
-                    onClick={() => toggleClusterExpand(group.clusterName)}
-                    style={{
-                      background: '#f1f5f9',
-                      borderBottom: '1px solid var(--border)',
-                      cursor: 'pointer',
-                      userSelect: 'none',
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.background = '#e2e8f0'}
-                    onMouseLeave={e => e.currentTarget.style.background = '#f1f5f9'}
-                  >
-                    <td style={{ padding: '11px 16px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        {isExpanded ? <ChevronDown size={16} color="var(--accent)" /> : <ChevronRight size={16} color="var(--text-muted)" />}
-                        <span style={{ fontSize: 13.5, fontWeight: 700 }}>{group.clusterName}</span>
-                      </div>
-                    </td>
-                    <td style={{ padding: '11px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontWeight: 700 }}>
-                      {group.categories.length}
-                    </td>
-                    <td style={{ padding: '11px 16px', color: 'var(--text-secondary)' }}>
-                      {group.categories[0]?.location || scopedProject?.location || 'Singapore'}
-                    </td>
-                    <td style={{ padding: '11px 16px', textAlign: 'center', fontWeight: 700, color: 'var(--text-primary)' }}>
-                      {uniqueClusterComps.size}
-                    </td>
-                    <td style={{ padding: '11px 16px', textAlign: 'center', fontWeight: 700, color: 'var(--text-primary)' }}>
-                      {group.totalKeywords}
-                    </td>
-                    <td style={{ padding: '11px 16px', textAlign: 'center' }}>
-                      <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontWeight: 500 }}>
-                        {isExpanded ? 'Collapse' : 'Expand'}
-                      </span>
-                    </td>
-                  </tr>
-
-                  {/* Category Child Rows */}
-                  {isExpanded && group.categories.map((r, i) => {
-                    const catFilter = (r.category || '').trim().toLowerCase();
-                    const uniqueCatComps = new Set(
-                      scopedCompetitors.filter(c => {
-                        if (!c.category) return false;
-                        const catList = c.category.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-                        return catList.some(cat => cat === catFilter || cat.includes(catFilter));
-                      }).map(c => (c.domain || c.name || c.url || '').toLowerCase()).filter(Boolean)
-                    );
-
-                    return (
+                  return (
+                    <Fragment key={group.clusterName}>
+                      {/* Cluster Parent Row */}
                       <tr
-                        key={r.category || i}
+                        onClick={() => toggleClusterExpand(group.clusterName)}
                         style={{
+                          background: '#f1f5f9',
                           borderBottom: '1px solid var(--border)',
-                          background: '#fff',
-                          transition: 'background 0.15s'
+                          cursor: 'pointer',
+                          userSelect: 'none',
                         }}
-                        onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
-                        onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                        onMouseEnter={e => e.currentTarget.style.background = '#e2e8f0'}
+                        onMouseLeave={e => e.currentTarget.style.background = '#f1f5f9'}
                       >
-                        <td style={{ padding: '10px 16px 10px 44px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ color: '#94a3b8', fontSize: 14, fontFamily: 'monospace' }}>└─</span>
-                            <span style={{ fontSize: 13 }}>{r.category}</span>
+                        <td style={{ padding: '11px 16px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            {isExpanded ? <ChevronDown size={16} color="var(--accent)" /> : <ChevronRight size={16} color="var(--text-muted)" />}
+                            <span style={{ fontSize: 13.5, fontWeight: 700 }}>{group.clusterName}</span>
                           </div>
                         </td>
-                        <td style={{ padding: '10px 16px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                          1
+                        <td style={{ padding: '11px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                          {group.categories.length}
                         </td>
-                        <td style={{ padding: '10px 16px', color: 'var(--text-secondary)' }}>
-                          {r.location || scopedProject?.location || 'Singapore'}
+                        <td style={{ padding: '11px 16px', color: 'var(--text-secondary)' }}>
+                          {group.categories[0]?.location || scopedProject?.location || 'Singapore'}
                         </td>
-                        <td style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                          {uniqueCatComps.size}
+                        <td style={{ padding: '11px 16px', textAlign: 'center', fontWeight: 700, color: 'var(--text-primary)' }}>
+                          {uniqueClusterComps.size}
                         </td>
-                        <td style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 500, color: 'var(--text-secondary)' }}>
-                          {r.totalKeywords}
+                        <td style={{ padding: '11px 16px', textAlign: 'center', fontWeight: 700, color: 'var(--text-primary)' }}>
+                          {group.totalKeywords}
                         </td>
-                        <td style={{ padding: '8px 16px', textAlign: 'center' }}>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onViewComp(r.category);
-                            }}
-                            style={{
-                              padding: '6px 14px',
-                              borderRadius: 6,
-                              border: 'none',
-                              background: '#0f1523',
-                              color: '#fff',
-                              fontSize: 12.5,
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                              fontFamily: 'var(--font-body)',
-                              transition: 'opacity 0.15s ease'
-                            }}
-                            onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
-                            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-                          >
-                            View Comp
-                          </button>
+                        <td style={{ padding: '11px 16px', textAlign: 'center' }}>
+                          <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontWeight: 500 }}>
+                            {isExpanded ? 'Collapse' : 'Expand'}
+                          </span>
                         </td>
                       </tr>
-                    );
-                  })}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )}
-  </>
+
+                      {/* Category Child Rows */}
+                      {isExpanded && group.categories.map((r, i) => {
+                        const catFilter = (r.category || '').trim().toLowerCase();
+                        const uniqueCatComps = new Set(
+                          scopedCompetitors.filter(c => {
+                            if (!c.category) return false;
+                            const catList = c.category.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+                            return catList.some(cat => cat === catFilter || cat.includes(catFilter));
+                          }).map(c => (c.domain || c.name || c.url || '').toLowerCase()).filter(Boolean)
+                        );
+
+                        return (
+                          <tr
+                            key={r.category || i}
+                            style={{
+                              borderBottom: '1px solid var(--border)',
+                              background: '#fff',
+                              transition: 'background 0.15s'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
+                            onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                          >
+                            <td style={{ padding: '10px 16px 10px 44px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ color: '#94a3b8', fontSize: 14, fontFamily: 'monospace' }}>└─</span>
+                                <span style={{ fontSize: 13 }}>{r.category}</span>
+                              </div>
+                            </td>
+                            <td style={{ padding: '10px 16px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                              1
+                            </td>
+                            <td style={{ padding: '10px 16px', color: 'var(--text-secondary)' }}>
+                              {r.location || scopedProject?.location || 'Singapore'}
+                            </td>
+                            <td style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                              {uniqueCatComps.size}
+                            </td>
+                            <td style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 500, color: 'var(--text-secondary)' }}>
+                              {r.totalKeywords}
+                            </td>
+                            <td style={{ padding: '8px 16px', textAlign: 'center' }}>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onViewComp(r.category);
+                                }}
+                                style={{
+                                  padding: '6px 14px',
+                                  borderRadius: 6,
+                                  border: 'none',
+                                  background: '#0f1523',
+                                  color: '#fff',
+                                  fontSize: 12.5,
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  fontFamily: 'var(--font-body)',
+                                  transition: 'opacity 0.15s ease'
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+                                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                              >
+                                View Comp
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -5028,7 +5079,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
   const handleDeletePageRow = async (key) => {
     setPageRows(prev => prev.filter((r, i) => (r.id || i) !== key));
     if (typeof key === 'number') {
-      try { await deleteCompetitorPageRow(key); } catch (e) {}
+      try { await deleteCompetitorPageRow(key); } catch (e) { }
     }
   };
 
@@ -5148,9 +5199,9 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
   const targetSlug = (scopedProject?.slug || scopedProject?.project_slug || scopedProject?.name || '').toLowerCase();
   const baseFiltered = scopedProject
     ? competitors.filter(c => {
-        const cSlug = (c.projectSlug || c.project_slug || c.project_name || '').toLowerCase();
-        return cSlug === targetSlug;
-      })
+      const cSlug = (c.projectSlug || c.project_slug || c.project_name || '').toLowerCase();
+      return cSlug === targetSlug;
+    })
     : competitors;
   const filtered = baseFiltered
     .filter(c => {
@@ -5168,7 +5219,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
         const cCats = (c.category || c.targetSubtype || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
         const cClus = (c.cluster || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
         const matches = cCats.some(cat => cat === filterLower || cat.includes(filterLower) || filterLower.includes(cat)) ||
-                        cClus.some(clus => clus === filterLower || clus.includes(filterLower) || filterLower.includes(clus));
+          cClus.some(clus => clus === filterLower || clus.includes(filterLower) || filterLower.includes(clus));
         if (!matches) return false;
       }
       if (tableFilters.category?.length) {
@@ -5980,6 +6031,12 @@ export default function ProjectSetupPage({ tab, user }) {
       return;
     }
 
+    if (activeTab === 'Outreach' && hasOutreachPendingChanges) {
+      if (!window.confirm('You have unsaved changes. Discard them?')) return;
+      setOutreachPendingUpdates(new Map());
+      setOutreachPendingDeleteIds(new Set());
+    }
+
     setActiveTab(t);
     setSelectedPageProject(null);
     setSelectedCompetitor(null);
@@ -5999,6 +6056,144 @@ export default function ProjectSetupPage({ tab, user }) {
   const [outreachError, setOutreachError] = useState('');
   const [addingOutreach, setAddingOutreach] = useState(false);
   const [deletingOutreachLink, setDeletingOutreachLink] = useState(null);
+
+  const OUTREACH_TYPES = useMemo(() => ['Paid Guest', 'Classified Ads', 'Brand Mention', 'Business Listing'], []);
+
+  const outreachFilterConfigs = useMemo(() => [
+    { key: 'type', label: 'Type', type: 'select', options: ['Paid Guest', 'Classified Ads', 'Brand Mention', 'Business Listing'] },
+    { key: 'da', label: 'DA', type: 'range' },
+    { key: 'pa', label: 'PA', type: 'range' },
+    { key: 'ss', label: 'Spam Score (SS)', type: 'range' },
+    { key: 'traffic', label: 'Traffic', type: 'range' },
+  ], []);
+
+  const [outreachTableFilters, setOutreachTableFilters] = useState({
+    type: [],
+    da: { min: '', max: '' },
+    pa: { min: '', max: '' },
+    ss: { min: '', max: '' },
+    traffic: { min: '', max: '' }
+  });
+
+  const [selectedOutreachIds, setSelectedOutreachIds] = useState(new Set());
+  const [showBulkEditOutreach, setShowBulkEditOutreach] = useState(false);
+  const [showBulkDeleteOutreachConfirm, setShowBulkDeleteOutreachConfirm] = useState(false);
+  const [bulkEditOutreachData, setBulkEditOutreachData] = useState({
+    type: 'Paid Guest',
+    da: '',
+    pa: '',
+    ss: '',
+    traffic: ''
+  });
+
+  const [outreachPendingUpdates, setOutreachPendingUpdates] = useState(new Map());
+  const [outreachPendingDeleteIds, setOutreachPendingDeleteIds] = useState(new Set());
+  const [outreachSaving, setOutreachSaving] = useState(false);
+  const [outreachSaveError, setOutreachSaveError] = useState('');
+  const hasOutreachPendingChanges = outreachPendingUpdates.size > 0 || outreachPendingDeleteIds.size > 0;
+
+  const handleToggleSelectOutreach = (id) => {
+    setSelectedOutreachIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllOutreach = (visibleLinks) => {
+    if (!visibleLinks || visibleLinks.length === 0) return;
+    const allSelected = visibleLinks.every(lnk => selectedOutreachIds.has(lnk.id));
+    if (allSelected) {
+      setSelectedOutreachIds(new Set());
+    } else {
+      setSelectedOutreachIds(new Set(visibleLinks.map(lnk => lnk.id)));
+    }
+  };
+
+  const handleOutreachTypeChange = (lnkId, newType) => {
+    setOutreachLinks(prev => prev.map(l => l.id === lnkId ? { ...l, type: newType } : l));
+    setOutreachPendingUpdates(prev => {
+      const next = new Map(prev);
+      const existing = next.get(lnkId) || {};
+      next.set(lnkId, { ...existing, type: newType });
+      return next;
+    });
+  };
+
+  const handleBulkEditOutreachSave = () => {
+    const ids = Array.from(selectedOutreachIds);
+    if (!ids.length) return;
+
+    const updates = {};
+    if (bulkEditOutreachData.type) updates.type = bulkEditOutreachData.type;
+
+    setOutreachLinks(prev => prev.map(l => {
+      if (selectedOutreachIds.has(l.id)) {
+        return {
+          ...l,
+          ...(updates.type ? { type: updates.type } : {})
+        };
+      }
+      return l;
+    }));
+
+    setOutreachPendingUpdates(prev => {
+      const next = new Map(prev);
+      ids.forEach(id => {
+        const existing = next.get(id) || {};
+        next.set(id, { ...existing, ...updates });
+      });
+      return next;
+    });
+
+    setShowBulkEditOutreach(false);
+    setSelectedOutreachIds(new Set());
+  };
+
+  const handleBulkDeleteOutreachConfirm = () => {
+    const ids = Array.from(selectedOutreachIds);
+    if (!ids.length) return;
+
+    setOutreachLinks(prev => prev.filter(l => !selectedOutreachIds.has(l.id)));
+
+    setOutreachPendingDeleteIds(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => next.add(id));
+      return next;
+    });
+
+    setShowBulkDeleteOutreachConfirm(false);
+    setSelectedOutreachIds(new Set());
+  };
+
+  const handleDeleteOutreachLink = (id) => {
+    setOutreachLinks(prev => prev.filter(lnk => lnk.id !== id));
+    setOutreachPendingDeleteIds(prev => new Set(prev).add(id));
+  };
+
+  const handleSaveOutreachChanges = async () => {
+    const pSlug = activeProject?.project_slug || activeProject?.slug;
+    if (!pSlug) return;
+    setOutreachSaving(true);
+    setOutreachSaveError('');
+    try {
+      if (outreachPendingDeleteIds.size > 0) {
+        await bulkDeleteOutreachSitesApi(pSlug, Array.from(outreachPendingDeleteIds));
+      }
+      if (outreachPendingUpdates.size > 0) {
+        for (const [id, updates] of outreachPendingUpdates.entries()) {
+          await updateOutreachSiteApi(pSlug, id, updates);
+        }
+      }
+      setOutreachPendingUpdates(new Map());
+      setOutreachPendingDeleteIds(new Set());
+    } catch (err) {
+      setOutreachSaveError(err.message || 'Failed to save outreach changes.');
+    } finally {
+      setOutreachSaving(false);
+    }
+  };
 
   const downloadOutreachSampleTemplate = async () => {
     const headers = ['URL', 'Type'];
@@ -6188,7 +6383,7 @@ export default function ProjectSetupPage({ tab, user }) {
       setOutreachError('Link cannot be empty.');
       return;
     }
-    
+
     if (!/^https?:\/\//i.test(link)) {
       link = 'https://' + link;
     }
@@ -6208,8 +6403,8 @@ export default function ProjectSetupPage({ tab, user }) {
 
     setAddingOutreach(true);
     try {
+      const targetRegions = activeProject?.target_regions || ['in', 'us', 'uk'];
       const newSite = await addOutreachSiteApi(pSlug, link, targetRegions, newOutreachType || 'Paid Guest');
-      
       const mappedSite = {
         id: newSite.id,
         url: newSite.url,
@@ -6236,17 +6431,7 @@ export default function ProjectSetupPage({ tab, user }) {
     }
   };
 
-  const handleDeleteOutreachLink = async (id) => {
-    const pSlug = activeProject?.project_slug || activeProject?.slug;
-    if (pSlug && id) {
-      try {
-        await deleteOutreachSiteApi(pSlug, id);
-      } catch (err) {
-        console.error("Failed deleting outreach site from backend:", err);
-      }
-    }
-    setOutreachLinks(prev => prev.filter(lnk => lnk.id !== id));
-  };
+
 
   useEffect(() => {
     let cancelled = false;
@@ -6634,7 +6819,7 @@ export default function ProjectSetupPage({ tab, user }) {
       status: 'Success',
       project_name: project.slug,
       module: 'competitors'
-    }).catch(() => {});
+    }).catch(() => { });
     try {
       const { competitors: found, message } = await findCompetitors(project.slug, { useAi: true });
       handleFoundCompetitors(found);
@@ -6647,7 +6832,7 @@ export default function ProjectSetupPage({ tab, user }) {
         status: 'Warning',
         project_name: project.slug,
         module: 'competitors'
-      }).catch(() => {});
+      }).catch(() => { });
     } finally {
       setFindingCompetitors(false);
     }
@@ -6824,7 +7009,7 @@ export default function ProjectSetupPage({ tab, user }) {
     'Intent': { label: 'Add Keywords', onClick: () => setShowAddKeywords(true) },
     Pages: { label: 'Add Pages', onClick: () => setShowAddPages(true) },
     Competitors: { label: 'Choose Project', onClick: () => setShowChooseProject(true) },
-    Outreach: { label: 'Add Outreach', onClick: () => setShowAddOutreach(true) },
+    Outreach: { label: 'Add Sites', onClick: () => setShowAddOutreach(true) },
     Connectors: { label: 'Connect', onClick: () => { } },
   };
 
@@ -7082,6 +7267,15 @@ export default function ProjectSetupPage({ tab, user }) {
             </div>
           )}
 
+          {!isInDetailView && activeTab === 'Outreach' && (
+            <TableFilterDropdown
+              filters={outreachFilterConfigs}
+              rows={outreachLinks}
+              activeFilters={outreachTableFilters}
+              onFiltersChange={setOutreachTableFilters}
+            />
+          )}
+
           {!isInDetailView && userCanDownload && (
             <button
               onClick={handleDownloadMainTab}
@@ -7139,20 +7333,44 @@ export default function ProjectSetupPage({ tab, user }) {
                 </div>
               )
             ) : (
-              <button
-                onClick={cta.onClick}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
-                  padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
-                  fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-                }}
-                onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
-                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-              >
-                <Plus size={15} />
-                {cta.label}
-              </button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {activeTab === 'Outreach' && selectedOutreachIds.size > 0 && (
+                  <ActionsDropdown
+                    selectedCount={selectedOutreachIds.size}
+                    onBulkEdit={() => setShowBulkEditOutreach(true)}
+                    onBulkDelete={() => setShowBulkDeleteOutreachConfirm(true)}
+                  />
+                )}
+                {activeTab === 'Outreach' && userCanEdit && (hasOutreachPendingChanges || outreachSaving) && (
+                  <button
+                    onClick={handleSaveOutreachChanges}
+                    disabled={!hasOutreachPendingChanges || outreachSaving}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                      padding: '8px 18px', fontSize: 13.5, fontWeight: 600,
+                      cursor: outreachSaving ? 'default' : 'pointer',
+                      fontFamily: 'var(--font-body)', opacity: outreachSaving ? 0.7 : 1,
+                    }}
+                  >
+                    {outreachSaving ? 'Saving…' : 'Save changes'}
+                  </button>
+                )}
+                <button
+                  onClick={cta.onClick}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                    padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
+                    fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                >
+                  <Plus size={15} />
+                  {cta.label}
+                </button>
+              </div>
             )
           )}
         </div>
@@ -7268,131 +7486,229 @@ export default function ProjectSetupPage({ tab, user }) {
                   <RefreshCw size={16} className="spin" style={{ animation: 'spin 1s linear infinite' }} />
                   Loading outreach sites...
                 </div>
-              ) : outreachLinks.length === 0 ? (
-                <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-                  No outreach sites configured yet. Click <strong>+ {cta.label}</strong> to get started.
-                </div>
-              ) : (
-                <div style={{ overflowX: 'auto', padding: '12px 0' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 950 }}>
-                    <thead>
-                      <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
-                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 280 }}>
-                          Site
-                        </th>
-                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 120 }}>
-                          Type
-                        </th>
-                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
-                          DA
-                        </th>
-                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
-                          PA
-                        </th>
-                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
-                          SS
-                        </th>
-                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
-                          Traffic
-                        </th>
-                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
-                          Region 1
-                        </th>
-                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
-                          Region 2
-                        </th>
-                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
-                          Region 3
-                        </th>
-                        <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 100 }}>
-                          Action
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {outreachLinks.map((lnk) => (
-                        <tr key={lnk.id} style={{ borderBottom: '1px solid var(--border)' }}
-                          onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
-                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                          <td style={{ padding: '14px 16px', fontSize: 13.5, width: 280, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            <a href={lnk.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}
-                              onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
-                              onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
-                              {(() => {
-                                try {
-                                  const parsed = new URL(lnk.url);
-                                  const baseUrl = `${parsed.protocol}//${parsed.hostname}`;
-                                  if (lnk.url.length > baseUrl.length + 3) {
-                                    return `${baseUrl}...`;
-                                  }
-                                  return lnk.url;
-                                } catch (_) {
-                                  return lnk.url;
-                                }
-                              })()}
-                            </a>
-                          </td>
-                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
-                            <span style={{
-                              display: 'inline-block',
-                              padding: '2px 8px',
-                              borderRadius: 12,
-                              fontSize: 12,
-                              fontWeight: 500,
-                              background: '#e0f2fe',
-                              color: '#0369a1'
-                            }}>
-                              {lnk.type || lnk.site_type || lnk.website_type || 'Blog'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
-                            {lnk.da || '-'}
-                          </td>
-                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
-                            {lnk.pa || '-'}
-                          </td>
-                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
-                            {lnk.ss || '-'}
-                          </td>
-                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
-                            {lnk.totalTraffic || lnk.traffic || '-'}
-                          </td>
-                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
-                            {lnk.region1Traffic || '-'}
-                          </td>
-                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
-                            {lnk.region2Traffic || '-'}
-                          </td>
-                          <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
-                            {lnk.region3Traffic || '-'}
-                          </td>
-                          <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                            {userCanDelete && (
-                              <button
-                                onClick={() => setDeletingOutreachLink(lnk)}
+              ) : (() => {
+                if (outreachLinks.length === 0) {
+                  return (
+                    <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+                      No outreach sites configured yet. Click <strong>+ {cta.label}</strong> to get started.
+                    </div>
+                  );
+                }
+                let filteredOutreach = outreachLinks;
+                if (search && search.trim()) {
+                  const q = search.trim().toLowerCase();
+                  filteredOutreach = filteredOutreach.filter(l => (
+                    (l.url || '').toLowerCase().includes(q) ||
+                    (l.domain || '').toLowerCase().includes(q) ||
+                    (l.type || '').toLowerCase().includes(q)
+                  ));
+                }
+                if (outreachTableFilters.type && outreachTableFilters.type.length > 0) {
+                  filteredOutreach = filteredOutreach.filter(l => outreachTableFilters.type.includes(l.type || 'Paid Guest'));
+                }
+                const applyRangeFilter = (rows, key, fVal) => {
+                  if (!fVal || (fVal.min === '' && fVal.max === '')) return rows;
+                  const min = fVal.min !== '' ? Number(fVal.min) : -Infinity;
+                  const max = fVal.max !== '' ? Number(fVal.max) : Infinity;
+                  return rows.filter(r => {
+                    const val = Number(r[key] || 0);
+                    return val >= min && val <= max;
+                  });
+                };
+                filteredOutreach = applyRangeFilter(filteredOutreach, 'da', outreachTableFilters.da);
+                filteredOutreach = applyRangeFilter(filteredOutreach, 'pa', outreachTableFilters.pa);
+                filteredOutreach = applyRangeFilter(filteredOutreach, 'ss', outreachTableFilters.ss);
+                filteredOutreach = applyRangeFilter(filteredOutreach, 'totalTraffic', outreachTableFilters.traffic);
+
+                const isAllSelected = filteredOutreach.length > 0 && filteredOutreach.every(lnk => selectedOutreachIds.has(lnk.id));
+
+                return (
+                  <div style={{ padding: '12px 0' }}>
+                    {outreachSaveError && (
+                      <div style={{
+                        background: '#fef2f2',
+                        border: '1px solid #f87171',
+                        color: '#dc2626',
+                        borderRadius: 6,
+                        padding: '10px 14px',
+                        fontSize: 13,
+                        fontWeight: 500,
+                        marginBottom: 12
+                      }}>
+                        {outreachSaveError}
+                      </div>
+                    )}
+
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 950 }}>
+                        <thead>
+                          <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
+                            <th style={{ padding: '10px 14px', textAlign: 'center', width: 40 }}>
+                              <div
+                                onClick={() => handleToggleSelectAllOutreach(filteredOutreach)}
                                 style={{
-                                  background: 'none',
-                                  border: 'none',
-                                  color: 'var(--red, #dc2626)',
-                                  fontSize: 12.5,
-                                  fontWeight: 600,
-                                  cursor: 'pointer',
-                                  padding: '4px 8px',
-                                  borderRadius: 4
+                                  width: 20, height: 20, borderRadius: 6,
+                                  border: isAllSelected ? '2px solid #5c4af2' : '2px solid #cbd5e1',
+                                  background: isAllSelected ? '#5c4af2' : '#fff',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  cursor: 'pointer', transition: 'all 0.15s', margin: '0 auto'
                                 }}
-                                onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
-                                onMouseLeave={e => e.currentTarget.style.background = 'none'}
                               >
-                                Delete
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )
+                                {isAllSelected && <Check size={13} color="#fff" strokeWidth={3} />}
+                              </div>
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 280 }}>
+                              Site
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 170 }}>
+                              Type
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                              DA
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                              PA
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                              SS
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                              Traffic
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                              Region 1
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                              Region 2
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                              Region 3
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 100 }}>
+                              Action
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredOutreach.map((lnk) => {
+                            const isSelected = selectedOutreachIds.has(lnk.id);
+                            const currentType = lnk.type || lnk.site_type || lnk.website_type || 'Paid Guest';
+                            return (
+                              <tr key={lnk.id} style={{ borderBottom: '1px solid var(--border)', background: isSelected ? '#f0f9ff' : 'transparent' }}
+                                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#fafbfc'; }}
+                                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}>
+                                <td style={{ padding: '14px 14px', textAlign: 'center', width: 40 }}>
+                                  <div
+                                    onClick={() => handleToggleSelectOutreach(lnk.id)}
+                                    style={{
+                                      width: 20, height: 20, borderRadius: 6,
+                                      border: isSelected ? '2px solid #5c4af2' : '2px solid #cbd5e1',
+                                      background: isSelected ? '#5c4af2' : '#fff',
+                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                      cursor: 'pointer', transition: 'all 0.15s', margin: '0 auto'
+                                    }}
+                                  >
+                                    {isSelected && <Check size={13} color="#fff" strokeWidth={3} />}
+                                  </div>
+                                </td>
+                                <td style={{ padding: '14px 16px', fontSize: 13.5, width: 280, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  <a href={lnk.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}
+                                    onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                                    onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
+                                    {(() => {
+                                      try {
+                                        const parsed = new URL(lnk.url);
+                                        const baseUrl = `${parsed.protocol}//${parsed.hostname}`;
+                                        if (lnk.url.length > baseUrl.length + 3) {
+                                          return `${baseUrl}...`;
+                                        }
+                                        return lnk.url;
+                                      } catch (_) {
+                                        return lnk.url;
+                                      }
+                                    })()}
+                                  </a>
+                                </td>
+                                <td style={{ padding: '10px 16px', fontSize: 13.5, textAlign: 'left' }}>
+                                  <select
+                                    value={OUTREACH_TYPES.includes(currentType) ? currentType : 'Paid Guest'}
+                                    onChange={(e) => handleOutreachTypeChange(lnk.id, e.target.value)}
+                                    style={{
+                                      padding: '5px 10px',
+                                      fontSize: 12,
+                                      fontWeight: 600,
+                                      borderRadius: 6,
+                                      border: '1px solid #cbd5e1',
+                                      background: '#e0f2fe',
+                                      color: '#0369a1',
+                                      outline: 'none',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    {!OUTREACH_TYPES.includes(currentType) && (
+                                      <option value={currentType}>{currentType}</option>
+                                    )}
+                                    {OUTREACH_TYPES.map(opt => (
+                                      <option key={opt} value={opt} style={{ background: '#ffffff', color: '#0f172a' }}>
+                                        {opt}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                                  {lnk.da || '-'}
+                                </td>
+                                <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                                  {lnk.pa || '-'}
+                                </td>
+                                <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                                  {lnk.ss || '-'}
+                                </td>
+                                <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                                  {lnk.totalTraffic || lnk.traffic || '-'}
+                                </td>
+                                <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                                  {lnk.region1Traffic || '-'}
+                                </td>
+                                <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                                  {lnk.region2Traffic || '-'}
+                                </td>
+                                <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                                  {lnk.region3Traffic || '-'}
+                                </td>
+                                <td style={{ padding: '14px 16px', textAlign: 'right' }}>
+                                  {userCanDelete && (
+                                    <button
+                                      onClick={() => setDeletingOutreachLink(lnk)}
+                                      title="Delete domain"
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        color: 'var(--red, #dc2626)',
+                                        cursor: 'pointer',
+                                        padding: '6px 8px',
+                                        borderRadius: 6,
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justify: 'center',
+                                        transition: 'background 0.15s'
+                                      }}
+                                      onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
+                                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                                    >
+                                      <Trash2 size={15} color="var(--red, #dc2626)" />
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()
             )}
             {activeTab === 'Connectors' && (
               <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
@@ -7438,8 +7754,8 @@ export default function ProjectSetupPage({ tab, user }) {
           activeTab === 'Competitors' && selectedCompetitorProject !== null
             ? { slug: selectedCompetitorProject.slug, name: selectedCompetitorProject.name, domain: selectedCompetitorProject.domain }
             : activeTab === 'Pages' && selectedPageProject !== null
-            ? { index: selectedPageProject, slug: pages[selectedPageProject].slug, name: pages[selectedPageProject].name, domain: pages[selectedPageProject].domain }
-            : null
+              ? { index: selectedPageProject, slug: pages[selectedPageProject].slug, name: pages[selectedPageProject].name, domain: pages[selectedPageProject].domain }
+              : null
         }
       />
       <AddKeywordsModal
@@ -7451,8 +7767,8 @@ export default function ProjectSetupPage({ tab, user }) {
           activeTab === 'Competitors' && selectedCompetitorProject !== null
             ? { slug: selectedCompetitorProject.slug, name: selectedCompetitorProject.name, domain: selectedCompetitorProject.domain }
             : activeTab === 'Intent' && selectedKwProject !== null
-            ? { index: selectedKwProject, slug: kwClusters[selectedKwProject].slug, name: kwClusters[selectedKwProject].name, domain: kwClusters[selectedKwProject].domain }
-            : null
+              ? { index: selectedKwProject, slug: kwClusters[selectedKwProject].slug, name: kwClusters[selectedKwProject].name, domain: kwClusters[selectedKwProject].domain }
+              : null
         }
       />
       <ChooseProjectModal open={showChooseProject} onClose={() => setShowChooseProject(false)} onApply={handleChooseProjectApply} projects={projects} mode={chooseProjectMode} onCheckPrerequisites={checkProjectPrerequisites} />
@@ -7585,6 +7901,8 @@ export default function ProjectSetupPage({ tab, user }) {
               }}
             >
               <option value="Paid Guest">Paid Guest</option>
+              <option value="Classified Ads">Classified Ads</option>
+              <option value="Brand Mention">Brand Mention</option>
               <option value="Business Listing">Business Listing</option>
             </select>
           </div>
@@ -7655,7 +7973,56 @@ export default function ProjectSetupPage({ tab, user }) {
             </button>
           </>}>
           <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-secondary)' }}>
-            Are you sure you want to delete the outreach sites <strong>{deletingOutreachLink.url}</strong>? This action cannot be undone.
+            Are you sure you want to delete the outreach site <strong>{deletingOutreachLink.url}</strong>? This action cannot be undone.
+          </p>
+        </Modal>
+      )}
+      {showBulkEditOutreach && (
+        <Modal
+          open={true}
+          onClose={() => setShowBulkEditOutreach(false)}
+          title={`Bulk Edit Outreach Sites (${selectedOutreachIds.size} Selected)`}
+          footer={<>
+            <Btn variant="primary" onClick={handleBulkEditOutreachSave}>Apply Changes</Btn>
+            <Btn variant="outline" onClick={() => setShowBulkEditOutreach(false)}>Cancel</Btn>
+          </>}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Type</label>
+              <select
+                value={bulkEditOutreachData.type}
+                onChange={(e) => setBulkEditOutreachData(prev => ({ ...prev, type: e.target.value }))}
+                style={{ width: '100%', padding: '10px 14px', fontSize: 13.5, background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', outline: 'none' }}
+              >
+                {OUTREACH_TYPES.map(opt => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                
+              </div>
+              
+            </div>
+          </div>
+        </Modal>
+      )}
+      {showBulkDeleteOutreachConfirm && (
+        <Modal
+          open={true}
+          onClose={() => setShowBulkDeleteOutreachConfirm(false)}
+          title={`Bulk Delete Outreach Sites (${selectedOutreachIds.size} Selected)`}
+          footer={<>
+            <button onClick={() => setShowBulkDeleteOutreachConfirm(false)} style={{ padding: '8px 16px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+            <button onClick={handleBulkDeleteOutreachConfirm} style={{ padding: '8px 18px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              Delete {selectedOutreachIds.size} Site{selectedOutreachIds.size !== 1 ? 's' : ''}
+            </button>
+          </>}
+        >
+          <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-secondary)' }}>
+            Are you sure you want to delete <strong>{selectedOutreachIds.size}</strong> selected outreach site{selectedOutreachIds.size !== 1 ? 's' : ''}? This action cannot be undone.
           </p>
         </Modal>
       )}

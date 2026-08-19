@@ -290,6 +290,12 @@ def init_db():
         """))
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'Active'"))
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE"))
+        conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS nap_business_centre TEXT"))
+        conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS nap_phone TEXT"))
+        conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS nap_website TEXT"))
+        conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS nap_address TEXT"))
+        conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS nap_email TEXT"))
+        conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS branded_terms TEXT"))
 
         # --- Single Unified Monthly Operations Table -----------------
         conn.execute(text("""
@@ -607,6 +613,40 @@ def delete_outreach_site(site_id: int):
         conn.execute(
             text("DELETE FROM outreach_sites WHERE id = :id"),
             {"id": site_id}
+        )
+    return True
+
+
+def update_outreach_site(site_id: int, updates: dict):
+    """Update fields for a specific outreach site."""
+    if not os.environ.get("DATABASE_URL") or not updates:
+        return True
+    set_clauses = []
+    params = {"id": site_id}
+    allowed_keys = ["type", "da", "pa", "ss", "traffic", "total_traffic", "region1_traffic", "region2_traffic", "region3_traffic", "url", "domain"]
+    for k, v in updates.items():
+        db_key = k
+        if db_key not in allowed_keys and k == "site_type":
+            db_key = "type"
+        if db_key in allowed_keys:
+            set_clauses.append(f"{db_key} = :{db_key}")
+            params[db_key] = v
+    if not set_clauses:
+        return True
+    query = f"UPDATE outreach_sites SET {', '.join(set_clauses)} WHERE id = :id"
+    with engine.begin() as conn:
+        conn.execute(text(query), params)
+    return True
+
+
+def bulk_delete_outreach_sites(site_ids: list):
+    """Bulk delete outreach sites by IDs."""
+    if not os.environ.get("DATABASE_URL") or not site_ids:
+        return True
+    with engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM outreach_sites WHERE id = ANY(:ids)"),
+            {"ids": site_ids}
         )
     return True
 
@@ -929,7 +969,9 @@ def delete_project_pages(slug):
 # --- Domains (the "Create Project" form) --------------------------------
 
 def create_domain(domain, project_name=None, target_regions=None, platforms=None,
-                   domain_authority=None, users=None):
+                   domain_authority=None, users=None,
+                   nap_business_centre=None, nap_phone=None, nap_website=None,
+                   nap_address=None, nap_email=None, branded_terms=None):
     """Registers a new domain <-> project pairing (one domain, one
     project). If project_name is blank, defaults to the domain string
     itself (matching the form's "Auto-generated if left blank" hint --
@@ -956,13 +998,19 @@ def create_domain(domain, project_name=None, target_regions=None, platforms=None
             raise ValueError(f"Domain '{domain}' already exists.")
 
         conn.execute(text("""
-            INSERT INTO domains (domain, project_name, project_slug, target_regions, platforms, domain_authority, users, status, is_active)
-            VALUES (:domain, :project_name, :project_slug, :target_regions, :platforms, :domain_authority, CAST(:users AS JSONB), 'Active', TRUE)
+            INSERT INTO domains (domain, project_name, project_slug, target_regions, platforms, domain_authority, users, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, branded_terms, status, is_active)
+            VALUES (:domain, :project_name, :project_slug, :target_regions, :platforms, :domain_authority, CAST(:users AS JSONB), :nap_business_centre, :nap_phone, :nap_website, :nap_address, :nap_email, :branded_terms, 'Active', TRUE)
         """), {
             "domain": domain, "project_name": project_name, "project_slug": project_slug,
             "target_regions": target_regions or [], "platforms": platforms or [],
             "domain_authority": domain_authority,
             "users": json.dumps(users) if users is not None else None,
+            "nap_business_centre": nap_business_centre,
+            "nap_phone": nap_phone,
+            "nap_website": nap_website,
+            "nap_address": nap_address,
+            "nap_email": nap_email,
+            "branded_terms": branded_terms,
         })
 
     return project_slug
