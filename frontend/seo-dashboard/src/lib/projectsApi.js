@@ -826,7 +826,7 @@ export async function fetchKeywordRows(projectSlug) {
   for (const slug of candidateSlugs) {
     if (!slug) continue;
     try {
-      const res = await fetch(`http://127.0.0.1:5000/projects/${encodeURIComponent(slug)}/results`);
+      const res = await fetch(`${getApiBaseUrl()}/projects/${encodeURIComponent(slug)}/results`);
       if (res.ok) {
         const json = await res.json();
         if (json.results && json.results.length > 0) {
@@ -964,7 +964,7 @@ export function getApiBaseUrl() {
     if (host === 'localhost' || host === '127.0.0.1') {
       return 'http://127.0.0.1:5000';
     }
-    return `${window.location.protocol}//${host}:5000`;
+    return `${window.location.protocol}//${host}:8000`;
   }
   return 'http://127.0.0.1:5000';
 }
@@ -2182,131 +2182,360 @@ export async function fetchAiAnalysisHistory(projectSlug, engine = '') {
 
 
 // --- Monthly Operations API Calls -------------------------
-const API_BASE = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000').replace('0.0.0.0', '127.0.0.1');
+const API_BASE = getApiBaseUrl();
 
 export async function fetchMonthlyImportsApi() {
-  const res = await fetch(`${API_BASE}/monthly-operations/imports`);
-  if (!res.ok) throw new Error('Failed to fetch monthly imports');
-  const data = await res.json();
-  return data.imports || [];
+  // Try FastAPI backend first
+  try {
+    const res = await fetch(`${API_BASE}/monthly-operations/imports`);
+    if (res.ok) {
+      const data = await res.json();
+      return data.imports || [];
+    }
+  } catch (e) {
+    console.warn('[fetchMonthlyImportsApi] Backend unavailable, falling back to Supabase:', e);
+  }
+  // Supabase fallback
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('monthly_operations')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error) return data || [];
+    } catch (e) {
+      console.warn('[fetchMonthlyImportsApi] Supabase fetch failed:', e);
+    }
+  }
+  return [];
 }
 
 export async function createMonthlyImportApi(importData) {
-  const res = await fetch(`${API_BASE}/monthly-operations/imports`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(importData)
-  });
-  if (!res.ok) throw new Error('Failed to save monthly import');
-  return await res.json();
+  let result = null;
+  // Try backend first
+  try {
+    const res = await fetch(`${API_BASE}/monthly-operations/imports`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(importData)
+    });
+    if (res.ok) {
+      result = await res.json();
+    } else {
+      throw new Error('Failed to save monthly import');
+    }
+  } catch (e) {
+    console.warn('[createMonthlyImportApi] Backend failed:', e.message);
+  }
+  // Supabase sync
+  if (supabase) {
+    try {
+      const supabaseRow = { ...importData };
+      if (result?.id) {
+        await supabase.from('monthly_operations').upsert({ ...supabaseRow, id: result.id }, { onConflict: 'id' });
+      } else {
+        const { data } = await supabase.from('monthly_operations').insert(supabaseRow).select().single();
+        if (!result && data) result = data;
+      }
+    } catch (e) {
+      console.warn('[createMonthlyImportApi] Supabase sync failed:', e);
+    }
+  }
+  if (!result) throw new Error('Failed to save monthly import');
+  return result;
 }
 
 export async function updateMonthlyImportApi(importId, updateData) {
-  const res = await fetch(`${API_BASE}/monthly-operations/imports/${importId}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(updateData)
-  });
-  if (!res.ok) throw new Error('Failed to update monthly import');
-  return await res.json();
+  // Backend update
+  try {
+    const res = await fetch(`${API_BASE}/monthly-operations/imports/${importId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updateData)
+    });
+    if (!res.ok) console.warn('[updateMonthlyImportApi] Backend update failed');
+  } catch (e) {
+    console.warn('[updateMonthlyImportApi] Backend unavailable:', e);
+  }
+  // Supabase update
+  if (supabase) {
+    try {
+      await supabase.from('monthly_operations').update(updateData).eq('id', importId);
+    } catch (e) {
+      console.warn('[updateMonthlyImportApi] Supabase update failed:', e);
+    }
+  }
 }
 
 export async function deleteMonthlyImportApi(importId) {
-  const res = await fetch(`${API_BASE}/monthly-operations/imports/${importId}`, {
-    method: 'DELETE'
-  });
-  if (!res.ok) throw new Error('Failed to delete monthly import');
-  return await res.json();
+  // Backend delete
+  try {
+    const res = await fetch(`${API_BASE}/monthly-operations/imports/${importId}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) console.warn('[deleteMonthlyImportApi] Backend delete failed');
+  } catch (e) {
+    console.warn('[deleteMonthlyImportApi] Backend unavailable:', e);
+  }
+  // Supabase delete
+  if (supabase) {
+    try {
+      await supabase.from('monthly_operations').delete().eq('id', importId);
+    } catch (e) {
+      console.warn('[deleteMonthlyImportApi] Supabase delete failed:', e);
+    }
+  }
 }
 
 export async function fetchScheduledActivitiesApi() {
-  const res = await fetch(`${API_BASE}/monthly-operations/schedules`);
-  if (!res.ok) throw new Error('Failed to fetch scheduled activities');
-  const data = await res.json();
-  return data.schedules || [];
+  // Try FastAPI backend first
+  try {
+    const res = await fetch(`${API_BASE}/monthly-operations/schedules`);
+    if (res.ok) {
+      const data = await res.json();
+      return data.schedules || [];
+    }
+  } catch (e) {
+    console.warn('[fetchScheduledActivitiesApi] Backend unavailable, falling back to Supabase:', e);
+  }
+  // Supabase fallback
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('scheduled_activities')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error) return data || [];
+    } catch (e) {
+      console.warn('[fetchScheduledActivitiesApi] Supabase fetch failed:', e);
+    }
+  }
+  return [];
 }
 
 export async function createScheduledActivityApi(scheduleData) {
-  const res = await fetch(`${API_BASE}/monthly-operations/schedules`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(scheduleData)
-  });
-  if (!res.ok) throw new Error('Failed to save scheduled activity');
-  return await res.json();
+  let result = null;
+  // Try backend
+  try {
+    const res = await fetch(`${API_BASE}/monthly-operations/schedules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scheduleData)
+    });
+    if (res.ok) {
+      result = await res.json();
+    } else {
+      throw new Error('Failed to save scheduled activity');
+    }
+  } catch (e) {
+    console.warn('[createScheduledActivityApi] Backend failed:', e.message);
+  }
+  // Supabase sync
+  if (supabase) {
+    try {
+      const supabaseRow = { ...scheduleData };
+      if (result?.id) {
+        await supabase.from('scheduled_activities').upsert({ ...supabaseRow, id: result.id }, { onConflict: 'id' });
+      } else {
+        const { data } = await supabase.from('scheduled_activities').insert(supabaseRow).select().single();
+        if (!result && data) result = data;
+      }
+    } catch (e) {
+      console.warn('[createScheduledActivityApi] Supabase sync failed:', e);
+    }
+  }
+  if (!result) throw new Error('Failed to save scheduled activity');
+  return result;
 }
 
 export async function deleteScheduledActivityApi(scheduleId) {
-  const res = await fetch(`${API_BASE}/monthly-operations/schedules/${scheduleId}`, {
-    method: 'DELETE'
-  });
-  if (!res.ok) throw new Error('Failed to delete scheduled activity');
-  return await res.json();
+  // Backend delete
+  try {
+    const res = await fetch(`${API_BASE}/monthly-operations/schedules/${scheduleId}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) console.warn('[deleteScheduledActivityApi] Backend delete failed');
+  } catch (e) {
+    console.warn('[deleteScheduledActivityApi] Backend unavailable:', e);
+  }
+  // Supabase delete
+  if (supabase) {
+    try {
+      await supabase.from('scheduled_activities').delete().eq('id', scheduleId);
+    } catch (e) {
+      console.warn('[deleteScheduledActivityApi] Supabase delete failed:', e);
+    }
+  }
 }
 
 export async function fetchOutreachSitesApi(projectSlug) {
-  if (!projectSlug) return [];
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach`);
-  if (!res.ok) throw new Error('Failed to fetch outreach sites');
-  const data = await res.json();
-  return data.sites || [];
+  // Always query Supabase first — it's the primary persistent store
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('outreach_sites')
+        .select('*')
+        .order('created_at', { ascending: false });
+      console.log('[fetchOutreachSitesApi] Supabase result:', { data, error, count: data?.length });
+      if (!error && data && data.length > 0) {
+        return data;
+      }
+      if (error) {
+        console.warn('[fetchOutreachSitesApi] Supabase error:', error);
+      }
+    } catch (e) {
+      console.warn('[fetchOutreachSitesApi] Supabase fetch failed, trying backend:', e);
+    }
+  } else {
+    console.warn('[fetchOutreachSitesApi] supabase client is null/undefined');
+  }
+
+  // Fall back to backend if Supabase has no data or failed
+  try {
+    const url = projectSlug
+      ? `${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach`
+      : `${CATEGORY_API_BASE}/outreach`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      console.log('[fetchOutreachSitesApi] Backend result:', data);
+      return data.sites || [];
+    }
+  } catch (e) {
+    console.warn('[fetchOutreachSitesApi] Backend also unavailable:', e);
+  }
+
+  return [];
 }
 
 export async function addOutreachSiteApi(projectSlug, url, regions = null, type = 'Paid Guest') {
   if (!projectSlug) throw new Error('Project slug is required');
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, regions, type })
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => null);
-    throw new Error(err?.detail || 'Failed to add outreach site');
+  let backendSite = null;
+  // Try backend
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, regions, type })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      backendSite = data.site;
+    } else {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail || 'Failed to add outreach site');
+    }
+  } catch (e) {
+    if (!backendSite) console.warn('[addOutreachSiteApi] Backend failed:', e.message);
   }
-  const data = await res.json();
-  return data.site;
+  // Supabase sync
+  if (supabase) {
+    try {
+      const domain = url.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').split('?')[0];
+      const supabaseRow = { project_slug: projectSlug, url, domain, type, ...(regions ? { metrics_json: { regions } } : {}) };
+      if (backendSite?.id) {
+        await supabase.from('outreach_sites').upsert({ ...supabaseRow, id: backendSite.id }, { onConflict: 'id' });
+      } else {
+        const { data } = await supabase.from('outreach_sites').insert(supabaseRow).select().single();
+        if (!backendSite && data) backendSite = data;
+      }
+    } catch (e) {
+      console.warn('[addOutreachSiteApi] Supabase sync failed:', e);
+    }
+  }
+  return backendSite;
 }
 
 export async function deleteOutreachSiteApi(projectSlug, siteId) {
   if (!projectSlug || !siteId) return;
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach/${siteId}`, {
-    method: 'DELETE'
-  });
-  if (!res.ok) throw new Error('Failed to delete outreach site');
-  return await res.json();
+  // Backend delete
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach/${siteId}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) console.warn('[deleteOutreachSiteApi] Backend delete failed');
+  } catch (e) {
+    console.warn('[deleteOutreachSiteApi] Backend unavailable:', e);
+  }
+  // Supabase delete
+  if (supabase) {
+    try {
+      await supabase.from('outreach_sites').delete().eq('id', siteId);
+    } catch (e) {
+      console.warn('[deleteOutreachSiteApi] Supabase delete failed:', e);
+    }
+  }
 }
 
 export async function updateOutreachSiteApi(projectSlug, siteId, updates) {
   if (!projectSlug || !siteId) return;
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach/${siteId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ updates })
-  });
-  if (!res.ok) throw new Error('Failed to update outreach site');
-  return await res.json();
+  // Backend update
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach/${siteId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ updates })
+    });
+    if (!res.ok) console.warn('[updateOutreachSiteApi] Backend update failed');
+  } catch (e) {
+    console.warn('[updateOutreachSiteApi] Backend unavailable:', e);
+  }
+  // Supabase update
+  if (supabase) {
+    try {
+      await supabase.from('outreach_sites').update(updates).eq('id', siteId);
+    } catch (e) {
+      console.warn('[updateOutreachSiteApi] Supabase update failed:', e);
+    }
+  }
 }
 
 export async function bulkDeleteOutreachSitesApi(projectSlug, ids) {
   if (!projectSlug || !ids || !ids.length) return;
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach/bulk-delete`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids })
-  });
-  if (!res.ok) throw new Error('Failed to bulk delete outreach sites');
-  return await res.json();
+  // Backend bulk delete
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach/bulk-delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids })
+    });
+    if (!res.ok) console.warn('[bulkDeleteOutreachSitesApi] Backend bulk delete failed');
+  } catch (e) {
+    console.warn('[bulkDeleteOutreachSitesApi] Backend unavailable:', e);
+  }
+  // Supabase bulk delete
+  if (supabase) {
+    try {
+      await supabase.from('outreach_sites').delete().in('id', ids);
+    } catch (e) {
+      console.warn('[bulkDeleteOutreachSitesApi] Supabase bulk delete failed:', e);
+    }
+  }
 }
 
 export async function bulkUpdateOutreachSitesApi(projectSlug, ids, updates) {
   if (!projectSlug || !ids || !ids.length) return;
-  const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach/bulk-update`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids, updates })
-  });
-  if (!res.ok) throw new Error('Failed to bulk update outreach sites');
-  return await res.json();
+  // Backend bulk update
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach/bulk-update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, updates })
+    });
+    if (!res.ok) console.warn('[bulkUpdateOutreachSitesApi] Backend bulk update failed');
+  } catch (e) {
+    console.warn('[bulkUpdateOutreachSitesApi] Backend unavailable:', e);
+  }
+  // Supabase bulk update
+  if (supabase) {
+    try {
+      for (const id of ids) {
+        await supabase.from('outreach_sites').update(updates).eq('id', id);
+      }
+    } catch (e) {
+      console.warn('[bulkUpdateOutreachSitesApi] Supabase bulk update failed:', e);
+    }
+  }
 }
 
 export async function fetchDomainMetricsApi(domain, regions = null) {

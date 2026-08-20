@@ -547,22 +547,31 @@ def init_db():
 
 # --- Outreach Sites Database Functions ------------------------------------
 
-def list_outreach_sites(project_slug: str):
-    """Fetch all stored outreach sites for a given project slug."""
+def list_outreach_sites(project_slug: str = None):
+    """Fetch all stored outreach sites for a given project slug or all if None."""
     if not os.environ.get("DATABASE_URL"):
         return []
     with engine.connect() as conn:
-        res = conn.execute(
-            text("""
+        if project_slug:
+            query = text("""
                 SELECT id, project_slug, url, domain, type, da, pa, ss, traffic,
                        total_traffic, region1_traffic, region2_traffic, region3_traffic,
                        metrics_json, created_at
                 FROM outreach_sites
                 WHERE project_slug = :slug
                 ORDER BY id DESC
-            """),
-            {"slug": project_slug}
-        ).mappings().all()
+            """)
+            params = {"slug": project_slug}
+        else:
+            query = text("""
+                SELECT id, project_slug, url, domain, type, da, pa, ss, traffic,
+                       total_traffic, region1_traffic, region2_traffic, region3_traffic,
+                       metrics_json, created_at
+                FROM outreach_sites
+                ORDER BY id DESC
+            """)
+            params = {}
+        res = conn.execute(query, params).mappings().all()
         return [dict(r) for r in res]
 
 

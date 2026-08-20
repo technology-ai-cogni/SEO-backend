@@ -606,7 +606,7 @@ async def _do_status_check_async(dataset_id: Optional[int], rows_payload: Option
     if QuoraScraper:
         try:
             scraper = QuoraScraper()
-            await scraper.start(use_bright_data=False, headless=False)
+            await scraper.start(use_bright_data=False, headless=True)
             try:
                 await scraper.login_quora()
             except Exception as le:
@@ -2092,6 +2092,15 @@ class AddOutreachSiteRequest(BaseModel):
     site_type: Optional[str] = None
     regions: Optional[List[str]] = None
 
+
+@app.get("/outreach")
+def get_all_outreach_sites_endpoint():
+    """List all stored outreach sites across all projects."""
+    try:
+        sites = db.list_outreach_sites(None)
+        return {"sites": sites}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/projects/{project_slug}/outreach")
 def get_outreach_sites_endpoint(project_slug: str):

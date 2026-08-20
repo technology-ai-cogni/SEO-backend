@@ -13,6 +13,7 @@ import {
   findCompetitors, fetchCompetitorSnapshots, classifyCompetitorUrls,
   fetchOutreachSitesApi, addOutreachSiteApi, deleteOutreachSiteApi,
   updateOutreachSiteApi, bulkDeleteOutreachSitesApi, bulkUpdateOutreachSitesApi,
+  createAuditLogApi, getActiveUserEmail,
   getApiBaseUrl
 } from '../../lib/projectsApi';
 import { isReadOnlyUser, canEdit, canDelete, canDownload, canUpdate } from '../../lib/permissions';
@@ -6286,18 +6287,12 @@ export default function ProjectSetupPage({ tab, user }) {
     return null;
   }, [selectedCompetitorProject, selectedPageProject, pages, selectedKwProject, kwClusters, projects]);
 
-  // Fetch outreach sites whenever active project or active tab changes
+  // Fetch outreach sites whenever active tab changes (not scoped by project)
   useEffect(() => {
     if (activeTab !== 'Outreach') return;
     let cancelled = false;
-    const pSlug = activeProject?.project_slug || activeProject?.slug;
-    if (!pSlug) {
-      setOutreachLinks([]);
-      setOutreachLoading(false);
-      return;
-    }
     setOutreachLoading(true);
-    fetchOutreachSitesApi(pSlug)
+    fetchOutreachSitesApi(null)
       .then(sites => {
         if (!cancelled) {
           const mapped = sites.map(s => ({
@@ -6324,7 +6319,7 @@ export default function ProjectSetupPage({ tab, user }) {
         if (!cancelled) setOutreachLoading(false);
       });
     return () => { cancelled = true; };
-  }, [activeProject, activeTab]);
+  }, [activeTab]);
 
   const handleAddOutreachLink = async (e) => {
     if (e) e.preventDefault();
