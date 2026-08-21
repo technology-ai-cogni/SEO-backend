@@ -552,6 +552,19 @@ if os.path.exists(quora_checker_path):
     except Exception as err:
         print(f"[app] Error loading quora-checker.py: {err}")
 
+paid_guest_post_path = os.path.join(os.path.dirname(__file__), "..", "paid-guest-post.py")
+if not os.path.exists(paid_guest_post_path):
+    paid_guest_post_path = os.path.join(os.path.dirname(__file__), "paid-guest-post.py")
+
+paid_guest_post_module = None
+if os.path.exists(paid_guest_post_path):
+    try:
+        spec = importlib.util.spec_from_file_location("paid_guest_post", paid_guest_post_path)
+        paid_guest_post_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(paid_guest_post_module)
+    except Exception as err:
+        print(f"[app] Error loading paid-guest-post.py: {err}")
+
 class AiStatusCheckRequest(BaseModel):
     dataset_id: Optional[int] = None
     rows: Optional[List[Dict[str, Any]]] = None
@@ -606,7 +619,7 @@ async def _do_status_check_async(dataset_id: Optional[int], rows_payload: Option
     if QuoraScraper:
         try:
             scraper = QuoraScraper()
-            await scraper.start(use_bright_data=False, headless=True)
+            await scraper.start(use_bright_data=False, headless=False)
             try:
                 await scraper.login_quora()
             except Exception as le:
@@ -620,13 +633,67 @@ async def _do_status_check_async(dataset_id: Optional[int], rows_payload: Option
             continue
 
         for r in rows:
-            activity = str(r.get("activityName") or r.get("activity") or "").strip()
+            activity = str(r.get("activityName") or r.get("activity_name") or r.get("activity") or "").strip()
             topic = str(r.get("topic") or "").strip()
-            live_link = str(r.get("liveLink") or r.get("link") or "").strip()
-            landing_page = str(r.get("landingPage") or r.get("page") or "").strip()
-            kw1 = str(r.get("keyword1") or "").strip()
+            live_link = str(r.get("liveLink") or r.get("live_link") or r.get("link") or "").strip()
+            landing_page = str(r.get("landingPage") or r.get("landing_page") or r.get("page") or "").strip()
+            kw1 = str(r.get("keyword1") or r.get("keyword_1") or "").strip()
+            kw2 = str(r.get("keyword2") or r.get("keyword_2") or "").strip()
 
-            if not ("quora" in activity.lower() or "quora.com" in topic.lower()):
+            act_lower = activity.lower()
+            is_quora = "quora" in act_lower or "quora.com" in topic.lower()
+            is_guest_post = any(term in act_lower for term in ["guest post", "paid guest", "guest-post", "guestpost", "niche edit", "link insertion"]) or (not is_quora and live_link.startswith("http"))
+
+            # Branch 1: Guest Post / Paid Guest Post Audit using paid-guest-post.py
+            if is_guest_post:
+                total_checked += 1
+                pgp_mod = None
+                pgp_candidates = [
+                    os.path.join(os.path.dirname(__file__), "scripts", "paid-guest-post.py"),
+                    os.path.join(os.path.dirname(__file__), "..", "paid-guest-post.py"),
+                    os.path.join(os.path.dirname(__file__), "paid-guest-post.py")
+                ]
+                for ppath in pgp_candidates:
+                    if os.path.exists(ppath):
+                        try:
+                            spec = importlib.util.spec_from_file_location("paid_guest_post_dynamic", ppath)
+                            pgp_mod = importlib.util.module_from_spec(spec)
+                            spec.loader.exec_module(pgp_mod)
+                            break
+                        except Exception as pe:
+                            print(f"[app] Error loading {ppath}: {pe}", file=sys.stderr, flush=True)
+
+                check_fn = getattr(pgp_mod, "check_paid_guest_post", None) if pgp_mod else None
+                if check_fn:
+                    try:
+                        gp_res = await check_fn(
+                            live_url=live_link,
+                            keyword1=kw1,
+                            keyword2=kw2,
+                            target_url=landing_page,
+                            use_bright_data=True,
+                            headless=True
+                        )
+                        r["status"] = gp_res.get("status", "Audited-LQ")
+                        r["remarks"] = gp_res.get("remarks", "Pending")
+                        r["solution"] = gp_res.get("solution", "Pending")
+                    except Exception as gpe:
+                        print(f"[app] Guest post audit error: {gpe}", file=sys.stderr, flush=True)
+                        r["status"] = "Audited-LQ"
+                        r["remarks"] = "broken link"
+                        r["solution"] = "Replace Guest Post Link"
+                else:
+                    r["status"] = "Audited-LQ"
+                    r["remarks"] = "broken link"
+                    r["solution"] = "Replace Guest Post Link"
+
+                now_date = time.strftime("%Y-%m-%d")
+                r["updatedDate"] = now_date
+                r["updated_date"] = now_date
+                r["lastActivity"] = f"AI Status Checked on {now_date}"
+                continue
+
+            if not is_quora:
                 continue
 
             total_checked += 1
@@ -637,8 +704,16 @@ async def _do_status_check_async(dataset_id: Optional[int], rows_payload: Option
                 r["solution"] = "Quora : Reddit- Post New Answer"
                 continue
 
+            live_deleted = False
+            check_deleted_fn = getattr(quora_checker_module, "check_quora_live_link_deleted", None)
+            if check_deleted_fn and live_link and live_link.startswith("http") and scraper and getattr(scraper, "page", None):
+                try:
+                    live_deleted = await check_deleted_fn(scraper.page, live_link)
+                except Exception as de:
+                    print(f"[app] Live link check notice: {de}", file=sys.stderr, flush=True)
+
             scraped_answers = []
-            if scraper and getattr(scraper, "page", None):
+            if not live_deleted and scraper and getattr(scraper, "page", None):
                 try:
                     scrape_data = await scraper.fetch_quora_post(topic)
                     scraped_answers = scrape_data.get("scraped_answers", [])
@@ -652,83 +727,54 @@ async def _do_status_check_async(dataset_id: Optional[int], rows_payload: Option
             our_answer = None
             our_rank = None
 
-            for idx, ans in enumerate(scraped_answers):
-                ans_url = ans.get("url", "")
-                ans_full = ans.get("full_url", "")
-                ans_author = ans.get("author_url", "")
-                ans_text_lower = ans.get("text", "").lower()
-                ext_links = [l.lower() for l in ans.get("external_links", [])]
+            if not live_deleted:
+                for idx, ans in enumerate(scraped_answers):
+                    ans_url = ans.get("url", "")
+                    ans_full = ans.get("full_url", "")
+                    ans_author = ans.get("author_url", "")
+                    ans_text_lower = ans.get("text", "").lower()
+                    ext_links = [l.lower() for l in ans.get("external_links", [])]
 
-                is_match = False
-                if live_path and (live_path.lower() in ans_url.lower() or ans_url.lower() in live_path.lower()):
-                    is_match = True
-                elif live_link and (live_link.lower() in ans_full.lower() or live_link.lower() in ans_author.lower()):
-                    is_match = True
-                elif live_path and ("/" in live_path):
-                    author_seg = live_path.split("/")[-1].replace("-", " ").lower()
-                    if author_seg and (author_seg in ans_url.lower() or author_seg in ans_author.lower() or author_seg in ans_full.lower() or author_seg in ans_text_lower):
+                    is_match = False
+                    if live_path and (live_path.lower() in ans_url.lower() or ans_url.lower() in live_path.lower()):
                         is_match = True
-
-                if not is_match and landing_page:
-                    if any(landing_page.lower() in l or l in landing_page.lower() for l in ext_links) or (landing_domain and landing_domain in ans_text_lower):
+                    elif live_link and (live_link.lower() in ans_full.lower() or live_link.lower() in ans_author.lower()):
                         is_match = True
+                    elif live_path and ("/" in live_path):
+                        author_seg = live_path.split("/")[-1].replace("-", " ").lower()
+                        if author_seg and (author_seg in ans_url.lower() or author_seg in ans_author.lower() or author_seg in ans_full.lower() or author_seg in ans_text_lower):
+                            is_match = True
 
-                if is_match:
-                    our_answer = ans
-                    our_rank = idx + 1
-                    break
+                    if not is_match and landing_page:
+                        if any(landing_page.lower() in l or l in landing_page.lower() for l in ext_links) or (landing_domain and landing_domain in ans_text_lower):
+                            is_match = True
 
-            if our_answer:
-                our_upvotes = int(our_answer.get("upvotes", 0) or 0)
-                ans_text = our_answer.get("text", "")
-                brand_mentioned = bool(landing_domain and landing_domain in ans_text.lower())
-                kw_present = bool(kw1 and kw1.lower() in ans_text.lower())
+                    if is_match:
+                        our_answer = ans
+                        our_rank = idx + 1
+                        break
 
-                if our_rank == 1:
+            eval_fn = getattr(quora_checker_module, "evaluate_quora_status_and_remarks", None)
+            if eval_fn:
+                status, remarks, solution = eval_fn(None, scraped_answers, our_answer, our_rank, landing_page, landing_domain, live_deleted)
+                r["status"] = status
+                r["remarks"] = remarks
+                r["status"] = status
+                r["remarks"] = remarks
+                r["solution"] = solution
+            else:
+                if live_deleted:
+                    r["status"] = "Audited-LQ"
+                    r["remarks"] = "Answer Deleted"
+                    r["solution"] = "Quora : Reddit- Post New Answer"
+                elif our_answer and our_rank and our_rank <= 3:
                     r["status"] = "Audited-Indexed"
+                    r["remarks"] = "Indexed"
                     r["solution"] = "fixed"
-                    narration = f"No Issues (Rank #1, Upvotes: {our_upvotes}"
-                    if brand_mentioned: narration += ", Brand mentioned"
-                    if kw_present: narration += ", Anchor text matched"
-                    narration += ")"
-                    r["remarks"] = narration
                 else:
                     r["status"] = "Audited-LQ"
-                    top_answer = scraped_answers[0] if scraped_answers else {}
-                    top_upvotes = int(top_answer.get("upvotes", 0) or 0)
-
-                    analyze_content_fn = getattr(quora_checker_module, "analyze_content_to_add", None)
-                    detailed_advice = ""
-                    if analyze_content_fn:
-                        try:
-                            detailed_advice = await analyze_content_fn(topic, top_answer, our_answer, kw1, landing_domain)
-                        except Exception as ae:
-                            print(f"[app] Advice generation notice: {ae}")
-
-                    if not detailed_advice:
-                        if our_upvotes < top_upvotes:
-                            detailed_advice = f"Add {top_upvotes - our_upvotes} upvotes and detail to match Rank #1."
-                        else:
-                            detailed_advice = f"Add target keyword '{kw1}' and bullet points to match Rank #1."
-
-                    advice_words = detailed_advice.split()
-                    if len(advice_words) > 15:
-                        detailed_advice = " ".join(advice_words[:15])
-
-                    r["remarks"] = detailed_advice
-                    
-                    if our_upvotes < top_upvotes:
-                        r["solution"] = "Quora : Reddit- Add More Upvotes"
-                    else:
-                        r["solution"] = "Content Replace"
-            else:
-                r["status"] = "Flagged-Indexation"
-                if not live_link:
-                    r["remarks"] = "Wrong url Targeted"
-                    r["solution"] = "Link Replace"
-                else:
-                    r["remarks"] = "Flagged-Indexation (Live link / answer not present)"
-                    r["solution"] = "Quora : Reddit- Post New Answer"
+                    r["remarks"] = "Not in Top3"
+                    r["solution"] = "Quora : Reddit- Add More Upvotes"
 
             now_date = time.strftime("%Y-%m-%d")
             r["updatedDate"] = now_date

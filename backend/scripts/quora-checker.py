@@ -37,6 +37,119 @@ def normalize_quora_url(url):
     except Exception:
         return None
 
+def parse_upvote_val(val):
+    if not val:
+        return 0
+    val_str = str(val).strip().upper()
+    try:
+        if 'K' in val_str:
+            return int(float(val_str.replace('K', '')) * 1000)
+        if 'M' in val_str:
+            return int(float(val_str.replace('M', '')) * 1000000)
+        return int(float(val_str))
+    except Exception:
+        return 0
+
+def evaluate_quora_status_and_remarks(topic_error, scraped_answers, our_answer, our_rank, landing_page="", landing_domain="", live_link_deleted=False):
+    """
+    Evaluates Quora thread check results and returns (status, remarks, solution).
+
+    Order of Checks:
+    1. Deleted Check: If live link specifically shows 'Quora deleted this answer.' or topic errored or 0 answers exist -> 'Answer Deleted'
+    2. Rank Check: If our answer is missing or not in top 3 (our_rank > 3) -> 'Not in Top3'
+    3. Upvotes Check: If upvotes < max top 3 answers (or 0 upvotes) -> 'No upvotes'
+    4. Brand Mention Check: If landing domain or brand term is not mentioned -> 'No Brand Mention'
+    5. Low Content Check: If word count is low -> 'Low content'
+    6. Everything Fine: -> status = 'Audited-Indexed', remarks = 'Indexed', solution = 'fixed'
+    """
+    # 1. Answer Deleted Check (Only if confirmed deleted banner, topic error, or empty topic page)
+    if live_link_deleted or topic_error or (scraped_answers is not None and len(scraped_answers) == 0):
+        return "Audited-LQ", "Answer Deleted", "Quora : Reddit- Post New Answer"
+
+    # 2. Not in Top 3 Check (If our answer is missing or ranked > 3)
+    if not our_answer or not our_rank or our_rank > 3:
+        return "Audited-LQ", "Not in Top3", "Quora : Reddit- Add More Upvotes"
+
+    # 3. Upvotes comparison with top 3 answers
+    top3_answers = scraped_answers[:3] if scraped_answers else []
+    top3_upvote_vals = [parse_upvote_val(a.get("upvotes")) for a in top3_answers]
+    max_top3_upvotes = max(top3_upvote_vals) if top3_upvote_vals else 0
+    our_upvotes = parse_upvote_val(our_answer.get("upvotes"))
+
+    if our_upvotes < max_top3_upvotes or our_upvotes == 0:
+        return "Audited-LQ", "No upvotes", "Quora : Reddit- Add More Upvotes"
+
+    # 4. Brand Mention
+    ans_text = our_answer.get("text", "") or ""
+    ans_links = [str(l).lower() for l in our_answer.get("external_links", [])]
+    brand_mentioned = False
+    if landing_domain and (landing_domain in ans_text.lower() or any(landing_domain in l for l in ans_links)):
+        brand_mentioned = True
+    elif landing_page and (landing_page.lower() in ans_text.lower() or any(landing_page.lower() in l for l in ans_links)):
+        brand_mentioned = True
+
+    if not brand_mentioned:
+        return "Audited-LQ", "No Brand Mention", "Content Replace"
+
+    # 5. Low Content check
+    words = ans_text.split()
+    word_count = len(words)
+    top3_word_counts = [len((a.get("text") or "").split()) for a in top3_answers if a.get("text")]
+    avg_top3_words = (sum(top3_word_counts) / len(top3_word_counts)) if top3_word_counts else 0
+
+    if word_count < 30 or (avg_top3_words > 0 and word_count < 0.4 * avg_top3_words):
+        return "Audited-LQ", "Low content", "Content Replace"
+
+    # Everything is fine!
+    return "Audited-Indexed", "Indexed", "fixed"
+
+async def check_quora_live_link_deleted(page, live_url: str) -> bool:
+    """
+    Directly checks if a Quora live link answer is deleted.
+    Looks specifically for:
+    '<div class="q-text qu-dynamicFontSize--large qu-bold qu-mt--medium" style="box-sizing: border-box;">Quora deleted this answer.</div>'
+    or text containing 'Quora deleted this answer.' / 'deleted this answer'.
+    """
+    if not live_url or not isinstance(live_url, str) or not live_url.startswith("http"):
+        return False
+
+    try:
+        print(f"[Live Link Check] Navigating directly to live link: {live_url}...")
+        response = await page.goto(live_url, timeout=30000, wait_until="domcontentloaded")
+        await page.wait_for_timeout(2500)
+
+        if response and response.status in [404, 410]:
+            print(f"[Live Link Check] HTTP {response.status} returned for {live_url}.")
+            return True
+
+        # Check for EXACT Quora deletion element banner
+        is_deleted = await page.evaluate("""() => {
+            const banner = document.querySelector('.qu-dynamicFontSize--large.qu-bold, .q-text.qu-bold');
+            if (banner && banner.innerText && banner.innerText.trim() === 'Quora deleted this answer.') {
+                return true;
+            }
+            const elements = Array.from(document.querySelectorAll('div, span, h1, h2, p'));
+            for (const el of elements) {
+                if (el.children.length === 0) {
+                    const txt = (el.innerText || "").trim();
+                    if (txt === "Quora deleted this answer." || txt === "This answer was deleted.") {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }""")
+
+        if is_deleted:
+            print(f"[Live Link Check] 'Quora deleted this answer' banner detected on {live_url}!")
+            return True
+
+        print(f"[Live Link Check] Live link is available: {live_url}")
+        return False
+    except Exception as e:
+        print(f"[Live Link Check] Exception checking {live_url}: {str(e)}")
+        return False
+
 async def analyze_gap(topic, top_answer, our_answer):
     """Use OpenAI to compare the top answer with our answer."""
     prompt = f"""You are an SEO and Quora marketing expert.
@@ -588,36 +701,7 @@ class QuoraScraper:
                 await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 await self.page.wait_for_timeout(1500)
 
-            print("Waiting up to 7 seconds for collapsed answers button (e.g. '8 answers collapsed') to appear...")
-            clicked_collapsed = False
-            for attempt in range(7):
-                try:
-                    clicked_count = await self.page.evaluate("""() => {
-                        let clicked = 0;
-                        const targets = Array.from(document.querySelectorAll('.q-click-wrapper, div, span, button'));
-                        for (const el of targets) {
-                            if (el.children.length > 3) continue;
-                            const txt = (el.innerText || "").trim();
-                            if (/\\d+\\s+answers?\\s+collapsed/i.test(txt) || (txt.toLowerCase().includes('collapsed') && txt.toLowerCase().includes('answer'))) {
-                                el.scrollIntoView({ behavior: 'instant', block: 'center' });
-                                el.click();
-                                clicked++;
-                            }
-                        }
-                        return clicked;
-                    }""")
-                    if clicked_count > 0:
-                        print(f"[OK] Successfully clicked {clicked_count} collapsed answers button(s) (e.g. '.q-click-wrapper')!")
-                        clicked_collapsed = True
-                        break
-                except Exception:
-                    pass
-                await self.page.wait_for_timeout(1000)
-
-            if not clicked_collapsed:
-                print("Collapsed answers button did not appear within 7 seconds (or none on page).")
-
-            # 3. Click any '(more)' expand buttons to reveal full text
+            # Click any '(more)' expand buttons to reveal full answer text
             try:
                 more_btns = await self.page.query_selector_all('div:has-text("(more)"), span:has-text("(more)")')
                 for btn in more_btns[:15]:
@@ -628,9 +712,7 @@ class QuoraScraper:
             except Exception:
                 pass
 
-            # 4. Wait 7 seconds after expanding collapsed answers before fetching data
-            print("[PAUSE] Waiting 7 seconds after expanding collapsed answers before fetching data...")
-            await self.page.wait_for_timeout(7000)
+            await self.page.wait_for_timeout(2000)
 
             topic_path = normalize_quora_url(url)
             if not topic_path:
@@ -866,7 +948,13 @@ async def main():
                     row_result["Error"] = "Invalid or empty Topic URL"
                 else:
                     print(f"\n[{idx+1}] Processing Topic: {topic}")
-                    scrape_data = await scraper.fetch_quora_post(topic)
+                    live_deleted = False
+                    if live and live.startswith("http") and hasattr(scraper, "page") and scraper.page:
+                        live_deleted = await check_quora_live_link_deleted(scraper.page, live)
+
+                    scrape_data = {}
+                    if not live_deleted:
+                        scrape_data = await scraper.fetch_quora_post(topic)
                     
                     if scrape_data.get("error"):
                         row_result["Error"] = scrape_data["error"]
@@ -874,7 +962,7 @@ async def main():
                         scraped = scrape_data.get("scraped_answers", [])
                         row_result["All Scraped Answers"] = scraped
                         
-                        if live_path:
+                        if live_path and not live_deleted:
                             # Find our mapped answer in the list
                             our_answer = None
                             our_rank = None
@@ -908,11 +996,24 @@ async def main():
                                     our_rank = i + 1
                                     break
                                     
+                            status, remarks, solution = evaluate_quora_status_and_remarks(
+                                scrape_data.get("error"),
+                                scraped,
+                                our_answer,
+                                our_rank,
+                                landing_page,
+                                landing_domain,
+                                live_deleted
+                            )
+                            row_result["Status"] = status
+                            row_result["Remarks"] = remarks
+                            row_result["Solution"] = solution
+
                             if our_answer:
                                 row_result["Is Present"] = True
                                 row_result["Rank"] = our_rank
                                 row_result["Our Upvotes"] = our_answer.get("upvotes")
-                                print(f"-> SUCCESS: Live link found at Rank {our_rank} (Upvotes: {our_answer.get('upvotes')})!")
+                                print(f"-> SUCCESS: Live link found at Rank {our_rank} (Upvotes: {our_answer.get('upvotes')}) | Status: {status} | Remarks: {remarks}")
                                 
                                 # If we are not Rank 1, run LLM analysis against Top Answer
                                 if our_rank > 1 and len(scraped) > 0:
@@ -927,9 +1028,21 @@ async def main():
                                     row_result["LLM Analysis"] = "We are already ranked #1!"
                             else:
                                 row_result["Is Present"] = False
-                                print("-> Live link not matched in scraped answers list.")
+                                print(f"-> Live link not matched in scraped answers list. Status: {status} | Remarks: {remarks}")
                         else:
-                            print(f"-> Scraped {len(scraped)} answers for Topic (No Live Link provided).")
+                            status, remarks, solution = evaluate_quora_status_and_remarks(
+                                scrape_data.get("error"),
+                                scraped,
+                                None,
+                                None,
+                                landing_page,
+                                landing_domain,
+                                live_deleted
+                            )
+                            row_result["Status"] = status
+                            row_result["Remarks"] = remarks
+                            row_result["Solution"] = solution
+                            print(f"-> Scraped {len(scraped)} answers for Topic (No Live Link provided or Live Link deleted). Status: {status} | Remarks: {remarks}")
                 
                 results.append(row_result)
                 

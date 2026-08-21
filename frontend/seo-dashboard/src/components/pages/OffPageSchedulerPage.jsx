@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Calendar, UploadCloud, Clock, Trash2, Play, CheckCircle, AlertCircle, FileSpreadsheet, X, Upload, ChevronDown, Filter, Pencil, Save, ShieldCheck, Users, Sparkles, Download } from 'lucide-react';
 import ExcelJS from 'exceljs';
+import * as XLSX from 'xlsx';
 import { 
   fetchDomainRows, 
   fetchMonthlyImportsApi, 
@@ -339,6 +340,90 @@ export default function OffPageSchedulerPage({ user }) {
     setFilterEndDate('');
     setFilterActivity('ALL');
     setFilterStatus('ALL');
+  };
+
+  const handleDownloadRows = async (rowsToExport, datasetName = 'Monthly Operations') => {
+    let exportData = rowsToExport || [];
+    
+    // Fallback to selectedDataset rows if empty
+    if ((!exportData || exportData.length === 0) && selectedDataset && selectedDataset.rowsData) {
+      exportData = selectedDataset.rowsData;
+    }
+
+    if (!exportData || exportData.length === 0) {
+      alert("No records available to download.");
+      return;
+    }
+
+    const headers = [
+      'UID', 'Period', 'Scheduled Date', 'Keyword 1', 'Keyword 2', 'Cluster',
+      'KW Category', 'Activity Name', 'Word Count', 'Content SPOC', 'Topic',
+      'Content Doc', 'POC', 'PG Site Domain', 'Live Link', 'Status',
+      'Remarks', 'Solution', 'Verified Status', 'Last Activity', 'Updated Date'
+    ];
+
+    try {
+      const workbook = new ExcelJS.Workbook();
+      const sheetName = String(datasetName || 'Monthly Operations').replace(/[\\/*?:\[\]]/g, '').substring(0, 31);
+      const worksheet = workbook.addWorksheet(sheetName || 'Data');
+
+      worksheet.addRow(headers);
+      const headerRow = worksheet.getRow(1);
+      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+      headerRow.height = 24;
+
+      exportData.forEach(r => {
+        worksheet.addRow([
+          r.uid || '',
+          r.period || '',
+          r.scheduledDate || r.scheduled_date || '',
+          r.keyword1 || r.keyword_1 || '',
+          r.keyword2 || r.keyword_2 || '',
+          r.cluster || '',
+          r.kwCategory || r.kw_category || '',
+          r.activityName || r.activity_name || r.activity || '',
+          r.wordCount || r.word_count || '',
+          r.contentSpoc || r.content_spoc || '',
+          r.topic || '',
+          r.contentDoc || r.content_doc || '',
+          r.publisher || r.poc || '',
+          r.pgSiteDomain || r.pg_site_domain || '',
+          r.liveLink || r.live_link || r.link || '',
+          r.status || '',
+          r.remarks || '',
+          r.solution || '',
+          (r.verified === true || r.verified === 'true') ? 'Verified' : 'Unverified',
+          r.lastActivity || r.last_activity || '',
+          r.updatedDate || r.updated_date || ''
+        ]);
+      });
+
+      worksheet.columns.forEach(col => {
+        let maxLen = 12;
+        col.eachCell({ includeEmpty: true }, cell => {
+          const len = cell.value ? String(cell.value).length : 0;
+          if (len > maxLen) maxLen = len;
+        });
+        col.width = Math.min(maxLen + 4, 40);
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const safeName = String(datasetName || 'Monthly-Operations').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const fileName = `${safeName}_data.xlsx`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export dataset to Excel:', err);
+      alert('Failed to download Excel file.');
+    }
   };
 
   const filterRef = useRef(null);
@@ -762,15 +847,15 @@ export default function OffPageSchedulerPage({ user }) {
 
   const validateAndSetFile = (file) => {
     const ext = file.name.split('.').pop().toLowerCase();
-    if (!['csv', 'json'].includes(ext)) {
-      setImportMsg({ type: 'error', text: 'Unsupported format. Please upload CSV or JSON data.' });
+    if (!['csv', 'xlsx', 'xls', 'json', 'tsv'].includes(ext)) {
+      setImportMsg({ type: 'error', text: 'Unsupported format. Please upload Excel (.xlsx, .xls), CSV or JSON data.' });
       setImportFile(null);
       return;
     }
     setImportFile(file);
   };
 
-  // CSV/JSON File Parser & DB Sync
+  // CSV/JSON/Excel File Parser & DB Sync
   const handleUploadSubmit = async () => {
     if (!importFile) {
       setImportMsg({ type: 'error', text: 'Please choose or drag a file to import.' });
@@ -778,15 +863,24 @@ export default function OffPageSchedulerPage({ user }) {
     }
 
     try {
-      const text = await importFile.text();
       let rowsData = [];
       const filenameLower = importFile.name.toLowerCase();
+      const ext = filenameLower.split('.').pop();
 
-      if (filenameLower.endsWith('.json')) {
+      if (['xlsx', 'xls'].includes(ext)) {
+        const arrayBuffer = await importFile.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonRows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+        rowsData = jsonRows.map(item => normalizeRow(item));
+      } else if (filenameLower.endsWith('.json')) {
+        const text = await importFile.text();
         const parsed = JSON.parse(text);
         const list = Array.isArray(parsed) ? parsed : [parsed];
         rowsData = list.map(item => normalizeRow(item));
       } else {
+        const text = await importFile.text();
         // Parse CSV lines
         const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
         if (lines.length > 1) {
@@ -1265,7 +1359,7 @@ export default function OffPageSchedulerPage({ user }) {
               onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
               onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
             >
-              ← Back to Import Logs
+              ← Back
             </button>
           </div>
         )}
@@ -1648,33 +1742,206 @@ export default function OffPageSchedulerPage({ user }) {
                 </div>
               )}
             </div>
+
+            {/* Download Icon Button right near Filter Icon */}
+            <button
+              onClick={() => handleDownloadRows(filteredRows, selectedDataset?.project || selectedDataset?.project_name || selectedDataset?.name || 'Monthly Operations')}
+              title="Download Excel Data"
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 6,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 6,
+                transition: 'opacity 0.15s ease',
+                outline: 'none'
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.75'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+            >
+              <Download size={19} color="#64748b" style={{ strokeWidth: 1.8 }} />
+            </button>
           </div>
 
           {/* Actions Button & Dropdown matching screenshot */}
           {(!isVendor && selectedRowIndices.length > 0) ? (
-            <div ref={actionsRef} style={{ position: 'relative' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {/* Actions Dropdown */}
+              <div ref={actionsRef} style={{ position: 'relative' }}>
+                <button
+                  onClick={() => setShowActionsDropdown(!showActionsDropdown)}
+                  style={{
+                    background: '#0f172a',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: 8,
+                    padding: '8px 16px',
+                    fontSize: 13.5,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    boxShadow: '0 2px 6px rgba(15, 23, 42, 0.15)',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#1e293b'}
+                  onMouseLeave={e => e.currentTarget.style.background = '#0f172a'}
+                >
+                  Actions ({selectedRowIndices.length})
+                  <ChevronDown size={14} style={{ transform: showActionsDropdown ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }} />
+                </button>
+
+                {/* Actions Popover Dropdown Menu */}
+                {showActionsDropdown && (
+                  <div style={{
+                    position: 'absolute',
+                    top: 44,
+                    right: 0,
+                    zIndex: 100,
+                    width: 175,
+                    background: '#ffffff',
+                    borderRadius: 8,
+                    border: '1px solid #e2e8f0',
+                    boxShadow: '0 10px 30px -5px rgba(0,0,0,0.12), 0 4px 6px -2px rgba(0,0,0,0.05)',
+                    padding: '6px 0',
+                    overflow: 'hidden'
+                  }}>
+                    {/* Bulk Edit Option */}
+                    <button
+                      onClick={() => {
+                        setShowActionsDropdown(false);
+                        setShowBulkEditModal(true);
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '10px 16px',
+                        background: 'none',
+                        border: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        fontSize: 13.5,
+                        fontWeight: 600,
+                        color: '#1e293b',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'background 0.12s ease'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    >
+                      <Pencil size={15} color="#475569" />
+                      Bulk Edit
+                    </button>
+
+                    <div style={{ height: 1, background: '#f1f5f9', margin: '4px 0' }} />
+
+                    {/* Bulk Delete Option */}
+                    <button
+                      onClick={() => {
+                        setShowActionsDropdown(false);
+                        if (selectedDataset && selectedRowIndices.length > 0) {
+                          const selectedRowsSet = new Set(selectedRowIndices.map(idx => filteredRows[idx]).filter(Boolean));
+                          const remainingRows = (selectedDataset.rowsData || []).filter(r => !selectedRowsSet.has(r));
+                          setSelectedDataset(prev => ({ ...prev, rowsData: remainingRows }));
+                          setIsDirty(true);
+                          setSelectedRowIndices([]);
+                        }
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '10px 16px',
+                        background: 'none',
+                        border: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        fontSize: 13.5,
+                        fontWeight: 600,
+                        color: '#ef4444',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'background 0.12s ease'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    >
+                      <Trash2 size={15} color="#ef4444" />
+                      Bulk Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Standalone Verify Button on the right of Actions */}
               <button
-                onClick={() => setShowActionsDropdown(!showActionsDropdown)}
+                onClick={async () => {
+                  if (selectedDataset && selectedRowIndices.length > 0) {
+                    const todayStr = getTodayFormatted();
+                    const updatedRows = [...(selectedDataset.rowsData || [])];
+                    selectedRowIndices.forEach(filteredIdx => {
+                      const actualRow = filteredRows[filteredIdx];
+                      if (actualRow) {
+                        const realIdx = updatedRows.indexOf(actualRow);
+                        if (realIdx !== -1) {
+                          updatedRows[realIdx] = { 
+                            ...updatedRows[realIdx], 
+                            verified: true,
+                            updatedDate: todayStr,
+                            updated_date: todayStr
+                          };
+                        }
+                      }
+                    });
+
+                    const datasetId = selectedDataset.id;
+                    setSelectedDataset(prev => ({ ...prev, rowsData: updatedRows }));
+                    setImports(prev => prev.map(imp => imp.id === datasetId ? { ...imp, rowsData: updatedRows } : imp));
+                    setOriginalRowsData(JSON.parse(JSON.stringify(updatedRows)));
+                    setIsDirty(false);
+                    setSelectedRowIndices([]);
+                    setSavingState('saving');
+
+                    try {
+                      await updateMonthlyImportApi(datasetId, {
+                        project: selectedDataset.project || selectedDataset.project_name,
+                        filename: selectedDataset.filename,
+                        rows: updatedRows.length,
+                        rowsData: updatedRows,
+                        rows_data: updatedRows
+                      });
+                      setSavingState('saved');
+                      setTimeout(() => setSavingState(''), 3000);
+                    } catch (err) {
+                      console.error('[Verify] Failed to update DB:', err);
+                      setSavingState('error');
+                    }
+                  }
+                }}
                 style={{
-                  background: '#0f172a',
+                  background: '#059669',
                   color: '#ffffff',
                   border: 'none',
-                  borderRadius: 14,
-                  padding: '9px 18px',
+                  borderRadius: 8,
+                  padding: '8px 16px',
                   fontSize: 13.5,
                   fontWeight: 700,
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 8,
-                  boxShadow: '0 4px 12px rgba(15, 23, 42, 0.18)',
+                  gap: 6,
+                  boxShadow: '0 2px 6px rgba(5, 150, 105, 0.2)',
                   transition: 'all 0.15s ease'
                 }}
-                onMouseEnter={e => e.currentTarget.style.background = '#1e293b'}
-                onMouseLeave={e => e.currentTarget.style.background = '#0f172a'}
+                onMouseEnter={e => e.currentTarget.style.background = '#047857'}
+                onMouseLeave={e => e.currentTarget.style.background = '#059669'}
               >
-                Actions ({selectedRowIndices.length})
-                <ChevronDown size={14} style={{ transform: showActionsDropdown ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }} />
+                <CheckCircle size={15} color="#ffffff" />
+                Verify
               </button>
 
               {/* Actions Popover Dropdown Menu */}
@@ -1796,8 +2063,8 @@ export default function OffPageSchedulerPage({ user }) {
                   {[
                     'UID', 'Period', 'Scheduled Date', 'Keyword 1', 'Keyword 2', 'Cluster', 
                     'KW Category', 'Activity Name', 'Word Count', 'Content SPOC', 'Topic', 
-                    'Content Doc', 'Status', 'POC', 'PG Site Domain', 
-                    'Live Link', 'Remarks', 'Solution', 'Last Activity', 'Updated Date'
+                    'Content Doc', 'POC', 'PG Site Domain', 'Live Link', 'Status', 
+                    'Remarks', 'Solution', 'Verified Status', 'Last Activity', 'Updated Date'
                   ].map((col, idx) => (
                     <th key={idx} style={{ 
                       padding: '12px 16px', 
@@ -1816,7 +2083,7 @@ export default function OffPageSchedulerPage({ user }) {
               <tbody>
                 {filteredRows.length === 0 ? (
                   <tr>
-                    <td colSpan={(!isVendor && (userCanEdit || userCanDelete)) ? 21 : 20} style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+                    <td colSpan={(!isVendor && (userCanEdit || userCanDelete)) ? 22 : 21} style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
                       No matching records found in this dataset.
                     </td>
                   </tr>
@@ -1914,6 +2181,27 @@ export default function OffPageSchedulerPage({ user }) {
                           </a>
                         ) : 'N/A'}
                       </td>
+                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                        {row.publisher || 'Unassigned'}
+                      </td>
+                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: '#2563eb', whiteSpace: 'nowrap' }} title={row.pgSiteDomain}>
+                        {row.pgSiteDomain ? (
+                          <a href={formatUrl(row.pgSiteDomain)} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                            onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
+                            {formatTruncatedDomain(row.pgSiteDomain, 15)} ↗
+                          </a>
+                        ) : 'N/A'}
+                      </td>
+                      <td style={{ padding: '14px 16px', fontSize: 13.5, whiteSpace: 'nowrap' }}>
+                        {row.liveLink ? (
+                          <a href={formatUrl(row.liveLink)} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                            onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
+                            View Link ↗
+                          </a>
+                        ) : 'N/A'}
+                      </td>
                       <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
                         {isVendor ? (
                           <span style={{
@@ -1950,112 +2238,6 @@ export default function OffPageSchedulerPage({ user }) {
                             ))}
                           </select>
                         )}
-                      </td>
-                      <td style={{ padding: '12px 16px', fontSize: 13, whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                            {row.publisher || 'Unassigned'}
-                          </span>
-                          {isVendor ? (
-                            (row.verified === true || row.verified === 'true') && (
-                              <span style={{ 
-                                display: 'inline-flex', 
-                                alignItems: 'center', 
-                                gap: 4, 
-                                padding: '3px 8px', 
-                                borderRadius: 6, 
-                                fontSize: 11.5, 
-                                fontWeight: 700, 
-                                background: '#dcfce7', 
-                                color: '#15803d',
-                                border: '1px solid #bbf7d0'
-                              }}>
-                                <CheckCircle size={13} /> Verified ✓
-                              </span>
-                            )
-                          ) : (
-                            (row.verified === true || row.verified === 'true') ? (
-                              <button
-                                onClick={() => {
-                                  handleRowChange(selectedDataset.id, rIdx, 'verified', false);
-                                }}
-                                title="Click to Unverify"
-                                style={{ 
-                                  display: 'inline-flex', 
-                                  alignItems: 'center', 
-                                  gap: 4, 
-                                  padding: '3px 8px', 
-                                  borderRadius: 6, 
-                                  fontSize: 11.5, 
-                                  fontWeight: 700, 
-                                  background: '#dcfce7', 
-                                  color: '#15803d',
-                                  border: '1px solid #bbf7d0',
-                                  cursor: 'pointer',
-                                  transition: 'all 0.15s ease'
-                                }}
-                                onMouseEnter={e => {
-                                  e.currentTarget.style.background = '#fef2f2';
-                                  e.currentTarget.style.color = '#dc2626';
-                                  e.currentTarget.style.borderColor = '#fca5a5';
-                                }}
-                                onMouseLeave={e => {
-                                  e.currentTarget.style.background = '#dcfce7';
-                                  e.currentTarget.style.color = '#15803d';
-                                  e.currentTarget.style.borderColor = '#bbf7d0';
-                                }}
-                              >
-                                <CheckCircle size={13} /> Verified ✓
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => {
-                                  handleRowChange(selectedDataset.id, rIdx, 'verified', true);
-                                }}
-                                title="Click to Verify"
-                                style={{
-                                  padding: '4px 10px',
-                                  fontSize: 11.5,
-                                  fontWeight: 700,
-                                  borderRadius: 6,
-                                  border: '1px solid var(--accent)',
-                                  background: '#eff6ff',
-                                  color: 'var(--accent)',
-                                  cursor: 'pointer',
-                                  transition: 'all 0.15s ease'
-                                }}
-                                onMouseEnter={e => {
-                                  e.currentTarget.style.background = 'var(--accent)';
-                                  e.currentTarget.style.color = '#ffffff';
-                                }}
-                                onMouseLeave={e => {
-                                  e.currentTarget.style.background = '#eff6ff';
-                                  e.currentTarget.style.color = 'var(--accent)';
-                                }}
-                              >
-                                Verify
-                              </button>
-                            )
-                          )}
-                        </div>
-                      </td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: '#2563eb', whiteSpace: 'nowrap' }} title={row.pgSiteDomain}>
-                        {row.pgSiteDomain ? (
-                          <a href={formatUrl(row.pgSiteDomain)} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                            onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
-                            onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
-                            {formatTruncatedDomain(row.pgSiteDomain, 15)} ↗
-                          </a>
-                        ) : 'N/A'}
-                      </td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, whiteSpace: 'nowrap' }}>
-                        {row.liveLink ? (
-                          <a href={formatUrl(row.liveLink)} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                            onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
-                            onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
-                            View Link ↗
-                          </a>
-                        ) : 'N/A'}
                       </td>
                       <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
                         <select
@@ -2109,6 +2291,39 @@ export default function OffPageSchedulerPage({ user }) {
                             <option key={opt} value={opt}>{opt}</option>
                           ))}
                         </select>
+                      </td>
+                      <td style={{ padding: '12px 16px', fontSize: 13, whiteSpace: 'nowrap' }}>
+                        {(row.verified === true || row.verified === 'true') ? (
+                          <span style={{ 
+                            display: 'inline-flex', 
+                            alignItems: 'center', 
+                            gap: 4, 
+                            padding: '4px 10px', 
+                            borderRadius: 6, 
+                            fontSize: 11.5, 
+                            fontWeight: 700, 
+                            background: '#dcfce7', 
+                            color: '#15803d',
+                            border: '1px solid #bbf7d0'
+                          }}>
+                            <CheckCircle size={13} /> Verified ✓
+                          </span>
+                        ) : (
+                          <span style={{ 
+                            display: 'inline-flex', 
+                            alignItems: 'center', 
+                            gap: 4, 
+                            padding: '4px 10px', 
+                            borderRadius: 6, 
+                            fontSize: 11.5, 
+                            fontWeight: 600, 
+                            background: '#f8fafc', 
+                            color: '#64748b',
+                            border: '1px solid #e2e8f0'
+                          }}>
+                            Unverified
+                          </span>
+                        )}
                       </td>
                       <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.lastActivity || 'N/A'}</td>
                       <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{row.updatedDate || 'N/A'}</td>
@@ -2512,25 +2727,6 @@ export default function OffPageSchedulerPage({ user }) {
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {userCanDownload && (
-            <button
-              onClick={handleDownloadMonthlyOperations}
-              title="Download Monthly Operations Data (Excel)"
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: '#ffffff', color: '#0f172a',
-                border: '1.5px solid #cbd5e1', borderRadius: 10,
-                padding: '10px 14px', cursor: 'pointer',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-              onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
-            >
-              <Download size={16} color="var(--accent)" />
-            </button>
-          )}
-
           {!isVendor && userCanUpdate && (
             <button
               onClick={handleRunAudit}
@@ -2789,30 +2985,30 @@ export default function OffPageSchedulerPage({ user }) {
                               setDeleteConfirmImport(imp);
                             }}
                             title="Delete Dataset"
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: '#ef4444',
-                              cursor: 'pointer',
-                              padding: '6px',
-                              borderRadius: 6,
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              transition: 'all 0.15s ease'
-                            }}
-                            onMouseEnter={e => {
-                              e.currentTarget.style.background = '#fef2f2';
-                              e.currentTarget.style.color = '#dc2626';
-                            }}
-                            onMouseLeave={e => {
-                              e.currentTarget.style.background = 'none';
-                              e.currentTarget.style.color = '#ef4444';
-                            }}
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        )}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: '#ef4444',
+                                cursor: 'pointer',
+                                padding: '6px',
+                                borderRadius: 6,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                transition: 'all 0.15s ease'
+                              }}
+                              onMouseEnter={e => {
+                                e.currentTarget.style.background = '#fef2f2';
+                                e.currentTarget.style.color = '#dc2626';
+                              }}
+                              onMouseLeave={e => {
+                                e.currentTarget.style.background = 'none';
+                                e.currentTarget.style.color = '#ef4444';
+                              }}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
                       </td>
                     </tr>
                   ))}

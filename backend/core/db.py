@@ -330,6 +330,7 @@ def init_db():
             )
         """))
         conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS uid TEXT"))
+        conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT FALSE"))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS scheduled_activities (
@@ -2485,6 +2486,8 @@ def _insert_monthly_operation_rows(conn, filename, project_name, rows_data):
         values_sql_parts = []
         for idx, r in enumerate(chunk):
             p = f"_{idx}"
+            is_ver = r.get("verified")
+            verified_bool = (is_ver is True) or (isinstance(is_ver, str) and is_ver.lower() == "true")
             params.update({
                 f"uid{p}": _generate_uid(r.get("uid")),
                 f"filename{p}": filename,
@@ -2507,6 +2510,7 @@ def _insert_monthly_operation_rows(conn, filename, project_name, rows_data):
                 f"live_link{p}": r.get("liveLink", r.get("live_link", "")),
                 f"remarks{p}": r.get("remarks", ""),
                 f"solution{p}": r.get("solution", ""),
+                f"verified{p}": verified_bool,
                 f"last_activity{p}": r.get("lastActivity", r.get("last_activity", "")),
                 f"updated_date{p}": r.get("updatedDate", r.get("updated_date", ""))
             })
@@ -2514,7 +2518,7 @@ def _insert_monthly_operation_rows(conn, filename, project_name, rows_data):
                 :uid{p}, :filename{p}, :project_name{p}, :period{p}, :scheduled_date{p}, :keyword1{p}, :keyword2{p},
                 :landing_page{p}, :cluster{p}, :kw_category{p}, :activity_name{p}, :word_count{p},
                 :content_spoc{p}, :topic{p}, :content_doc{p}, :status{p}, :publisher{p},
-                :pg_site_domain{p}, :live_link{p}, :remarks{p}, :solution{p}, :last_activity{p}, :updated_date{p}
+                :pg_site_domain{p}, :live_link{p}, :remarks{p}, :solution{p}, :verified{p}, :last_activity{p}, :updated_date{p}
             )""")
 
         sql = f"""
@@ -2522,7 +2526,7 @@ def _insert_monthly_operation_rows(conn, filename, project_name, rows_data):
                 uid, filename, project_name, period, scheduled_date, keyword1, keyword2,
                 landing_page, cluster, kw_category, activity_name, word_count,
                 content_spoc, topic, content_doc, status, publisher,
-                pg_site_domain, live_link, remarks, solution, last_activity, updated_date
+                pg_site_domain, live_link, remarks, solution, verified, last_activity, updated_date
             ) VALUES {','.join(values_sql_parts)}
         """
         conn.execute(text(sql), params)
@@ -2537,7 +2541,7 @@ def list_monthly_imports():
                    word_count as "wordCount", content_spoc as "contentSpoc",
                    topic, content_doc as "contentDoc", status, publisher,
                    pg_site_domain as "pgSiteDomain", live_link as "liveLink",
-                   remarks, solution, last_activity as "lastActivity",
+                   remarks, solution, verified, last_activity as "lastActivity",
                    updated_date as "updatedDate", created_at
             FROM monthly_operations
             ORDER BY id ASC
@@ -2622,6 +2626,8 @@ def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, d
             for r in rows_data:
                 r_id = r.get("id")
                 r_uid = _generate_uid(r.get("uid"))
+                is_ver = r.get("verified")
+                verified_bool = (is_ver is True) or (isinstance(is_ver, str) and is_ver.lower() == "true")
                 if r_id and isinstance(r_id, int) and r_id in existing_ids:
                     input_ids.add(r_id)
                     update_param_list.append({
@@ -2647,6 +2653,7 @@ def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, d
                         "live_link": r.get("liveLink", r.get("live_link", "")),
                         "remarks": r.get("remarks", ""),
                         "solution": r.get("solution", ""),
+                        "verified": verified_bool,
                         "last_activity": r.get("lastActivity", r.get("last_activity", "")),
                         "updated_date": r.get("updatedDate", r.get("updated_date", ""))
                     })
@@ -2685,6 +2692,7 @@ def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, d
                             f"live_link{p}": u["live_link"],
                             f"remarks{p}": u["remarks"],
                             f"solution{p}": u["solution"],
+                            f"verified{p}": u["verified"],
                             f"last_activity{p}": u["last_activity"],
                             f"updated_date{p}": u["updated_date"]
                         })
@@ -2692,7 +2700,7 @@ def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, d
                             CAST(:id{p} AS bigint), :uid{p}, :filename{p}, :project_name{p}, :period{p}, :scheduled_date{p},
                             :keyword1{p}, :keyword2{p}, :landing_page{p}, :cluster{p}, :kw_category{p}, :activity_name{p},
                             :word_count{p}, :content_spoc{p}, :topic{p}, :content_doc{p}, :status{p}, :publisher{p},
-                            :pg_site_domain{p}, :live_link{p}, :remarks{p}, :solution{p}, :last_activity{p}, :updated_date{p}
+                            :pg_site_domain{p}, :live_link{p}, :remarks{p}, :solution{p}, CAST(:verified{p} AS boolean), :last_activity{p}, :updated_date{p}
                         )""")
 
                     sql = f"""
@@ -2718,6 +2726,7 @@ def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, d
                             live_link = v.live_link,
                             remarks = v.remarks,
                             solution = v.solution,
+                            verified = v.verified,
                             last_activity = v.last_activity,
                             updated_date = v.updated_date,
                             updated_at = now()
@@ -2725,7 +2734,7 @@ def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, d
                             id, uid, filename, project_name, period, scheduled_date,
                             keyword1, keyword2, landing_page, cluster, kw_category, activity_name,
                             word_count, content_spoc, topic, content_doc, status, publisher,
-                            pg_site_domain, live_link, remarks, solution, last_activity, updated_date
+                            pg_site_domain, live_link, remarks, solution, verified, last_activity, updated_date
                         )
                         WHERE m.id = v.id
                     """
