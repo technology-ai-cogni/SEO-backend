@@ -1339,11 +1339,11 @@ export default function UsersPage({ user, onNavigate }) {
                               </select>
                             </td>
 
-                            {/* ASSIGNED PROJECT (VENDOR SCOPED) */}
+                            {/* ASSIGNED PROJECT (NON-ADMIN SCOPED) */}
                             <td style={{ padding: '12px 16px', width: 175 }}>
-                              {isVendor ? (
+                              {currentRoleKey !== 'ADMIN' ? (
                                 <select
-                                  value={currentEdit.assigned_project || 'All Projects'}
+                                  value={currentEdit.assigned_project && currentEdit.assigned_project !== 'All Projects' ? currentEdit.assigned_project : ''}
                                   onChange={e => handleInlineFieldChange(u.id, 'assigned_project', e.target.value)}
                                   style={{
                                     padding: '6px 8px',
@@ -1357,9 +1357,10 @@ export default function UsersPage({ user, onNavigate }) {
                                     outline: 'none',
                                     width: '100%'
                                   }}
-                                  title="Project scope for Vendor Monthly Operations"
+                                  title="Assigned project scope for this user"
                                 >
-                                  {projectOptions.map(pName => (
+                                  <option value="">-- Select Project --</option>
+                                  {projectOptions.filter(p => p !== 'All Projects').map(pName => (
                                     <option key={pName} value={pName}>{pName}</option>
                                   ))}
                                 </select>
@@ -1776,14 +1777,14 @@ export default function UsersPage({ user, onNavigate }) {
                 </div>
               </div>
 
-              {/* Assigned Project selector for Vendor role */}
-              {(formData.category === 'Vendor' || formData.role === 'VENDOR') && (
+              {/* Assigned Project selector for non-admin roles */}
+              {(formData.role || '').toUpperCase() !== 'ADMIN' && (
                 <div style={{ marginTop: 12 }}>
                   <label style={{ fontSize: 12.5, fontWeight: 700, color: '#c2410c', display: 'block', marginBottom: 5 }}>
-                    Assigned Project (Vendor Access Scope)
+                    Assigned Project Scope
                   </label>
                   <select
-                    value={formData.assigned_project || 'All Projects'}
+                    value={formData.assigned_project && formData.assigned_project !== 'All Projects' ? formData.assigned_project : ''}
                     onChange={e => setFormData({ ...formData, assigned_project: e.target.value })}
                     style={{
                       width: '100%',
@@ -1797,7 +1798,8 @@ export default function UsersPage({ user, onNavigate }) {
                       outline: 'none'
                     }}
                   >
-                    {projectOptions.map(pName => (
+                    <option value="">-- Select Project --</option>
+                    {projectOptions.filter(p => p !== 'All Projects').map(pName => (
                       <option key={pName} value={pName}>{pName}</option>
                     ))}
                   </select>

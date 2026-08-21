@@ -131,6 +131,14 @@ export function canAccessRoute(user, routePath) {
   const userRole = user.role.toUpperCase();
   if (userRole === 'ADMIN') return true;
 
+  // Monthly Operations: Hidden for non-admin users until a project is allotted by an Admin
+  if (routePath === 'search-visibility/off-page-scheduler' || routePath.startsWith('search-visibility/off-page-scheduler')) {
+    const assigned = user.assigned_project;
+    if (!assigned || assigned === 'All Projects' || !assigned.trim()) {
+      return false;
+    }
+  }
+
   const sectionAccess = (user.section_access || 'Default').trim();
   const lowerAccess = sectionAccess.toLowerCase();
   const userPerms = (user.permissions || 'Default').trim().toLowerCase();
@@ -537,5 +545,25 @@ export function recordAiModelAnalysisRun(user, projectSlug, engineName = 'all') 
   localStorage.setItem(genKey, 'true');
   localStorage.setItem(engKey, 'true');
 }
+
+/**
+ * Returns the project scope assigned to a user by an Admin from the Users page.
+ * Admins always return null (unrestricted access to all projects).
+ * For all non-admin users, if user.assigned_project is set and !== 'All Projects',
+ * returns that assigned project name/slug. Otherwise returns null.
+ *
+ * @param {Object} user - Logged in user context
+ * @returns {string|null} - Assigned project name or null if unrestricted
+ */
+export function getUserAssignedProject(user) {
+  if (!user || !user.role) return null;
+  const role = user.role.toUpperCase();
+  if (role === 'ADMIN') return null;
+  if (user.assigned_project && user.assigned_project !== 'All Projects') {
+    return user.assigned_project;
+  }
+  return null;
+}
+
 
 

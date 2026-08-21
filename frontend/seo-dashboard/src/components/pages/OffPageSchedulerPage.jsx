@@ -160,10 +160,11 @@ function normalizeRow(item, index) {
 export default function OffPageSchedulerPage({ user }) {
   const [activeTab, setActiveTab] = useState('import'); // 'import' or 'scheduler'
   
-  // Viewer & Vendor Scoping Filters
+  // Viewer & User Scoping Filters
   const isViewer = isReadOnlyUser(user);
   const isVendor = user?.category === 'Vendor' || user?.role?.toUpperCase() === 'VENDOR';
-  const vendorProject = isVendor && user?.assigned_project && user.assigned_project !== 'All Projects' ? user.assigned_project : null;
+  const isAdmin = user?.role?.toUpperCase() === 'ADMIN';
+  const vendorProject = !isAdmin && user?.assigned_project && user.assigned_project !== 'All Projects' ? user.assigned_project : null;
   const userCanEdit = canEdit(user);
   const userCanUpdate = canUpdate(user);
   
@@ -2467,6 +2468,29 @@ export default function OffPageSchedulerPage({ user }) {
     );
   }
 
+  if (!isAdmin && !vendorProject) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center', background: '#f8fafc', minHeight: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{
+          maxWidth: 480,
+          background: '#ffffff',
+          padding: 36,
+          borderRadius: 16,
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+        }}>
+          <div style={{ width: 52, height: 52, borderRadius: 14, background: '#fff7ed', color: '#ea580c', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto', border: '1px solid #fed7aa' }}>
+            <Lock size={26} />
+          </div>
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>No Project Assigned</h2>
+          <p style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.5, margin: 0 }}>
+            Monthly Operations is hidden and restricted until a project is allotted to your account by a system Administrator. Please contact your admin to assign a project from the Users page.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 0 }}>
       {/* Header Panel with Title & Top-Right Button */}
@@ -2558,10 +2582,10 @@ export default function OffPageSchedulerPage({ user }) {
           <ShieldCheck size={20} color="#ea580c" />
           <div>
             <div style={{ fontSize: 14, fontWeight: 800, color: '#9a3412' }}>
-              Vendor Project Scope Active
+              Assigned Project Scope Active
             </div>
             <div style={{ fontSize: 12.5, color: '#c2410c', marginTop: 2 }}>
-              Your vendor profile is scoped to <strong>"{vendorProject}"</strong>. Showing monthly operations data and datasets for this assigned project only.
+              Your account is scoped to <strong>"{vendorProject}"</strong>. Showing monthly operations data and datasets for this assigned project only.
             </div>
           </div>
         </div>
