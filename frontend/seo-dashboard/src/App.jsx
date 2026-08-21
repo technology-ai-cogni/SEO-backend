@@ -412,10 +412,6 @@ export default function App() {
             };
             setUser(updatedUser);
             sessionStorage.setItem('seo_dashboard_user', JSON.stringify(updatedUser));
-
-            if (changes.length > 0) {
-              setAccountUpdateModal({ isDisabled: false, changes });
-            }
           }
         }
       } catch (e) {}

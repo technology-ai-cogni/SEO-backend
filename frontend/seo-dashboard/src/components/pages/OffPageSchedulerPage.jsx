@@ -14,7 +14,7 @@ import {
   deleteScheduledActivityApi,
   fetchUsersApi
 } from '../../lib/projectsApi';
-import { isReadOnlyUser, canDownload, canEdit, canUpdate } from '../../lib/permissions';
+import { isReadOnlyUser, canDownload, canEdit, canUpdate, canDelete } from '../../lib/permissions';
 
 // Reusable Modal Component matching Project Setup style
 function Modal({ open, onClose, title, children, footer }) {
@@ -167,6 +167,8 @@ export default function OffPageSchedulerPage({ user }) {
   const vendorProject = !isAdmin && user?.assigned_project && user.assigned_project !== 'All Projects' ? user.assigned_project : null;
   const userCanEdit = canEdit(user);
   const userCanUpdate = canUpdate(user);
+  const userCanDelete = canDelete(user);
+  const userCanDownload = canDownload(user);
   
   useEffect(() => {
     if (isViewer && activeTab === 'scheduler') {
@@ -718,17 +720,13 @@ export default function OffPageSchedulerPage({ user }) {
   }, [vendorProject]);
 
   useEffect(() => {
-    if (vendorProject) {
-      if (filteredImports && filteredImports.length > 0) {
-        const isCurrentValid = selectedDataset && filteredImports.some(imp => imp.id === selectedDataset.id);
-        if (!isCurrentValid) {
-          setSelectedDataset(filteredImports[0]);
-        }
-      } else {
-        setSelectedDataset(null);
+    if (filteredImports && filteredImports.length > 0) {
+      const isCurrentValid = selectedDataset && filteredImports.some(imp => imp.id === selectedDataset.id);
+      if (!isCurrentValid) {
+        setSelectedDataset(filteredImports[0]);
       }
     }
-  }, [vendorProject, filteredImports, selectedDataset]);
+  }, [filteredImports]);
 
   useEffect(() => {
     localStorage.setItem('seo_scheduled_actions', JSON.stringify(schedules));
@@ -1284,7 +1282,7 @@ export default function OffPageSchedulerPage({ user }) {
 
           {/* Save Changes & Run Audit Buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            {!isVendor && (
+            {!isVendor && userCanUpdate && (
               <button
                 onClick={handleRunAudit}
                 disabled={auditAllocating}
@@ -1311,30 +1309,32 @@ export default function OffPageSchedulerPage({ user }) {
               </button>
             )}
 
-            <button
-              onClick={handleRunAiStatusCheck}
-              disabled={aiChecking}
-              style={{
-                background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: 10,
-                padding: '9px 18px',
-                fontSize: 13.5,
-                fontWeight: 700,
-                cursor: aiChecking ? 'wait' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                boxShadow: '0 3px 10px rgba(59, 130, 246, 0.25)',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
-              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-            >
-              <Sparkles size={16} color="#ffffff" />
-              {aiChecking ? 'Running AI Audit Check...' : 'AI Audit Check'}
-            </button>
+            {!isVendor && userCanUpdate && (
+              <button
+                onClick={handleRunAiStatusCheck}
+                disabled={aiChecking}
+                style={{
+                  background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: 10,
+                  padding: '9px 18px',
+                  fontSize: 13.5,
+                  fontWeight: 700,
+                  cursor: aiChecking ? 'wait' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  boxShadow: '0 3px 10px rgba(59, 130, 246, 0.25)',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+              >
+                <Sparkles size={16} color="#ffffff" />
+                {aiChecking ? 'Running AI Audit Check...' : 'AI Audit Check'}
+              </button>
+            )}
 
             {hasUnsavedChanges && (
               <span style={{ fontSize: 12.5, fontWeight: 600, color: '#d97706', background: '#fef3c7', padding: '5px 12px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #fde68a' }}>
@@ -1342,7 +1342,7 @@ export default function OffPageSchedulerPage({ user }) {
               </span>
             )}
             
-            {!isVendor && (
+            {!isVendor && userCanEdit && (
               <button
                 onClick={handleSaveChanges}
                 disabled={savingState === 'saving'}
@@ -1693,62 +1693,67 @@ export default function OffPageSchedulerPage({ user }) {
                   overflow: 'hidden'
                 }}>
                   {/* Bulk Edit Option */}
-                  <button
-                    onClick={() => {
-                      setShowActionsDropdown(false);
-                      setShowBulkEditModal(true);
-                    }}
-                    style={{
-                      width: '100%',
-                      padding: '10px 16px',
-                      background: 'none',
-                      border: 'none',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      fontSize: 13.5,
-                      fontWeight: 600,
-                      color: '#1e293b',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      transition: 'background 0.12s ease'
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                  >
-                    <Pencil size={15} color="#475569" />
-                    Bulk Edit
-                  </button>
-
-                  <div style={{ height: 1, background: '#f1f5f9', margin: '4px 0' }} />
+                  {userCanEdit && (
+                    <button
+                      onClick={() => {
+                        setShowActionsDropdown(false);
+                        setShowBulkEditModal(true);
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '10px 16px',
+                        background: 'none',
+                        border: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        fontSize: 13.5,
+                        fontWeight: 600,
+                        color: '#1e293b',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'background 0.12s ease'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    >
+                      <Pencil size={15} color="#475569" />
+                      Bulk Edit
+                    </button>
+                  )}
 
                   {/* Bulk Delete Option */}
-                  <button
-                    onClick={() => {
-                      setShowActionsDropdown(false);
-                      handleBulkDelete();
-                    }}
-                    style={{
-                      width: '100%',
-                      padding: '10px 16px',
-                      background: 'none',
-                      border: 'none',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      fontSize: 13.5,
-                      fontWeight: 600,
-                      color: '#ef4444',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      transition: 'background 0.12s ease'
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                  >
-                    <Trash2 size={15} color="#ef4444" />
-                    Bulk Delete
-                  </button>
+                  {userCanDelete && (
+                    <>
+                      <div style={{ height: 1, background: '#f1f5f9', margin: '4px 0' }} />
+                      <button
+                        onClick={() => {
+                          setShowActionsDropdown(false);
+                          handleBulkDelete();
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '10px 16px',
+                          background: 'none',
+                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          fontSize: 13.5,
+                          fontWeight: 600,
+                          color: '#ef4444',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          transition: 'background 0.12s ease'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                      >
+                        <Trash2 size={15} color="#ef4444" />
+                        Bulk Delete
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -1772,7 +1777,7 @@ export default function OffPageSchedulerPage({ user }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 2600 }}>
               <thead>
                 <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 10 }}>
-                  {!isVendor && (
+                  {!isVendor && (userCanEdit || userCanDelete) && (
                     <th style={{ padding: '12px 16px', width: 44, textAlign: 'center' }}>
                       <input
                         type="checkbox"
@@ -1811,7 +1816,7 @@ export default function OffPageSchedulerPage({ user }) {
               <tbody>
                 {filteredRows.length === 0 ? (
                   <tr>
-                    <td colSpan={isVendor ? 20 : 21} style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+                    <td colSpan={(!isVendor && (userCanEdit || userCanDelete)) ? 21 : 20} style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
                       No matching records found in this dataset.
                     </td>
                   </tr>
@@ -1820,7 +1825,7 @@ export default function OffPageSchedulerPage({ user }) {
                     <tr key={rIdx} style={{ borderBottom: '1px solid var(--border)', background: selectedRowIndices.includes(rIdx) ? '#f0f9ff' : 'transparent' }}
                       onMouseEnter={e => e.currentTarget.style.background = selectedRowIndices.includes(rIdx) ? '#e0f2fe' : '#fafbfc'}
                       onMouseLeave={e => e.currentTarget.style.background = selectedRowIndices.includes(rIdx) ? '#f0f9ff' : 'transparent'}>
-                      {!isVendor && (
+                      {!isVendor && (userCanEdit || userCanDelete) && (
                         <td style={{ padding: '14px 16px', textAlign: 'center' }}>
                           <input
                             type="checkbox"
@@ -2054,6 +2059,7 @@ export default function OffPageSchedulerPage({ user }) {
                       </td>
                       <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
                         <select
+                          disabled={!userCanEdit}
                           value={REMARKS_PRESET_OPTIONS.includes(row.remarks) ? row.remarks : (row.remarks || 'No Issues')}
                           onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'remarks', e.target.value)}
                           style={{
@@ -2062,10 +2068,10 @@ export default function OffPageSchedulerPage({ user }) {
                             fontWeight: 600,
                             borderRadius: 6,
                             border: '1px solid #cbd5e1',
-                            background: '#ffffff',
+                            background: !userCanEdit ? '#f8fafc' : '#ffffff',
                             color: '#0f172a',
                             outline: 'none',
-                            cursor: 'pointer',
+                            cursor: !userCanEdit ? 'not-allowed' : 'pointer',
                             maxWidth: 240
                           }}
                           title={row.remarks}
@@ -2080,6 +2086,7 @@ export default function OffPageSchedulerPage({ user }) {
                       </td>
                       <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
                         <select
+                          disabled={!userCanEdit}
                           value={SOLUTION_PRESET_OPTIONS.includes(row.solution) ? row.solution : (row.solution || 'fixed')}
                           onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'solution', e.target.value)}
                           style={{
@@ -2088,10 +2095,10 @@ export default function OffPageSchedulerPage({ user }) {
                             fontWeight: 600,
                             borderRadius: 6,
                             border: '1px solid #cbd5e1',
-                            background: row.solution === 'fixed' ? '#f0fdf4' : '#ffffff',
+                            background: !userCanEdit ? '#f8fafc' : row.solution === 'fixed' ? '#f0fdf4' : '#ffffff',
                             color: row.solution === 'fixed' ? '#166534' : '#0f172a',
                             outline: 'none',
-                            cursor: 'pointer'
+                            cursor: !userCanEdit ? 'not-allowed' : 'pointer'
                           }}
                           title={row.solution}
                         >
@@ -2505,22 +2512,24 @@ export default function OffPageSchedulerPage({ user }) {
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button
-            onClick={handleDownloadMonthlyOperations}
-            title="Download Monthly Operations Data (Excel)"
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: '#ffffff', color: '#0f172a',
-              border: '1.5px solid #cbd5e1', borderRadius: 10,
-              padding: '10px 14px', cursor: 'pointer',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-              transition: 'all 0.15s ease'
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-            onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
-          >
-            <Download size={16} color="var(--accent)" />
-          </button>
+          {userCanDownload && (
+            <button
+              onClick={handleDownloadMonthlyOperations}
+              title="Download Monthly Operations Data (Excel)"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: '#ffffff', color: '#0f172a',
+                border: '1.5px solid #cbd5e1', borderRadius: 10,
+                padding: '10px 14px', cursor: 'pointer',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+              onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
+            >
+              <Download size={16} color="var(--accent)" />
+            </button>
+          )}
 
           {!isVendor && userCanUpdate && (
             <button
@@ -2773,7 +2782,7 @@ export default function OffPageSchedulerPage({ user }) {
                       </td>
                       <td style={{ padding: '14px 18px', fontSize: 13.5, color: 'var(--text-muted)' }}>{imp.date}</td>
                       <td style={{ padding: '14px 18px', textAlign: 'right' }}>
-                        {!isVendor && (
+                        {!isVendor && userCanDelete && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

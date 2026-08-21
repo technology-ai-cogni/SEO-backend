@@ -24,7 +24,7 @@ const PERMISSION_OPTIONS = [
   'View + Edit + Delete + Update',
 ];
 
-function ModuleAccessMultiSelect({ value = 'Default', onChange }) {
+function ModuleAccessMultiSelect({ value = 'Default', onChange, disabled = false }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
 
@@ -54,6 +54,7 @@ function ModuleAccessMultiSelect({ value = 'Default', onChange }) {
   }, [open]);
 
   const toggleOption = (opt) => {
+    if (disabled) return;
     if (opt === 'Default') {
       onChange('Default');
       return;
@@ -93,7 +94,8 @@ function ModuleAccessMultiSelect({ value = 'Default', onChange }) {
     <div ref={containerRef} style={{ position: 'relative', display: 'inline-block' }}>
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        disabled={disabled}
+        onClick={() => !disabled && setOpen(!open)}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -104,9 +106,9 @@ function ModuleAccessMultiSelect({ value = 'Default', onChange }) {
           fontWeight: 600,
           borderRadius: 6,
           border: '1px solid #cbd5e1',
-          background: '#ffffff',
-          color: '#0f172a',
-          cursor: 'pointer',
+          background: disabled ? '#f8fafc' : '#ffffff',
+          color: disabled ? '#94a3b8' : '#0f172a',
+          cursor: disabled ? 'not-allowed' : 'pointer',
           outline: 'none',
           minWidth: 150
         }}
@@ -572,8 +574,16 @@ export default function UsersPage({ user, onNavigate }) {
 
   // Inline Edit Handlers for Admin User Table (Auto-Saves Instantly into Database)
   const handleInlineCategoryChange = async (userId, newCategory) => {
-    const rolesForCategory = CATEGORY_ROLES_MAP[newCategory] || [ROLES.INTERNAL_ASSOCIATE];
     const targetUser = usersList.find(u => u.id === userId);
+    if (
+      (user?.email && targetUser?.email && user.email.toLowerCase() === targetUser.email.toLowerCase()) ||
+      (user?.id && targetUser?.id && String(user.id) === String(targetUser.id))
+    ) {
+      setAlertMsg({ type: 'error', text: 'You cannot modify your own account settings.' });
+      return;
+    }
+
+    const rolesForCategory = CATEGORY_ROLES_MAP[newCategory] || [ROLES.INTERNAL_ASSOCIATE];
     const current = editedUsers[userId] || (targetUser ? {
       category: targetUser.category || 'Internal',
       role: targetUser.role || 'INTERNAL_ASSOCIATE',
@@ -668,6 +678,13 @@ export default function UsersPage({ user, onNavigate }) {
 
   const handleInlineFieldChange = (userId, field, value) => {
     const targetUser = usersList.find(u => u.id === userId);
+    if (
+      (user?.email && targetUser?.email && user.email.toLowerCase() === targetUser.email.toLowerCase()) ||
+      (user?.id && targetUser?.id && String(user.id) === String(targetUser.id))
+    ) {
+      return;
+    }
+
     const current = editedUsers[userId] || (targetUser ? {
       category: targetUser.category || 'Internal',
       role: targetUser.role || 'INTERNAL_ASSOCIATE',
@@ -698,6 +715,14 @@ export default function UsersPage({ user, onNavigate }) {
   };
 
   const handleSaveUserSettings = async (targetUser) => {
+    if (
+      (user?.email && targetUser?.email && user.email.toLowerCase() === targetUser.email.toLowerCase()) ||
+      (user?.id && targetUser?.id && String(user.id) === String(targetUser.id))
+    ) {
+      setAlertMsg({ type: 'error', text: 'You cannot modify your own account settings.' });
+      return;
+    }
+
     const edits = editedUsers[targetUser.id];
     if (!edits || !edits.isDirty) return;
 
@@ -800,6 +825,14 @@ export default function UsersPage({ user, onNavigate }) {
   const adminCount = usersList.filter(u => u.role?.toUpperCase() === 'ADMIN').length;
 
   const handleToggleStatus = async (targetUser) => {
+    if (
+      (user?.email && targetUser?.email && user.email.toLowerCase() === targetUser.email.toLowerCase()) ||
+      (user?.id && targetUser?.id && String(user.id) === String(targetUser.id))
+    ) {
+      setAlertMsg({ type: 'error', text: 'You cannot disable your own account.' });
+      return;
+    }
+
     const nextStatus = (targetUser.status || 'Active') === 'Active' ? 'Disabled' : 'Active';
     setActionLoading(true);
     setAlertMsg({ type: '', text: '' });
@@ -853,6 +886,14 @@ export default function UsersPage({ user, onNavigate }) {
 
   const confirmDeleteUser = async () => {
     if (!selectedUser) return;
+    if (
+      (user?.email && selectedUser?.email && user.email.toLowerCase() === selectedUser.email.toLowerCase()) ||
+      (user?.id && selectedUser?.id && String(user.id) === String(selectedUser.id))
+    ) {
+      setAlertMsg({ type: 'error', text: 'You cannot delete your own account.' });
+      setShowDeleteModal(false);
+      return;
+    }
     setActionLoading(true);
     setAlertMsg({ type: '', text: '' });
     try {
@@ -1025,57 +1066,8 @@ export default function UsersPage({ user, onNavigate }) {
           </div>
         )}
 
-        {/* Navigation Subtabs */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, borderBottom: '1.5px solid var(--border, #e2e8f0)', paddingBottom: 10 }}>
-          <button
-            onClick={() => setSubTab('users')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '9px 18px',
-              fontSize: 13,
-              fontWeight: 700,
-              borderRadius: 8,
-              border: 'none',
-              cursor: 'pointer',
-              background: subTab === 'users' ? 'var(--accent, #7c3aed)' : 'var(--surface-2, #f1f5f9)',
-              color: subTab === 'users' ? '#ffffff' : '#64748b',
-              transition: 'all 0.15s ease'
-            }}
-          >
-            <User size={15} />
-            <span>User Accounts & Access</span>
-          </button>
-
-          <button
-            onClick={() => setSubTab('matrix')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '9px 18px',
-              fontSize: 13,
-              fontWeight: 700,
-              borderRadius: 8,
-              border: 'none',
-              cursor: 'pointer',
-              background: subTab === 'matrix' ? 'var(--accent, #7c3aed)' : 'var(--surface-2, #f1f5f9)',
-              color: subTab === 'matrix' ? '#ffffff' : '#64748b',
-              transition: 'all 0.15s ease'
-            }}
-          >
-            <Layers size={15} />
-            <span>Role & Permission Matrix</span>
-          </button>
-        </div>
-
-        {subTab === 'matrix' ? (
-          <RolePermissionMatrixView />
-        ) : (
-          <>
-            {/* Summary Metric Cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 24 }}>
+        {/* Summary Metric Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 24 }}>
               {[
                 { label: 'Total Users', value: totalUsers, color: 'var(--text-primary)', bg: 'var(--surface-2)' },
                 { label: 'Active Profiles', value: activeCount, color: '#16a34a', bg: '#f0fdf4' },
@@ -1165,7 +1157,7 @@ export default function UsersPage({ user, onNavigate }) {
                 }}
               >
                 <option value="all">All Roles</option>
-                {Object.keys(ROLE_DISPLAY_NAMES).map(rKey => (
+                {Object.keys(ROLE_DISPLAY_NAMES).filter(rKey => rKey !== 'USER').map(rKey => (
                   <option key={rKey} value={rKey}>{ROLE_DISPLAY_NAMES[rKey]}</option>
                 ))}
               </select>
@@ -1262,9 +1254,13 @@ export default function UsersPage({ user, onNavigate }) {
                         const categoryRoles = CATEGORY_ROLES_MAP[currentEdit.category] || [ROLES.INTERNAL_ASSOCIATE];
                         const rolesForCategory = categoryRoles.includes(currentRoleKey) ? categoryRoles : [currentRoleKey, ...categoryRoles];
                         const isVendor = currentEdit.category === 'Vendor' || currentEdit.role === 'VENDOR' || currentRoleKey === 'VENDOR';
+                        const isSelf = Boolean(
+                          (user?.email && u?.email && user.email.toLowerCase() === u.email.toLowerCase()) ||
+                          (user?.id && u?.id && String(user.id) === String(u.id))
+                        );
 
                         return (
-                          <tr key={u.id} style={{ borderBottom: '1px solid var(--border)', opacity: isActive ? 1 : 0.65 }}>
+                          <tr key={u.id} style={{ borderBottom: '1px solid var(--border)', opacity: isActive ? 1 : 0.65, background: isSelf ? '#f8fafc' : 'transparent' }}>
                             {/* USER INFO */}
                             <td style={{ padding: '12px 16px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1283,7 +1279,14 @@ export default function UsersPage({ user, onNavigate }) {
                                   {u.name ? u.name.charAt(0).toUpperCase() : u.email.charAt(0).toUpperCase()}
                                 </div>
                                 <div>
-                                  <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: 13.5 }}>{u.name || 'User'}</div>
+                                  <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    {u.name || 'User'}
+                                    {isSelf && (
+                                      <span style={{ fontSize: 10, fontWeight: 700, background: '#e0e7ff', color: '#3730a3', padding: '2px 6px', borderRadius: 4, border: '1px solid #c7d2fe' }}>
+                                        You (Current User)
+                                      </span>
+                                    )}
+                                  </div>
                                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{u.email}</div>
                                 </div>
                               </div>
@@ -1292,6 +1295,7 @@ export default function UsersPage({ user, onNavigate }) {
                             {/* CATEGORY DROPDOWN */}
                             <td style={{ padding: '12px 16px', width: 135 }}>
                               <select
+                                disabled={isSelf}
                                 value={currentEdit.category}
                                 onChange={e => handleInlineCategoryChange(u.id, e.target.value)}
                                 style={{
@@ -1300,13 +1304,14 @@ export default function UsersPage({ user, onNavigate }) {
                                   fontWeight: 600,
                                   borderRadius: 6,
                                   border: '1px solid #cbd5e1',
-                                  background: '#ffffff',
-                                  color: '#0f172a',
-                                  cursor: 'pointer',
+                                  background: isSelf ? '#f8fafc' : '#ffffff',
+                                  color: isSelf ? '#94a3b8' : '#0f172a',
+                                  cursor: isSelf ? 'not-allowed' : 'pointer',
                                   outline: 'none',
                                   width: '100%',
                                   minWidth: 100
                                 }}
+                                title={isSelf ? "You cannot modify your own category" : undefined}
                               >
                                 {Object.values(CATEGORIES).map(cat => (
                                   <option key={cat} value={cat}>{cat}</option>
@@ -1317,6 +1322,7 @@ export default function UsersPage({ user, onNavigate }) {
                             {/* ROLE DROPDOWN */}
                             <td style={{ padding: '12px 16px', width: 155 }}>
                               <select
+                                disabled={isSelf}
                                 value={currentRoleKey}
                                 onChange={e => handleInlineFieldChange(u.id, 'role', e.target.value)}
                                 style={{
@@ -1325,13 +1331,14 @@ export default function UsersPage({ user, onNavigate }) {
                                   fontWeight: 600,
                                   borderRadius: 6,
                                   border: '1px solid #cbd5e1',
-                                  background: '#ffffff',
-                                  color: '#0f172a',
-                                  cursor: 'pointer',
+                                  background: isSelf ? '#f8fafc' : '#ffffff',
+                                  color: isSelf ? '#94a3b8' : '#0f172a',
+                                  cursor: isSelf ? 'not-allowed' : 'pointer',
                                   outline: 'none',
                                   width: '100%',
                                   minWidth: 120
                                 }}
+                                title={isSelf ? "You cannot modify your own role" : undefined}
                               >
                                 {rolesForCategory.map(rKey => (
                                   <option key={rKey} value={rKey}>{ROLE_DISPLAY_NAMES[rKey] || rKey}</option>
@@ -1343,6 +1350,7 @@ export default function UsersPage({ user, onNavigate }) {
                             <td style={{ padding: '12px 16px', width: 175 }}>
                               {currentRoleKey !== 'ADMIN' ? (
                                 <select
+                                  disabled={isSelf}
                                   value={currentEdit.assigned_project && currentEdit.assigned_project !== 'All Projects' ? currentEdit.assigned_project : ''}
                                   onChange={e => handleInlineFieldChange(u.id, 'assigned_project', e.target.value)}
                                   style={{
@@ -1351,13 +1359,13 @@ export default function UsersPage({ user, onNavigate }) {
                                     fontWeight: 700,
                                     borderRadius: 6,
                                     border: '1.5px solid #f97316',
-                                    background: '#fff7ed',
-                                    color: '#c2410c',
-                                    cursor: 'pointer',
+                                    background: isSelf ? '#f8fafc' : '#fff7ed',
+                                    color: isSelf ? '#94a3b8' : '#c2410c',
+                                    cursor: isSelf ? 'not-allowed' : 'pointer',
                                     outline: 'none',
                                     width: '100%'
                                   }}
-                                  title="Assigned project scope for this user"
+                                  title={isSelf ? "You cannot modify your own assigned project" : "Assigned project scope for this user"}
                                 >
                                   <option value="">-- Select Project --</option>
                                   {projectOptions.filter(p => p !== 'All Projects').map(pName => (
@@ -1374,6 +1382,7 @@ export default function UsersPage({ user, onNavigate }) {
                             {/* SECTION ACCESS (MULTI-SELECT) */}
                             <td style={{ padding: '12px 16px', width: 190 }}>
                               <ModuleAccessMultiSelect
+                                disabled={isSelf}
                                 value={currentEdit.section_access}
                                 onChange={val => handleInlineFieldChange(u.id, 'section_access', val)}
                               />
@@ -1382,6 +1391,7 @@ export default function UsersPage({ user, onNavigate }) {
                             {/* PERMISSIONS DROPDOWN */}
                             <td style={{ padding: '12px 16px', width: 145 }}>
                               <select
+                                disabled={isSelf}
                                 value={currentEdit.permissions}
                                 onChange={e => handleInlineFieldChange(u.id, 'permissions', e.target.value)}
                                 style={{
@@ -1390,9 +1400,9 @@ export default function UsersPage({ user, onNavigate }) {
                                   fontWeight: 600,
                                   borderRadius: 6,
                                   border: '1px solid #cbd5e1',
-                                  background: '#ffffff',
-                                  color: '#0f172a',
-                                  cursor: 'pointer',
+                                  background: isSelf ? '#f8fafc' : '#ffffff',
+                                  color: isSelf ? '#94a3b8' : '#0f172a',
+                                  cursor: isSelf ? 'not-allowed' : 'pointer',
                                   outline: 'none',
                                   width: 145,
                                   maxWidth: 145,
@@ -1400,6 +1410,7 @@ export default function UsersPage({ user, onNavigate }) {
                                   textOverflow: 'ellipsis',
                                   whiteSpace: 'nowrap'
                                 }}
+                                title={isSelf ? "You cannot modify your own permissions" : undefined}
                               >
                                 {PERMISSION_OPTIONS.map(opt => (
                                   <option key={opt} value={opt}>{opt}</option>
@@ -1418,7 +1429,8 @@ export default function UsersPage({ user, onNavigate }) {
                                       display: 'inline-flex',
                                       alignItems: 'center',
                                       gap: 6,
-                                      cursor: 'pointer',
+                                      cursor: isSelf ? 'not-allowed' : 'pointer',
+                                      opacity: isSelf ? 0.6 : 1,
                                       fontSize: 11.5,
                                       fontWeight: 600,
                                       userSelect: 'none',
@@ -1429,15 +1441,16 @@ export default function UsersPage({ user, onNavigate }) {
                                       borderRadius: 6,
                                       transition: 'all 0.15s ease'
                                     }}
-                                    title={`Toggle attendance status for ${u.name}`}
+                                    title={isSelf ? "You cannot toggle your own attendance" : `Toggle attendance status for ${u.name}`}
                                   >
                                     <input
                                       type="checkbox"
+                                      disabled={isSelf}
                                       checked={isPresent}
                                       onChange={(e) => {
-                                        handleMarkAttendance(u.id, e.target.checked ? 'Present' : 'Not Present');
+                                        if (!isSelf) handleMarkAttendance(u.id, e.target.checked ? 'Present' : 'Not Present');
                                       }}
-                                      style={{ cursor: 'pointer', accentColor: '#16a34a', width: 13, height: 13 }}
+                                      style={{ cursor: isSelf ? 'not-allowed' : 'pointer', accentColor: '#16a34a', width: 13, height: 13 }}
                                     />
                                     <span>{isPresent ? 'Present' : 'Not Present'}</span>
                                   </label>
@@ -1450,7 +1463,7 @@ export default function UsersPage({ user, onNavigate }) {
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
 
                                 {/* SAVE BUTTON */}
-                                {editedUsers[u.id]?.isDirty && (
+                                {!isSelf && editedUsers[u.id]?.isDirty && (
                                   <button
                                     onClick={() => handleSaveUserSettings(u)}
                                     disabled={savingUserId === u.id}
@@ -1478,9 +1491,9 @@ export default function UsersPage({ user, onNavigate }) {
 
                                 {/* TOGGLE STATUS */}
                                 <button
-                                  onClick={() => handleToggleStatus(u)}
-                                  disabled={actionLoading}
-                                  title={isActive ? 'Disable User Profile' : 'Enable User Profile'}
+                                  onClick={() => !isSelf && handleToggleStatus(u)}
+                                  disabled={actionLoading || isSelf}
+                                  title={isSelf ? "You cannot disable your own account" : (isActive ? 'Disable User Profile' : 'Enable User Profile')}
                                   style={{
                                     display: 'flex',
                                     alignItems: 'center',
@@ -1489,7 +1502,8 @@ export default function UsersPage({ user, onNavigate }) {
                                     fontSize: 11.5,
                                     fontWeight: 600,
                                     borderRadius: 6,
-                                    cursor: actionLoading ? 'not-allowed' : 'pointer',
+                                    cursor: (actionLoading || isSelf) ? 'not-allowed' : 'pointer',
+                                    opacity: isSelf ? 0.4 : 1,
                                     background: isActive ? '#fef2f2' : '#f0fdf4',
                                     color: isActive ? '#dc2626' : '#166534',
                                     border: `1px solid ${isActive ? '#fca5a5' : '#bbf7d0'}`
@@ -1501,19 +1515,20 @@ export default function UsersPage({ user, onNavigate }) {
 
                                 {/* DELETE PROFILE */}
                                 <button
-                                  onClick={() => { setSelectedUser(u); setShowDeleteModal(true); }}
-                                  disabled={actionLoading}
-                                  title="Delete User"
+                                  onClick={() => { if (!isSelf) { setSelectedUser(u); setShowDeleteModal(true); } }}
+                                  disabled={actionLoading || isSelf}
+                                  title={isSelf ? "You cannot delete your own account" : "Delete User"}
                                   style={{
                                     background: 'transparent',
                                     border: 'none',
-                                    color: '#94a3b8',
-                                    cursor: actionLoading ? 'not-allowed' : 'pointer',
+                                    color: isSelf ? '#cbd5e1' : '#94a3b8',
+                                    cursor: (actionLoading || isSelf) ? 'not-allowed' : 'pointer',
+                                    opacity: isSelf ? 0.35 : 1,
                                     padding: 6,
                                     borderRadius: 6
                                   }}
-                                  onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
-                                  onMouseLeave={e => e.currentTarget.style.color = '#94a3b8'}
+                                  onMouseEnter={e => { if (!isSelf) e.currentTarget.style.color = '#dc2626'; }}
+                                  onMouseLeave={e => { if (!isSelf) e.currentTarget.style.color = '#94a3b8'; }}
                                 >
                                   <Trash2 size={14} />
                                 </button>
@@ -1527,8 +1542,6 @@ export default function UsersPage({ user, onNavigate }) {
                 </div>
               </div>
             )}
-          </>
-        )}
       </div>
 
       {/* ─── CREATE USER CREDENTIAL MODAL ─────────────────────────────────────── */}

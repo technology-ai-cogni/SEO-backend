@@ -7,7 +7,7 @@ import {
   runAiVisibilityAnalysis
 } from '../../lib/projectsApi';
 import { supabase } from '../../lib/supabaseClient';
-import { hasPermission, PERMISSIONS, canRunActions, canRunAiModelAnalysis, recordAiModelAnalysisRun } from '../../lib/permissions';
+import { hasPermission, PERMISSIONS, canRunActions, canRunAiModelAnalysis, recordAiModelAnalysisRun, canDownload } from '../../lib/permissions';
 
 // MultiSelectField Component for Popover Filters
 function MultiSelectField({ label, options, selectedValues = [], onChange }) {
@@ -155,6 +155,7 @@ function ColumnHeaderFilter({ title, options = [], selectedValues, onChange }) {
 
 export default function AiAnalysisPage({ user }) {
   const userCanRunActions = canRunActions(user);
+  const userCanDownload = canDownload(user);
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -967,27 +968,29 @@ export default function AiAnalysisPage({ user }) {
           </div>
 
           {/* Download CSV Button */}
-          <button
-            onClick={handleDownloadCsv}
-            title="Download CSV"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: '#f8fafc',
-              color: '#64748b',
-              border: '1.5px solid #e2e8f0',
-              borderRadius: 12,
-              padding: '9px 14px',
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              transition: 'all 0.15s ease'
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }}
-          >
-            <Download size={16} />
-          </button>
+          {userCanDownload && (
+            <button
+              onClick={handleDownloadCsv}
+              title="Download CSV"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#f8fafc',
+                color: '#64748b',
+                border: '1.5px solid #e2e8f0',
+                borderRadius: 12,
+                padding: '9px 14px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }}
+            >
+              <Download size={16} />
+            </button>
+          )}
 
           {/* Filter Trigger Button & Popover */}
           <div style={{ position: 'relative' }}>
