@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Search, ChevronDown, ExternalLink, Sparkles, RefreshCw, Filter, Download } from 'lucide-react';
+import { Search, ChevronDown, ExternalLink, Sparkles, RefreshCw, Filter, Download, Calendar, Lock } from 'lucide-react';
 import {
   fetchDomainRows,
   fetchKeywordRows,
@@ -161,6 +161,10 @@ export default function AiAnalysisPage({ user }) {
   const [projectKeywords, setProjectKeywords] = useState([]);
   const [history, setHistory] = useState([]);
   const [analyzing, setAnalyzing] = useState(false);
+  const handleOpenAnalyzeModal = () => {
+    handleRunAnalysis();
+  };
+
 
   // Sub-view & Filters
   const [selectedEngine, setSelectedEngine] = useState('chatgpt'); // 'chatgpt' | 'gemini' | 'ai overview'
@@ -554,7 +558,7 @@ export default function AiAnalysisPage({ user }) {
   const currentDomainDisplay = activeProject?.domain || activeProject?.name || (projects && projects[0] ? projects[0].domain || projects[0].name : '');
 
   return (
-    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: '#f8fafc', minHeight: '100vh' }}>
+    <div style={{ position: 'relative', padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: '#f8fafc', minHeight: '100vh' }}>
       
       {/* ─── HEADER BAR: Dashboard: domain.com v [Link] 🇮🇳 India v 📅 Date ───── */}
       {(() => {
@@ -789,13 +793,11 @@ export default function AiAnalysisPage({ user }) {
                 )}
               </div>
 
-              {/* Date Picker Button */}
+              {/* Calendar Date Selector Button beside Country */}
               <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                 <button
-                  onClick={() => {
-                    const hiddenInput = document.getElementById('ai_header_date_picker');
-                    if (hiddenInput) hiddenInput.showPicker ? hiddenInput.showPicker() : hiddenInput.click();
-                  }}
+                  onClick={handleRunAnalysis}
+                  title="Select Analysis Target Date Range"
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -816,13 +818,6 @@ export default function AiAnalysisPage({ user }) {
                     {new Date(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </span>
                 </button>
-                <input
-                  id="ai_header_date_picker"
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 0, height: 0 }}
-                />
               </div>
             </div>
           </div>
@@ -921,7 +916,7 @@ export default function AiAnalysisPage({ user }) {
             </div>
           </div>
 
-          {/* Right Side: Re-analyze Button */}
+          {/* Right Side: Analyze / Re-analyze Button */}
           {userCanRunActions && canRunAiModelAnalysis(user, activeProject?.slug, selectedEngine, !!getActiveEngineResult()) && (
             <button
               onClick={handleRunAnalysis}
@@ -930,7 +925,7 @@ export default function AiAnalysisPage({ user }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                background: 'linear-gradient(135deg, #7c3aed 0%, #a855f7 100%)',
+                background: '#7c3aed',
                 color: '#ffffff',
                 border: 'none',
                 borderRadius: 8,
@@ -938,11 +933,12 @@ export default function AiAnalysisPage({ user }) {
                 fontSize: 13,
                 fontWeight: 700,
                 cursor: analyzing ? 'not-allowed' : 'pointer',
-                opacity: analyzing ? 0.7 : 1
+                opacity: analyzing ? 0.75 : 1,
+                transition: 'all 0.15s ease'
               }}
             >
-              <RefreshCw size={14} className={analyzing ? 'animate-spin' : ''} />
-              <span>{analyzing ? 'Analyzing...' : 'Re-analyze'}</span>
+              <Sparkles size={14} className={analyzing ? 'animate-spin' : ''} />
+              <span>{analyzing ? 'Analyzing...' : (getActiveEngineResult() ? 'Re-analyze' : 'Analyze')}</span>
             </button>
           )}
         </div>
@@ -1323,6 +1319,115 @@ export default function AiAnalysisPage({ user }) {
         )}
       </div>
 
-    </div>
+    
+      {/* TOP PAGES AI PAGE BLUR OVERLAY */}
+      {analyzing && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'rgba(248, 250, 252, 0.70)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'center',
+          paddingTop: 180,
+          borderRadius: 16
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 20,
+            width: '100%',
+            maxWidth: 440,
+            padding: '36px 32px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            border: '1px solid #e2e8f0',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            textAlign: 'center',
+            gap: 18
+          }}>
+            <div style={{
+              width: 64,
+              height: 64,
+              borderRadius: 20,
+              background: '#f5f3ff',
+              color: '#7c3aed',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(124, 58, 237, 0.15)'
+            }}>
+              <Sparkles size={32} className="animate-spin" />
+            </div>
+            <div>
+              <h3 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>
+                Analyzing {selectedEngine.toUpperCase()} Visibility...
+              </h3>
+              <p style={{ fontSize: 13, color: '#64748b', margin: 0, lineHeight: 1.5 }}>
+                Gathering AI Mentions, Citations, and Ranks for <strong style={{ color: '#7c3aed' }}>{activeProject?.name || activeProject?.domain}</strong>. Please wait a moment.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI ANALYSIS CONTENT BLUR OVERLAY */}
+      {analyzing && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'rgba(248, 250, 252, 0.70)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'center',
+          paddingTop: 180,
+          borderRadius: 16
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 20,
+            width: '100%',
+            maxWidth: 440,
+            padding: '36px 32px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
+            border: '1px solid #e2e8f0',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            textAlign: 'center',
+            gap: 18
+          }}>
+            <div style={{
+              width: 64,
+              height: 64,
+              borderRadius: 20,
+              background: '#f5f3ff',
+              color: '#7c3aed',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(124, 58, 237, 0.15)'
+            }}>
+              <Sparkles size={32} className="animate-spin" />
+            </div>
+            <div>
+              <h3 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>
+                Analyzing AI Search Visibility...
+              </h3>
+              <p style={{ fontSize: 13, color: '#64748b', margin: 0, lineHeight: 1.5 }}>
+                Gathering Mentions, Citations, and AI Visibility Ranks for <strong style={{ color: '#7c3aed' }}>{activeProject?.name || activeProject?.domain}</strong>. Please wait a moment.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      </div>
   );
 }

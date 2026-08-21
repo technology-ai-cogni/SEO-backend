@@ -2630,3 +2630,18 @@ export async function markAllAttendanceApi(dateStr, statusStr) {
   return { status: 'success' };
 }
 
+// Run Organic Rank Check for a Project
+export async function runOrganicRankCheckApi(projectSlug, country = 'India') {
+  if (!projectSlug) throw new Error('Project slug is required');
+  const res = await fetch(`${CATEGORY_API_BASE}/projects/${projectSlug}/check-rank`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ country }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail?.[0]?.msg || body?.detail || 'Failed to start organic rank check');
+  }
+  return await res.json();
+}
+

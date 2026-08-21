@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, ChevronDown, ExternalLink, FileText, Filter, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, ChevronDown, ExternalLink, FileText, Filter, Download, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
 import { canDownload } from '../../lib/permissions';
-import { fetchDomainRows, fetchPageRows, fetchKeywordRows, fetchDomainMetricsApi } from '../../lib/projectsApi';
+import { fetchDomainRows, fetchPageRows, fetchKeywordRows, runOrganicRankCheckApi } from '../../lib/projectsApi';
 
 // MultiSelectField Component for Popover Filters
 function MultiSelectField({ label, options, selectedValues = [], onChange }) {
@@ -230,6 +230,24 @@ export default function TopPagesPage({ user }) {
   const [countryMenuOpen, setCountryMenuOpen] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
   const [selectedDate, setSelectedDate] = useState('2026-08-13');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  const handleRunOrganicRankCheck = async () => {
+    if (!activeProject?.slug || isAnalyzing) return;
+    setIsAnalyzing(true);
+    try {
+      const targetRegion = selectedRegion || activeProject?.location || 'India';
+      await runOrganicRankCheckApi(activeProject.slug, targetRegion);
+      const updatedKws = await fetchKeywordRows(activeProject.slug);
+      if (updatedKws && updatedKws.length > 0) {
+        setProjectKeywords(updatedKws);
+      }
+    } catch (err) {
+      console.warn('[TopPagesPage] Organic rank check error:', err);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   const COUNTRY_OPTIONS = [
     { code: 'IN', name: 'India' },
@@ -244,26 +262,7 @@ export default function TopPagesPage({ user }) {
   ];
 
   // Load project list on mount
-    // Auto-fetch domain metrics (Traffic / DA) from Moz API on project change
-  useEffect(() => {
-    if (activeProject?.domain || activeProject?.name) {
-      const domain = activeProject.domain || activeProject.name;
-      fetchDomainMetricsApi(domain)
-        .then((metrics) => {
-          if (metrics && (metrics.traffic || metrics.organic_traffic)) {
-            const fetchedTraffic = metrics.traffic ?? metrics.organic_traffic;
-            setLiveDomainTraffic(fetchedTraffic);
-            if (activeProject.slug) {
-              localStorage.setItem(`bd_domain_metrics_${activeProject.slug}`, JSON.stringify({
-                da: metrics.da,
-                traffic: fetchedTraffic
-              }));
-            }
-          }
-        })
-        .catch(err => console.warn('[TopPagesPage] Domain metrics fetch notice:', err));
-    }
-  }, [activeProject?.slug, activeProject?.domain]);
+
 
   useEffect(() => {
     let isMounted = true;
@@ -400,9 +399,9 @@ export default function TopPagesPage({ user }) {
 
   // Filtered pages based on search & column filters
   const filteredPages = pagesData.filter(p => {
-    const matchSearch = searchQuery === '' || 
-      (p.kw && p.kw.toLowerCase().includes(searchQuery.toLowerCase())) || 
-      (p.pageName && p.pageName.toLowerCase().includes(searchQuery.toLowerCase())) || 
+    const matchSearch = searchQuery === '' ||
+      (p.kw && p.kw.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (p.pageName && p.pageName.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (p.url && p.url.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (p.cluster && p.cluster.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -432,7 +431,7 @@ export default function TopPagesPage({ user }) {
     try {
       const raw = localStorage.getItem(`bd_domain_metrics_${activeProject.slug}`);
       if (raw) storedMetrics = JSON.parse(raw);
-    } catch (e) {}
+    } catch (e) { }
   }
 
   const liveTraffic = storedMetrics?.traffic ?? activeProject?.traffic ?? activeProject?.organic_traffic;
@@ -508,8 +507,8 @@ export default function TopPagesPage({ user }) {
   });
 
   return (
-    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: '#f8fafc', minHeight: '100vh' }}>
-      
+    <div style={{ position: 'relative', padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: '#f8fafc', minHeight: '100vh' }}>
+
       {/* ─── HEADER BAR: Dashboard: domain.com v [Link] 🇮🇳 India v 📅 Date ───── */}
       {(() => {
         const currentDomainDisplay = activeProject?.domain || activeProject?.name || 'Select Domain';
@@ -779,6 +778,33 @@ export default function TopPagesPage({ user }) {
                   style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 0, height: 0 }}
                 />
               </div>
+
+              {/* Organic Re-analyze Button */}
+              <div style={{ marginLeft: 'auto' }}>
+                <button
+                  onClick={handleRunOrganicRankCheck}
+                  disabled={isAnalyzing}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: '#7c3aed',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: 8,
+                    padding: '8px 16px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: isAnalyzing ? 'not-allowed' : 'pointer',
+                    opacity: isAnalyzing ? 0.75 : 1,
+                    boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <Sparkles size={14} className={isAnalyzing ? 'animate-spin' : ''} />
+                  <span>{isAnalyzing ? 'Analyzing...' : 'Re-analyze'}</span>
+                </button>
+              </div>
             </div>
           </div>
         );
@@ -786,7 +812,7 @@ export default function TopPagesPage({ user }) {
 
       {/* ─── SUMMARY CARDS ─────────────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
-        
+
         {/* CARD 1: Traffic */}
         <div style={{
           background: '#ffffff',
@@ -800,7 +826,7 @@ export default function TopPagesPage({ user }) {
         }}>
           <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>Traffic</div>
           <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>
-            {(() => {
+            {/* {(() => {
               const parseTrafficNum = (val) => {
                 if (val === undefined || val === null) return 0;
                 if (typeof val === 'number') return val;
@@ -813,7 +839,8 @@ export default function TopPagesPage({ user }) {
               return eff > 0
                 ? eff.toLocaleString()
                 : (totalOrganicTraffic > 0 ? totalOrganicTraffic.toLocaleString() : '0');
-            })()}
+            })()} */}
+            0
           </div>
         </div>
 
@@ -832,7 +859,7 @@ export default function TopPagesPage({ user }) {
             Top Pages
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, alignItems: 'center' }}>
-            
+
             {/* Top 1 */}
             <div
               onMouseEnter={() => handleMouseEnterTooltip('top1')}
@@ -1239,7 +1266,7 @@ export default function TopPagesPage({ user }) {
               ) : (
                 pagedPages.map(row => (
                   <tr key={row.id} style={{ borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' }}>
-                    
+
                     {/* PAGE URL */}
                     <td style={{ padding: '12px 16px', color: '#2563eb', maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       <a
@@ -1337,87 +1364,141 @@ export default function TopPagesPage({ user }) {
             </tbody>
           </table>
         </div>
-          {/* Pagination Controls */}
-          {filteredPages.length > 0 && (
+        {/* Pagination Controls */}
+        {filteredPages.length > 0 && (
+          <div style={{
+            padding: '12px 20px',
+            background: '#ffffff',
+            borderTop: '1px solid #e2e8f0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: 13,
+            color: '#64748b'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={safePage <= 1}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 28,
+                  height: 28,
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 6,
+                  background: '#ffffff',
+                  color: safePage <= 1 ? '#cbd5e1' : '#475569',
+                  cursor: safePage <= 1 ? 'default' : 'pointer',
+                  opacity: safePage <= 1 ? 0.5 : 1
+                }}
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span style={{ fontSize: 13, color: '#64748b', fontWeight: 500 }}>Page:</span>
+              <input
+                type="text"
+                value={safePage}
+                onChange={e => {
+                  const n = parseInt(e.target.value, 10);
+                  if (!Number.isNaN(n)) setPage(Math.min(Math.max(1, n), pageCount));
+                }}
+                style={{
+                  width: 38,
+                  height: 28,
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 6,
+                  padding: '2px 4px',
+                  textAlign: 'center',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: '#0f172a',
+                  outline: 'none',
+                  background: '#ffffff'
+                }}
+              />
+              <span style={{ fontSize: 13, color: '#64748b', fontWeight: 500 }}>of {pageCount}</span>
+              <button
+                onClick={() => setPage(p => Math.min(pageCount, p + 1))}
+                disabled={safePage >= pageCount}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 28,
+                  height: 28,
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 6,
+                  background: '#ffffff',
+                  color: safePage >= pageCount ? '#cbd5e1' : '#475569',
+                  cursor: safePage >= pageCount ? 'default' : 'pointer',
+                  opacity: safePage >= pageCount ? 0.5 : 1
+                }}
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+            <div style={{ fontSize: 12.5, color: '#94a3b8', fontWeight: 500 }}>
+              100 per page
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ORGANIC RANK CHECK CONTENT BLUR OVERLAY */}
+      {isAnalyzing && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'rgba(248, 250, 252, 0.70)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'center',
+          paddingTop: 180,
+          borderRadius: 16
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 20,
+            width: '100%',
+            maxWidth: 440,
+            padding: '36px 32px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
+            border: '1px solid #e2e8f0',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            textAlign: 'center',
+            gap: 18
+          }}>
             <div style={{
-              padding: '12px 20px',
-              background: '#ffffff',
-              borderTop: '1px solid #e2e8f0',
+              width: 64,
+              height: 64,
+              borderRadius: 20,
+              background: '#f5f3ff',
+              color: '#7c3aed',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'space-between',
-              fontSize: 13,
-              color: '#64748b'
+              justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(124, 58, 237, 0.15)'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <button
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={safePage <= 1}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 28,
-                    height: 28,
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 6,
-                    background: '#ffffff',
-                    color: safePage <= 1 ? '#cbd5e1' : '#475569',
-                    cursor: safePage <= 1 ? 'default' : 'pointer',
-                    opacity: safePage <= 1 ? 0.5 : 1
-                  }}
-                >
-                  <ChevronLeft size={14} />
-                </button>
-                <span style={{ fontSize: 13, color: '#64748b', fontWeight: 500 }}>Page:</span>
-                <input
-                  type="text"
-                  value={safePage}
-                  onChange={e => {
-                    const n = parseInt(e.target.value, 10);
-                    if (!Number.isNaN(n)) setPage(Math.min(Math.max(1, n), pageCount));
-                  }}
-                  style={{
-                    width: 38,
-                    height: 28,
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 6,
-                    padding: '2px 4px',
-                    textAlign: 'center',
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: '#0f172a',
-                    outline: 'none',
-                    background: '#ffffff'
-                  }}
-                />
-                <span style={{ fontSize: 13, color: '#64748b', fontWeight: 500 }}>of {pageCount}</span>
-                <button
-                  onClick={() => setPage(p => Math.min(pageCount, p + 1))}
-                  disabled={safePage >= pageCount}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 28,
-                    height: 28,
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 6,
-                    background: '#ffffff',
-                    color: safePage >= pageCount ? '#cbd5e1' : '#475569',
-                    cursor: safePage >= pageCount ? 'default' : 'pointer',
-                    opacity: safePage >= pageCount ? 0.5 : 1
-                  }}
-                >
-                  <ChevronRight size={14} />
-                </button>
-              </div>
-              <div style={{ fontSize: 12.5, color: '#94a3b8', fontWeight: 500 }}>
-                100 per page
-              </div>
+              <Sparkles size={32} className="animate-spin" />
             </div>
-          )}
-      </div>
+            <div>
+              <h3 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>
+                Checking Organic SERP Rankings...
+              </h3>
+              <p style={{ fontSize: 13, color: '#64748b', margin: 0, lineHeight: 1.5 }}>
+                Checking live Google organic positions for <strong style={{ color: '#7c3aed' }}>{activeProject?.name || activeProject?.domain}</strong>. Please wait a moment.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { ExternalLink, Search, ChevronDown, CheckCircle, Lock, ShieldAlert } from 'lucide-react';
+import { ExternalLink, Search, ChevronDown, CheckCircle, Lock, ShieldAlert, Calendar, Sparkles } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi, fetchDomainMetricsApi } from '../../lib/projectsApi';
+import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi, fetchDomainMetricsApi, runOrganicRankCheckApi } from '../../lib/projectsApi';
 import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions, canRunBrandDiscovery, isAssociateUser, canRunAiModelAnalysis, recordAiModelAnalysisRun } from '../../lib/permissions';
 
 function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 100, projectTotalKeywords = 514 }) {
@@ -436,6 +436,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   const [loading, setLoading] = useState(true);
   const [showReport, setShowReport] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
+
   const [topKeywords, setTopKeywords] = useState([]);
   const [multiResults, setMultiResults] = useState([]);
   const [tabResults, setTabResults] = useState({});
@@ -443,6 +444,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   const [projectKeywords, setProjectKeywords] = useState([]);
   const [projectPages, setProjectPages] = useState([]);
   const [unauthorizedModal, setUnauthorizedModal] = useState({ show: false, message: '' });
+  const [isAnalyzingOverlay, setIsAnalyzingOverlay] = useState(false);
 
   // Hidden cards state
   const [closedCards, setClosedCards] = useState({});
@@ -482,7 +484,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
           let targetProject = null;
 
           if (vendorProjectName) {
-            const matched = domains.find(p => 
+            const matched = domains.find(p =>
               p.name?.toLowerCase() === vendorProjectName.toLowerCase() ||
               p.slug?.toLowerCase() === vendorProjectName.toLowerCase() ||
               p.domain?.toLowerCase() === vendorProjectName.toLowerCase()
@@ -705,22 +707,17 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   // Load cached AI analysis results & live domain metrics from localStorage whenever project changes
   useEffect(() => {
     if (!activeProject?.slug) return;
-    
-    // Restore cached live DA & Traffic if present
+    // Restore cached live DA if present 
     const metricCacheKey = `bd_domain_metrics_${activeProject.slug}`;
     try {
       const cachedMetrics = localStorage.getItem(metricCacheKey);
       if (cachedMetrics) {
         const parsed = JSON.parse(cachedMetrics);
-        if (parsed) {
-          setActiveProject(prev => prev ? {
-            ...prev,
-            da: parsed.da ?? prev.da,
-            traffic: parsed.traffic ?? prev.traffic
-          } : prev);
+        if (parsed?.da) {
+          setActiveProject(prev => prev ? { ...prev, da: parsed.da } : prev);
         }
       }
-    } catch (e) {}
+    } catch (e) { }
 
     const tabs = ['overview', 'chatgpt', 'gemini', 'ai overview'];
     const newResults = {};
@@ -741,38 +738,67 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     setTabResults(prev => ({ ...prev, ...newResults }));
   }, [activeProject?.slug]);
 
-  const saveHitToPeriodHistory = (projectSlug, engineKey, visibilityResult) => {
+  const saveHitToPeriodHistory = (projectSlug, engineKey, visibilityResult, optionalKws = null) => {
     if (!projectSlug || !engineKey) return;
     const normEngine = engineKey.toLowerCase().trim();
     const storageKey = `ai_period_hits_${projectSlug}_${normEngine}`;
     let hits = [];
     try {
       hits = JSON.parse(localStorage.getItem(storageKey) || '[]');
-    } catch (e) {}
+    } catch (e) { }
 
-    // Calculate cluster counts for this specific analysis run
-    const citedPages = visibilityResult.cited_pages_list || [];
-    const clusterCounts = {};
+    const kwsSource = optionalKws || projectKeywords || [];
+    let clusterCounts = {};
 
-    citedPages.forEach((item) => {
-      const pageUrl = typeof item === 'string' ? item : (item.url || item.cited_url || item.page || '');
-      if (!pageUrl) return;
-
-      const normUrl = pageUrl.trim().toLowerCase();
-      const matchedKw = (projectKeywords || []).find(k => {
-        const kUrl = (k.landingPage || k.url || k.page_url || '').trim().toLowerCase();
-        return kUrl && (kUrl === normUrl || kUrl.includes(normUrl) || normUrl.includes(kUrl));
+    if (normEngine === 'organic') {
+      const uniquePagesByCluster = {};
+      kwsSource.forEach(k => {
+        const pUrl = (k.landingPage || k.url || k.page_url || k.landing_page_url || '').trim().toLowerCase();
+        if (pUrl) {
+          const cName = k.cluster || k.type || 'Schools';
+          if (!uniquePagesByCluster[cName]) {
+            uniquePagesByCluster[cName] = new Set();
+          }
+          uniquePagesByCluster[cName].add(pUrl);
+        }
+      });
+      Object.keys(uniquePagesByCluster).forEach(cName => {
+        clusterCounts[cName] = uniquePagesByCluster[cName].size;
       });
 
-      const clusterName = matchedKw?.cluster || matchedKw?.type || 'Schools';
-      clusterCounts[clusterName] = (clusterCounts[clusterName] || 0) + 1;
-    });
+      if (Object.keys(clusterCounts).length === 0) {
+        const uniqueUrls = new Set();
+        (projectPages || []).forEach(p => {
+          const pUrl = (p.url || p.page_url || '').trim().toLowerCase();
+          const cName = p.cluster || p.type || 'Schools';
+          if (pUrl && !uniqueUrls.has(pUrl)) {
+            uniqueUrls.add(pUrl);
+            clusterCounts[cName] = (clusterCounts[cName] || 0) + 1;
+          }
+        });
+      }
+    } else {
+      const citedPages = visibilityResult?.cited_pages_list || [];
+      citedPages.forEach((item) => {
+        const pageUrl = typeof item === 'string' ? item : (item.url || item.cited_url || item.page || '');
+        if (!pageUrl) return;
 
-    if (Object.keys(clusterCounts).length === 0) {
-      (projectKeywords || []).forEach(k => {
-        const cName = k.cluster || k.type || 'General';
-        clusterCounts[cName] = (clusterCounts[cName] || 0) + 1;
+        const normUrl = pageUrl.trim().toLowerCase();
+        const matchedKw = kwsSource.find(k => {
+          const kUrl = (k.landingPage || k.url || k.page_url || '').trim().toLowerCase();
+          return kUrl && (kUrl === normUrl || kUrl.includes(normUrl) || normUrl.includes(kUrl));
+        });
+
+        const clusterName = matchedKw?.cluster || matchedKw?.type || 'Schools';
+        clusterCounts[clusterName] = (clusterCounts[clusterName] || 0) + 1;
       });
+
+      if (Object.keys(clusterCounts).length === 0) {
+        kwsSource.forEach(k => {
+          const cName = k.cluster || k.type || 'General';
+          clusterCounts[cName] = (clusterCounts[cName] || 0) + 1;
+        });
+      }
     }
 
     const hitObj = {
@@ -786,7 +812,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
 
     // FIFO Sliding Window: Max 15 periods (P1 to P15)
     if (hits.length > 15) {
-      hits = hits.slice(-15); // Discards oldest hit once > 15
+      hits = hits.slice(-15);
     }
 
     localStorage.setItem(storageKey, JSON.stringify(hits));
@@ -794,184 +820,177 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   };
 
   const handleAiAnalysis = async (e, options = {}) => {
-    if (e && e.preventDefault) e.preventDefault();
-    if (!activeProject) return;
+    if (e) e.preventDefault();
+    const { analyzeAll = false, targetEngine = null } = options;
 
-    const { targetEngine = null, analyzeAll = false } = options;
-    const targetModel = analyzeAll ? 'all' : (targetEngine || aiTab || 'all').toLowerCase();
-    const currentModelResults = tabResults[targetModel] || [];
-    const hasModelData = currentModelResults.length > 0;
-
-    if (!canRunAiModelAnalysis(user, activeProject.slug, targetModel, hasModelData)) {
-      setAnalysisError('Permission Denied: You do not have permission to run AI analysis.');
-      return;
-    }
+    if (!activeProject?.slug) return;
     const domain = activeProject.domain || activeProject.name || '';
-    const countryObj = COUNTRY_OPTIONS.find(c => c.code === selectedRegion);
-    const countryName = countryObj ? countryObj.name : selectedRegion || 'India';
+    const kwList = topKeywords.map(k => k.keyword).filter(Boolean);
+    const countryName = activeProject.location || 'India';
 
-    // Fetch live Authority Score (DA) and Organic Traffic from RapidAPI via backend
-    if (domain) {
-      fetchDomainMetricsApi(domain)
-        .then((liveMetrics) => {
-          if (liveMetrics) {
-            setActiveProject(prev => {
-              if (!prev) return prev;
-              const updatedDa = liveMetrics.da ?? prev.da;
-              const updatedTraffic = liveMetrics.traffic ?? prev.traffic;
-              
-              // Persist in localStorage so it doesn't vanish on page navigation
-              if (prev.slug) {
-                localStorage.setItem(`bd_domain_metrics_${prev.slug}`, JSON.stringify({
-                  da: updatedDa,
-                  traffic: updatedTraffic
-                }));
+    setIsAnalyzingOverlay(true);
+
+    try {
+      // 1. Organic Rank Check Task
+      const organicTaskPromise = (async () => {
+        const targetRegion = selectedRegion || activeProject.location || 'India';
+        try {
+          await runOrganicRankCheckApi(activeProject.slug, targetRegion);
+          const updatedKws = await fetchKeywordRows(activeProject.slug);
+          if (updatedKws && updatedKws.length > 0) {
+            setProjectKeywords(updatedKws);
+            saveHitToPeriodHistory(activeProject.slug, 'organic', { total_keywords: updatedKws.length }, updatedKws);
+          }
+        } catch (err) {
+          console.warn('[PositionAnalysisPage] Organic rank check warning:', err);
+        }
+      })();
+
+      // 2. AI Visibility Analysis Task
+      const aiTaskPromise = (async () => {
+        if (analyzeAll) {
+          setAnalyzingTabs({
+            chatgpt: true,
+            gemini: true,
+            'ai overview': true,
+            overview: true
+          });
+          setAnalysisError('');
+
+          try {
+            const engines = [
+              { key: 'chatgpt', engine: 'chatgpt' },
+              { key: 'gemini', engine: 'gemini' },
+              { key: 'ai overview', engine: 'ai overview' }
+            ];
+
+            const allResults = await Promise.all(
+              engines.map(async ({ key, engine }) => {
+                try {
+                  const data = await runAiVisibilityAnalysis(activeProject.slug, domain, countryName, kwList, engine);
+                  const visibilityResult = data?.result || {
+                    ai_visibility: 0,
+                    mentions: 0,
+                    cited_pages: 0,
+                    mentioned_keywords: [],
+                    cited_pages_list: [],
+                    total_keywords: kwList.length
+                  };
+                  return { key, result: [visibilityResult] };
+                } catch (err) {
+                  return {
+                    key,
+                    result: [{
+                      ai_visibility: 0,
+                      mentions: 0,
+                      cited_pages: 0,
+                      mentioned_keywords: [],
+                      cited_pages_list: [],
+                      total_keywords: kwList.length
+                    }]
+                  };
+                }
+              })
+            );
+
+            const newTabResults = {};
+            allResults.forEach(({ key, result }) => {
+              newTabResults[key] = result;
+              localStorage.setItem(`ai_results_${activeProject.slug}_${key}`, JSON.stringify(result));
+              if (result && result[0]) {
+                saveHitToPeriodHistory(activeProject.slug, key, result[0]);
               }
-              
-              return { ...prev, da: updatedDa, traffic: updatedTraffic };
+            });
+
+            // Overview aggregation
+            const valid = allResults.map(r => r.result[0]).filter(Boolean);
+            if (valid.length > 0) {
+              const avgVis = Math.round(valid.reduce((sum, r) => sum + (r.ai_visibility || 0), 0) / valid.length);
+              const totalMentions = valid.reduce((sum, r) => sum + (r.mentions || 0), 0);
+              const totalCited = valid.reduce((sum, r) => sum + (r.cited_pages || 0), 0);
+
+              const overviewRes = [{
+                ...valid[0],
+                ai_visibility: avgVis,
+                mentions: totalMentions,
+                cited_pages: totalCited
+              }];
+              newTabResults['overview'] = overviewRes;
+              localStorage.setItem(`ai_results_${activeProject.slug}_overview`, JSON.stringify(overviewRes));
+            }
+
+            setTabResults(prev => ({ ...prev, ...newTabResults }));
+
+            if (isAssociateUser(user)) {
+              recordAiModelAnalysisRun(user, activeProject?.slug, 'all');
+              setAssociateAnalyzed(true);
+            }
+          } catch (err) {
+            setAnalysisError(err.message);
+          } finally {
+            setAnalyzingTabs({
+              chatgpt: false,
+              gemini: false,
+              'ai overview': false,
+              overview: false
             });
           }
-        })
-        .catch((err) => {
-          console.warn("[Brand Discovery] Live domain metrics fetch warning:", err);
-        });
-    }
-
-    // Analyze top 2 keywords per category
-    let kwList = topKeywords;
-    if (!kwList || kwList.length === 0) {
-      kwList = extractTop2PerCategory(projectKeywords);
-    }
-    if (!kwList || kwList.length === 0) {
-      kwList = ['dog dental chews', 'dental chews for dogs'];
-    }
-
-    if (analyzeAll) {
-      // HEADER BUTTON: Analyze ALL 3 models in parallel
-      setAnalyzingTabs({
-        chatgpt: true,
-        gemini: true,
-        'ai overview': true,
-        overview: true
-      });
-      setAnalysisError('');
-
-      try {
-        const engines = [
-          { key: 'chatgpt', engine: 'chatgpt' },
-          { key: 'gemini', engine: 'gemini' },
-          { key: 'ai overview', engine: 'ai overview' }
-        ];
-
-        const allResults = await Promise.all(
-          engines.map(async ({ key, engine }) => {
-            try {
-              const data = await runAiVisibilityAnalysis(activeProject.slug, domain, countryName, kwList, engine);
-              const visibilityResult = data?.result || {
-                ai_visibility: 0,
-                mentions: 0,
-                cited_pages: 0,
-                mentioned_keywords: [],
-                cited_pages_list: [],
-                total_keywords: kwList.length
-              };
-              return { key, result: [visibilityResult] };
-            } catch (err) {
-              return {
-                key,
-                result: [{
-                  ai_visibility: 0,
-                  mentions: 0,
-                  cited_pages: 0,
-                  mentioned_keywords: [],
-                  cited_pages_list: [],
-                  total_keywords: kwList.length
-                }]
-              };
-            }
-          })
-        );
-
-        const newTabResults = {};
-        allResults.forEach(({ key, result }) => {
-          newTabResults[key] = result;
-          localStorage.setItem(`ai_results_${activeProject.slug}_${key}`, JSON.stringify(result));
-          if (result && result[0]) {
-            saveHitToPeriodHistory(activeProject.slug, key, result[0]);
+        } else {
+          // CARD / INSIDE MODEL BUTTON: Analyze ONLY for that specific model/tab
+          const currentTab = (targetEngine || aiTab).toLowerCase();
+          if (currentTab === 'overview') {
+            return handleAiAnalysis(e, { analyzeAll: true });
           }
-        });
 
-        // Overview aggregation
-        const valid = allResults.map(r => r.result[0]).filter(Boolean);
-        if (valid.length > 0) {
-          const avgVis = Math.round(valid.reduce((sum, r) => sum + (r.ai_visibility || 0), 0) / valid.length);
-          const totalMentions = valid.reduce((sum, r) => sum + (r.mentions || 0), 0);
-          const totalCited = valid.reduce((sum, r) => sum + (r.cited_pages || 0), 0);
+          if (currentTab === 'organic') {
+            // ORGANIC ONLY: Hit organic rank check without AI LLMs
+            const targetRegion = selectedRegion || activeProject.location || 'India';
+            await runOrganicRankCheckApi(activeProject.slug, targetRegion);
+            const updatedKws = await fetchKeywordRows(activeProject.slug);
+            if (updatedKws && updatedKws.length > 0) {
+              setProjectKeywords(updatedKws);
+              saveHitToPeriodHistory(activeProject.slug, 'organic', { total_keywords: updatedKws.length }, updatedKws);
+            }
+            return;
+          }
 
-          const overviewRes = [{
-            ...valid[0],
-            ai_visibility: avgVis,
-            mentions: totalMentions,
-            cited_pages: totalCited
-          }];
-          newTabResults['overview'] = overviewRes;
-          localStorage.setItem(`ai_results_${activeProject.slug}_overview`, JSON.stringify(overviewRes));
+          const engineKey = currentTab.includes('gemini') ? 'gemini' : currentTab.includes('overview') ? 'ai overview' : 'chatgpt';
+
+          setAnalyzingTabs(prev => ({ ...prev, [engineKey]: true, [currentTab]: true }));
+          setAnalysisError('');
+
+          try {
+            const data = await runAiVisibilityAnalysis(activeProject.slug, domain, countryName, kwList, engineKey);
+            const visibilityResult = data?.result || {
+              ai_visibility: 0,
+              mentions: 0,
+              cited_pages: 0,
+              mentioned_keywords: [],
+              cited_pages_list: [],
+              total_keywords: kwList.length
+            };
+
+            const results = [visibilityResult];
+            setTabResults(prev => ({ ...prev, [engineKey]: results, [currentTab]: results }));
+            localStorage.setItem(`ai_results_${activeProject.slug}_${engineKey}`, JSON.stringify(results));
+            localStorage.setItem(`ai_results_${activeProject.slug}_${currentTab}`, JSON.stringify(results));
+            saveHitToPeriodHistory(activeProject.slug, engineKey, visibilityResult);
+
+            if (isAssociateUser(user)) {
+              recordAiModelAnalysisRun(user, activeProject?.slug, engineKey);
+              setAssociateAnalyzed(true);
+            }
+          } catch (err) {
+            setAnalysisError(err.message);
+          } finally {
+            setAnalyzingTabs(prev => ({ ...prev, [engineKey]: false, [currentTab]: false }));
+          }
         }
+      })();
 
-        setTabResults(prev => ({ ...prev, ...newTabResults }));
-
-        if (isAssociateUser(user)) {
-          recordAiModelAnalysisRun(user, activeProject?.slug, 'all');
-          setAssociateAnalyzed(true);
-        }
-      } catch (err) {
-        setAnalysisError(err.message);
-      } finally {
-        setAnalyzingTabs({
-          chatgpt: false,
-          gemini: false,
-          'ai overview': false,
-          overview: false
-        });
-      }
-    } else {
-      // CARD / INSIDE MODEL BUTTON: Analyze ONLY for that specific model/tab
-      const currentTab = (targetEngine || aiTab).toLowerCase();
-      if (currentTab === 'overview') {
-        return handleAiAnalysis(e, { analyzeAll: true });
-      }
-
-      const engineKey = currentTab.includes('gemini') ? 'gemini' : currentTab.includes('overview') ? 'ai overview' : 'chatgpt';
-
-      setAnalyzingTabs(prev => ({ ...prev, [engineKey]: true, [currentTab]: true }));
-      setAnalysisError('');
-
-      try {
-        const data = await runAiVisibilityAnalysis(activeProject.slug, domain, countryName, kwList, engineKey);
-        const visibilityResult = data?.result || {
-          ai_visibility: 0,
-          mentions: 0,
-          cited_pages: 0,
-          mentioned_keywords: [],
-          cited_pages_list: [],
-          total_keywords: kwList.length
-        };
-
-        const results = [visibilityResult];
-        setTabResults(prev => ({ ...prev, [engineKey]: results, [currentTab]: results }));
-        localStorage.setItem(`ai_results_${activeProject.slug}_${engineKey}`, JSON.stringify(results));
-        localStorage.setItem(`ai_results_${activeProject.slug}_${currentTab}`, JSON.stringify(results));
-        saveHitToPeriodHistory(activeProject.slug, engineKey, visibilityResult);
-
-        if (isAssociateUser(user)) {
-          recordAiModelAnalysisRun(user, activeProject?.slug, engineKey);
-          setAssociateAnalyzed(true);
-        }
-      } catch (err) {
-        setAnalysisError(err.message);
-      } finally {
-        setAnalyzingTabs(prev => ({ ...prev, [engineKey]: false, [currentTab]: false }));
-      }
+      await Promise.allSettled([organicTaskPromise, aiTaskPromise]);
+    } finally {
+      setIsAnalyzingOverlay(false);
     }
   };
 
@@ -1323,6 +1342,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
 
   return (
     <div style={{
+      position: 'relative',
       padding: '24px 32px',
       background: 'var(--bg, #f8fafc)',
       minHeight: '100vh',
@@ -1619,56 +1639,56 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                   )}
                 </div>
 
-                {/* Custom Date Selector Button */}
-                <button
-                  onClick={() => dateInputRef.current && dateInputRef.current.showPicker()}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    background: 'transparent',
-                    border: 'none',
-                    padding: 0,
-                    margin: 0,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: '#2563eb',
-                    cursor: 'pointer',
-                    outline: 'none',
-                    whiteSpace: 'nowrap'
-                  }}
-                >
-                  <span style={{ fontSize: 14 }}>📅</span>
-                  <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>
-                    {(() => {
-                      try {
-                        const parts = selectedDate.split('-');
-                        const dObj = new Date(parts[0], parts[1] - 1, parts[2]);
-                        return dObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-                      } catch (e) {
-                        return selectedDate;
+                {/* Custom Calendar Date Selector Button beside Country */}
+                <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                  <button
+                    onClick={() => {
+                      const hiddenInput = document.getElementById('bd_header_date_picker');
+                      if (hiddenInput) hiddenInput.showPicker ? hiddenInput.showPicker() : hiddenInput.click();
+                    }}
+                    title="Select Date"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      background: 'transparent',
+                      border: 'none',
+                      padding: 0,
+                      margin: 0,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: '#2563eb',
+                      cursor: 'pointer',
+                      outline: 'none',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>📅</span>
+                    <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>
+                      {(() => {
+                        try {
+                          const parts = selectedDate.split('-');
+                          const dObj = new Date(parts[0], parts[1] - 1, parts[2]);
+                          return dObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                        } catch (e) {
+                          return selectedDate;
+                        }
+                      })()}
+                    </span>
+                  </button>
+                  <input
+                    id="bd_header_date_picker"
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        setSelectedDate(e.target.value);
+                        localStorage.setItem('bd_selected_date', e.target.value);
                       }
-                    })()}
-                  </span>
-                </button>
-
-                {/* Hidden Native Date Picker */}
-                <input
-                  ref={dateInputRef}
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => {
-                    setSelectedDate(e.target.value);
-                    localStorage.setItem('bd_selected_date', e.target.value);
-                  }}
-                  style={{
-                    position: 'absolute',
-                    opacity: 0,
-                    pointerEvents: 'none',
-                    width: 0,
-                    height: 0
-                  }}
-                />
+                    }}
+                    style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 0, height: 0 }}
+                  />
+                </div>
               </div>
             );
           })()}
@@ -1686,6 +1706,9 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
               disabled={Object.values(analyzingTabs).some(Boolean)}
               style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
                 background: '#7c3aed',
                 color: '#ffffff',
                 border: 'none',
@@ -1701,9 +1724,12 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               onMouseEnter={e => { if (!Object.values(analyzingTabs).some(Boolean)) e.currentTarget.style.background = '#6d28d9'; }}
               onMouseLeave={e => { if (!Object.values(analyzingTabs).some(Boolean)) e.currentTarget.style.background = '#7c3aed'; }}
             >
-              {Object.values(analyzingTabs).some(Boolean)
-                ? 'Analyzing...'
-                : (Object.values(tabResults).some(r => r && r.length > 0) ? 'Re-analyze' : 'Analyze')}
+              <Sparkles size={14} className={Object.values(analyzingTabs).some(Boolean) ? 'animate-spin' : ''} />
+              <span>
+                {Object.values(analyzingTabs).some(Boolean)
+                  ? 'Analyzing...'
+                  : (Object.values(tabResults).some(r => r && r.length > 0) ? 'Re-analyze' : 'Analyze')}
+              </span>
             </button>
           )}
         </div>
@@ -1722,7 +1748,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       }}>
         {[
           { label: 'Authority Score', value: activeProject?.da || 'N/A' },
-          { label: 'Organic Traffic', value: activeProject?.traffic ? (isNaN(activeProject.traffic) ? activeProject.traffic : Number(activeProject.traffic).toLocaleString()) : '0' },
+          { label: 'Organic Traffic', value: '0' },
           { label: 'Keywords', value: (kwCount || activeProject?.keywords || 0).toLocaleString() },
           { label: 'Total Pages', value: (pageCount || activeProject?.targetPages || 0).toLocaleString() },
           { label: 'Total Blogs', value: (blogCount || activeProject?.blogPages || 0).toLocaleString() },
@@ -1835,27 +1861,31 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       textAlign: 'center'
                     }}>
                       {userCanRunActions && canRunAiModelAnalysis(user, activeProject?.slug, aiTab, currentTabResults.length > 0) && (
-                        <button
-                          onClick={(e) => handleAiAnalysis(e, { targetEngine: aiTab.toLowerCase() })}
-                          disabled={isCurrentTabAnalyzing || !topKeywords.length}
-                          style={{
-                            background: '#7c3aed',
-                            color: '#ffffff',
-                            border: 'none',
-                            borderRadius: 8,
-                            padding: '10px 20px',
-                            fontSize: 13.5,
-                            fontWeight: 700,
-                            cursor: isCurrentTabAnalyzing || !topKeywords.length ? 'not-allowed' : 'pointer',
-                            opacity: isCurrentTabAnalyzing || !topKeywords.length ? 0.7 : 1,
-                            boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8
-                          }}
-                        >
-                          {isCurrentTabAnalyzing ? 'Analyzing...' : 'Analyze'}
-                        </button>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                          <button
+                            onClick={(e) => handleAiAnalysis(e, { targetEngine: aiTab.toLowerCase() })}
+                            disabled={isCurrentTabAnalyzing || !topKeywords.length}
+                            title="Run AI Analysis"
+                            style={{
+                              background: '#7c3aed',
+                              color: '#ffffff',
+                              border: 'none',
+                              borderRadius: 8,
+                              padding: '10px 20px',
+                              fontSize: 13.5,
+                              fontWeight: 700,
+                              cursor: (isCurrentTabAnalyzing || !topKeywords.length) ? 'not-allowed' : 'pointer',
+                              opacity: (isCurrentTabAnalyzing || !topKeywords.length) ? 0.75 : 1,
+                              boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8
+                            }}
+                          >
+                            <RefreshCw size={14} className={isCurrentTabAnalyzing ? 'animate-spin' : ''} />
+                            <span>{isCurrentTabAnalyzing ? 'Analyzing...' : (currentTabResults.length > 0 ? 'Re-analyze' : 'Analyze')}</span>
+                          </button>
+                        </div>
                       )}
                       {analysisError && (
                         <div style={{ color: '#ef4444', fontSize: 13, fontWeight: 600 }}>{analysisError}</div>
@@ -1930,6 +1960,9 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                             onClick={(e) => handleAiAnalysis(e, { targetEngine: aiTab.toLowerCase() })}
                             disabled={!!analyzingTabs[aiTab.toLowerCase()]}
                             style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
                               background: 'transparent',
                               color: '#7c3aed',
                               border: '1px solid #ddd6fe',
@@ -1941,9 +1974,12 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                               opacity: !!analyzingTabs[aiTab.toLowerCase()] ? 0.6 : 1
                             }}
                           >
-                            {!!analyzingTabs[aiTab.toLowerCase()]
-                              ? 'Analyzing...'
-                              : ((tabResults[aiTab.toLowerCase()] || []).length > 0 ? 'Re-analyze' : 'Analyze')}
+                            <Sparkles size={13} className={!!analyzingTabs[aiTab.toLowerCase()] ? 'animate-spin' : ''} />
+                            <span>
+                              {!!analyzingTabs[aiTab.toLowerCase()]
+                                ? 'Analyzing...'
+                                : ((tabResults[aiTab.toLowerCase()] || []).length > 0 ? 'Re-analyze' : 'Analyze')}
+                            </span>
                           </button>
                         </div>
                       )}
@@ -2304,6 +2340,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         }}>
           {/* Left Section: Mentions & Cited sub-columns */}
           {(() => {
+            const isOverview = (aiTab || 'overview').toLowerCase() === 'overview';
             const currentAiResults = tabResults[aiTab.toLowerCase()] || [];
             const visibilityData = currentAiResults[0] || {};
             const liveMentionedKws = visibilityData.mentioned_keywords || [];
@@ -2342,12 +2379,16 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ textAlign: 'center', marginBottom: 4 }}>
                       <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        Mentions ({liveMentionedKws.length})
+                        Mentions ({isOverview ? 'N/A' : liveMentionedKws.length})
                       </span>
                     </div>
 
                     <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, paddingRight: 4 }}>
-                      {liveMentionedKws.length > 0 ? (
+                      {isOverview ? (
+                        <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, padding: '20px 10px', textAlign: 'center' }}>
+                          N/A
+                        </div>
+                      ) : liveMentionedKws.length > 0 ? (
                         liveMentionedKws.map((kw, idx) => (
                           <div
                             key={idx}
@@ -2381,12 +2422,16 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ textAlign: 'center', marginBottom: 4 }}>
                       <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        Cited ({uniqueCitedPages.length} Unique Pages)
+                        Cited ({isOverview ? 'N/A' : `${uniqueCitedPages.length} Unique Pages`})
                       </span>
                     </div>
 
                     <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, paddingRight: 4 }}>
-                      {uniqueCitedPages.length > 0 ? (
+                      {isOverview ? (
+                        <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, padding: '20px 10px', textAlign: 'center' }}>
+                          N/A
+                        </div>
+                      ) : uniqueCitedPages.length > 0 ? (
                         uniqueCitedPages.map((item, idx) => (
                           <div
                             key={idx}
@@ -2754,7 +2799,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               let savedHits = [];
               try {
                 savedHits = JSON.parse(localStorage.getItem(storageKey) || '[]');
-              } catch (e) {}
+              } catch (e) { }
 
               // Calculate total page counts per cluster from left-side table data
               const clusterCounts = {};
@@ -2835,106 +2880,106 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                         margin={{ top: 10, right: 15, left: 15, bottom: 20 }}
                         onMouseLeave={() => setHoveredChartLine(null)}
                       >
-                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                          <XAxis
-                            dataKey="period"
-                            stroke="#94a3b8"
-                            fontSize={9.5}
-                            tickLine={false}
-                            interval={0}
-                            label={{ value: 'Periods', position: 'insideBottom', offset: -12, fill: '#64748b', fontSize: 11, fontWeight: 700 }}
-                          />
-                          <YAxis
-                            stroke="#94a3b8"
-                            fontSize={11}
-                            tickLine={true}
-                            axisLine={true}
-                            allowDecimals={false}
-                            domain={[0, (dataMax) => (typeof dataMax === 'number' && !isNaN(dataMax) && dataMax > 0 ? Math.ceil(dataMax * 1.2) + 2 : 10)]}
-                            tickFormatter={(val) => Math.round(val)}
-                            label={{ value: 'Pages', angle: -90, position: 'insideLeft', offset: 10, fill: '#64748b', fontSize: 11, fontWeight: 700 }}
-                          />
-                          <Tooltip
-                            content={({ active, payload }) => {
-                              if (active && payload && payload.length) {
-                                const validPayload = payload.filter(p => p.value != null);
-                                if (validPayload.length === 0) return null;
-                                const pName = validPayload[0].payload.period;
-                                const pIdx = periods.indexOf(pName);
-                                const hitObj = savedHits[pIdx];
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                        <XAxis
+                          dataKey="period"
+                          stroke="#94a3b8"
+                          fontSize={9.5}
+                          tickLine={false}
+                          interval={0}
+                          label={{ value: 'Periods', position: 'insideBottom', offset: -12, fill: '#64748b', fontSize: 11, fontWeight: 700 }}
+                        />
+                        <YAxis
+                          stroke="#94a3b8"
+                          fontSize={11}
+                          tickLine={true}
+                          axisLine={true}
+                          allowDecimals={false}
+                          domain={[0, (dataMax) => (typeof dataMax === 'number' && !isNaN(dataMax) && dataMax > 0 ? Math.ceil(dataMax * 1.2) + 2 : 10)]}
+                          tickFormatter={(val) => Math.round(val)}
+                          label={{ value: 'Pages', angle: -90, position: 'insideLeft', offset: 10, fill: '#64748b', fontSize: 11, fontWeight: 700 }}
+                        />
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const validPayload = payload.filter(p => p.value != null);
+                              if (validPayload.length === 0) return null;
+                              const pName = validPayload[0].payload.period;
+                              const pIdx = periods.indexOf(pName);
+                              const hitObj = savedHits[pIdx];
 
-                                return (
-                                  <div style={{
-                                    background: '#ffffff',
-                                    border: '1px solid #e2e8f0',
-                                    borderRadius: 8,
-                                    color: '#0f172a',
-                                    fontSize: 11,
-                                    padding: '8px 12px',
-                                    boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.05)',
-                                    minWidth: 140
-                                  }}>
-                                    <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: 2 }}>
-                                      Period: {pName}
-                                    </div>
-                                    {hitObj?.dateStr && (
-                                      <div style={{ fontSize: 10, color: '#64748b', marginBottom: 4, borderBottom: '1px solid #f1f5f9', paddingBottom: 4 }}>
-                                        {hitObj.dateStr.replace(/,?\s*\d{1,2}:\d{2}.*/i, '')}
-                                      </div>
-                                    )}
-                                    {validPayload.map((entry, idx) => (
-                                      <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '2px 0' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: entry.color, fontWeight: 700 }}>
-                                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: entry.color, display: 'inline-block' }} />
-                                          {entry.dataKey}:
-                                        </div>
-                                        <span style={{ color: '#0f172a', fontWeight: 800 }}>{entry.value} {entry.value === 1 ? 'Page' : 'Pages'}</span>
-                                      </div>
-                                    ))}
+                              return (
+                                <div style={{
+                                  background: '#ffffff',
+                                  border: '1px solid #e2e8f0',
+                                  borderRadius: 8,
+                                  color: '#0f172a',
+                                  fontSize: 11,
+                                  padding: '8px 12px',
+                                  boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.05)',
+                                  minWidth: 140
+                                }}>
+                                  <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: 2 }}>
+                                    Period: {pName}
                                   </div>
-                                );
-                              }
-                              return null;
-                            }}
-                          />
-                          {legendPages.map((page) => {
-                            const isHovered = hoveredChartLine === page.name;
-                            return (
-                              <Line
-                                key={page.name}
-                                type="monotone"
-                                dataKey={page.name}
-                                stroke={page.color}
-                                connectNulls={false}
-                                strokeWidth={isHovered ? 4 : (hoveredChartLine ? 1.5 : 2.5)}
-                                strokeOpacity={hoveredChartLine && !isHovered ? 0.25 : 1}
-                                dot={{ r: isHovered ? 5 : 3 }}
-                                activeDot={{
-                                  r: 6,
-                                  onMouseEnter: () => setHoveredChartLine(page.name)
-                                }}
-                                onMouseEnter={() => setHoveredChartLine(page.name)}
-                              />
-                            );
-                          })}
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-
-                    {/* Centered Aligned Title Below Graph */}
-                    <div style={{
-                      fontSize: 12,
-                      fontWeight: 800,
-                      color: '#0f172a',
-                      letterSpacing: '0.5px',
-                      textTransform: 'uppercase',
-                      marginTop: 10,
-                      textAlign: 'center',
-                      width: '100%'
-                    }}>
-                      PAGE ANALYSIS
-                    </div>
+                                  {hitObj?.dateStr && (
+                                    <div style={{ fontSize: 10, color: '#64748b', marginBottom: 4, borderBottom: '1px solid #f1f5f9', paddingBottom: 4 }}>
+                                      {hitObj.dateStr.replace(/,?\s*\d{1,2}:\d{2}.*/i, '')}
+                                    </div>
+                                  )}
+                                  {validPayload.map((entry, idx) => (
+                                    <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '2px 0' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: entry.color, fontWeight: 700 }}>
+                                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: entry.color, display: 'inline-block' }} />
+                                        {entry.dataKey}:
+                                      </div>
+                                      <span style={{ color: '#0f172a', fontWeight: 800 }}>{entry.value} {entry.value === 1 ? 'Page' : 'Pages'}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        {legendPages.map((page) => {
+                          const isHovered = hoveredChartLine === page.name;
+                          return (
+                            <Line
+                              key={page.name}
+                              type="monotone"
+                              dataKey={page.name}
+                              stroke={page.color}
+                              connectNulls={false}
+                              strokeWidth={isHovered ? 4 : (hoveredChartLine ? 1.5 : 2.5)}
+                              strokeOpacity={hoveredChartLine && !isHovered ? 0.25 : 1}
+                              dot={{ r: isHovered ? 5 : 3 }}
+                              activeDot={{
+                                r: 6,
+                                onMouseEnter: () => setHoveredChartLine(page.name)
+                              }}
+                              onMouseEnter={() => setHoveredChartLine(page.name)}
+                            />
+                          );
+                        })}
+                      </LineChart>
+                    </ResponsiveContainer>
                   </div>
+
+                  {/* Centered Aligned Title Below Graph */}
+                  <div style={{
+                    fontSize: 12,
+                    fontWeight: 800,
+                    color: '#0f172a',
+                    letterSpacing: '0.5px',
+                    textTransform: 'uppercase',
+                    marginTop: 10,
+                    textAlign: 'center',
+                    width: '100%'
+                  }}>
+                    PAGE ANALYSIS
+                  </div>
+                </div>
               );
             })()}
           </div>
@@ -2944,14 +2989,14 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12, paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
           <button
             onClick={() => {
-            if (onNavigate) {
-              if (pageAnalysisLlm === 'organic') {
-                onNavigate('search-visibility/top-pages');
-              } else {
-                onNavigate('search-visibility/ai-analysis');
+              if (onNavigate) {
+                if (pageAnalysisLlm === 'organic') {
+                  onNavigate('search-visibility/top-pages');
+                } else {
+                  onNavigate('search-visibility/ai-analysis');
+                }
               }
-            }
-          }}
+            }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = '#f1f5f9';
               e.currentTarget.style.color = '#7c3aed';
@@ -3138,6 +3183,61 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
           </div>
         </div>
       )}
-    </div>
+
+      {/* BRAND ANALYSIS PAGE BLUR OVERLAY */}
+      {isAnalyzingOverlay && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'rgba(248, 250, 252, 0.70)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'center',
+          paddingTop: 180,
+          borderRadius: 16
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 20,
+            width: '100%',
+            maxWidth: 440,
+            padding: '36px 32px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
+            border: '1px solid #e2e8f0',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            textAlign: 'center',
+            gap: 18
+          }}>
+            <div style={{
+              width: 64,
+              height: 64,
+              borderRadius: 20,
+              background: '#f5f3ff',
+              color: '#7c3aed',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(124, 58, 237, 0.15)'
+            }}>
+              <Sparkles size={32} className="animate-spin" />
+            </div>
+            <div>
+              <h3 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>
+                Analyzing Brand & Organic Ranks...
+              </h3>
+              <p style={{ fontSize: 13, color: '#64748b', margin: 0, lineHeight: 1.5 }}>
+                Checking AI Mentions, Citations, and Organic SERP Rankings for <strong style={{ color: '#7c3aed' }}>{activeProject?.name || activeProject?.domain}</strong>. Please wait a moment.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      </div>
   );
 }
