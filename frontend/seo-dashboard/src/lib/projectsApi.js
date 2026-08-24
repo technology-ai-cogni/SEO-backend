@@ -259,6 +259,10 @@ function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
     napWebsite: row.nap_website || null,
     napAddress: row.nap_address || null,
     napEmail: row.nap_email || null,
+    napBcPhone: row.nap_bc_phone || null,
+    napBcWebsite: row.nap_bc_website || null,
+    napBcAddress: row.nap_bc_address || null,
+    napBcEmail: row.nap_bc_email || null,
     brandedTerms: row.branded_terms || null,
   };
 }
@@ -425,7 +429,7 @@ export async function fetchDomainRows() {
   return mergedDomains.map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
 }
 
-export async function createProject({ name, domain, regions, platforms, da, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, branded_terms, users }) {
+export async function createProject({ name, domain, regions, platforms, da, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, nap_bc_phone, nap_bc_website, nap_bc_address, nap_bc_email, branded_terms, users }) {
   const slug = slugify(name);
 
   if (isLocalMode) {
@@ -454,6 +458,10 @@ export async function createProject({ name, domain, regions, platforms, da, nap_
       nap_website: nap_website || null,
       nap_address: nap_address || null,
       nap_email: nap_email || null,
+      nap_bc_phone: nap_bc_phone || null,
+      nap_bc_website: nap_bc_website || null,
+      nap_bc_address: nap_bc_address || null,
+      nap_bc_email: nap_bc_email || null,
       branded_terms: branded_terms || null,
       users: users || [],
       traffic: '0',
@@ -485,6 +493,10 @@ export async function createProject({ name, domain, regions, platforms, da, nap_
         nap_website: nap_website || null,
         nap_address: nap_address || null,
         nap_email: nap_email || null,
+        nap_bc_phone: nap_bc_phone || null,
+        nap_bc_website: nap_bc_website || null,
+        nap_bc_address: nap_bc_address || null,
+        nap_bc_email: nap_bc_email || null,
         branded_terms: branded_terms || null,
         users: users || [],
       }),
@@ -573,6 +585,17 @@ export async function updateDomainRow(id, updates) {
       dbUpdates.is_active = updates.isActive;
     }
 
+    if ('napBusinessCentre' in updates) dbUpdates.nap_business_centre = updates.napBusinessCentre;
+    if ('napPhone' in updates) dbUpdates.nap_phone = updates.napPhone;
+    if ('napWebsite' in updates) dbUpdates.nap_website = updates.napWebsite;
+    if ('napAddress' in updates) dbUpdates.nap_address = updates.napAddress;
+    if ('napEmail' in updates) dbUpdates.nap_email = updates.napEmail;
+    if ('napBcPhone' in updates) dbUpdates.nap_bc_phone = updates.napBcPhone;
+    if ('napBcWebsite' in updates) dbUpdates.nap_bc_website = updates.napBcWebsite;
+    if ('napBcAddress' in updates) dbUpdates.nap_bc_address = updates.napBcAddress;
+    if ('napBcEmail' in updates) dbUpdates.nap_bc_email = updates.napBcEmail;
+    if ('brandedTerms' in updates) dbUpdates.branded_terms = updates.brandedTerms;
+
     domains[index] = dbUpdates;
     localStorage.setItem('seo_domains', JSON.stringify(domains));
     const kwCounts = await fetchKwCountsForSlug(dbUpdates.project_slug);
@@ -592,6 +615,16 @@ export async function updateDomainRow(id, updates) {
     dbUpdates.status = updates.isActive ? 'Active' : 'Inactive';
     dbUpdates.is_active = updates.isActive;
   }
+  if ('napBusinessCentre' in updates) dbUpdates.nap_business_centre = updates.napBusinessCentre;
+  if ('napPhone' in updates) dbUpdates.nap_phone = updates.napPhone;
+  if ('napWebsite' in updates) dbUpdates.nap_website = updates.napWebsite;
+  if ('napAddress' in updates) dbUpdates.nap_address = updates.napAddress;
+  if ('napEmail' in updates) dbUpdates.nap_email = updates.napEmail;
+  if ('napBcPhone' in updates) dbUpdates.nap_bc_phone = updates.napBcPhone;
+  if ('napBcWebsite' in updates) dbUpdates.nap_bc_website = updates.napBcWebsite;
+  if ('napBcAddress' in updates) dbUpdates.nap_bc_address = updates.napBcAddress;
+  if ('napBcEmail' in updates) dbUpdates.nap_bc_email = updates.napBcEmail;
+  if ('brandedTerms' in updates) dbUpdates.branded_terms = updates.brandedTerms;
 
   const { data, error } = await supabase.from('domains').update(dbUpdates).eq('id', id).select().single();
   if (error) throw error;
@@ -2584,6 +2617,49 @@ export async function runAuditAllocationApi(importData = null) {
     console.warn('[runAuditAllocationApi] Backend call notice:', err);
   }
   return { status: 'success', message: 'Audit allocation completed.' };
+}
+
+export async function runAiStatusCheckStreamApi(importData = null, onRowUpdate = null) {
+  try {
+    const res = await fetch(`${API_BASE}/monthly-operations/run-ai-status-check-stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(importData || {})
+    });
+
+    if (res.ok && res.body) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop();
+
+        for (const part of parts) {
+          const line = part.trim();
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data && onRowUpdate) {
+                onRowUpdate(data);
+              }
+            } catch (e) {
+              console.warn('[runAiStatusCheckStreamApi] Parse error:', e);
+            }
+          }
+        }
+      }
+      return { status: 'success', message: 'AI Status Check completed!' };
+    }
+  } catch (err) {
+    console.warn('[runAiStatusCheckStreamApi] Notice, falling back to sync:', err);
+  }
+  return await runAiStatusCheckApi(importData);
 }
 
 export async function runAiStatusCheckApi(importData = null) {

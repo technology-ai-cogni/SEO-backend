@@ -227,7 +227,7 @@ function MultiSelect({ label, options, selected, onToggle }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {label && <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{label}</span>}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: 2 }}>
         {options.map(o => {
           const active = selected.includes(o.value);
           return (
@@ -235,12 +235,13 @@ function MultiSelect({ label, options, selected, onToggle }) {
               key={o.value}
               onClick={() => onToggle(o.value)}
               style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '6px 14px', borderRadius: 99, fontSize: 12.5, fontWeight: 500,
+                display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
+                padding: '5px 12px', borderRadius: 99, fontSize: 12, fontWeight: 500,
                 border: active ? '1.5px solid var(--accent)' : '1.5px solid #d1d5db',
                 background: active ? 'var(--accent-light)' : '#fff',
                 color: active ? 'var(--accent)' : 'var(--text-secondary)',
                 cursor: 'pointer', fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+                flexShrink: 0
               }}
             >
               {active && <Check size={11} />}
@@ -651,6 +652,12 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
   const [napWebsite, setNapWebsite] = useState('');
   const [napAddress, setNapAddress] = useState('');
   const [napEmail, setNapEmail] = useState('');
+  const [napBcPhone, setNapBcPhone] = useState('');
+  const [napBcWebsite, setNapBcWebsite] = useState('');
+  const [napBcAddress, setNapBcAddress] = useState('');
+  const [napBcEmail, setNapBcEmail] = useState('');
+  const [activeTab, setActiveTab] = useState('basic_info');
+  const [napSubTab, setNapSubTab] = useState('basic');
   const [brandedTerms, setBrandedTerms] = useState('');
   const [userType, setUserType] = useState('');
   const [userEmail, setUserEmail] = useState('');
@@ -685,6 +692,9 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
     setDomain(''); setName(''); setShare(false); setRegions([]);
     setPlatforms([]); setDa('');
     setNapBusinessCentre(''); setNapPhone(''); setNapWebsite(''); setNapAddress(''); setNapEmail('');
+    setNapBcPhone(''); setNapBcWebsite(''); setNapBcAddress(''); setNapBcEmail('');
+    setActiveTab('basic_info');
+    setNapSubTab('basic');
     setBrandedTerms('');
     setUserType(''); setUserEmail(''); setUsers([]);
     setSubmitting(false); setApiError('');
@@ -706,6 +716,10 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
         nap_website: napWebsite.trim(),
         nap_address: napAddress.trim(),
         nap_email: napEmail.trim(),
+        nap_bc_phone: napBcPhone.trim(),
+        nap_bc_website: napBcWebsite.trim(),
+        nap_bc_address: napBcAddress.trim(),
+        nap_bc_email: napBcEmail.trim(),
         branded_terms: brandedTerms.trim(),
         users,
         share,
@@ -719,7 +733,7 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Create project" maxWidth={920}
+    <Modal open={open} onClose={onClose} title="Create project" maxWidth={680}
       footer={<>
         <Btn
           variant="primary"
@@ -743,79 +757,147 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
         <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{apiError}</span>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, alignItems: 'start' }}>
-        {/* Left Side: Basic Info & Team */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent, #5c4af2)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        {/* Top Main Tab Navigation */}
+        <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 10, padding: 4, gap: 4 }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('basic_info')}
+            style={{
+              flex: 1, padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, border: 'none',
+              background: activeTab === 'basic_info' ? '#fff' : 'transparent',
+              color: activeTab === 'basic_info' ? '#5c4af2' : '#6b7280',
+              boxShadow: activeTab === 'basic_info' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+              cursor: 'pointer', transition: 'all 0.15s ease', fontFamily: 'var(--font-body)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+            }}
+          >
             Basic Information
-          </div>
-          <Input label="Domain *" placeholder="domain.com" value={domain} onChange={setDomain} />
-          <Input label="Project Name" placeholder="Auto-generated if left blank" value={name} onChange={setName} />
-          <CountryTagInput
-            label="Target Regions"
-            tags={regions}
-            onAdd={r => setRegions(p => [...p, r])}
-            onRemove={r => setRegions(p => p.filter(x => x !== r))}
-            placeholder="e.g. India, Singapore, USA"
-          />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Input label="Domain Authority" placeholder="e.g. 42" value={da} onChange={setDa} type="number" />
+            {(domain || name || regions.length > 0 || brandedTerms) && (
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#5c4af2' }} />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('nap_details')}
+            style={{
+              flex: 1, padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, border: 'none',
+              background: activeTab === 'nap_details' ? '#fff' : 'transparent',
+              color: activeTab === 'nap_details' ? '#5c4af2' : '#6b7280',
+              boxShadow: activeTab === 'nap_details' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+              cursor: 'pointer', transition: 'all 0.15s ease', fontFamily: 'var(--font-body)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+            }}
+          >
+            NAP Details
+            {(napPhone || napWebsite || napAddress || napEmail || napBusinessCentre || napBcPhone || napBcWebsite || napBcAddress || napBcEmail) && (
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#5c4af2' }} />
+            )}
+          </button>
+        </div>
+
+        {/* Tab 1: Basic Information */}
+        {activeTab === 'basic_info' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <Input label="Domain *" placeholder="domain.com" value={domain} onChange={setDomain} />
+              <Input label="Project Name" placeholder="Auto-generated if left blank" value={name} onChange={setName} />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+              <CountryTagInput
+                label="Target Regions"
+                tags={regions}
+                onAdd={r => setRegions(p => [...p, r])}
+                onRemove={r => setRegions(p => p.filter(x => x !== r))}
+                placeholder="e.g. India, Singapore, USA"
+              />
+              <Input label="Domain Authority" placeholder="e.g. 42" value={da} onChange={setDa} type="number" />
+            </div>
+
             <MultiSelect
               label="Platforms"
               options={platformOptions}
               selected={platforms}
               onToggle={togglePlatform}
             />
-          </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Add Users</span>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              <Select
-                placeholder="Type"
-                value={userType}
-                onChange={setUserType}
-                options={[
-                  { value: 'agency', label: 'Agency' },
-                  { value: 'cxo', label: 'CXO' },
-                  { value: 'project_head', label: 'Project Head' },
-                  { value: 'team_member', label: 'Team Member' },
-                ]}
-              />
-              <Input placeholder="User (Email ID)" value={userEmail} onChange={setUserEmail} type="email" />
-            </div>
-            <button onClick={addUser} style={{ alignSelf: 'flex-start', fontSize: 12.5, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)', fontWeight: 600, padding: '2px 0' }}>
-              + Add another user
-            </button>
-
-            {users.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 100, overflowY: 'auto' }}>
-                {users.map((u, idx) => (
-                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: 'var(--surface-2)', borderRadius: 6 }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'var(--accent-light)', borderRadius: 99, padding: '2px 6px' }}>
-                      {userTypeLabels[u.type] || u.type}
-                    </span>
-                    <span style={{ fontSize: 12, color: 'var(--text-primary)', flex: 1, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{u.email}</span>
-                    <button onClick={() => removeUser(idx)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0, lineHeight: 1, fontSize: 14 }}>×</button>
-                  </div>
-                ))}
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 2 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Add Users</span>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Select
+                  placeholder="Type"
+                  value={userType}
+                  onChange={setUserType}
+                  options={[
+                    { value: 'agency', label: 'Agency' },
+                    { value: 'cxo', label: 'CXO' },
+                    { value: 'project_head', label: 'Project Head' },
+                    { value: 'team_member', label: 'Team Member' },
+                  ]}
+                />
+                <Input placeholder="User (Email ID)" value={userEmail} onChange={setUserEmail} type="email" />
               </div>
-            )}
-          </div>
-        </div>
+              <button onClick={addUser} style={{ alignSelf: 'flex-start', fontSize: 12.5, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)', fontWeight: 600, padding: '2px 0' }}>
+                + Add another user
+              </button>
+              <Input label="Branded Terms" placeholder="e.g. Brand1, Brand2" value={brandedTerms} onChange={setBrandedTerms} />
 
-        {/* Right Side: NAP & Branding Info */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent, #5c4af2)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            NAP & Branding
+              {users.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, maxHeight: 100, overflowY: 'auto' }}>
+                  {users.map((u, idx) => (
+                    <div key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '4px 10px', background: 'var(--surface-2)', borderRadius: 6 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'var(--accent-light)', borderRadius: 99, padding: '2px 6px' }}>
+                        {userTypeLabels[u.type] || u.type}
+                      </span>
+                      <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>{u.email}</span>
+                      <button onClick={() => removeUser(idx)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0, lineHeight: 1, fontSize: 14 }}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-          <Input label="Business Centre" placeholder="Business centre" value={napBusinessCentre} onChange={setNapBusinessCentre} />
-          <Input label="Phone" placeholder="e.g. +1 234 567 8900" value={napPhone} onChange={setNapPhone} />
-          <Input label="Website" placeholder="e.g. https://domain.com" value={napWebsite} onChange={setNapWebsite} />
-          <Input label="Address" placeholder="Full business address" value={napAddress} onChange={setNapAddress} />
-          <Input label="Email ID" placeholder="contact@domain.com" value={napEmail} onChange={setNapEmail} type="email" />
-          <Input label="Branded Terms" placeholder="e.g. Brand1, Brand2" value={brandedTerms} onChange={setBrandedTerms} />
-        </div>
+        )}
+
+        {/* Tab 2: NAP Details */}
+        {activeTab === 'nap_details' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Section 1: Basic NAP */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent, #5c4af2)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Basic NAP
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <Input label="Phone" placeholder="e.g. +1 234 567 8900" value={napPhone} onChange={setNapPhone} />
+                <Input label="Website" placeholder="e.g. https://domain.com" value={napWebsite} onChange={setNapWebsite} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <Input label="Address" placeholder="Full business address" value={napAddress} onChange={setNapAddress} />
+                <Input label="Email ID" placeholder="contact@domain.com" value={napEmail} onChange={setNapEmail} type="email" />
+              </div>
+            </div>
+
+            {/* Subtle Divider */}
+
+            {/* Section 2: Business Centre NAP */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent, #5c4af2)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Business Centre NAP
+              </div>
+              <Input label="Name" placeholder="Business centre name" value={napBusinessCentre} onChange={setNapBusinessCentre} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <Input label="Phone" placeholder="e.g. +1 234 567 8900" value={napBcPhone} onChange={setNapBcPhone} />
+                <Input label="Website" placeholder="e.g. https://domain.com" value={napBcWebsite} onChange={setNapBcWebsite} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <Input label="Address" placeholder="Business centre address" value={napBcAddress} onChange={setNapBcAddress} />
+                <Input label="Email ID" placeholder="contact@domain.com" value={napBcEmail} onChange={setNapBcEmail} type="email" />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
     </Modal>
@@ -1573,6 +1655,17 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
   const [da, setDa] = useState('');
   const [traffic, setTraffic] = useState('');
   const [status, setStatus] = useState('Active');
+  const [activeTab, setActiveTab] = useState('basic_info');
+  const [napBusinessCentre, setNapBusinessCentre] = useState('');
+  const [napPhone, setNapPhone] = useState('');
+  const [napWebsite, setNapWebsite] = useState('');
+  const [napAddress, setNapAddress] = useState('');
+  const [napEmail, setNapEmail] = useState('');
+  const [napBcPhone, setNapBcPhone] = useState('');
+  const [napBcWebsite, setNapBcWebsite] = useState('');
+  const [napBcAddress, setNapBcAddress] = useState('');
+  const [napBcEmail, setNapBcEmail] = useState('');
+  const [brandedTerms, setBrandedTerms] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [apiError, setApiError] = useState('');
@@ -1585,6 +1678,17 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
       setDa(project.da ?? '');
       setTraffic(project.traffic ?? '');
       setStatus(project.status || (project.isActive ? 'Active' : 'Inactive'));
+      setNapBusinessCentre(project.napBusinessCentre || '');
+      setNapPhone(project.napPhone || '');
+      setNapWebsite(project.napWebsite || '');
+      setNapAddress(project.napAddress || '');
+      setNapEmail(project.napEmail || '');
+      setNapBcPhone(project.napBcPhone || '');
+      setNapBcWebsite(project.napBcWebsite || '');
+      setNapBcAddress(project.napBcAddress || '');
+      setNapBcEmail(project.napBcEmail || '');
+      setBrandedTerms(project.brandedTerms || '');
+      setActiveTab('basic_info');
       setConfirmDelete(false);
       setSubmitting(false);
       setApiError('');
@@ -1609,6 +1713,16 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
         traffic: traffic !== '' ? Number(traffic) : 0,
         status,
         isActive: status === 'Active',
+        napBusinessCentre: napBusinessCentre.trim(),
+        napPhone: napPhone.trim(),
+        napWebsite: napWebsite.trim(),
+        napAddress: napAddress.trim(),
+        napEmail: napEmail.trim(),
+        napBcPhone: napBcPhone.trim(),
+        napBcWebsite: napBcWebsite.trim(),
+        napBcAddress: napBcAddress.trim(),
+        napBcEmail: napBcEmail.trim(),
+        brandedTerms: brandedTerms.trim(),
       });
       handleClose();
     } catch (err) {
@@ -1648,7 +1762,7 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
   }
 
   return (
-    <Modal open={open} onClose={handleClose} title="Edit Project"
+    <Modal open={open} onClose={handleClose} title="Edit Project" maxWidth={680}
       footer={<>
         <Btn variant="primary" onClick={handleSave} style={submitting ? { opacity: 0.6, pointerEvents: 'none' } : {}}>{submitting ? 'Saving…' : 'Save'}</Btn>
         <Btn variant="outline" onClick={handleClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
@@ -1658,39 +1772,125 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
       {apiError && (
         <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{apiError}</span>
       )}
-      <Input label="Project Name" placeholder="e.g. OWIS Singapore" value={name} onChange={setName} />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Domain</span>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '10px 14px', background: 'var(--surface-2)', borderRadius: 8, border: '1.5px solid var(--border)' }}>
-          {project?.domain}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        {/* Top Main Tab Navigation */}
+        <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 10, padding: 4, gap: 4 }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('basic_info')}
+            style={{
+              flex: 1, padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, border: 'none',
+              background: activeTab === 'basic_info' ? '#fff' : 'transparent',
+              color: activeTab === 'basic_info' ? '#5c4af2' : '#6b7280',
+              boxShadow: activeTab === 'basic_info' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+              cursor: 'pointer', transition: 'all 0.15s ease', fontFamily: 'var(--font-body)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+            }}
+          >
+            Basic Information
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('nap_details')}
+            style={{
+              flex: 1, padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, border: 'none',
+              background: activeTab === 'nap_details' ? '#fff' : 'transparent',
+              color: activeTab === 'nap_details' ? '#5c4af2' : '#6b7280',
+              boxShadow: activeTab === 'nap_details' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+              cursor: 'pointer', transition: 'all 0.15s ease', fontFamily: 'var(--font-body)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+            }}
+          >
+            NAP Details
+            {(napPhone || napWebsite || napAddress || napEmail || napBusinessCentre || napBcPhone || napBcWebsite || napBcAddress || napBcEmail) && (
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#5c4af2' }} />
+            )}
+          </button>
         </div>
+
+        {/* Tab 1: Basic Information */}
+        {activeTab === 'basic_info' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <Input label="Project Name" placeholder="e.g. OWIS Singapore" value={name} onChange={setName} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Domain</span>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '10px 14px', background: 'var(--surface-2)', borderRadius: 8, border: '1.5px solid var(--border)' }}>
+                  {project?.domain}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <Select
+                label="Location"
+                placeholder="Select a location"
+                value={location}
+                onChange={setLocation}
+                options={COUNTRIES}
+              />
+              <Select
+                label="Status"
+                placeholder="Select status"
+                value={status}
+                onChange={setStatus}
+                options={['Active', 'Inactive']}
+              />
+            </div>
+
+            <MultiSelect
+              label="Target Platforms"
+              options={platformOptionsList}
+              selected={platforms}
+              onToggle={togglePlatform}
+            />
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <Input label="Domain Authority" placeholder="e.g. 42" value={da} onChange={setDa} type="number" />
+              <Input label="Traffic" placeholder="e.g. 44.29" value={traffic} onChange={setTraffic} type="number" />
+            </div>
+
+            <Input label="Branded Terms" placeholder="e.g. Brand1, Brand2" value={brandedTerms} onChange={setBrandedTerms} />
+          </div>
+        )}
+
+        {/* Tab 2: NAP Details */}
+        {activeTab === 'nap_details' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Section 1: Basic NAP */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent, #5c4af2)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Basic NAP
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <Input label="Phone" placeholder="e.g. +1 234 567 8900" value={napPhone} onChange={setNapPhone} />
+                <Input label="Website" placeholder="e.g. https://domain.com" value={napWebsite} onChange={setNapWebsite} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <Input label="Address" placeholder="Full business address" value={napAddress} onChange={setNapAddress} />
+                <Input label="Email ID" placeholder="contact@domain.com" value={napEmail} onChange={setNapEmail} type="email" />
+              </div>
+            </div>
+
+            {/* Section 2: Business Centre NAP */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent, #5c4af2)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Business Centre NAP
+              </div>
+              <Input label="Name" placeholder="Business centre name" value={napBusinessCentre} onChange={setNapBusinessCentre} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <Input label="Phone" placeholder="e.g. +1 234 567 8900" value={napBcPhone} onChange={setNapBcPhone} />
+                <Input label="Website" placeholder="e.g. https://domain.com" value={napBcWebsite} onChange={setNapBcWebsite} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <Input label="Address" placeholder="Business centre address" value={napBcAddress} onChange={setNapBcAddress} />
+                <Input label="Email ID" placeholder="contact@domain.com" value={napBcEmail} onChange={setNapBcEmail} type="email" />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-
-      <Select
-        label="Location"
-        placeholder="Select a location"
-        value={location}
-        onChange={setLocation}
-        options={COUNTRIES}
-      />
-
-      <MultiSelect
-        label="Target Platforms"
-        options={platformOptionsList}
-        selected={platforms}
-        onToggle={togglePlatform}
-      />
-
-      <Input label="Domain Authority" placeholder="e.g. 42" value={da} onChange={setDa} type="number" />
-      <Input label="Traffic" placeholder="e.g. 44.29" value={traffic} onChange={setTraffic} type="number" />
-
-      <Select
-        label="Status"
-        placeholder="Select status"
-        value={status}
-        onChange={setStatus}
-        options={['Active', 'Inactive']}
-      />
     </Modal>
   );
 }

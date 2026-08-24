@@ -68,7 +68,7 @@ async def check_paid_guest_post(
     keyword2: str = "",
     target_url: str = "",
     use_bright_data: bool = True,
-    headless: bool = True,
+    headless: bool = False,
     timeout_ms: int = 30000
 ) -> Dict[str, Any]:
     """
@@ -147,9 +147,8 @@ async def check_paid_guest_post(
         try:
             response = await page.goto(live_url, wait_until="domcontentloaded", timeout=timeout_ms)
         except Exception as nav_err:
-            print(f"[Guest Post Checker] Navigation error: {nav_err}")
-            result["is_broken"] = True
-            result["error_message"] = str(nav_err)
+            print(f"[Guest Post Checker] Playwright navigation notice: {nav_err}. Falling back to HTTP check...")
+            return _check_with_requests(live_url, keyword1, keyword2, target_url)
 
         if response:
             result["status_code"] = response.status
@@ -260,43 +259,27 @@ async def check_paid_guest_post(
             result["solution"] = "Replace Guest Post Link"
             return result
 
+        issues = []
+
         # 2. No Anchor Text at all on page
         if len(extracted_links) == 0:
-            result["status"] = "Audited-LQ"
-            result["remarks"] = "no anchor text"
-            result["solution"] = "Add Hyperlink"
-            return result
+            issues.append("no anchor text")
 
         # 3. Incorrect Anchor Text (neither kw1 nor kw2 present on page)
         if kw1_clean and kw2_clean and not result["keyword1_present"] and not result["keyword2_present"]:
-            result["status"] = "Audited-LQ"
-            result["remarks"] = "incorrect anchor text"
-            result["solution"] = "Content Replace"
-            return result
+            issues.append("incorrect anchor text")
         elif kw1_clean and not kw2_clean and not result["keyword1_present"]:
-            result["status"] = "Audited-LQ"
-            result["remarks"] = "incorrect anchor text"
-            result["solution"] = "Content Replace"
-            return result
+            issues.append("incorrect anchor text")
         elif kw2_clean and not kw1_clean and not result["keyword2_present"]:
-            result["status"] = "Audited-LQ"
-            result["remarks"] = "incorrect anchor text"
-            result["solution"] = "Content Replace"
-            return result
+            issues.append("incorrect anchor text")
 
         # 4. Anchor Text Missed KW1
         if kw1_clean and result["keyword1_present"] and not result["keyword1_has_hyperlink"]:
-            result["status"] = "Audited-LQ"
-            result["remarks"] = "anchor text missed-kw1"
-            result["solution"] = "Add Hyperlink"
-            return result
+            issues.append("anchor text missed-kw1")
 
         # 5. Anchor Text Missed KW2
         if kw2_clean and result["keyword2_present"] and not result["keyword2_has_hyperlink"]:
-            result["status"] = "Audited-LQ"
-            result["remarks"] = "anchor text missed kw-2"
-            result["solution"] = "Add Hyperlink"
-            return result
+            issues.append("anchor text missed kw-2")
 
         # Check target URL matches for kw1 and kw2 hrefs
         kw1_url_matched = False
@@ -325,40 +308,51 @@ async def check_paid_guest_post(
 
         # 6. Wrong URL Targeted KW1
         if kw1_clean and result["keyword1_has_hyperlink"] and target_url and not kw1_url_matched:
-            result["status"] = "Audited-LQ"
-            result["remarks"] = "wrong url targeted - kw1"
-            result["solution"] = "Fix Destination Link"
-            return result
+            issues.append("wrong url targeted - kw1")
 
         # 7. Wrong URL Targeted KW2
         if kw2_clean and result["keyword2_has_hyperlink"] and target_url and not kw2_url_matched:
-            result["status"] = "Audited-LQ"
-            result["remarks"] = "wrong url targeted- kw2"
-            result["solution"] = "Fix Destination Link"
-            return result
+            issues.append("wrong url targeted- kw2")
 
-        # 8. All checks pass
-        result["status"] = "Audited-Indexed"
-        result["remarks"] = "Indexed"
-        result["solution"] = "fixed"
+        if issues:
+            result["status"] = "Audited-LQ"
+            result["remarks"] = ", ".join(issues)
+            if "no anchor text" in issues or "anchor text missed-kw1" in issues or "anchor text missed kw-2" in issues:
+                result["solution"] = "Add Hyperlink"
+            elif "wrong url targeted - kw1" in issues or "wrong url targeted- kw2" in issues:
+                result["solution"] = "Fix Destination Link"
+            else:
+                result["solution"] = "Content Replace"
+        else:
+            result["status"] = "Audited-Indexed"
+            result["remarks"] = "Indexed"
+            result["solution"] = "fixed"
 
     except Exception as e:
-        print(f"[Guest Post Checker Error] {e}")
-        result["is_broken"] = True
-        result["error_message"] = str(e)
-        result["status"] = "Audited-LQ"
-        result["remarks"] = "broken link"
-        result["solution"] = "Replace Guest Post Link"
+        print(f"[Guest Post Checker] Playwright error: {e}. Falling back to HTTP check...")
+        return _check_with_requests(live_url, keyword1, keyword2, target_url)
 
     finally:
         if page:
-            await page.close()
+            try:
+                await page.close()
+            except Exception:
+                pass
         if context:
-            await context.close()
+            try:
+                await context.close()
+            except Exception:
+                pass
         if browser:
-            await browser.close()
+            try:
+                await browser.close()
+            except Exception:
+                pass
         if playwright:
-            await playwright.stop()
+            try:
+                await playwright.stop()
+            except Exception:
+                pass
 
     return result
 
@@ -369,7 +363,11 @@ def _check_with_requests(
     keyword2: str = "",
     target_url: str = ""
 ) -> Dict[str, Any]:
-    """Fallback HTTP checker using requests & BeautifulSoup if Playwright is unavailable."""
+    """Fallback HTTP checker using requests / urllib & BeautifulSoup if Playwright is unavailable or fails."""
+    import ssl
+    import urllib.request
+    from bs4 import BeautifulSoup
+
     result = {
         "live_url": live_url,
         "is_broken": False,
@@ -391,50 +389,119 @@ def _check_with_requests(
         "solution": "Pending"
     }
 
-    if not REQUESTS_AVAILABLE:
+    if not live_url:
         result["is_broken"] = True
         result["remarks"] = "broken link"
+        result["solution"] = "Provide Live Link"
         return result
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    }
+    clean_url = live_url if (live_url.startswith("http://") or live_url.startswith("https://")) else "https://" + live_url
 
-    try:
-        resp = requests.get(live_url, headers=headers, timeout=15, allow_redirects=True)
-        result["status_code"] = resp.status_code
-        if resp.status_code >= 400:
+    html_content = ""
+    status_code = 0
+
+    if REQUESTS_AVAILABLE:
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            }
+            resp = requests.get(clean_url, headers=headers, timeout=15, allow_redirects=True, verify=False)
+            status_code = resp.status_code
+            if status_code < 400:
+                html_content = resp.text
+        except Exception:
+            pass
+
+    if not html_content:
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            }
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+
+            req = urllib.request.Request(clean_url, headers=headers)
+            with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+                status_code = resp.getcode()
+                if status_code < 400:
+                    html_content = resp.read().decode('utf-8', errors='ignore')
+        except Exception as e:
+            print(f"[Guest Post HTTP Check] Request failed for {clean_url}: {e}", flush=True)
             result["is_broken"] = True
+            result["error_message"] = str(e)
             result["remarks"] = "broken link"
             result["solution"] = "Replace Guest Post Link"
             return result
 
-        html = resp.text.lower()
-        kw1_clean = keyword1.strip().lower() if keyword1 else ""
-        kw2_clean = keyword2.strip().lower() if keyword2 else ""
-
-        if kw1_clean:
-            result["keyword1_present"] = kw1_clean in html
-        if kw2_clean:
-            result["keyword2_present"] = kw2_clean in html
-
-        target_clean_domain = _normalize_domain(target_url) if target_url else ""
-        if target_clean_domain and target_clean_domain in html:
-            result["target_url_matched"] = True
-
-        if kw1_clean and not result["keyword1_present"]:
-            result["remarks"] = "incorrect anchor text"
-            result["solution"] = "Content Replace"
-        else:
-            result["status"] = "Audited-Indexed"
-            result["remarks"] = "Indexed"
-            result["solution"] = "fixed"
-
-    except Exception as e:
+    if status_code >= 400 or not html_content:
         result["is_broken"] = True
-        result["error_message"] = str(e)
+        result["status_code"] = status_code
         result["remarks"] = "broken link"
         result["solution"] = "Replace Guest Post Link"
+        return result
+
+    # HTTP GET succeeded (HTTP 200 OK)!
+    result["status_code"] = status_code
+    result["is_broken"] = False
+
+    soup = BeautifulSoup(html_content, 'html.parser')
+    page_text = soup.get_text(separator=' ').lower()
+
+    kw1_clean = keyword1.strip().lower() if keyword1 else ""
+    kw2_clean = keyword2.strip().lower() if keyword2 else ""
+    target_clean_domain = _normalize_domain(target_url) if target_url else ""
+
+    if kw1_clean:
+        result["keyword1_present"] = kw1_clean in page_text
+    if kw2_clean:
+        result["keyword2_present"] = kw2_clean in page_text
+
+    for a in soup.find_all('a', href=True):
+        href = a.get('href', '').strip()
+        text = a.get_text().strip().lower()
+        if not href or href.startswith("javascript:") or href.startswith("#"):
+            continue
+
+        if kw1_clean and kw1_clean in text:
+            result["keyword1_has_hyperlink"] = True
+            result["keyword1_href"] = href
+        if kw2_clean and kw2_clean in text:
+            result["keyword2_has_hyperlink"] = True
+            result["keyword2_href"] = href
+
+        if target_clean_domain and target_clean_domain in href.lower():
+            result["target_url_matched"] = True
+
+    issues = []
+    if kw1_clean and kw2_clean and not result["keyword1_present"] and not result["keyword2_present"]:
+        issues.append("incorrect anchor text")
+    elif kw1_clean and not kw2_clean and not result["keyword1_present"]:
+        issues.append("incorrect anchor text")
+    elif kw2_clean and not kw1_clean and not result["keyword2_present"]:
+        issues.append("incorrect anchor text")
+
+    if kw1_clean and result["keyword1_present"] and not result["keyword1_has_hyperlink"]:
+        issues.append("anchor text missed-kw1")
+    if kw2_clean and result["keyword2_present"] and not result["keyword2_has_hyperlink"]:
+        issues.append("anchor text missed kw-2")
+
+    if target_clean_domain and not result["target_url_matched"]:
+        issues.append("wrong url targeted")
+
+    if issues:
+        result["status"] = "Audited-LQ"
+        result["remarks"] = ", ".join(issues)
+        if "anchor text missed-kw1" in issues or "anchor text missed kw-2" in issues:
+            result["solution"] = "Add Hyperlink"
+        elif "wrong url targeted" in issues:
+            result["solution"] = "Fix Destination Link"
+        else:
+            result["solution"] = "Content Replace"
+    else:
+        result["status"] = "Audited-Indexed"
+        result["remarks"] = "Indexed"
+        result["solution"] = "fixed"
 
     return result
 

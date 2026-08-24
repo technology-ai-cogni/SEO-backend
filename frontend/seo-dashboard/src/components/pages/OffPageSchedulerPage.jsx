@@ -10,6 +10,7 @@ import {
   deleteMonthlyImportApi, 
   runAuditAllocationApi,
   runAiStatusCheckApi,
+  runAiStatusCheckStreamApi,
   fetchScheduledActivitiesApi, 
   createScheduledActivityApi, 
   deleteScheduledActivityApi,
@@ -1221,31 +1222,29 @@ export default function OffPageSchedulerPage({ user }) {
     if (!selectedDataset) return;
     setAiChecking(true);
     try {
-      const res = await runAiStatusCheckApi({
-        dataset_id: selectedDataset.id,
-        rows: selectedDataset.rowsData
-      });
+      const res = await runAiStatusCheckStreamApi(
+        {
+          dataset_id: selectedDataset.id,
+          rows: selectedDataset.rowsData
+        },
+        ({ index, row }) => {
+          if (row && index !== undefined) {
+            setSelectedDataset(prev => {
+              if (!prev || !prev.rowsData) return prev;
+              const newRows = [...prev.rowsData];
+              newRows[index] = { ...newRows[index], ...row };
+              return { ...prev, rowsData: newRows };
+            });
+          }
+        }
+      );
 
-      if (res && res.rowsData && res.rowsData.length > 0) {
-        setSelectedDataset(prev => ({
-          ...prev,
-          rowsData: res.rowsData
-        }));
-        setOriginalRowsData(JSON.parse(JSON.stringify(res.rowsData)));
-        setIsDirty(false);
-      }
-
-      const freshImports = await fetchMonthlyImportsApi();
+      const freshImports = await fetchMonthlyImportsApi().catch(() => null);
       if (freshImports && freshImports.length > 0) {
         setImports(freshImports);
-        const updatedDs = freshImports.find(imp => String(imp.id) === String(selectedDataset.id) || imp.project === selectedDataset.project);
-        if (updatedDs && updatedDs.rowsData) {
-          setSelectedDataset(updatedDs);
-          setOriginalRowsData(JSON.parse(JSON.stringify(updatedDs.rowsData)));
-        }
       }
 
-      setAuditSuccessMsg(res.message || 'AI Audit Check completed successfully!');
+      setAuditSuccessMsg(res?.message || 'AI Audit Check completed successfully!');
       setTimeout(() => setAuditSuccessMsg(''), 5000);
     } catch (err) {
       setAuditSuccessMsg(`AI Audit Check notice: ${err.message}`);

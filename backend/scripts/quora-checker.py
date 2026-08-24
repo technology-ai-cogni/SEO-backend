@@ -1,3 +1,4 @@
+from typing import Tuple, Dict, Any, Optional, List
 import os
 import csv
 import json
@@ -53,52 +54,57 @@ def parse_upvote_val(val):
 def evaluate_quora_status_and_remarks(topic_error, scraped_answers, our_answer, our_rank, landing_page="", landing_domain="", live_link_deleted=False):
     """
     Evaluates Quora thread check results and returns (status, remarks, solution).
-
-    Order of Checks:
-    1. Deleted Check: If live link specifically shows 'Quora deleted this answer.' or topic errored or 0 answers exist -> 'Answer Deleted'
-    2. Rank Check: If our answer is missing or not in top 3 (our_rank > 3) -> 'Not in Top3'
-    3. Upvotes Check: If upvotes < max top 3 answers (or 0 upvotes) -> 'No upvotes'
-    4. Brand Mention Check: If landing domain or brand term is not mentioned -> 'No Brand Mention'
-    5. Low Content Check: If word count is low -> 'Low content'
-    6. Everything Fine: -> status = 'Audited-Indexed', remarks = 'Indexed', solution = 'fixed'
+    Collects ALL detected issues into remarks.
     """
-    # 1. Answer Deleted Check (Only if confirmed deleted banner, topic error, or empty topic page)
-    if live_link_deleted or topic_error or (scraped_answers is not None and len(scraped_answers) == 0):
+    # 1. Answer Deleted Check (Only if confirmed deleted banner or topic error)
+    if live_link_deleted or topic_error:
         return "Audited-LQ", "Answer Deleted", "Quora : Reddit- Post New Answer"
+
+    issues = []
 
     # 2. Not in Top 3 Check (If our answer is missing or ranked > 3)
     if not our_answer or not our_rank or our_rank > 3:
-        return "Audited-LQ", "Not in Top3", "Quora : Reddit- Add More Upvotes"
+        issues.append("Not in Top3")
 
     # 3. Upvotes comparison with top 3 answers
     top3_answers = scraped_answers[:3] if scraped_answers else []
     top3_upvote_vals = [parse_upvote_val(a.get("upvotes")) for a in top3_answers]
     max_top3_upvotes = max(top3_upvote_vals) if top3_upvote_vals else 0
-    our_upvotes = parse_upvote_val(our_answer.get("upvotes"))
+    our_upvotes = parse_upvote_val(our_answer.get("upvotes")) if our_answer else 0
 
     if our_upvotes < max_top3_upvotes or our_upvotes == 0:
-        return "Audited-LQ", "No upvotes", "Quora : Reddit- Add More Upvotes"
+        issues.append("No upvotes")
 
     # 4. Brand Mention
-    ans_text = our_answer.get("text", "") or ""
-    ans_links = [str(l).lower() for l in our_answer.get("external_links", [])]
-    brand_mentioned = False
-    if landing_domain and (landing_domain in ans_text.lower() or any(landing_domain in l for l in ans_links)):
-        brand_mentioned = True
-    elif landing_page and (landing_page.lower() in ans_text.lower() or any(landing_page.lower() in l for l in ans_links)):
-        brand_mentioned = True
+    if our_answer:
+        ans_text = our_answer.get("text", "") or ""
+        ans_links = [str(l).lower() for l in our_answer.get("external_links", [])]
+        brand_mentioned = False
+        if landing_domain and (landing_domain in ans_text.lower() or any(landing_domain in l for l in ans_links)):
+            brand_mentioned = True
+        elif landing_page and (landing_page.lower() in ans_text.lower() or any(landing_page.lower() in l for l in ans_links)):
+            brand_mentioned = True
 
-    if not brand_mentioned:
-        return "Audited-LQ", "No Brand Mention", "Content Replace"
+        if not brand_mentioned:
+            issues.append("No Brand Mention")
 
-    # 5. Low Content check
-    words = ans_text.split()
-    word_count = len(words)
-    top3_word_counts = [len((a.get("text") or "").split()) for a in top3_answers if a.get("text")]
-    avg_top3_words = (sum(top3_word_counts) / len(top3_word_counts)) if top3_word_counts else 0
+        # 5. Low Content check
+        words = ans_text.split()
+        word_count = len(words)
+        top3_word_counts = [len((a.get("text") or "").split()) for a in top3_answers if a.get("text")]
+        avg_top3_words = (sum(top3_word_counts) / len(top3_word_counts)) if top3_word_counts else 0
 
-    if word_count < 30 or (avg_top3_words > 0 and word_count < 0.4 * avg_top3_words):
-        return "Audited-LQ", "Low content", "Content Replace"
+        if word_count < 30 or (avg_top3_words > 0 and word_count < 0.4 * avg_top3_words):
+            issues.append("Low content")
+
+    if issues:
+        remarks_str = ", ".join(issues)
+        solution = "Quora : Reddit- Add More Upvotes"
+        if "Not in Top3" in issues:
+            solution = "Quora : Reddit- Add More Upvotes"
+        elif "No Brand Mention" in issues or "Low content" in issues:
+            solution = "Content Replace"
+        return "Audited-LQ", remarks_str, solution
 
     # Everything is fine!
     return "Audited-Indexed", "Indexed", "fixed"
@@ -149,6 +155,52 @@ async def check_quora_live_link_deleted(page, live_url: str) -> bool:
     except Exception as e:
         print(f"[Live Link Check] Exception checking {live_url}: {str(e)}")
         return False
+
+
+def check_quora_http_fallback(live_link: str, topic: str = "", landing_page: str = "") -> Tuple[str, str, str]:
+    """
+    Lightweight HTTP fallback check for Quora links when Playwright scraper is unavailable or returns 0 answers.
+    """
+    import ssl
+    import urllib.request
+
+    check_url = live_link if (live_link and live_link.startswith("http")) else topic
+    if not check_url or not check_url.startswith("http"):
+        return "Audited-LQ", "Flagged-Indexation", "Quora : Reddit- Post New Answer"
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+    }
+
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        req = urllib.request.Request(check_url, headers=headers)
+        with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
+            status_code = resp.getcode()
+            if status_code in [404, 410]:
+                return "Audited-LQ", "Answer Deleted", "Quora : Reddit- Post New Answer"
+
+            raw_bytes = resp.read()
+            html_text = raw_bytes.decode('utf-8', errors='ignore')
+
+            if "Quora deleted this answer" in html_text or "This answer was deleted" in html_text or "This page does not exist" in html_text:
+                return "Audited-LQ", "Answer Deleted", "Quora : Reddit- Post New Answer"
+
+            landing_domain = landing_page.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower() if landing_page else ""
+            html_lower = html_text.lower()
+
+            if landing_domain and landing_domain in html_lower:
+                return "Audited-Indexed", "Indexed", "fixed"
+            else:
+                return "Audited-LQ", "Not in Top3", "Quora : Reddit- Add More Upvotes"
+
+    except Exception as e:
+        print(f"[Quora HTTP Check Notice] {check_url}: {e}")
+        return "Audited-LQ", "Not in Top3", "Quora : Reddit- Add More Upvotes"
 
 async def analyze_gap(topic, top_answer, our_answer):
     """Use OpenAI to compare the top answer with our answer."""

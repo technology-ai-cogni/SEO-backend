@@ -68,7 +68,7 @@ async def check_paid_guest_post(
     keyword2: str = "",
     target_url: str = "",
     use_bright_data: bool = True,
-    headless: bool = True,
+    headless: bool = False,
     timeout_ms: int = 30000
 ) -> Dict[str, Any]:
     """
@@ -126,7 +126,7 @@ async def check_paid_guest_post(
         else:
             print(f"[Guest Post Checker] Launching local Chromium browser (headless={headless})...")
             browser = await playwright.chromium.launch(
-                headless=headless,
+                headless=False,
                 args=[
                     "--no-sandbox",
                     "--disable-dev-shm-usage",

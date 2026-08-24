@@ -68,7 +68,7 @@ async def check_paid_guest_post(
     keyword2: str = "",
     target_url: str = "",
     use_bright_data: bool = True,
-    headless: bool = True,
+    headless: bool = False,
     timeout_ms: int = 30000
 ) -> Dict[str, Any]:
     """
