@@ -205,8 +205,9 @@ export default function OffPageSchedulerPage({ user }) {
   const [aiChecking, setAiChecking] = useState(false);
   const [deleteConfirmImport, setDeleteConfirmImport] = useState(null);
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
-  const [pendingLeaveAction, setPendingLeaveAction] = useState(null);
   const [auditSuccessMsg, setAuditSuccessMsg] = useState('');
+  const [showAssocPopover, setShowAssocPopover] = useState(false);
+  const [showGlobalAssocPopover, setShowGlobalAssocPopover] = useState(false);
 
   const STATUS_PRESET_OPTIONS = useMemo(() => [
     'Audited-Indexed',
@@ -1376,30 +1377,161 @@ export default function OffPageSchedulerPage({ user }) {
           {/* Save Changes & Run Audit Buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {!isVendor && userCanUpdate && (
-              <button
-                onClick={handleRunAudit}
-                disabled={auditAllocating}
-                style={{
-                  background: '#ffffff',
-                  color: '#0f172a',
-                  border: '1.5px solid #cbd5e1',
-                  borderRadius: 10,
-                  padding: '9px 18px',
-                  fontSize: 13.5,
-                  fontWeight: 700,
-                  cursor: auditAllocating ? 'wait' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-                onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
-              >
-                <ShieldCheck size={16} color="var(--accent)" />
-                {auditAllocating ? 'Allocating Associates...' : 'Run Audit Allocation'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  onClick={handleRunAudit}
+                  disabled={auditAllocating}
+                  style={{
+                    background: '#ffffff',
+                    color: '#0f172a',
+                    border: '1.5px solid #cbd5e1',
+                    borderRadius: 10,
+                    padding: '9px 18px',
+                    fontSize: 13.5,
+                    fontWeight: 700,
+                    cursor: auditAllocating ? 'wait' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                  onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
+                >
+                  <ShieldCheck size={16} color="var(--accent)" />
+                  {auditAllocating ? 'Allocating Associates...' : 'Run Audit Allocation'}
+                </button>
+
+                {/* People Icon Button with Associate Breakdown Popover */}
+                {(() => {
+                  const nameMap = new Map();
+                  (systemAssociates || []).forEach(name => {
+                    if (name && name.trim() && name.toLowerCase() !== 'unassigned') {
+                      const key = name.trim().toLowerCase();
+                      if (!nameMap.has(key)) {
+                        nameMap.set(key, { name: name.trim(), count: 0 });
+                      }
+                    }
+                  });
+                  const hasSystemAssocs = systemAssociates && systemAssociates.length > 0;
+                  (rows || []).forEach(r => {
+                    const raw = r.publisher && r.publisher.trim() !== '' ? r.publisher.trim() : 'Unassigned';
+                    const key = raw.toLowerCase();
+                    if (nameMap.has(key)) {
+                      nameMap.get(key).count += 1;
+                    } else if (!hasSystemAssocs) {
+                      nameMap.set(key, { name: raw, count: 1 });
+                    }
+                  });
+                  const assocEntries = Array.from(nameMap.values()).map(item => [item.name, item.count]);
+                  const assignedCount = assocEntries.filter(([n]) => n.toLowerCase() !== 'unassigned').length;
+
+                  return (
+                    <div style={{ position: 'relative', display: 'inline-block' }}>
+                      <button
+                        onClick={() => setShowAssocPopover(!showAssocPopover)}
+                        title="View Associate Resource Allocation"
+                        style={{
+                          background: showAssocPopover ? '#f1f5f9' : '#ffffff',
+                          color: '#0f172a',
+                          border: '1.5px solid #cbd5e1',
+                          borderRadius: 10,
+                          padding: '9px 12px',
+                          fontSize: 13.5,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                          transition: 'all 0.15s ease'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                        onMouseLeave={e => e.currentTarget.style.background = showAssocPopover ? '#f1f5f9' : '#ffffff'}
+                      >
+                        <Users size={18} color="#2563eb" />
+                        <span style={{ 
+                          background: '#dbeafe', 
+                          color: '#1e40af', 
+                          padding: '2px 8px', 
+                          borderRadius: 12, 
+                          fontSize: 12, 
+                          fontWeight: 800 
+                        }}>
+                          {assignedCount}
+                        </span>
+                      </button>
+
+                      {showAssocPopover && (
+                        <div style={{
+                          position: 'absolute',
+                          top: 'calc(100% + 8px)',
+                          right: 0,
+                          zIndex: 999,
+                          width: 320,
+                          background: '#ffffff',
+                          border: '1.5px solid #e2e8f0',
+                          borderRadius: 14,
+                          padding: '16px 18px',
+                          boxShadow: '0 12px 32px rgba(0, 0, 0, 0.15)'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, paddingBottom: 8, borderBottom: '1px solid #f1f5f9' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <Users size={16} color="#2563eb" />
+                              <h4 style={{ margin: 0, fontSize: 13.5, fontWeight: 800, color: '#0f172a' }}>
+                                Associate Allocations
+                              </h4>
+                            </div>
+                            <button 
+                              onClick={() => setShowAssocPopover(false)}
+                              style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#64748b', padding: 2 }}
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+
+                          <p style={{ margin: '0 0 12px 0', fontSize: 12, color: '#64748b' }}>
+                            <strong>{assignedCount} Associate(s)</strong> assigned across <strong>{rows.length}</strong> total resources
+                          </p>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 220, overflowY: 'auto' }}>
+                            {assocEntries.map(([associateName, count]) => (
+                              <div key={associateName} style={{
+                                background: '#f8fafc',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: 8,
+                                padding: '8px 12px',
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: '#0f172a',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between'
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: associateName === 'Unassigned' ? '#94a3b8' : '#2563eb' }} />
+                                  <span>{associateName}</span>
+                                </div>
+                                <span style={{
+                                  background: associateName === 'Unassigned' ? '#f1f5f9' : '#dbeafe',
+                                  color: associateName === 'Unassigned' ? '#475569' : '#1e40af',
+                                  padding: '2px 8px',
+                                  borderRadius: 6,
+                                  fontSize: 12,
+                                  fontWeight: 800
+                                }}>
+                                  {count} {count === 1 ? 'resource' : 'resources'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
             )}
 
             {!isVendor && userCanUpdate && (
@@ -1468,90 +1600,7 @@ export default function OffPageSchedulerPage({ user }) {
           </div>
         </div>
 
-        {/* Associate Resource Breakdown Summary Card */}
-        {(() => {
-          const nameMap = new Map();
-          (systemAssociates || []).forEach(name => {
-            if (name && name.trim() && name.toLowerCase() !== 'unassigned') {
-              const key = name.trim().toLowerCase();
-              if (!nameMap.has(key)) {
-                nameMap.set(key, { name: name.trim(), count: 0 });
-              }
-            }
-          });
-          const hasSystemAssocs = systemAssociates && systemAssociates.length > 0;
-          (rows || []).forEach(r => {
-            const raw = r.publisher && r.publisher.trim() !== '' ? r.publisher.trim() : 'Unassigned';
-            const key = raw.toLowerCase();
-            if (nameMap.has(key)) {
-              nameMap.get(key).count += 1;
-            } else if (!hasSystemAssocs) {
-              nameMap.set(key, { name: raw, count: 1 });
-            }
-          });
-          const assocEntries = Array.from(nameMap.values()).map(item => [item.name, item.count]);
-          if (assocEntries.length === 0) return null;
-          const assignedCount = assocEntries.filter(([n]) => n.toLowerCase() !== 'unassigned').length;
 
-          return (
-            <div style={{
-              background: '#ffffff',
-              border: '1.5px solid #e2e8f0',
-              borderRadius: 14,
-              padding: '16px 20px',
-              marginBottom: 20,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 16,
-              flexWrap: 'wrap',
-              boxShadow: '0 2px 6px rgba(0,0,0,0.03)'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                <div>
-                  <h4 style={{ margin: 0, fontSize: 14.5, fontWeight: 800, color: 'var(--text-primary)' }}>
-                    
-                  </h4>
-                  <p style={{ margin: '2px 0 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}>
-                    <strong>{assignedCount} Associate(s)</strong> assigned across <strong>{rows.length}</strong> total resources
-                  </p>
-                </div>
-              </div>
-
-              {/* Associate Resource Badges */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                {assocEntries.map(([associateName, count]) => (
-                  <div key={associateName} style={{
-                    background: '#f8fafc',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 10,
-                    padding: '7px 14px',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: '#0f172a',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
-                  }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: associateName === 'Unassigned' ? '#94a3b8' : '#2563eb' }} />
-                    <span>{associateName}:</span>
-                    <span style={{ 
-                      background: associateName === 'Unassigned' ? '#f1f5f9' : '#dbeafe', 
-                      color: associateName === 'Unassigned' ? '#475569' : '#1e40af', 
-                      padding: '3px 9px', 
-                      borderRadius: 6, 
-                      fontSize: 12, 
-                      fontWeight: 800 
-                    }}>
-                      {count} resource{count !== 1 ? 's' : ''}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })()}
 
         {/* Search, Filters, and Bulk Actions Bar */}
         <div style={{
@@ -2727,30 +2776,165 @@ export default function OffPageSchedulerPage({ user }) {
         
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {!isVendor && userCanUpdate && (
-            <button
-              onClick={handleRunAudit}
-              disabled={auditAllocating}
-              style={{
-                background: '#ffffff',
-                color: '#0f172a',
-                border: '1.5px solid #cbd5e1',
-                borderRadius: 10,
-                padding: '10px 18px',
-                fontSize: 13.5,
-                fontWeight: 700,
-                cursor: auditAllocating ? 'wait' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-              onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
-            >
-              <ShieldCheck size={16} color="var(--accent)" />
-              {auditAllocating ? 'Allocating...' : 'Run Audit Allocation'}
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button
+                onClick={handleRunAudit}
+                disabled={auditAllocating}
+                style={{
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  border: '1.5px solid #cbd5e1',
+                  borderRadius: 10,
+                  padding: '10px 18px',
+                  fontSize: 13.5,
+                  fontWeight: 700,
+                  cursor: auditAllocating ? 'wait' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
+              >
+                <ShieldCheck size={16} color="var(--accent)" />
+                {auditAllocating ? 'Allocating...' : 'Run Audit Allocation'}
+              </button>
+
+              {/* Global People Icon Button with Associate Breakdown Popover */}
+              {(() => {
+                let totalRes = 0;
+                const nameMap = new Map();
+                (systemAssociates || []).forEach(name => {
+                  if (name && name.trim() && name.toLowerCase() !== 'unassigned') {
+                    const key = name.trim().toLowerCase();
+                    if (!nameMap.has(key)) {
+                      nameMap.set(key, { name: name.trim(), count: 0 });
+                    }
+                  }
+                });
+                const hasSystemAssocs = systemAssociates && systemAssociates.length > 0;
+                (filteredImports || []).forEach(imp => {
+                  (imp.rowsData || []).forEach(r => {
+                    totalRes += 1;
+                    const raw = r.publisher && r.publisher.trim() !== '' ? r.publisher.trim() : 'Unassigned';
+                    const key = raw.toLowerCase();
+                    if (nameMap.has(key)) {
+                      nameMap.get(key).count += 1;
+                    } else if (!hasSystemAssocs) {
+                      nameMap.set(key, { name: raw, count: 1 });
+                    }
+                  });
+                });
+                const globalEntries = Array.from(nameMap.values()).map(item => [item.name, item.count]);
+                const assignedCount = globalEntries.filter(([n]) => n.toLowerCase() !== 'unassigned').length;
+
+                return (
+                  <div style={{ position: 'relative', display: 'inline-block' }}>
+                    <button
+                      onClick={() => setShowGlobalAssocPopover(!showGlobalAssocPopover)}
+                      title="View Associate Resource Allocation"
+                      style={{
+                        background: showGlobalAssocPopover ? '#f1f5f9' : '#ffffff',
+                        color: '#0f172a',
+                        border: '1.5px solid #cbd5e1',
+                        borderRadius: 10,
+                        padding: '10px 14px',
+                        fontSize: 13.5,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                        transition: 'all 0.15s ease'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                      onMouseLeave={e => e.currentTarget.style.background = showGlobalAssocPopover ? '#f1f5f9' : '#ffffff'}
+                    >
+                      <Users size={18} color="#2563eb" />
+                      <span style={{ 
+                        background: '#dbeafe', 
+                        color: '#1e40af', 
+                        padding: '2px 8px', 
+                        borderRadius: 12, 
+                        fontSize: 12, 
+                        fontWeight: 800 
+                      }}>
+                        {assignedCount}
+                      </span>
+                    </button>
+
+                    {showGlobalAssocPopover && (
+                      <div style={{
+                        position: 'absolute',
+                        top: 'calc(100% + 8px)',
+                        right: 0,
+                        zIndex: 999,
+                        width: 320,
+                        background: '#ffffff',
+                        border: '1.5px solid #e2e8f0',
+                        borderRadius: 14,
+                        padding: '16px 18px',
+                        boxShadow: '0 12px 32px rgba(0, 0, 0, 0.15)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, paddingBottom: 8, borderBottom: '1px solid #f1f5f9' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Users size={16} color="#2563eb" />
+                            <h4 style={{ margin: 0, fontSize: 13.5, fontWeight: 800, color: '#0f172a' }}>
+                              Associate Allocations
+                            </h4>
+                          </div>
+                          <button 
+                            onClick={() => setShowGlobalAssocPopover(false)}
+                            style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#64748b', padding: 2 }}
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+
+                        <p style={{ margin: '0 0 12px 0', fontSize: 12, color: '#64748b' }}>
+                          <strong>{assignedCount} Associate(s)</strong> assigned across <strong>{totalRes}</strong> total resources
+                        </p>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 220, overflowY: 'auto' }}>
+                          {globalEntries.map(([associateName, count]) => (
+                            <div key={associateName} style={{
+                              background: '#f8fafc',
+                              border: '1px solid #e2e8f0',
+                              borderRadius: 8,
+                              padding: '8px 12px',
+                              fontSize: 13,
+                              fontWeight: 600,
+                              color: '#0f172a',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between'
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: associateName === 'Unassigned' ? '#94a3b8' : '#2563eb' }} />
+                                <span>{associateName}</span>
+                              </div>
+                              <span style={{
+                                background: associateName === 'Unassigned' ? '#f1f5f9' : '#dbeafe',
+                                color: associateName === 'Unassigned' ? '#475569' : '#1e40af',
+                                padding: '2px 8px',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: 800
+                              }}>
+                                {count} {count === 1 ? 'resource' : 'resources'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
           )}
 
           {activeTab === 'import' ? (
@@ -2852,93 +3036,7 @@ export default function OffPageSchedulerPage({ user }) {
           boxShadow: 'var(--shadow-sm)',
           padding: 24
         }}>
-          {/* Global Associate Resource Breakdown Card in Main View */}
-          {(() => {
-            const nameMap = new Map();
-            (systemAssociates || []).forEach(name => {
-              if (name && name.trim() && name.toLowerCase() !== 'unassigned') {
-                const key = name.trim().toLowerCase();
-                if (!nameMap.has(key)) {
-                  nameMap.set(key, { name: name.trim(), count: 0 });
-                }
-              }
-            });
-            const hasSystemAssocs = systemAssociates && systemAssociates.length > 0;
-            let totalRes = 0;
-            (filteredImports || []).forEach(imp => {
-              (imp.rowsData || []).forEach(r => {
-                totalRes += 1;
-                const raw = r.publisher && r.publisher.trim() !== '' ? r.publisher.trim() : 'Unassigned';
-                const key = raw.toLowerCase();
-                if (nameMap.has(key)) {
-                  nameMap.get(key).count += 1;
-                } else if (!hasSystemAssocs) {
-                  nameMap.set(key, { name: raw, count: 1 });
-                }
-              });
-            });
-            const globalEntries = Array.from(nameMap.values()).map(item => [item.name, item.count]);
-            if (globalEntries.length === 0) return null;
-            const assignedCount = globalEntries.filter(([n]) => n.toLowerCase() !== 'unassigned').length;
 
-            return (
-              <div style={{
-                background: '#ffffff',
-                border: '1.5px solid #e2e8f0',
-                borderRadius: 14,
-                padding: '16px 20px',
-                marginBottom: 20,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 16,
-                flexWrap: 'wrap',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.03)'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div>
-                    <h4 style={{ margin: 0, fontSize: 14.5, fontWeight: 800, color: 'var(--text-primary)' }}>
-                      
-                    </h4>
-                    <p style={{ margin: '2px 0 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}>
-                      <strong>{assignedCount} Associate(s)</strong> assigned across <strong>{totalRes}</strong> total resources
-                    </p>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  {globalEntries.map(([associateName, count]) => (
-                    <div key={associateName} style={{
-                      background: '#f8fafc',
-                      border: '1px solid #cbd5e1',
-                      borderRadius: 10,
-                      padding: '7px 14px',
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: '#0f172a',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
-                    }}>
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: associateName === 'Unassigned' ? '#94a3b8' : '#2563eb' }} />
-                      <span>{associateName}:</span>
-                      <span style={{ 
-                        background: associateName === 'Unassigned' ? '#f1f5f9' : '#dbeafe', 
-                        color: associateName === 'Unassigned' ? '#475569' : '#1e40af', 
-                        padding: '3px 9px', 
-                        borderRadius: 6, 
-                        fontSize: 12, 
-                        fontWeight: 800 
-                      }}>
-                        {count} resource{count !== 1 ? 's' : ''}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
           {filteredImports.length === 0 ? (
             <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
               {vendorProject ? `No datasets found for project "${vendorProject}".` : 'No spreadsheets imported yet. Click + Import Data to get started.'}
