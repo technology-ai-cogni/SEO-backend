@@ -107,7 +107,7 @@ def evaluate_quora_status_and_remarks(topic_error, scraped_answers, our_answer, 
         return "Audited-LQ", remarks_str, solution
 
     # Everything is fine!
-    return "Audited-Indexed", "Indexed", "fixed"
+    return "Audited-Indexed", "Indexed", "No issues"
 
 async def check_quora_live_link_deleted(page, live_url: str) -> bool:
     """
@@ -194,7 +194,7 @@ def check_quora_http_fallback(live_link: str, topic: str = "", landing_page: str
             html_lower = html_text.lower()
 
             if landing_domain and landing_domain in html_lower:
-                return "Audited-Indexed", "Indexed", "fixed"
+                return "Audited-Indexed", "Indexed", "No issues"
             else:
                 return "Audited-LQ", "Not in Top3", "Quora : Reddit- Add More Upvotes"
 
@@ -283,7 +283,7 @@ class UndetectedQuoraScraper:
     def __init__(self):
         self.driver = None
 
-    async def start(self, use_bright_data=False, headless=False):
+    async def start(self, use_bright_data=False, headless=True):
         print(f"\n[Undetected Chromedriver] Launching undetected Chrome browser (headless={headless})...")
         
         def make_options():
@@ -582,7 +582,7 @@ class QuoraScraper:
         self.context = None
         self.page = None
 
-    async def start(self, use_bright_data=True, headless=False):
+    async def start(self, use_bright_data=True, headless=True):
         self.playwright = await async_playwright().start()
 
         wss_url = os.getenv("BRIGHTDATA_WSS_URL")

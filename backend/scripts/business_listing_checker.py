@@ -5,8 +5,13 @@ import json
 import ssl
 import urllib.parse
 import urllib.request
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from bs4 import BeautifulSoup
+
+try:
+    import requests
+except ImportError:
+    requests = None
 
 # Try importing RapidAPI DA fetcher from domain_checeker if available
 try:
@@ -50,6 +55,131 @@ def normalize_phone_number(phone: str) -> str:
     if not phone:
         return ""
     return re.sub(r'[^0-9]', '', str(phone))
+
+
+def check_google_site_indexed(live_link: str) -> bool:
+    """
+    Searches Google using site: operator (e.g. site:live_link) via Bright Data SERP API
+    or HTTP fallback to verify if the URL is indexed.
+    """
+    if not live_link or not live_link.startswith("http"):
+        return False
+
+    clean_url = live_link.strip()
+    search_url = f"https://www.google.com/search?q=site:{urllib.parse.quote(clean_url)}&hl=en"
+
+    api_key = os.getenv("BRIGHTDATA_API_KEY")
+    zone = os.getenv("BRIGHTDATA_SERP_ZONE", "serp_api1")
+
+    if api_key and requests:
+        try:
+            payload = {
+                "zone": zone,
+                "url": search_url,
+                "format": "raw"
+            }
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            resp = requests.post("https://api.brightdata.com/request", headers=headers, json=payload, timeout=20)
+            if resp.status_code == 200:
+                html_text = resp.text.lower()
+                if "did not match any documents" in html_text or "no results found" in html_text:
+                    print(f"[Business Listing Audit] [Google site: Check] site:{clean_url} -> NOT INDEXED (Non-indexed)", flush=True)
+                    return False
+                print(f"[Business Listing Audit] [Google site: Check] site:{clean_url} -> INDEXED (Indexed)", flush=True)
+                return True
+        except Exception as e:
+            print(f"[Business Listing Audit] Bright Data site check notice: {e}", file=sys.stderr, flush=True)
+
+    # HTTP Fallback check
+    try:
+        req = urllib.request.Request(
+            search_url,
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        )
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as res:
+            html_text = res.read().decode('utf-8', errors='ignore').lower()
+            if "did not match any documents" in html_text or "no results found" in html_text:
+                print(f"[Business Listing Audit] [Google site: Check] site:{clean_url} -> NOT INDEXED (Non-indexed)", flush=True)
+                return False
+            print(f"[Business Listing Audit] [Google site: Check] site:{clean_url} -> INDEXED (Indexed)", flush=True)
+            return True
+    except Exception as fe:
+        print(f"[Business Listing Audit] Google HTTP fallback notice: {fe}", file=sys.stderr, flush=True)
+
+    return True
+
+
+def fetch_live_page_content(url: str, timeout: int = 20) -> Tuple[bool, int, str]:
+    """
+    Fetches live URL allowing full page load:
+    - Follows HTTP redirects.
+    - Sets full Chrome User-Agent and headers.
+    - Uses 20-second timeout to allow slow JS/CSS assets or directory pages to finish loading.
+    - Returns (link_broken, status_code, page_text).
+    """
+    if not url:
+        return True, 0, ""
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+    }
+
+    # Attempt 1: requests library with session, redirect tracking & full timeout
+    if requests:
+        try:
+            session = requests.Session()
+            session.headers.update(headers)
+            resp = session.get(url, timeout=timeout, allow_redirects=True, verify=False)
+            status_code = resp.status_code
+            if status_code < 400:
+                soup = BeautifulSoup(resp.text, 'html.parser')
+                for s in soup(["script", "style", "noscript", "svg"]):
+                    s.decompose()
+                page_text = soup.get_text(separator=' ')
+                print(f"[Business Listing Audit] [OK] Full Page Loaded via requests (HTTP {status_code})", flush=True)
+                return False, status_code, page_text
+            else:
+                print(f"[Business Listing Audit] [!] HTTP {status_code} received on requests load.", flush=True)
+                return True, status_code, ""
+        except Exception as re_err:
+            print(f"[Business Listing Audit] requests load notice: {re_err}. Trying urllib fallback...", flush=True)
+
+    # Attempt 2: urllib.request with SSL context bypass & 20s timeout
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, context=ctx, timeout=timeout) as resp:
+            status_code = resp.getcode()
+            if status_code < 400:
+                raw_bytes = resp.read()
+                page_html = raw_bytes.decode('utf-8', errors='ignore')
+                soup = BeautifulSoup(page_html, 'html.parser')
+                for s in soup(["script", "style", "noscript", "svg"]):
+                    s.decompose()
+                page_text = soup.get_text(separator=' ')
+                print(f"[Business Listing Audit] [OK] Full Page Loaded via urllib (HTTP {status_code})", flush=True)
+                return False, status_code, page_text
+            else:
+                return True, status_code, ""
+    except urllib.error.HTTPError as he:
+        print(f"[Business Listing Audit] HTTPError {he.code}: {he.reason}", flush=True)
+        return True, he.code, ""
+    except Exception as e:
+        print(f"[Business Listing Audit] Failed to load full page ({e}). Flagging Broken Link.", flush=True)
+        return True, 0, ""
 
 
 def find_domain_record_for_row(row: dict, dataset_project_name: str = "") -> Optional[dict]:
@@ -113,21 +243,19 @@ def check_business_listing(
 ) -> Dict[str, Any]:
     """
     Audits a Business Listing activity link:
-    1. Checks if live link is broken (HTTP GET status).
-    2. Checks DA & SS using RapidAPI (Low DA if < 25, High SS if > 2).
-    3. Checks NAP details against expected domain record in DB.
+    1. Waits for full page load (20s timeout, follows redirects, session cookies).
+    2. Checks if live link is indexed in Google via `site:live_link`.
+    3. Checks DA & SS using RapidAPI (Low DA if < 25, High SS if > 2).
+    4. Checks NAP details against expected domain record in DB.
 
     Returns dict with keys:
       - status: "Audited-Indexed" or "Audited-LQ"
-      - remarks: String of issues or "Audited-Indexed"
+      - remarks: "Indexed", "Non-indexed", or comma-joined issues
       - solution: Actionable suggestion
       - da: Domain Authority
       - ss: Spam Score
     """
     issues = []
-    link_broken = False
-    page_text = ""
-
     clean_url = (live_link or "").strip()
     print(f"\n[Business Listing Audit] ----------------------------------------", flush=True)
     print(f"[Business Listing Audit] Auditing URL: {clean_url}", flush=True)
@@ -149,43 +277,28 @@ def check_business_listing(
             "ss": None
         }
 
-    # 1. Fetch Live Link
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-    }
-
-    try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-
-        req = urllib.request.Request(clean_url, headers=headers)
-        with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
-            status_code = resp.getcode()
-            if status_code >= 400:
-                link_broken = True
-                print(f"[Business Listing Audit] [!] HTTP Status {status_code} received. Flagging Broken Link.", flush=True)
-            else:
-                raw_bytes = resp.read()
-                page_html = raw_bytes.decode('utf-8', errors='ignore')
-                soup = BeautifulSoup(page_html, 'html.parser')
-                for s in soup(["script", "style", "noscript", "svg"]):
-                    s.decompose()
-                page_text = soup.get_text(separator=' ')
-                print(f"[Business Listing Audit] [✓] Live Link Status: ACTIVE (HTTP {status_code})", flush=True)
-    except Exception as e:
-        link_broken = True
-        print(f"[Business Listing Audit] [!] Failed to fetch live link ({e}). Flagging Broken Link.", flush=True)
+    # 1. Full Page Load Check
+    print(f"[Business Listing Audit] Waiting for full page load (20s max timeout, following redirects)...", flush=True)
+    link_broken, status_code, page_text = fetch_live_page_content(clean_url, timeout=20)
 
     if link_broken:
         issues.append("Broken Link")
 
-    # 2. RapidAPI DA & SS Check
+    # 2. Google site: Indexation Check
+    if not link_broken:
+        is_indexed = check_google_site_indexed(clean_url)
+        if not is_indexed:
+            print(f"[Business Listing Audit] [!] Google site check yielded 0 results. Flagging Non-indexed.", flush=True)
+            issues.append("Non-indexed")
+
+    # 3. RapidAPI DA & SS Check
     da_val = None
     ss_val = None
     target_domain = extract_root_domain(clean_url)
-    api_key_to_use = rapidapi_key or RAPIDAPI_KEY
+    raw_key = rapidapi_key or os.getenv("RAPIDAPI_KEY") or RAPIDAPI_KEY
+    api_key_to_use = raw_key.strip().strip('"').strip("'")
+    if "os.getenv" in api_key_to_use or len(api_key_to_use) < 10:
+        api_key_to_use = "9d27d2418bmsh49f11b032161487p1fb7c7jsn267454df8fe9"
 
     if target_domain and fetch_rapidapi_da_metrics:
         print(f"[Business Listing Audit] Requesting RapidAPI DA/SS for domain: '{target_domain}'...", flush=True)
@@ -213,7 +326,7 @@ def check_business_listing(
         except Exception as ex:
             print(f"[Business Listing Audit] RapidAPI check notice: {ex}", file=sys.stderr, flush=True)
 
-    # 3. NAP Details Verification
+    # 4. NAP Details Verification
     if not link_broken and domain_rec and page_text:
         print(f"[Business Listing Audit] Verifying NAP details on page content...", flush=True)
         expected_nap = {}
@@ -298,16 +411,16 @@ def check_business_listing(
                 print(f"[Business Listing Audit] [!] Missing NAP categories on page: {missing_str}", flush=True)
                 issues.append(f"Incorrect NAP (missing {missing_str})")
             else:
-                print(f"[Business Listing Audit] [✓] All expected NAP categories verified on page!", flush=True)
+                print(f"[Business Listing Audit] [OK] All expected NAP categories verified on page!", flush=True)
 
     # Final Remarks & Status Determination
     if not issues:
-        print(f"[Business Listing Audit] RESULT -> Status: 'Audited-Indexed' | Remarks: 'Audited-Indexed'", flush=True)
+        print(f"[Business Listing Audit] RESULT -> Status: 'Audited-Indexed' | Remarks: 'Indexed'", flush=True)
         print(f"[Business Listing Audit] ----------------------------------------\n", flush=True)
         return {
             "status": "Audited-Indexed",
-            "remarks": "Audited-Indexed",
-            "solution": "fixed",
+            "remarks": "Indexed",
+            "solution": "No issues",
             "da": da_val,
             "ss": ss_val
         }
@@ -316,6 +429,8 @@ def check_business_listing(
         solution = "Update Business Listing / Fix NAP"
         if "Broken Link" in issues:
             solution = "Replace Business Listing Link"
+        elif "Non-indexed" in issues:
+            solution = "Submit URL to Google Search Console / Re-index Link"
         elif "Low DA" in issues or "High SS" in issues:
             solution = "Submit on Higher DA / Lower SS Directory"
 

@@ -340,7 +340,7 @@ async def check_paid_guest_post(
         # 8. All checks pass
         result["status"] = "Audited-Indexed"
         result["remarks"] = "Indexed"
-        result["solution"] = "fixed"
+        result["solution"] = "No issues"
 
     except Exception as e:
         print(f"[Guest Post Checker Error] {e}")
@@ -428,7 +428,7 @@ def _check_with_requests(
         else:
             result["status"] = "Audited-Indexed"
             result["remarks"] = "Indexed"
-            result["solution"] = "fixed"
+            result["solution"] = "No issues"
 
     except Exception as e:
         result["is_broken"] = True

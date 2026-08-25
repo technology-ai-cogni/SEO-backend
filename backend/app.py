@@ -493,7 +493,7 @@ def run_audit_allocation_endpoint(payload: AuditAllocationRequest):
     """
     try:
         imports = db.list_monthly_imports()
-        target_imports = [imp for imp in imports if imp["id"] == payload.dataset_id] if payload.dataset_id else imports
+        target_imports = [imp for imp in imports if str(imp.get("id")) == str(payload.dataset_id)] if payload.dataset_id else imports
 
         total_allocated = 0
         for imp in target_imports:
@@ -635,9 +635,9 @@ async def _do_quora_single_audit_coro(qc_mod, topic, live_link, landing_page):
 
     scr = None
     try:
-        print(f"[Quora Scraper] Launching headful Chromium browser window (headless=False) in Proactor thread...", flush=True)
+        print(f"[Quora Scraper] Launching headless Chromium browser window (headless=True) in Proactor thread...", flush=True)
         scr = QuoraScraperCls()
-        await scr.start(use_bright_data=False, headless=False)
+        await scr.start(use_bright_data=False, headless=True)
         try:
             await scr.login_quora()
         except Exception as le:
@@ -704,7 +704,7 @@ async def _do_quora_single_audit_coro(qc_mod, topic, live_link, landing_page):
             if live_deleted:
                 return "Audited-LQ", "Answer Deleted", "Quora : Reddit- Post New Answer"
             elif our_answer and our_rank and our_rank <= 3:
-                return "Audited-Indexed", "Indexed", "fixed"
+                return "Audited-Indexed", "Indexed", "No issues"
             else:
                 return "Audited-LQ", "Not in Top3", "Quora : Reddit- Add More Upvotes"
 
@@ -723,7 +723,7 @@ async def _do_quora_single_audit_coro(qc_mod, topic, live_link, landing_page):
 
 async def _do_status_check_stream_gen(dataset_id: Optional[int], rows_payload: Optional[List[Dict[str, Any]]]):
     imports = db.list_monthly_imports()
-    target_imports = [imp for imp in imports if imp["id"] == dataset_id] if dataset_id else imports
+    target_imports = [imp for imp in imports if str(imp.get("id")) == str(dataset_id)] if dataset_id else imports
 
     if not target_imports and rows_payload:
         target_imports = [{"id": dataset_id or 0, "rowsData": rows_payload}]
@@ -930,7 +930,7 @@ async def _do_status_check_stream_gen(dataset_id: Optional[int], rows_payload: O
                 await asyncio.sleep(0.01)
 
     finally:
-        if scraper:
+        if 'scraper' in locals() and scraper:
             try:
                 await scraper.close()
             except Exception:

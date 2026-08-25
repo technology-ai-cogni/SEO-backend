@@ -61,7 +61,10 @@ def fetch_rapidapi_da_metrics(target_info: dict, rapidapi_key: str = None) -> di
     Domain Rating (DR), and Total Organic Traffic using RapidAPI bulk-da-pa-checker2 endpoint.
     """
     domain = target_info["domain"]
-    api_key = rapidapi_key or RAPIDAPI_KEY
+    raw_key = rapidapi_key or os.getenv("RAPIDAPI_KEY") or RAPIDAPI_KEY
+    api_key = raw_key.strip().strip('"').strip("'")
+    if "os.getenv" in api_key or len(api_key) < 10:
+        api_key = "9d27d2418bmsh49f11b032161487p1fb7c7jsn267454df8fe9"
 
     conn = http.client.HTTPSConnection(RAPIDAPI_HOST)
     payload = f"domains={domain}"

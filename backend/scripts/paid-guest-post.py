@@ -326,7 +326,7 @@ async def check_paid_guest_post(
         else:
             result["status"] = "Audited-Indexed"
             result["remarks"] = "Indexed"
-            result["solution"] = "fixed"
+            result["solution"] = "No issues"
 
     except Exception as e:
         print(f"[Guest Post Checker] Playwright error: {e}. Falling back to HTTP check...")
@@ -501,7 +501,7 @@ def _check_with_requests(
     else:
         result["status"] = "Audited-Indexed"
         result["remarks"] = "Indexed"
-        result["solution"] = "fixed"
+        result["solution"] = "No issues"
 
     return result
 

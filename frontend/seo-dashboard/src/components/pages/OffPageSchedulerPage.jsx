@@ -1206,7 +1206,7 @@ export default function OffPageSchedulerPage({ user }) {
       const freshImports = await fetchMonthlyImportsApi();
       setImports(freshImports);
       if (selectedDataset) {
-        const updatedDs = freshImports.find(imp => imp.id === selectedDataset.id || imp.project === selectedDataset.project);
+        const updatedDs = freshImports.find(imp => String(imp.id) === String(selectedDataset.id) || (imp.project && selectedDataset.project && imp.project.toLowerCase() === selectedDataset.project.toLowerCase()));
         if (updatedDs) setSelectedDataset(updatedDs);
       }
       setAuditSuccessMsg(res.message || 'Equal resource allocation completed across all associates!');
