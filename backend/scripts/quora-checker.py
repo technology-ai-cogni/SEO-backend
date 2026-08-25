@@ -72,8 +72,10 @@ def evaluate_quora_status_and_remarks(topic_error, scraped_answers, our_answer, 
     max_top3_upvotes = max(top3_upvote_vals) if top3_upvote_vals else 0
     our_upvotes = parse_upvote_val(our_answer.get("upvotes")) if our_answer else 0
 
-    if our_upvotes < max_top3_upvotes or our_upvotes == 0:
+    if our_upvotes == 0:
         issues.append("No upvotes")
+    elif our_upvotes < max_top3_upvotes:
+        issues.append("Less upvotes")
 
     # 4. Brand Mention
     if our_answer:
