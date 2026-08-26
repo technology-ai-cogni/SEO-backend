@@ -2346,11 +2346,20 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
             const liveMentionedKws = visibilityData.mentioned_keywords || [];
             const liveCitedPagesList = visibilityData.cited_pages_list || [];
 
-            // Group unique URLs and count citations
+            // Group unique URLs and count citations (mapping to real project pages)
             const uniqueCitedUrlsMap = new Map();
             liveCitedPagesList.forEach(item => {
               const match = item.match(/https?:\/\/[^\s]+/i);
-              const url = match ? match[0].trim() : item.trim();
+              let url = match ? match[0].trim() : item.trim();
+
+              const itemKwMatch = item.includes(' - ') ? item.split(' - ')[0].trim().toLowerCase() : '';
+              if (itemKwMatch && topKeywords && topKeywords.length > 0) {
+                const foundKwRow = topKeywords.find(k => String(k.kw || k.keyword || '').trim().toLowerCase() === itemKwMatch);
+                if (foundKwRow && (foundKwRow.landingPage || foundKwRow.page_url || foundKwRow.url)) {
+                  url = foundKwRow.landingPage || foundKwRow.page_url || foundKwRow.url;
+                }
+              }
+
               if (url) {
                 uniqueCitedUrlsMap.set(url, (uniqueCitedUrlsMap.get(url) || 0) + 1);
               }

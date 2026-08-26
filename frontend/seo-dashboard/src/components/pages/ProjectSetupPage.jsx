@@ -6838,7 +6838,7 @@ export default function ProjectSetupPage({ tab, user }) {
       return;
     }
 
-    const targetRegions = activeProject?.target_regions || ['in', 'us', 'uk'];
+    const targetRegions = activeProject?.target_regions || null;
 
     if (outreachCsvRows.length > 0) {
       setAddingOutreach(true);
@@ -6905,7 +6905,7 @@ export default function ProjectSetupPage({ tab, user }) {
 
     setAddingOutreach(true);
     try {
-      const targetRegions = activeProject?.target_regions || ['in', 'us', 'uk'];
+      const targetRegions = activeProject?.target_regions || null;
       const newSite = await addOutreachSiteApi(pSlug, link, targetRegions, newOutreachType || 'Paid Guest');
       const mappedSite = {
         id: newSite.id,

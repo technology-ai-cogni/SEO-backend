@@ -138,7 +138,7 @@ def generate_content_with_retry(model: str, contents, config, max_attempts=2):
                     completion = o_client.chat.completions.create(
                         model=os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
                         messages=messages,
-                        temperature=0.3
+                        temperature=0.0
                     )
                     class FallbackResp:
                         def __init__(self, text):
@@ -448,7 +448,7 @@ class GeminiAgent(BaseAgent):
                 config=gtypes.GenerateContentConfig(
                     system_instruction=system_prompt,
                     thinking_config=gtypes.ThinkingConfig(thinking_budget=0),
-                    temperature=0.3,
+                    temperature=0.0,
                     max_output_tokens=700,
                     http_options=gtypes.HttpOptions(timeout=120000),
                 )

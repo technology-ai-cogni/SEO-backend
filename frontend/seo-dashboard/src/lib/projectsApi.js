@@ -2731,3 +2731,94 @@ export async function runOrganicRankCheckApi(projectSlug, country = 'India') {
   return await res.json();
 }
 
+
+// Off-Page Activities API
+export async function listOffPageActivitiesApi() {
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/off-page-activities`);
+    if (res.ok) {
+      const data = await res.json();
+      return data.activities || data.data || [];
+    }
+  } catch (e) {
+    console.warn('[listOffPageActivitiesApi] Backend unavailable, trying Supabase:', e);
+  }
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('off_page_activities')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error) return data || [];
+    } catch (e) {
+      console.warn('[listOffPageActivitiesApi] Supabase fetch error:', e);
+    }
+  }
+  return [];
+}
+
+
+export async function createOffPageActivityApi(payload) {
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/off-page-activities`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.activity || data;
+    }
+  } catch (e) {
+    console.warn('[createOffPageActivityApi] Backend unavailable:', e);
+  }
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('off_page_activities').insert([payload]).select();
+      if (!error && data && data.length > 0) return data[0];
+    } catch (e) {
+      console.warn('[createOffPageActivityApi] Supabase insert failed:', e);
+    }
+  }
+  return { id: Date.now(), ...payload };
+}
+
+export async function updateOffPageActivityApi(id, updates) {
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/off-page-activities/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+    if (res.ok) return await res.json();
+  } catch (e) {
+    console.warn('[updateOffPageActivityApi] Backend unavailable:', e);
+  }
+  if (supabase) {
+    try {
+      await supabase.from('off_page_activities').update(updates).eq('id', id);
+    } catch (e) {
+      console.warn('[updateOffPageActivityApi] Supabase update failed:', e);
+    }
+  }
+  return { id, ...updates };
+}
+
+export async function deleteOffPageActivityApi(id) {
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/off-page-activities/${id}`, {
+      method: 'DELETE'
+    });
+    if (res.ok) return await res.json();
+  } catch (e) {
+    console.warn('[deleteOffPageActivityApi] Backend unavailable:', e);
+  }
+  if (supabase) {
+    try {
+      await supabase.from('off_page_activities').delete().eq('id', id);
+    } catch (e) {
+      console.warn('[deleteOffPageActivityApi] Supabase delete failed:', e);
+    }
+  }
+  return { id };
+}

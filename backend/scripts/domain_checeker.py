@@ -12,7 +12,7 @@ RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "9d27d2418bmsh49f11b032161487p1fb7c7jsn
 RAPIDAPI_HOST = "bulk-da-pa-checker2.p.rapidapi.com"
 
 # SE Ranking API Key from project .env (used ONLY for regional breakdown)
-SERANKING_API_KEY = os.getenv("SERANKING_API_KEY", "0bc19e9b-edc7-4032-710a-8dcbf6710190")
+SERANKING_API_KEY = os.getenv("SERANKING_API_KEY", "3847ddf8-428d-4849-b0df-8fe5faa3bacb")
 SERANKING_BASE_URL = "https://api.seranking.com/v1"
 
 COUNTRY_NAMES = {
@@ -115,70 +115,122 @@ def fetch_rapidapi_da_metrics(target_info: dict, rapidapi_key: str = None) -> di
         conn.close()
 
 
+import pycountry
+
+def get_country_display_name(code: str) -> str:
+    """Dynamically resolve 2-letter ISO country code to full country name."""
+    code_upper = code.strip().upper()
+    try:
+        match = pycountry.countries.get(alpha_2=code_upper)
+        if match:
+            return f"{match.name} [{code_upper}]"
+    except Exception:
+        pass
+    return COUNTRY_NAMES.get(code.strip().lower(), f"{code_upper} Database")
+
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def extract_tld_country(domain: str) -> str:
+    """Extract country code from domain TLD (e.g., azerbaijan.az -> az, brand.co.uk -> uk)."""
+    parts = domain.lower().strip().split('.')
+    if len(parts) > 1:
+        tld = parts[-1]
+        if len(tld) == 2 and tld not in ['com', 'org', 'net', 'edu', 'gov', 'biz']:
+            return tld
+        if len(parts) > 2 and len(parts[-2]) == 2:
+            return parts[-2]
+    return None
+
+
+import time
+
 def fetch_seranking_regional_traffic(target_info: dict, regions: list = None, api_key: str = None) -> list:
     """
-    Fetch traffic breakdown BY REGION using SE Ranking API solely for regional context.
+    Fetch traffic breakdown dynamically across all top global databases using SE Ranking API.
+    Always includes home country TLD detection + high speed concurrent database lookup.
     """
     if not api_key:
         api_key = SERANKING_API_KEY
-    if not regions:
-        regions = ["in", "us", "uk", "ca", "au"]
 
-    results = []
-    url = f"{SERANKING_BASE_URL}/domain/overview/db"
+    domain = target_info['domain']
+
+    # Candidate pool covering all major regional search markets globally
+    tld_country = extract_tld_country(domain)
+    candidate_pool = ["us", "in", "uk", "ru", "tr", "de", "fr", "ge", "kz", "ca", "au", "br", "es", "it", "jp", "sg", "ae", "nl", "mx", "id", "sa", "eg", "za", "pl", "se", "ch", "at", "be", "no", "az"]
     
+    if tld_country:
+        if tld_country in candidate_pool:
+            candidate_pool.remove(tld_country)
+        candidate_pool.insert(0, tld_country)
+
+    if regions and isinstance(regions, list):
+        for r in regions:
+            r_clean = str(r).strip().lower()
+            if r_clean and r_clean not in candidate_pool:
+                candidate_pool.append(r_clean)
+
+    regions = candidate_pool
+
+    url = f"{SERANKING_BASE_URL}/domain/overview/db"
     headers = {
         "Authorization": f"Token {api_key}",
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
 
-    for region in regions:
-        region_code = region.strip().lower()
-        full_url = f"{url}?domain={quote(target_info['domain'])}&source={region_code}&with_subdomains=1"
+    def fetch_single_region(region_code_str):
+        code = region_code_str.strip().lower()
+        full_url = f"{url}?domain={quote(domain)}&source={code}&with_subdomains=1"
         req = Request(full_url, headers=headers)
         
-        try:
-            with urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-                raw = data.get("data", data)
-                
-                org_obj = raw.get("organic", {})
-                if isinstance(org_obj, dict):
-                    org_traffic = org_obj.get("traffic_sum") or org_obj.get("traffic", 0)
-                    org_kw = org_obj.get("keywords_count") or org_obj.get("keywords", 0)
-                else:
-                    org_traffic = raw.get("organic_traffic", 0)
-                    org_kw = raw.get("organic_keywords", 0)
+        for attempt in range(2):
+            try:
+                with urlopen(req, timeout=5) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+                    raw = data.get("data", data)
+                    
+                    org_obj = raw.get("organic", {})
+                    if isinstance(org_obj, dict):
+                        org_traffic = org_obj.get("traffic_sum") or org_obj.get("traffic", 0)
+                        org_kw = org_obj.get("keywords_count") or org_obj.get("keywords", 0)
+                    else:
+                        org_traffic = raw.get("organic_traffic", 0)
+                        org_kw = raw.get("organic_keywords", 0)
 
-                paid_obj = raw.get("paid") or raw.get("adv", {})
-                if isinstance(paid_obj, dict):
-                    paid_traffic = paid_obj.get("traffic_sum") or paid_obj.get("traffic", 0)
-                    paid_kw = paid_obj.get("keywords_count") or paid_obj.get("keywords", 0)
-                else:
-                    paid_traffic = raw.get("paid_traffic", 0)
-                    paid_kw = raw.get("paid_keywords", 0)
+                    paid_obj = raw.get("paid") or raw.get("adv", {})
+                    if isinstance(paid_obj, dict):
+                        paid_traffic = paid_obj.get("traffic_sum") or paid_obj.get("traffic", 0)
+                        paid_kw = paid_obj.get("keywords_count") or paid_obj.get("keywords", 0)
+                    else:
+                        paid_traffic = raw.get("paid_traffic", 0)
+                        paid_kw = raw.get("paid_keywords", 0)
 
-                results.append({
-                    "region_code": region_code.upper(),
-                    "country": COUNTRY_NAMES.get(region_code, f"{region_code.upper()} Database"),
-                    "organic_traffic": org_traffic,
-                    "paid_traffic": paid_traffic,
-                    "total_traffic": org_traffic + paid_traffic,
-                    "organic_keywords": org_kw,
-                    "paid_keywords": paid_kw
-                })
-        except Exception:
-            results.append({
-                "region_code": region_code.upper(),
-                "country": COUNTRY_NAMES.get(region_code, f"{region_code.upper()} Database"),
-                "organic_traffic": 0,
-                "paid_traffic": 0,
-                "total_traffic": 0,
-                "organic_keywords": 0,
-                "paid_keywords": 0
-            })
+                    total_t = org_traffic + paid_traffic
+                    if total_t > 0 or org_kw > 0:
+                        return {
+                            "region_code": code.upper(),
+                            "country": get_country_display_name(code),
+                            "organic_traffic": org_traffic,
+                            "paid_traffic": paid_traffic,
+                            "total_traffic": total_t,
+                            "organic_keywords": org_kw,
+                            "paid_keywords": paid_kw
+                        }
+                    return None
+            except Exception:
+                time.sleep(0.2)
+        return None
 
+    results = []
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(fetch_single_region, r) for r in regions]
+        for future in as_completed(futures):
+            res = future.result()
+            if res:
+                results.append(res)
+
+    # Sort dynamically in descending order of traffic
     results.sort(key=lambda x: x.get("total_traffic", 0), reverse=True)
     return results
 
@@ -199,10 +251,8 @@ def check_domain_metrics(link_input: str, rapidapi_key: str = None, regions: lis
     """
     Analyze a URL/domain:
     - DA, PA, DR, Spam Score, AND Total Traffic STRICTLY from RapidAPI.
-    - Regional Traffic Breakdown strictly from SE Ranking API.
+    - Dynamic Regional Traffic Breakdown strictly from SE Ranking API.
     """
-    if not regions:
-        regions = ["in", "us", "uk", "ca", "au"]
 
     target_info = parse_target(link_input)
     da_data = fetch_rapidapi_da_metrics(target_info, rapidapi_key=rapidapi_key)

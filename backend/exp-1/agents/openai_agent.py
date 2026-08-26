@@ -186,7 +186,8 @@ class OpenAIAgent(BaseAgent):
                     {"role": "system", "content": system_prompt},
                     {"role": "user",   "content": user_prompt},
                 ],
-                temperature=0.3,
+                temperature=0.0,
+                seed=42,
                 max_tokens=500,
             )
             return resp.choices[0].message.content.strip()
@@ -255,7 +256,10 @@ class OpenAIAgent(BaseAgent):
                     messages=[
                         {"role": "system", "content": system_msg},
                         {"role": "user", "content": user_prompt}
-                    ]
+                    ],
+                    temperature=0.0,
+                    seed=42,
+                    response_format={"type":"json_object"}
                 )
             except Exception as model_err:
                 print(f"[OpenAIAgent] Primary model failed ({model_err}), falling back to gpt-4o", file=sys.stderr, flush=True)

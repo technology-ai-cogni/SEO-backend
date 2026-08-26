@@ -135,7 +135,7 @@ def generate_content_with_retry(model: str, contents, config, max_attempts=2):
                     completion = o_client.chat.completions.create(
                         model=os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
                         messages=messages,
-                        temperature=0.3
+                        temperature=0.0
                     )
                     class FallbackResp:
                         def __init__(self, text):
@@ -275,7 +275,7 @@ class AIOAgent(BaseAgent):
         """
         import json
         if not keywords:
-            keywords = ["dog dental chews", "dental chews for dogs"]
+            keywords = []
 
         keywords_slice = keywords
         domain_clean = client_domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0] if client_domain else "dogseechew.in"
@@ -426,7 +426,7 @@ class AIOAgent(BaseAgent):
             resp = generate_content_with_retry(
                 model=SUMMARY_MODEL,
                 contents=f"{system_prompt}\n\n{user_prompt}",
-                config=gtypes.GenerateContentConfig(temperature=0.3)
+                config=gtypes.GenerateContentConfig(temperature=0.0)
             )
             return resp.text.strip()
         except Exception as e:
