@@ -263,6 +263,7 @@ function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
     napBcWebsite: row.nap_bc_website || null,
     napBcAddress: row.nap_bc_address || null,
     napBcEmail: row.nap_bc_email || null,
+    businessCentres: row.business_centres || null,
     brandedTerms: row.branded_terms || null,
   };
 }
@@ -429,7 +430,7 @@ export async function fetchDomainRows() {
   return mergedDomains.map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
 }
 
-export async function createProject({ name, domain, regions, platforms, da, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, nap_bc_phone, nap_bc_website, nap_bc_address, nap_bc_email, branded_terms, users }) {
+export async function createProject({ name, domain, regions, platforms, da, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, nap_bc_phone, nap_bc_website, nap_bc_address, nap_bc_email, business_centres, branded_terms, users }) {
   const slug = slugify(name);
 
   if (isLocalMode) {
@@ -462,6 +463,7 @@ export async function createProject({ name, domain, regions, platforms, da, nap_
       nap_bc_website: nap_bc_website || null,
       nap_bc_address: nap_bc_address || null,
       nap_bc_email: nap_bc_email || null,
+      business_centres: business_centres || null,
       branded_terms: branded_terms || null,
       users: users || [],
       traffic: '0',
@@ -497,6 +499,7 @@ export async function createProject({ name, domain, regions, platforms, da, nap_
         nap_bc_website: nap_bc_website || null,
         nap_bc_address: nap_bc_address || null,
         nap_bc_email: nap_bc_email || null,
+        business_centres: business_centres || null,
         branded_terms: branded_terms || null,
         users: users || [],
       }),
@@ -529,6 +532,11 @@ export async function createProject({ name, domain, regions, platforms, da, nap_
         nap_website: nap_website || null,
         nap_address: nap_address || null,
         nap_email: nap_email || null,
+        nap_bc_phone: nap_bc_phone || null,
+        nap_bc_website: nap_bc_website || null,
+        nap_bc_address: nap_bc_address || null,
+        nap_bc_email: nap_bc_email || null,
+        business_centres: business_centres || null,
         branded_terms: branded_terms || null,
         users: users || [],
         traffic: '0',
@@ -594,6 +602,7 @@ export async function updateDomainRow(id, updates) {
     if ('napBcWebsite' in updates) dbUpdates.nap_bc_website = updates.napBcWebsite;
     if ('napBcAddress' in updates) dbUpdates.nap_bc_address = updates.napBcAddress;
     if ('napBcEmail' in updates) dbUpdates.nap_bc_email = updates.napBcEmail;
+    if ('businessCentres' in updates) dbUpdates.business_centres = updates.businessCentres;
     if ('brandedTerms' in updates) dbUpdates.branded_terms = updates.brandedTerms;
 
     domains[index] = dbUpdates;
@@ -624,6 +633,7 @@ export async function updateDomainRow(id, updates) {
   if ('napBcWebsite' in updates) dbUpdates.nap_bc_website = updates.napBcWebsite;
   if ('napBcAddress' in updates) dbUpdates.nap_bc_address = updates.napBcAddress;
   if ('napBcEmail' in updates) dbUpdates.nap_bc_email = updates.napBcEmail;
+  if ('businessCentres' in updates) dbUpdates.business_centres = updates.businessCentres;
   if ('brandedTerms' in updates) dbUpdates.branded_terms = updates.brandedTerms;
 
   const { data, error } = await supabase.from('domains').update(dbUpdates).eq('id', id).select().single();

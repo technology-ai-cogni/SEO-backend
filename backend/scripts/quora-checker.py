@@ -43,6 +43,15 @@ def parse_upvote_val(val):
         return 0
     val_str = str(val).strip().upper()
     try:
+        import re
+        match = re.search(r'([\d\.]+[KMBkmb]?)', val_str)
+        if match:
+            v = match.group(1).upper()
+            if 'K' in v:
+                return int(float(v.replace('K', '')) * 1000)
+            if 'M' in v:
+                return int(float(v.replace('M', '')) * 1000000)
+            return int(float(v))
         if 'K' in val_str:
             return int(float(val_str.replace('K', '')) * 1000)
         if 'M' in val_str:
@@ -51,7 +60,7 @@ def parse_upvote_val(val):
     except Exception:
         return 0
 
-def evaluate_quora_status_and_remarks(topic_error, scraped_answers, our_answer, our_rank, landing_page="", landing_domain="", live_link_deleted=False):
+def evaluate_quora_status_and_remarks(topic_error, scraped_answers, our_answer, our_rank, landing_page="", landing_domain="", live_link_deleted=False, direct_live_upvotes="0"):
     """
     Evaluates Quora thread check results and returns (status, remarks, solution).
     Collects ALL detected issues into remarks.
@@ -70,7 +79,14 @@ def evaluate_quora_status_and_remarks(topic_error, scraped_answers, our_answer, 
     top3_answers = scraped_answers[:3] if scraped_answers else []
     top3_upvote_vals = [parse_upvote_val(a.get("upvotes")) for a in top3_answers]
     max_top3_upvotes = max(top3_upvote_vals) if top3_upvote_vals else 0
-    our_upvotes = parse_upvote_val(our_answer.get("upvotes")) if our_answer else 0
+
+    raw_upvote_str = our_answer.get("upvotes", "0") if our_answer else "0"
+    if parse_upvote_val(raw_upvote_str) == 0 and parse_upvote_val(direct_live_upvotes) > 0:
+        raw_upvote_str = direct_live_upvotes
+
+    our_upvotes = parse_upvote_val(raw_upvote_str)
+
+    print(f"[Quora Audit] [Upvote Metrics] Our Rank: {our_rank or 'Not Found'} | Our Upvotes: '{raw_upvote_str}' (numeric: {our_upvotes}) | Top 3 Max Upvotes: {max_top3_upvotes}", flush=True)
 
     if our_upvotes == 0:
         issues.append("No upvotes")
@@ -111,15 +127,13 @@ def evaluate_quora_status_and_remarks(topic_error, scraped_answers, our_answer, 
     # Everything is fine!
     return "Audited-Indexed", "Indexed", "No issues"
 
-async def check_quora_live_link_deleted(page, live_url: str) -> bool:
+async def check_quora_live_link_deleted(page, live_url: str) -> Tuple[bool, str]:
     """
-    Directly checks if a Quora live link answer is deleted.
-    Looks specifically for:
-    '<div class="q-text qu-dynamicFontSize--large qu-bold qu-mt--medium" style="box-sizing: border-box;">Quora deleted this answer.</div>'
-    or text containing 'Quora deleted this answer.' / 'deleted this answer'.
+    Directly checks if a Quora live link answer is deleted AND extracts our answer's upvotes directly.
+    Returns (is_deleted, extracted_upvotes_str).
     """
     if not live_url or not isinstance(live_url, str) or not live_url.startswith("http"):
-        return False
+        return False, "0"
 
     try:
         print(f"[Live Link Check] Navigating directly to live link: {live_url}...")
@@ -128,7 +142,7 @@ async def check_quora_live_link_deleted(page, live_url: str) -> bool:
 
         if response and response.status in [404, 410]:
             print(f"[Live Link Check] HTTP {response.status} returned for {live_url}.")
-            return True
+            return True, "0"
 
         # Check for EXACT Quora deletion element banner
         is_deleted = await page.evaluate("""() => {
@@ -150,13 +164,34 @@ async def check_quora_live_link_deleted(page, live_url: str) -> bool:
 
         if is_deleted:
             print(f"[Live Link Check] 'Quora deleted this answer' banner detected on {live_url}!")
-            return True
+            return True, "0"
 
-        print(f"[Live Link Check] Live link is available: {live_url}")
-        return False
+        # Extract direct upvotes for our answer from live link page
+        direct_upvotes = await page.evaluate("""() => {
+            let candidates = Array.from(document.querySelectorAll('.puppeteer_test_button_text, [aria-label*="Upvote"], [aria-label*="upvote"], button, div[role="button"]'));
+            let upvoteBtns = candidates.filter(el => {
+                let txt = el.innerText || el.textContent || "";
+                let label = el.getAttribute('aria-label') || "";
+                return /upvote/i.test(txt) || /upvote/i.test(label) || el.classList.contains('puppeteer_test_button_text');
+            });
+            let topBtns = upvoteBtns.filter(b => !upvoteBtns.some(other => other !== b && other.contains(b)));
+
+            for (let btn of topBtns) {
+                let clone = btn.cloneNode(true);
+                let hiddenSpans = clone.querySelectorAll('.qu-visibility--hidden, .qu-display--none, [style*="opacity: 0"], [style*="opacity:0"], [style*="display: none"], [style*="display:none"]');
+                hiddenSpans.forEach(h => h.remove());
+                let btnTxt = (clone.innerText || clone.textContent || "").replace(/upvote[s]?/gi, '').replace(/[·\\•]/g, '').trim();
+                let match = btnTxt.match(/([\\d\\.]+[KMBkmb]?)/);
+                if (match && match[1]) return match[1];
+            }
+            return "0";
+        }""")
+
+        print(f"[Live Link Check] Live link is available: {live_url} (Extracted Upvotes: '{direct_upvotes}')")
+        return False, direct_upvotes
     except Exception as e:
         print(f"[Live Link Check] Exception checking {live_url}: {str(e)}")
-        return False
+        return False, "0"
 
 
 def check_quora_http_fallback(live_link: str, topic: str = "", landing_page: str = "") -> Tuple[str, str, str]:
@@ -198,11 +233,11 @@ def check_quora_http_fallback(live_link: str, topic: str = "", landing_page: str
             if landing_domain and landing_domain in html_lower:
                 return "Audited-Indexed", "Indexed", "No issues"
             else:
-                return "Audited-LQ", "Not in Top3", "Quora : Reddit- Add More Upvotes"
+                return "Audited-LQ", "Not in Top3, No upvotes", "Quora : Reddit- Add More Upvotes"
 
     except Exception as e:
         print(f"[Quora HTTP Check Notice] {check_url}: {e}")
-        return "Audited-LQ", "Not in Top3", "Quora : Reddit- Add More Upvotes"
+        return "Audited-LQ", "Not in Top3, No upvotes", "Quora : Reddit- Add More Upvotes"
 
 async def analyze_gap(topic, top_answer, our_answer):
     """Use OpenAI to compare the top answer with our answer."""
@@ -495,68 +530,83 @@ class UndetectedQuoraScraper:
 
             extract_script = """(expectedPrefix) => {
                 const results = [];
+                const seenContainers = new Set();
                 const seenPaths = new Set();
-                let links = Array.from(document.querySelectorAll('a[href*="/answer/"], a[href*="/profile/"]'));
                 
-                for (let link of links) {
-                    let href = link.getAttribute('href');
-                    if (!href) continue;
+                let upvoteBtns = Array.from(document.querySelectorAll('.puppeteer_test_button_text, button[aria-label*="Upvote"], button[aria-label*="upvote"], div[aria-label*="Upvote"], div[aria-label*="upvote"]'));
+                let topBtns = upvoteBtns.filter(b => !upvoteBtns.some(other => other !== b && other.contains(b)));
+
+                for (let btn of topBtns) {
+                    let clone = btn.cloneNode(true);
+                    let hiddenSpans = clone.querySelectorAll('.qu-visibility--hidden, .qu-display--none, [style*="opacity: 0"], [style*="opacity:0"], [style*="display: none"], [style*="display:none"]');
+                    hiddenSpans.forEach(h => h.remove());
                     
-                    let urlObj;
-                    try {
-                        urlObj = new URL(href, window.location.origin);
-                    } catch(e) { continue; }
+                    let btnTxt = (clone.innerText || clone.textContent || "").replace(/upvote[s]?/gi, '').replace(/[·\•]/g, '').trim();
+                    let match = btnTxt.match(/([\\d\\.]+[KMBkmb]?)/);
+                    let upvotes = (match && match[1]) ? match[1] : "0";
                     
-                    let path = urlObj.pathname.replace(/^\\//, '');
-                    if (href.includes('/answer/') && expectedPrefix && !path.toLowerCase().includes(expectedPrefix.toLowerCase())) continue;
+                    let container = btn;
+                    for (let i = 0; i < 15; i++) {
+                        if (!container || container === document.body) break;
+                        let links = container.querySelectorAll('a[href*="/answer/"], a[href*="/profile/"]');
+                        if (links && links.length > 0) break;
+                        container = container.parentElement;
+                    }
+                    if (!container || seenContainers.has(container)) continue;
+                    seenContainers.add(container);
+                    
+                    let profileLink = container.querySelector('a[href*="/profile/"]');
+                    let answerLink = container.querySelector('a[href*="/answer/"]');
+                    let targetLink = answerLink || profileLink;
+                    if (!targetLink) continue;
+                    
+                    let href = targetLink.getAttribute('href');
+                    let path = href.replace(/^https?:\\/\\/[^\\/]+\\//, '').replace(/^\\//, '');
                     if (seenPaths.has(path)) continue;
                     seenPaths.add(path);
                     
-                    let container = link;
-                    let upvotes = "0";
-                    for (let i = 0; i < 15; i++) {
-                        if (!container || container === document.body) break;
-                        let upvoteBtn = Array.from(container.querySelectorAll('button')).find(b => 
-                            (b.innerText && b.innerText.includes('Upvote')) || 
-                            (b.getAttribute('aria-label') && b.getAttribute('aria-label').includes('Upvote')) ||
-                            (b.innerText && b.innerText.includes('upvote'))
-                        );
-                        if (upvoteBtn) {
-                            let txt = upvoteBtn.innerText || "";
-                            let match = txt.match(/([\\d\\.]+[KMBkmb]?)/);
-                            if (match) upvotes = match[1];
-                            break; 
-                        }
-                        container = container.parentElement;
-                    }
-                    
                     let externalLinks = [];
-                    let authorUrl = "";
-                    if (container) {
-                        let innerLinks = container.querySelectorAll('a[href]');
-                        for (let a of innerLinks) {
-                            let aHref = a.getAttribute('href');
-                            if (!aHref) continue;
-                            if (aHref.includes('quora.com') && (aHref.includes('/profile/') || aHref.includes('/answer/'))) {
-                                if (!authorUrl && aHref.includes('/profile/')) authorUrl = aHref;
-                            } else if (!aHref.startsWith('#') && !aHref.startsWith('javascript:') && !aHref.includes('quora.com')) {
-                                externalLinks.push(aHref);
-                            }
+                    let authorUrl = profileLink ? profileLink.href : "";
+                    let innerLinks = container.querySelectorAll('a[href]');
+                    for (let a of innerLinks) {
+                        let aHref = a.getAttribute('href');
+                        if (!aHref) continue;
+                        if (aHref.includes('quora.com') && aHref.includes('/profile/')) {
+                            if (!authorUrl) authorUrl = a.href;
+                        } else if (!aHref.startsWith('#') && !aHref.startsWith('javascript:') && !aHref.includes('quora.com')) {
+                            externalLinks.push(aHref);
                         }
                     }
-
-                    let text = container ? container.innerText : "";
-                    if (text.length > 3000) text = text.substring(0, 3000);
                     
+                    let text = container.innerText || container.textContent || "";
                     results.push({
                         url: path,
-                        full_url: link.href || ("https://www.quora.com/" + path),
+                        full_url: targetLink.href || ("https://www.quora.com/" + path),
                         author_url: authorUrl,
                         upvotes: upvotes,
-                        text: text,
+                        text: text.substring(0, 3000),
                         external_links: externalLinks
                     });
                 }
+
+                let links = Array.from(document.querySelectorAll('a[href*="/answer/"], a[href*="/profile/"]'));
+                for (let link of links) {
+                    let href = link.getAttribute('href');
+                    if (!href) continue;
+                    let path = href.replace(/^https?:\\/\\/[^\\/]+\\//, '').replace(/^\\//, '');
+                    if (seenPaths.has(path)) continue;
+                    seenPaths.add(path);
+                    
+                    results.push({
+                        url: path,
+                        full_url: link.href,
+                        author_url: href.includes('/profile/') ? link.href : "",
+                        upvotes: "0",
+                        text: link.innerText || "",
+                        external_links: []
+                    });
+                }
+                
                 return results;
             }"""
 
@@ -776,122 +826,83 @@ class QuoraScraper:
             # JS Evaluation to extract all answers, their text, and upvotes
             extract_script = """(expectedPrefix) => {
                 const results = [];
-                const seenPaths = new Set();
                 const seenContainers = new Set();
+                const seenPaths = new Set();
                 
-                let links = Array.from(document.querySelectorAll('a[href*="/answer/"], a[href*="/profile/"]'));
-                
-                for (let link of links) {
-                    let href = link.getAttribute('href');
-                    if (!href) continue;
+                let upvoteBtns = Array.from(document.querySelectorAll('.puppeteer_test_button_text, button[aria-label*="Upvote"], button[aria-label*="upvote"], div[aria-label*="Upvote"], div[aria-label*="upvote"]'));
+                let topBtns = upvoteBtns.filter(b => !upvoteBtns.some(other => other !== b && other.contains(b)));
+
+                for (let btn of topBtns) {
+                    let clone = btn.cloneNode(true);
+                    let hiddenSpans = clone.querySelectorAll('.qu-visibility--hidden, .qu-display--none, [style*="opacity: 0"], [style*="opacity:0"], [style*="display: none"], [style*="display:none"]');
+                    hiddenSpans.forEach(h => h.remove());
                     
-                    let urlObj;
-                    try {
-                        urlObj = new URL(href, window.location.origin);
-                    } catch(e) { continue; }
+                    let btnTxt = (clone.innerText || clone.textContent || "").replace(/upvote[s]?/gi, '').replace(/[·\•]/g, '').trim();
+                    let match = btnTxt.match(/([\\d\\.]+[KMBkmb]?)/);
+                    let upvotes = (match && match[1]) ? match[1] : "0";
                     
-                    let path = urlObj.pathname.replace(/^\\//, '');
+                    let container = btn;
+                    for (let i = 0; i < 15; i++) {
+                        if (!container || container === document.body) break;
+                        let links = container.querySelectorAll('a[href*="/answer/"], a[href*="/profile/"]');
+                        if (links && links.length > 0) break;
+                        container = container.parentElement;
+                    }
+                    if (!container || seenContainers.has(container)) continue;
+                    seenContainers.add(container);
                     
-                    if (href.includes('/answer/') && expectedPrefix && !path.toLowerCase().includes(expectedPrefix.toLowerCase())) continue;
+                    let profileLink = container.querySelector('a[href*="/profile/"]');
+                    let answerLink = container.querySelector('a[href*="/answer/"]');
+                    let targetLink = answerLink || profileLink;
+                    if (!targetLink) continue;
                     
+                    let href = targetLink.getAttribute('href');
+                    let path = href.replace(/^https?:\\/\\/[^\\/]+\\//, '').replace(/^\\//, '');
                     if (seenPaths.has(path)) continue;
                     seenPaths.add(path);
                     
-                    let container = link;
-                    let upvotes = "0";
-                    for (let i = 0; i < 15; i++) {
-                        if (!container || container === document.body) break;
-                        
-                        let upvoteBtn = Array.from(container.querySelectorAll('button')).find(b => 
-                            (b.innerText && b.innerText.includes('Upvote')) || 
-                            (b.getAttribute('aria-label') && b.getAttribute('aria-label').includes('Upvote')) ||
-                            (b.innerText && b.innerText.includes('upvote'))
-                        );
-                        
-                        if (upvoteBtn) {
-                            let txt = upvoteBtn.innerText || "";
-                            let match = txt.match(/([\\d\\.]+[KMBkmb]?)/);
-                            if (match) upvotes = match[1];
-                            break; 
-                        }
-                        container = container.parentElement;
-                    }
-                    if (container) seenContainers.add(container);
-                    
                     let externalLinks = [];
-                    let authorUrl = "";
-                    if (container) {
-                        let innerLinks = container.querySelectorAll('a[href]');
-                        for (let a of innerLinks) {
-                            let aHref = a.getAttribute('href');
-                            if (!aHref) continue;
-                            if (aHref.includes('quora.com') && (aHref.includes('/profile/') || aHref.includes('/answer/'))) {
-                                if (!authorUrl && aHref.includes('/profile/')) authorUrl = aHref;
-                            } else if (!aHref.startsWith('#') && !aHref.startsWith('javascript:') && !aHref.includes('quora.com')) {
-                                externalLinks.push(aHref);
-                            }
+                    let authorUrl = profileLink ? profileLink.href : "";
+                    let innerLinks = container.querySelectorAll('a[href]');
+                    for (let a of innerLinks) {
+                        let aHref = a.getAttribute('href');
+                        if (!aHref) continue;
+                        if (aHref.includes('quora.com') && aHref.includes('/profile/')) {
+                            if (!authorUrl) authorUrl = a.href;
+                        } else if (!aHref.startsWith('#') && !aHref.startsWith('javascript:') && !aHref.includes('quora.com')) {
+                            externalLinks.push(aHref);
                         }
                     }
-
-                    let text = container ? container.innerText : "";
-                    if (text.length > 3000) {
-                        text = text.substring(0, 3000); 
-                    }
                     
+                    let text = container.innerText || container.textContent || "";
                     results.push({
                         url: path,
-                        full_url: link.href || ("https://www.quora.com/" + path),
+                        full_url: targetLink.href || ("https://www.quora.com/" + path),
                         author_url: authorUrl,
                         upvotes: upvotes,
-                        text: text,
+                        text: text.substring(0, 3000),
                         external_links: externalLinks
                     });
                 }
 
-                // Parse standalone collapsed answer containers
-                let upvoteButtons = Array.from(document.querySelectorAll('button')).filter(b => 
-                    (b.innerText && b.innerText.includes('Upvote')) || 
-                    (b.getAttribute('aria-label') && b.getAttribute('aria-label').includes('Upvote'))
-                );
-                for (let btn of upvoteButtons) {
-                    let container = btn;
-                    for (let i = 0; i < 10; i++) {
-                        if (!container || container === document.body) break;
-                        if (container.parentElement && container.parentElement.innerText.length > container.innerText.length + 100) {
-                            break;
-                        }
-                        container = container.parentElement;
-                    }
-                    if (container && !seenContainers.has(container)) {
-                        seenContainers.add(container);
-                        let text = container.innerText || "";
-                        if (text.length > 50) {
-                            let externalLinks = [];
-                            let authorUrl = "";
-                            let innerLinks = container.querySelectorAll('a[href]');
-                            for (let a of innerLinks) {
-                                let aHref = a.getAttribute('href');
-                                if (!aHref) continue;
-                                if (aHref.includes('quora.com') && aHref.includes('/profile/')) {
-                                    if (!authorUrl) authorUrl = aHref;
-                                } else if (!aHref.startsWith('#') && !aHref.startsWith('javascript:') && !aHref.includes('quora.com')) {
-                                    externalLinks.push(aHref);
-                                }
-                            }
-                            let match = (btn.innerText || "").match(/([\\d\\.]+[KMBkmb]?)/);
-                            let upvotes = match ? match[1] : "0";
-                            results.push({
-                                url: authorUrl ? authorUrl.replace(/^.*quora\\.com\\//, '') : "",
-                                full_url: authorUrl || "",
-                                author_url: authorUrl,
-                                upvotes: upvotes,
-                                text: text.substring(0, 3000),
-                                external_links: externalLinks
-                            });
-                        }
-                    }
+                let links = Array.from(document.querySelectorAll('a[href*="/answer/"], a[href*="/profile/"]'));
+                for (let link of links) {
+                    let href = link.getAttribute('href');
+                    if (!href) continue;
+                    let path = href.replace(/^https?:\\/\\/[^\\/]+\\//, '').replace(/^\\//, '');
+                    if (seenPaths.has(path)) continue;
+                    seenPaths.add(path);
+                    
+                    results.push({
+                        url: path,
+                        full_url: link.href,
+                        author_url: href.includes('/profile/') ? link.href : "",
+                        upvotes: "0",
+                        text: link.innerText || "",
+                        external_links: []
+                    });
                 }
-
+                
                 return results;
             }"""
 

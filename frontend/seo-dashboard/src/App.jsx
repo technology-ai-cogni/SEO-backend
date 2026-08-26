@@ -211,7 +211,7 @@ const PAGE_TITLES = {
   'search-visibility/keywords': { title: 'Keywords', subtitle: `${totalKeywordCount.toLocaleString()} tracked keywords` },
   'search-visibility/top-pages': { title: 'Top Pages (Organic)', subtitle: 'Best performing pages by organic traffic' },
   'search-visibility/link-outreach': { title: 'Link Outreach', subtitle: 'Manage backlink acquisition campaigns' },
-  'search-visibility/off-page-scheduler': { title: 'Monthly Operations', subtitle: 'Schedule off-page SEO activities' },
+  'search-visibility/off-page-scheduler': { title: 'Off-Page', subtitle: 'Schedule off-page SEO activities' },
   'search-visibility/on-page': { title: 'On-Page Optimization', subtitle: 'On-page SEO recommendations' },
   'search-visibility/competitors': { title: 'Project', subtitle: 'Competitor SEO intelligence' },
   'search-visibility/search/overview': { title: 'Search Overview', subtitle: 'High-level search performance summary' },
@@ -281,7 +281,7 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
               cursor: 'pointer'
             }}
           >
-            {isVendor ? 'Go to Monthly Operations' : 'Return to Home'}
+            {isVendor ? 'Go to Off-Page' : 'Return to Home'}
           </button>
         </div>
       </div>

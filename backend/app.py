@@ -208,6 +208,7 @@ class CreateDomainRequest(BaseModel):
     nap_bc_website: Optional[str] = None
     nap_bc_address: Optional[str] = None
     nap_bc_email: Optional[str] = None
+    business_centres: Optional[List[Dict[str, Any]]] = None
     branded_terms: Optional[str] = None
     users: Optional[List[DomainUser]] = None
 
@@ -427,6 +428,7 @@ def create_domain(payload: CreateDomainRequest):
             nap_bc_website=payload.nap_bc_website,
             nap_bc_address=payload.nap_bc_address,
             nap_bc_email=payload.nap_bc_email,
+            business_centres=payload.business_centres,
             branded_terms=payload.branded_terms,
         )
     except ValueError as e:
@@ -631,7 +633,7 @@ async def _do_quora_single_audit_coro(qc_mod, topic, live_link, landing_page):
     if not QuoraScraperCls:
         if http_fallback_fn:
             return http_fallback_fn(live_link, topic, landing_page)
-        return "Audited-LQ", "Not in Top3", "Quora : Reddit- Add More Upvotes"
+        return "Audited-LQ", "Not in Top3, No upvotes", "Quora : Reddit- Add More Upvotes"
 
     scr = None
     try:
@@ -644,15 +646,23 @@ async def _do_quora_single_audit_coro(qc_mod, topic, live_link, landing_page):
             print(f"[quora-checker] Login notice: {le}", flush=True)
 
         live_deleted = False
+        direct_live_upvotes = "0"
         if check_del_fn and live_link and live_link.startswith("http") and getattr(scr, "page", None):
             try:
-                live_deleted = await check_del_fn(scr.page, live_link)
+                res = await check_del_fn(scr.page, live_link)
+                if isinstance(res, tuple):
+                    live_deleted, direct_live_upvotes = res
+                else:
+                    live_deleted = bool(res)
             except Exception as de:
                 print(f"[quora-checker] Live link check notice: {de}", flush=True)
 
         scraped_answers = []
         if not live_deleted and getattr(scr, "page", None):
-            target_topic_url = topic if (topic and topic.startswith("http")) else live_link
+            raw_url = topic if (topic and topic.startswith("http")) else live_link
+            target_topic_url = raw_url
+            if target_topic_url and "/answer/" in target_topic_url:
+                target_topic_url = target_topic_url.split("?")[0].split("/answer/")[0]
             try:
                 scrape_data = await scr.fetch_quora_post(target_topic_url)
                 scraped_answers = scrape_data.get("scraped_answers", [])
@@ -662,7 +672,7 @@ async def _do_quora_single_audit_coro(qc_mod, topic, live_link, landing_page):
         if not scraped_answers and not live_deleted:
             if http_fallback_fn:
                 return http_fallback_fn(live_link, topic, landing_page)
-            return "Audited-LQ", "Not in Top3", "Quora : Reddit- Add More Upvotes"
+            return "Audited-LQ", "Not in Top3, No upvotes", "Quora : Reddit- Add More Upvotes"
 
         topic_path = norm_quora_url_fn(topic) if norm_quora_url_fn else None
         live_path = norm_quora_url_fn(live_link) if (norm_quora_url_fn and live_link) else None
@@ -672,6 +682,9 @@ async def _do_quora_single_audit_coro(qc_mod, topic, live_link, landing_page):
         our_rank = None
 
         if not live_deleted:
+            clean_live = live_link.split('?')[0].rstrip('/') if live_link else ""
+            live_slug = clean_live.split('/')[-1].lower() if clean_live else ""
+
             for idx, ans in enumerate(scraped_answers):
                 ans_url = ans.get("url", "")
                 ans_full = ans.get("full_url", "")
@@ -684,9 +697,8 @@ async def _do_quora_single_audit_coro(qc_mod, topic, live_link, landing_page):
                     is_match = True
                 elif live_link and (live_link.lower() in ans_full.lower() or live_link.lower() in ans_author.lower()):
                     is_match = True
-                elif live_path and ("/" in live_path):
-                    author_seg = live_path.split("/")[-1].replace("-", " ").lower()
-                    if author_seg and (author_seg in ans_url.lower() or author_seg in ans_author.lower() or author_seg in ans_full.lower() or author_seg in ans_text_lower):
+                elif live_slug and len(live_slug) > 2:
+                    if live_slug in ans_url.lower() or live_slug in ans_full.lower() or live_slug in ans_author.lower() or live_slug in ans_text_lower or live_slug.replace('-', ' ') in ans_text_lower:
                         is_match = True
 
                 if not is_match and landing_page:
@@ -699,20 +711,23 @@ async def _do_quora_single_audit_coro(qc_mod, topic, live_link, landing_page):
                     break
 
         if evaluate_fn:
-            return evaluate_fn(None, scraped_answers, our_answer, our_rank, landing_page, landing_domain, live_deleted)
+            try:
+                return evaluate_fn(None, scraped_answers, our_answer, our_rank, landing_page, landing_domain, live_deleted, direct_live_upvotes)
+            except TypeError:
+                return evaluate_fn(None, scraped_answers, our_answer, our_rank, landing_page, landing_domain, live_deleted)
         else:
             if live_deleted:
                 return "Audited-LQ", "Answer Deleted", "Quora : Reddit- Post New Answer"
             elif our_answer and our_rank and our_rank <= 3:
                 return "Audited-Indexed", "Indexed", "No issues"
             else:
-                return "Audited-LQ", "Not in Top3", "Quora : Reddit- Add More Upvotes"
+                return "Audited-LQ", "Not in Top3, No upvotes", "Quora : Reddit- Add More Upvotes"
 
     except Exception as e:
         print(f"[quora-checker] Playwright error: {e}", flush=True)
         if http_fallback_fn:
             return http_fallback_fn(live_link, topic, landing_page)
-        return "Audited-LQ", "Not in Top3", "Quora : Reddit- Add More Upvotes"
+        return "Audited-LQ", "Not in Top3, No upvotes", "Quora : Reddit- Add More Upvotes"
     finally:
         if scr:
             try:
@@ -754,7 +769,7 @@ async def _do_status_check_stream_gen(dataset_id: Optional[int], rows_payload: O
 
                 # Explicit Activity Classification
                 is_forum_quora = "quora" in act_lower or "quora" in topic_lower or "quora" in live_lower or "forum" in act_lower
-                is_business_listing = not is_forum_quora and any(term in act_lower for term in ["business listing", "business-listing", "businesslisting"])
+                is_business_listing = not is_forum_quora and any(term in act_lower for term in ["business listing", "business-listing", "businesslisting", "classified ads", "classified", "classifieds", "classified ad", "classified-ads"])
                 is_paid_guest_post = not is_forum_quora and not is_business_listing
 
                 # Route 1: Forum Quora -> scripts/quora-checker.py
@@ -798,7 +813,7 @@ async def _do_status_check_stream_gen(dataset_id: Optional[int], rows_payload: O
                         except Exception as q_err:
                             print(f"[app] Quora audit thread error: {q_err}", file=sys.stderr, flush=True)
                             r["status"] = "Audited-LQ"
-                            r["remarks"] = "Not in Top3"
+                            r["remarks"] = "Not in Top3, No upvotes"
                             r["solution"] = "Quora : Reddit- Add More Upvotes"
 
                     now_date = time.strftime("%Y-%m-%d")

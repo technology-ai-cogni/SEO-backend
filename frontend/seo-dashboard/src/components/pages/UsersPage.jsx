@@ -314,8 +314,8 @@ function RolePermissionMatrixView() {
           name: 'Vendor',
           roleKey: 'VENDOR',
           defaultActionPerm: 'View Only',
-          defaultSectionAccess: 'Monthly Operations (Scheduler)',
-          description: 'External link-building and outreach vendor scoped exclusively to Monthly Operations.',
+          defaultSectionAccess: 'Off-Page (Scheduler)',
+          description: 'External link-building and outreach vendor scoped exclusively to Off-Page.',
           capabilities: {
             viewDashboard: true,
             uploadData: false,

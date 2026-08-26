@@ -208,6 +208,21 @@ export default function OffPageSchedulerPage({ user }) {
   const [auditSuccessMsg, setAuditSuccessMsg] = useState('');
   const [showAssocPopover, setShowAssocPopover] = useState(false);
   const [showGlobalAssocPopover, setShowGlobalAssocPopover] = useState(false);
+  const assocPopoverRef = useRef(null);
+  const globalAssocPopoverRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (assocPopoverRef.current && !assocPopoverRef.current.contains(event.target)) {
+        setShowAssocPopover(false);
+      }
+      if (globalAssocPopoverRef.current && !globalAssocPopoverRef.current.contains(event.target)) {
+        setShowGlobalAssocPopover(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const STATUS_PRESET_OPTIONS = useMemo(() => [
     'Audited-Indexed',
@@ -344,7 +359,7 @@ export default function OffPageSchedulerPage({ user }) {
     setFilterStatus('ALL');
   };
 
-  const handleDownloadRows = async (rowsToExport, datasetName = 'Monthly Operations') => {
+  const handleDownloadRows = async (rowsToExport, datasetName = 'Off-Page') => {
     let exportData = rowsToExport || [];
     
     // Fallback to selectedDataset rows if empty
@@ -358,7 +373,7 @@ export default function OffPageSchedulerPage({ user }) {
     }
 
     const headers = [
-      'UID', 'Period', 'Scheduled Date', 'Keyword 1', 'Keyword 2', 'Cluster',
+      'UID', 'Period', 'Scheduled Date', 'Keyword 1', 'Keyword 2', 'Landing Page', 'Cluster',
       'KW Category', 'Activity Name', 'Word Count', 'Content SPOC', 'Topic',
       'Content Doc', 'POC', 'PG Site Domain', 'Live Link', 'Status',
       'Remarks', 'Solution', 'Verified Status', 'Last Activity', 'Updated Date'
@@ -366,7 +381,7 @@ export default function OffPageSchedulerPage({ user }) {
 
     try {
       const workbook = new ExcelJS.Workbook();
-      const sheetName = String(datasetName || 'Monthly Operations').replace(/[\\/*?:\[\]]/g, '').substring(0, 31);
+      const sheetName = String(datasetName || 'Off-Page').replace(/[\\/*?:\[\]]/g, '').substring(0, 31);
       const worksheet = workbook.addWorksheet(sheetName || 'Data');
 
       worksheet.addRow(headers);
@@ -382,6 +397,7 @@ export default function OffPageSchedulerPage({ user }) {
           r.scheduledDate || r.scheduled_date || '',
           r.keyword1 || r.keyword_1 || '',
           r.keyword2 || r.keyword_2 || '',
+          r.landingPage || r.landing_page || r.page || '',
           r.cluster || '',
           r.kwCategory || r.kw_category || '',
           r.activityName || r.activity_name || r.activity || '',
@@ -721,7 +737,7 @@ export default function OffPageSchedulerPage({ user }) {
               'UID': r.uid || '',
               'Keyword 1': r.keyword1 || r.keyword || '',
               'Keyword 2': r.keyword2 || '',
-              'Landing Page': r.landingPage || '',
+              'Landing Page': r.landingPage || r.landing_page || r.page || '',
               'Cluster': r.cluster || '',
               'KW Category': r.kwCategory || '',
               'Activity Name': r.activityName || '',
@@ -752,13 +768,13 @@ export default function OffPageSchedulerPage({ user }) {
       });
 
       if (allRows.length === 0) {
-        alert('No Monthly Operations data available to download.');
+        alert('No Off-Page data available to download.');
         return;
       }
 
       const headers = Object.keys(allRows[0]);
       const workbook = new ExcelJS.Workbook();
-      const sheet = workbook.addWorksheet('Monthly Operations');
+      const sheet = workbook.addWorksheet('Off-Page');
       sheet.columns = headers.map(h => ({ header: h, width: Math.max(14, h.length + 4) }));
 
       const thinBorder = { style: 'thin', color: { argb: 'FFD1D5DB' } };
@@ -784,13 +800,13 @@ export default function OffPageSchedulerPage({ user }) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `monthly-operations-db-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      link.download = `off-page-db-${new Date().toISOString().slice(0, 10)}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } catch (err) {
-      console.error('Failed to export Monthly Operations data:', err);
+      console.error('Failed to export Off-Page data:', err);
     }
   };
 
@@ -807,10 +823,10 @@ export default function OffPageSchedulerPage({ user }) {
   }, [vendorProject]);
 
   useEffect(() => {
-    if (filteredImports && filteredImports.length > 0) {
-      const isCurrentValid = selectedDataset && filteredImports.some(imp => imp.id === selectedDataset.id);
+    if (selectedDataset && filteredImports && filteredImports.length > 0) {
+      const isCurrentValid = filteredImports.some(imp => String(imp.id) === String(selectedDataset.id));
       if (!isCurrentValid) {
-        setSelectedDataset(filteredImports[0]);
+        setSelectedDataset(null);
       }
     }
   }, [filteredImports]);
@@ -1207,11 +1223,15 @@ export default function OffPageSchedulerPage({ user }) {
       const freshImports = await fetchMonthlyImportsApi();
       setImports(freshImports);
       if (selectedDataset) {
-        const updatedDs = freshImports.find(imp => String(imp.id) === String(selectedDataset.id) || (imp.project && selectedDataset.project && imp.project.toLowerCase() === selectedDataset.project.toLowerCase()));
-        if (updatedDs) setSelectedDataset(updatedDs);
+        const updatedDs = freshImports.find(imp => String(imp.id) === String(selectedDataset.id));
+        if (updatedDs) {
+          setSelectedDataset(updatedDs);
+        }
+        setShowAssocPopover(true);
+      } else {
+        setShowGlobalAssocPopover(true);
       }
       setAuditSuccessMsg(res.message || 'Equal resource allocation completed across all associates!');
-      setTimeout(() => setAuditSuccessMsg(''), 4000);
     } catch (err) {
       setAuditSuccessMsg(`Audit allocation notice: ${err.message}`);
     } finally {
@@ -1369,9 +1389,7 @@ export default function OffPageSchedulerPage({ user }) {
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 4 }}>
               {selectedDataset.project || selectedDataset.project_name}
             </h1>
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
-               Imported: {selectedDataset.date}
-            </p>
+            
           </div>
 
           {/* Save Changes & Run Audit Buttons */}
@@ -1428,7 +1446,7 @@ export default function OffPageSchedulerPage({ user }) {
                   const assignedCount = assocEntries.filter(([n]) => n.toLowerCase() !== 'unassigned').length;
 
                   return (
-                    <div style={{ position: 'relative', display: 'inline-block' }}>
+                    <div ref={assocPopoverRef} style={{ position: 'relative', display: 'inline-block' }}>
                       <button
                         onClick={() => setShowAssocPopover(!showAssocPopover)}
                         title="View Associate Resource Allocation"
@@ -1451,16 +1469,6 @@ export default function OffPageSchedulerPage({ user }) {
                         onMouseLeave={e => e.currentTarget.style.background = showAssocPopover ? '#f1f5f9' : '#ffffff'}
                       >
                         <Users size={18} color="#2563eb" />
-                        <span style={{ 
-                          background: '#dbeafe', 
-                          color: '#1e40af', 
-                          padding: '2px 8px', 
-                          borderRadius: 12, 
-                          fontSize: 12, 
-                          fontWeight: 800 
-                        }}>
-                          {assignedCount}
-                        </span>
                       </button>
 
                       {showAssocPopover && (
@@ -1793,7 +1801,7 @@ export default function OffPageSchedulerPage({ user }) {
 
             {/* Download Icon Button right near Filter Icon */}
             <button
-              onClick={() => handleDownloadRows(filteredRows, selectedDataset?.project || selectedDataset?.project_name || selectedDataset?.name || 'Monthly Operations')}
+              onClick={() => handleDownloadRows(filteredRows, selectedDataset?.project || selectedDataset?.project_name || selectedDataset?.name || 'Off-Page')}
               title="Download Excel Data"
               style={{
                 background: 'none',
@@ -2088,12 +2096,12 @@ export default function OffPageSchedulerPage({ user }) {
           boxShadow: 'var(--shadow-sm)',
           overflow: 'hidden'
         }}>
-          <div style={{ overflowX: 'auto', maxHeight: '60vh' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 2600 }}>
+          <div style={{ overflowX: 'auto', maxHeight: '75vh' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 2800 }}>
               <thead>
-                <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 10 }}>
+                <tr style={{ background: '#f8f9fb', borderBottom: '1.5px solid var(--border)', position: 'sticky', top: 0, zIndex: 10 }}>
                   {!isVendor && (userCanEdit || userCanDelete) && (
-                    <th style={{ padding: '12px 16px', width: 44, textAlign: 'center' }}>
+                    <th style={{ padding: '14px 18px', width: 48, textAlign: 'center' }}>
                       <input
                         type="checkbox"
                         checked={filteredRows.length > 0 && filteredRows.every((_, idx) => selectedRowIndices.includes(idx))}
@@ -2104,7 +2112,7 @@ export default function OffPageSchedulerPage({ user }) {
                             setSelectedRowIndices([]);
                           }
                         }}
-                        style={{ cursor: 'pointer', width: 16, height: 16, accentColor: 'var(--accent)' }}
+                        style={{ cursor: 'pointer', width: 17, height: 17, accentColor: 'var(--accent)' }}
                       />
                     </th>
                   )}
@@ -2115,13 +2123,13 @@ export default function OffPageSchedulerPage({ user }) {
                     'Remarks', 'Solution', 'Verified Status', 'Last Activity', 'Updated Date'
                   ].map((col, idx) => (
                     <th key={idx} style={{ 
-                      padding: '12px 16px', 
+                      padding: '14px 18px', 
                       textAlign: 'left', 
-                      fontSize: 12, 
+                      fontSize: 13, 
                       fontWeight: 700, 
                       color: 'var(--text-muted)',
                       textTransform: 'uppercase',
-                      letterSpacing: '0.05em'
+                      letterSpacing: '0.04em'
                     }}>
                       {col}
                     </th>
@@ -2141,7 +2149,7 @@ export default function OffPageSchedulerPage({ user }) {
                       onMouseEnter={e => e.currentTarget.style.background = selectedRowIndices.includes(rIdx) ? '#e0f2fe' : '#fafbfc'}
                       onMouseLeave={e => e.currentTarget.style.background = selectedRowIndices.includes(rIdx) ? '#f0f9ff' : 'transparent'}>
                       {!isVendor && (userCanEdit || userCanDelete) && (
-                        <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                        <td style={{ padding: '16px 18px', textAlign: 'center' }}>
                           <input
                             type="checkbox"
                             checked={selectedRowIndices.includes(rIdx)}
@@ -2152,16 +2160,16 @@ export default function OffPageSchedulerPage({ user }) {
                                 setSelectedRowIndices([...selectedRowIndices, rIdx]);
                               }
                             }}
-                            style={{ cursor: 'pointer', width: 16, height: 16, accentColor: 'var(--accent)' }}
+                            style={{ cursor: 'pointer', width: 17, height: 17, accentColor: 'var(--accent)' }}
                           />
                         </td>
                       )}
-                      <td style={{ padding: '14px 16px', fontSize: 12.5, fontFamily: 'monospace', color: '#475569', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '16px 18px', fontSize: 13.5, fontFamily: 'monospace', color: '#475569', fontWeight: 700, whiteSpace: 'nowrap' }}>
                         {row.uid || `MO-${(rIdx + 1).toString().padStart(4, '0')}`}
                       </td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{row.period || 'N/A'}</td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.scheduledDate || 'N/A'}</td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: '#2563eb', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '16px 18px', fontSize: 14, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{row.period || 'N/A'}</td>
+                      <td style={{ padding: '16px 18px', fontSize: 14, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.scheduledDate || 'N/A'}</td>
+                      <td style={{ padding: '16px 18px', fontSize: 14, color: '#2563eb', fontWeight: 600, whiteSpace: 'nowrap' }}>
                         {row.keyword1 ? (
                           row.landingPage ? (
                             <a href={formatUrl(row.landingPage)} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
@@ -2175,23 +2183,23 @@ export default function OffPageSchedulerPage({ user }) {
                           )
                         ) : 'N/A'}
                       </td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>{row.keyword2 || 'N/A'}</td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.cluster || 'N/A'}</td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.kwCategory || 'N/A'}</td>
-                      <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '16px 18px', fontSize: 14, color: 'var(--text-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>{row.keyword2 || 'N/A'}</td>
+                      <td style={{ padding: '16px 18px', fontSize: 14, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.cluster || 'N/A'}</td>
+                      <td style={{ padding: '16px 18px', fontSize: 14, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.kwCategory || 'N/A'}</td>
+                      <td style={{ padding: '12px 18px', whiteSpace: 'nowrap' }}>
                         {isVendor ? (
-                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                          <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)' }}>
                             {row.activityName || 'N/A'}
                           </span>
                         ) : (
                           <select
-                            value={['Forum Quora', 'Forum Reddit', 'Paid Guest Post', 'Business Listing', 'Brand Mention'].includes(row.activityName) ? row.activityName : 'Forum Quora'}
+                            value={['Forum Quora', 'Forum Reddit', 'Paid Guest Post', 'Business Listing', 'Classified Ads'].includes(row.activityName) ? row.activityName : 'Forum Quora'}
                             onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'activityName', e.target.value)}
                             style={{
-                              padding: '5px 10px',
-                              fontSize: 12.5,
+                              padding: '7px 12px',
+                              fontSize: 13,
                               fontWeight: 600,
-                              borderRadius: 6,
+                              borderRadius: 8,
                               border: '1px solid #cbd5e1',
                               background: '#ffffff',
                               color: '#0f172a',
@@ -2199,15 +2207,15 @@ export default function OffPageSchedulerPage({ user }) {
                               cursor: 'pointer'
                             }}
                           >
-                            {['Forum Quora', 'Forum Reddit', 'Paid Guest Post', 'Business Listing', 'Brand Mention'].map(opt => (
+                            {['Forum Quora', 'Forum Reddit', 'Paid Guest Post', 'Business Listing', 'Classified Ads'].map(opt => (
                               <option key={opt} value={opt}>{opt}</option>
                             ))}
                           </select>
                         )}
                       </td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.wordCount || 'N/A'}</td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.contentSpoc || 'N/A'}</td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.topic}>
+                      <td style={{ padding: '16px 18px', fontSize: 14, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.wordCount || 'N/A'}</td>
+                      <td style={{ padding: '16px 18px', fontSize: 14, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.contentSpoc || 'N/A'}</td>
+                      <td style={{ padding: '16px 18px', fontSize: 14, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.topic}>
                         {row.topic ? (
                           isUrlLike(row.topic) ? (
                             <a href={formatUrl(row.topic)} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
@@ -2220,7 +2228,7 @@ export default function OffPageSchedulerPage({ user }) {
                           )
                         ) : 'N/A'}
                       </td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '16px 18px', fontSize: 14, whiteSpace: 'nowrap' }}>
                         {row.contentDoc ? (
                           <a href={formatUrl(row.contentDoc)} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                             onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
@@ -2229,10 +2237,10 @@ export default function OffPageSchedulerPage({ user }) {
                           </a>
                         ) : 'N/A'}
                       </td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '16px 18px', fontSize: 14, color: 'var(--text-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                         {row.publisher || 'Unassigned'}
                       </td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, color: '#2563eb', whiteSpace: 'nowrap' }} title={row.pgSiteDomain}>
+                      <td style={{ padding: '16px 18px', fontSize: 14, color: '#2563eb', whiteSpace: 'nowrap' }} title={row.pgSiteDomain}>
                         {row.pgSiteDomain ? (
                           <a href={formatUrl(row.pgSiteDomain)} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                             onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
@@ -2241,7 +2249,7 @@ export default function OffPageSchedulerPage({ user }) {
                           </a>
                         ) : 'N/A'}
                       </td>
-                      <td style={{ padding: '14px 16px', fontSize: 13.5, whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '16px 18px', fontSize: 14, whiteSpace: 'nowrap' }}>
                         {row.liveLink ? (
                           <a href={formatUrl(row.liveLink)} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                             onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
@@ -2250,13 +2258,13 @@ export default function OffPageSchedulerPage({ user }) {
                           </a>
                         ) : 'N/A'}
                       </td>
-                      <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '12px 18px', whiteSpace: 'nowrap' }}>
                         {isVendor ? (
                           <span style={{
-                            padding: '4px 9px',
-                            fontSize: 12,
+                            padding: '6px 12px',
+                            fontSize: 13,
                             fontWeight: 700,
-                            borderRadius: 6,
+                            borderRadius: 8,
                             background: row.status === 'Published-Indexed' || row.status === 'Audited-Indexed' ? '#ecfdf5' : row.status === 'Audited-LQ' || row.status === 'Published-LQ' ? '#fff7ed' : row.status === 'Flagged-Indexation' || row.status === 'Not Found' ? '#fef2f2' : '#f8fafc',
                             color: row.status === 'Published-Indexed' || row.status === 'Audited-Indexed' ? '#047857' : row.status === 'Audited-LQ' || row.status === 'Published-LQ' ? '#c2410c' : row.status === 'Flagged-Indexation' || row.status === 'Not Found' ? '#b91c1c' : '#334155',
                           }}>
@@ -2267,10 +2275,10 @@ export default function OffPageSchedulerPage({ user }) {
                             value={STATUS_PRESET_OPTIONS.includes(row.status) ? row.status : (row.status || 'Published-Indexed')}
                             onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'status', e.target.value)}
                             style={{
-                              padding: '5px 10px',
-                              fontSize: 12,
+                              padding: '7px 12px',
+                              fontSize: 13,
                               fontWeight: 700,
-                              borderRadius: 6,
+                              borderRadius: 8,
                               border: '1px solid #cbd5e1',
                               background: row.status === 'Published-Indexed' || row.status === 'Audited-Indexed' ? '#ecfdf5' : row.status === 'Audited-LQ' || row.status === 'Published-LQ' ? '#fff7ed' : row.status === 'Flagged-Indexation' || row.status === 'Not Found' ? '#fef2f2' : '#f8fafc',
                               color: row.status === 'Published-Indexed' || row.status === 'Audited-Indexed' ? '#047857' : row.status === 'Audited-LQ' || row.status === 'Published-LQ' ? '#c2410c' : row.status === 'Flagged-Indexation' || row.status === 'Not Found' ? '#b91c1c' : '#334155',
@@ -2287,22 +2295,22 @@ export default function OffPageSchedulerPage({ user }) {
                           </select>
                         )}
                       </td>
-                      <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '12px 18px', whiteSpace: 'nowrap' }}>
                         <select
                           disabled={!userCanEdit}
                           value={REMARKS_PRESET_OPTIONS.includes(row.remarks) ? row.remarks : (row.remarks || 'No Issues')}
                           onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'remarks', e.target.value)}
                           style={{
-                            padding: '5px 10px',
-                            fontSize: 12,
+                            padding: '7px 12px',
+                            fontSize: 13,
                             fontWeight: 600,
-                            borderRadius: 6,
+                            borderRadius: 8,
                             border: '1px solid #cbd5e1',
                             background: !userCanEdit ? '#f8fafc' : '#ffffff',
                             color: '#0f172a',
                             outline: 'none',
                             cursor: !userCanEdit ? 'not-allowed' : 'pointer',
-                            maxWidth: 240
+                            maxWidth: 260
                           }}
                           title={row.remarks}
                         >
@@ -2314,16 +2322,16 @@ export default function OffPageSchedulerPage({ user }) {
                           ))}
                         </select>
                       </td>
-                      <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '12px 18px', whiteSpace: 'nowrap' }}>
                         <select
                           disabled={!userCanEdit}
                           value={SOLUTION_PRESET_OPTIONS.includes(row.solution) ? row.solution : (row.solution || 'fixed')}
                           onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'solution', e.target.value)}
                           style={{
-                            padding: '5px 10px',
-                            fontSize: 12,
+                            padding: '7px 12px',
+                            fontSize: 13,
                             fontWeight: 600,
-                            borderRadius: 6,
+                            borderRadius: 8,
                             border: '1px solid #cbd5e1',
                             background: !userCanEdit ? '#f8fafc' : row.solution === 'fixed' ? '#f0fdf4' : '#ffffff',
                             color: row.solution === 'fixed' ? '#166534' : '#0f172a',
@@ -2598,7 +2606,7 @@ export default function OffPageSchedulerPage({ user }) {
                       <option value="Forum Reddit">Forum Reddit</option>
                       <option value="Paid Guest Post">Paid Guest Post</option>
                       <option value="Business Listing">Business Listing</option>
-                      <option value="Brand Mention">Brand Mention</option>
+                      <option value="Classified Ads">Classified Ads</option>
                     </select>
                     <ChevronDown size={16} color="#64748b" style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
                   </div>
@@ -2754,7 +2762,7 @@ export default function OffPageSchedulerPage({ user }) {
           </div>
           <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>No Project Assigned</h2>
           <p style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.5, margin: 0 }}>
-            Monthly Operations is hidden and restricted until a project is allotted to your account by a system Administrator. Please contact your admin to assign a project from the Users page.
+            Off-Page is hidden and restricted until a project is allotted to your account by a system Administrator. Please contact your admin to assign a project from the Users page.
           </p>
         </div>
       </div>
@@ -2767,7 +2775,7 @@ export default function OffPageSchedulerPage({ user }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
           <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 6 }}>
-            Monthly Operations
+            Off-Page
           </h1>
           <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: 0 }}>
             Automate audits, import data sheets, and schedule link outreach actions.
@@ -2831,7 +2839,7 @@ export default function OffPageSchedulerPage({ user }) {
                 const assignedCount = globalEntries.filter(([n]) => n.toLowerCase() !== 'unassigned').length;
 
                 return (
-                  <div style={{ position: 'relative', display: 'inline-block' }}>
+                  <div ref={globalAssocPopoverRef} style={{ position: 'relative', display: 'inline-block' }}>
                     <button
                       onClick={() => setShowGlobalAssocPopover(!showGlobalAssocPopover)}
                       title="View Associate Resource Allocation"
@@ -2854,16 +2862,6 @@ export default function OffPageSchedulerPage({ user }) {
                       onMouseLeave={e => e.currentTarget.style.background = showGlobalAssocPopover ? '#f1f5f9' : '#ffffff'}
                     >
                       <Users size={18} color="#2563eb" />
-                      <span style={{ 
-                        background: '#dbeafe', 
-                        color: '#1e40af', 
-                        padding: '2px 8px', 
-                        borderRadius: 12, 
-                        fontSize: 12, 
-                        fontWeight: 800 
-                      }}>
-                        {assignedCount}
-                      </span>
                     </button>
 
                     {showGlobalAssocPopover && (
@@ -3002,29 +3000,7 @@ export default function OffPageSchedulerPage({ user }) {
           <UploadCloud size={16} />
           Data
         </button>
-        {!isViewer && (
-          <button
-            onClick={() => setActiveTab('scheduler')}
-            style={{
-              padding: '12px 20px',
-              fontSize: 14.5,
-              fontWeight: 600,
-              color: activeTab === 'scheduler' ? 'var(--accent)' : 'var(--text-muted)',
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === 'scheduler' ? '2.5px solid var(--accent)' : '2.5px solid transparent',
-              cursor: 'pointer',
-              transition: 'all 0.15s',
-              outline: 'none',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8
-            }}
-          >
-            <Calendar size={16} />
-            Scheduler Calendar
-          </button>
-        )}
+
       </div>
 
       {/* CONTENT PANEL */}
@@ -3597,8 +3573,8 @@ export default function OffPageSchedulerPage({ user }) {
       >
         <div style={{ padding: '8px 0 16px 0' }}>
           <p style={{ fontSize: 14.5, color: '#64748b', margin: 0, lineHeight: 1.6 }}>
-            Are you sure you want to delete <strong>this project's Monthly Operations data (records, scheduled activities)</strong> for <strong>{deleteConfirmImport?.project}</strong>? This action cannot be undone.
-          </p>
+            Are you sure you want to delete <strong>this project's Off-Page data (records, scheduled activities)</strong> for <strong>{deleteConfirmImport?.project}</strong>? This action cannot be undone.
+f          </p>
         </div>
       </Modal>
       {/* Unsaved Changes Confirmation Modal */}

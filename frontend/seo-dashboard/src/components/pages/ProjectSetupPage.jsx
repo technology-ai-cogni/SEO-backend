@@ -656,6 +656,9 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
   const [napBcWebsite, setNapBcWebsite] = useState('');
   const [napBcAddress, setNapBcAddress] = useState('');
   const [napBcEmail, setNapBcEmail] = useState('');
+  const [businessCentres, setBusinessCentres] = useState([
+    { name: '', phone: '', website: '', address: '', email: '' }
+  ]);
   const [activeTab, setActiveTab] = useState('basic_info');
   const [napSubTab, setNapSubTab] = useState('basic');
   const [brandedTerms, setBrandedTerms] = useState('');
@@ -665,6 +668,28 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
   const [submitting, setSubmitting] = useState(false);
   const [apiError, setApiError] = useState('');
   const [btnActive, setBtnActive] = useState(false);
+
+  const [centreToDeleteIndex, setCentreToDeleteIndex] = useState(null);
+
+  const addBusinessCentre = () => {
+    setBusinessCentres(prev => [...prev, { name: '', phone: '', website: '', address: '', email: '' }]);
+  };
+
+  const updateBusinessCentre = (index, field, value) => {
+    setBusinessCentres(prev => prev.map((item, idx) => idx === index ? { ...item, [field]: value } : item));
+  };
+
+  const removeBusinessCentre = (index) => {
+    setCentreToDeleteIndex(index);
+  };
+
+  const confirmRemoveBusinessCentre = (index) => {
+    setBusinessCentres(prev => {
+      const updated = prev.filter((_, idx) => idx !== index);
+      return updated.length > 0 ? updated : [{ name: '', phone: '', website: '', address: '', email: '' }];
+    });
+    setCentreToDeleteIndex(null);
+  };
 
   const platformOptions = [
     { value: 'ai_mode', label: 'AI Mode' },
@@ -693,6 +718,7 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
     setPlatforms([]); setDa('');
     setNapBusinessCentre(''); setNapPhone(''); setNapWebsite(''); setNapAddress(''); setNapEmail('');
     setNapBcPhone(''); setNapBcWebsite(''); setNapBcAddress(''); setNapBcEmail('');
+    setBusinessCentres([{ name: '', phone: '', website: '', address: '', email: '' }]);
     setActiveTab('basic_info');
     setNapSubTab('basic');
     setBrandedTerms('');
@@ -705,21 +731,23 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
     setSubmitting(true);
     setApiError('');
     try {
+      const primaryBc = businessCentres[0] || {};
       await onCreateProject({
         domain: domain.trim(),
         name: name.trim() || domain.trim(),
         regions,
         platforms,
         da: da || null,
-        nap_business_centre: napBusinessCentre.trim(),
+        nap_business_centre: (primaryBc.name || '').trim(),
         nap_phone: napPhone.trim(),
         nap_website: napWebsite.trim(),
         nap_address: napAddress.trim(),
         nap_email: napEmail.trim(),
-        nap_bc_phone: napBcPhone.trim(),
-        nap_bc_website: napBcWebsite.trim(),
-        nap_bc_address: napBcAddress.trim(),
-        nap_bc_email: napBcEmail.trim(),
+        nap_bc_phone: (primaryBc.phone || '').trim(),
+        nap_bc_website: (primaryBc.website || '').trim(),
+        nap_bc_address: (primaryBc.address || '').trim(),
+        nap_bc_email: (primaryBc.email || '').trim(),
+        business_centres: businessCentres,
         branded_terms: brandedTerms.trim(),
         users,
         share,
@@ -739,7 +767,7 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
           variant="primary"
           onClick={handleCreate}
           style={{
-            background: (submitting || btnActive) ? '#0f1523' : '#6b7280',
+            background: (submitting || btnActive) ? '#0f1523' : (domain.trim() ? '#5c4af2' : '#6b7280'),
             color: '#ffffff',
             transition: 'background-color 0.15s ease, opacity 0.15s ease',
             ...(submitting ? { opacity: 0.6, pointerEvents: 'none' } : {})
@@ -750,7 +778,6 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
         >
           {submitting ? 'Creating…' : 'Create SEO project'}
         </Btn>
-        <Btn variant="outline" onClick={onClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
       </>}
     >
       {apiError && (
@@ -789,7 +816,7 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
             }}
           >
-            NAP Details
+            NAP
             {(napPhone || napWebsite || napAddress || napEmail || napBusinessCentre || napBcPhone || napBcWebsite || napBcAddress || napBcEmail) && (
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#5c4af2' }} />
             )}
@@ -866,8 +893,11 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* Section 1: Basic NAP */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent, #5c4af2)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                Basic NAP
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 3.5, height: 13, background: '#4f46e5', borderRadius: 2 }} />
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                  Headquarters
+                </span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <Input label="Phone" placeholder="e.g. +1 234 567 8900" value={napPhone} onChange={setNapPhone} />
@@ -879,27 +909,129 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
               </div>
             </div>
 
-            {/* Subtle Divider */}
+            {/* Section 2: Business Centre Details */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 3.5, height: 13, background: '#4f46e5', borderRadius: 2 }} />
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                    Business Centre
+                  </span>
+                  {businessCentres.length > 1 && (
+                    <span style={{ fontSize: 10, background: '#eef2ff', color: '#4f46e5', padding: '2px 7px', borderRadius: 10, fontWeight: 600, border: '1px solid #c7d2fe' }}>
+                      {businessCentres.length}
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={addBusinessCentre}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    background: '#eef2ff', color: '#4f46e5',
+                    border: '1px solid #c7d2fe', borderRadius: 6,
+                    padding: '4px 10px', fontSize: 11.5, fontWeight: 600,
+                    cursor: 'pointer', transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = '#e0e7ff'; e.currentTarget.style.borderColor = '#a5b4fc'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = '#eef2ff'; e.currentTarget.style.borderColor = '#c7d2fe'; }}
+                >
+                  <Plus size={13} strokeWidth={2.5} /> Add Centre
+                </button>
+              </div>
 
-            {/* Section 2: Business Centre NAP */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent, #5c4af2)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                Business Centre NAP
-              </div>
-              <Input label="Name" placeholder="Business centre name" value={napBusinessCentre} onChange={setNapBusinessCentre} />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <Input label="Phone" placeholder="e.g. +1 234 567 8900" value={napBcPhone} onChange={setNapBcPhone} />
-                <Input label="Website" placeholder="e.g. https://domain.com" value={napBcWebsite} onChange={setNapBcWebsite} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <Input label="Address" placeholder="Business centre address" value={napBcAddress} onChange={setNapBcAddress} />
-                <Input label="Email ID" placeholder="contact@domain.com" value={napBcEmail} onChange={setNapBcEmail} type="email" />
-              </div>
+              {businessCentres.map((bc, idx) => (
+                <div key={idx} style={{
+                  display: 'flex', flexDirection: 'column', gap: 10,
+                  padding: businessCentres.length > 1 ? '12px 14px' : '0px',
+                  border: businessCentres.length > 1 ? '1px solid var(--border)' : 'none',
+                  borderRadius: 10, background: businessCentres.length > 1 ? 'var(--surface-2, #fafafa)' : 'transparent'
+                }}>
+                  {businessCentres.length > 1 && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                        Centre #{idx + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeBusinessCentre(idx)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red, #dc2626)', padding: 2, display: 'flex', alignItems: 'center', opacity: 0.8 }}
+                        title="Remove Business Centre"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  )}
+                  <Input
+                    label="Name"
+                    placeholder="Business centre name"
+                    value={bc.name}
+                    onChange={v => updateBusinessCentre(idx, 'name', v)}
+                  />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <Input
+                      label="Phone"
+                      placeholder="e.g. +1 234 567 8900"
+                      value={bc.phone}
+                      onChange={v => updateBusinessCentre(idx, 'phone', v)}
+                    />
+                    <Input
+                      label="Landing Page"
+                      placeholder="e.g. https://domain.com"
+                      value={bc.website}
+                      onChange={v => updateBusinessCentre(idx, 'website', v)}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <Input
+                      label="Address"
+                      placeholder="Business centre address"
+                      value={bc.address}
+                      onChange={v => updateBusinessCentre(idx, 'address', v)}
+                    />
+                    <Input
+                      label="Email ID"
+                      placeholder="contact@domain.com"
+                      value={bc.email}
+                      onChange={v => updateBusinessCentre(idx, 'email', v)}
+                      type="email"
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
       </div>
 
+      {centreToDeleteIndex !== null && (
+        <Modal
+          open={true}
+          onClose={() => setCentreToDeleteIndex(null)}
+          title="Delete Business Centre"
+          maxWidth={460}
+          footer={<>
+            <Btn
+              variant="primary"
+              onClick={() => confirmRemoveBusinessCentre(centreToDeleteIndex)}
+              style={{ flex: 1, background: 'var(--red, #dc2626)' }}
+            >
+              Delete
+            </Btn>
+            <Btn
+              variant="outline"
+              onClick={() => setCentreToDeleteIndex(null)}
+              style={{ flex: 1 }}
+            >
+              Cancel
+            </Btn>
+          </>}
+        >
+          <div style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            Are you sure you want to delete <strong>{businessCentres[centreToDeleteIndex]?.name || `Centre #${centreToDeleteIndex + 1}`}</strong>?
+          </div>
+        </Modal>
+      )}
     </Modal>
   );
 }
@@ -1665,10 +1797,63 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
   const [napBcWebsite, setNapBcWebsite] = useState('');
   const [napBcAddress, setNapBcAddress] = useState('');
   const [napBcEmail, setNapBcEmail] = useState('');
+  const [businessCentres, setBusinessCentres] = useState([
+    { name: '', phone: '', website: '', address: '', email: '' }
+  ]);
   const [brandedTerms, setBrandedTerms] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [apiError, setApiError] = useState('');
+
+  const [centreToDeleteIndex, setCentreToDeleteIndex] = useState(null);
+
+  const addBusinessCentre = () => {
+    setBusinessCentres(prev => [...prev, { name: '', phone: '', website: '', address: '', email: '' }]);
+  };
+
+  const updateBusinessCentre = (index, field, value) => {
+    setBusinessCentres(prev => prev.map((item, idx) => idx === index ? { ...item, [field]: value } : item));
+  };
+
+  const removeBusinessCentre = (index) => {
+    setCentreToDeleteIndex(index);
+  };
+
+  const confirmRemoveBusinessCentre = async (index) => {
+    const updatedCentres = businessCentres.filter((_, idx) => idx !== index);
+    const finalCentres = updatedCentres.length > 0 ? updatedCentres : [{ name: '', phone: '', website: '', address: '', email: '' }];
+    setBusinessCentres(finalCentres);
+    setCentreToDeleteIndex(null);
+
+    try {
+      setSubmitting(true);
+      const primaryBc = finalCentres[0] || {};
+      await onSave({
+        name: name.trim() || project?.name,
+        location,
+        targetPlatforms: platforms,
+        da: da !== '' ? Number(da) : null,
+        traffic: traffic !== '' ? Number(traffic) : 0,
+        status,
+        isActive: status === 'Active',
+        napBusinessCentre: (primaryBc.name || '').trim(),
+        napPhone: napPhone.trim(),
+        napWebsite: napWebsite.trim(),
+        napAddress: napAddress.trim(),
+        napEmail: napEmail.trim(),
+        napBcPhone: (primaryBc.phone || '').trim(),
+        napBcWebsite: (primaryBc.website || '').trim(),
+        napBcAddress: (primaryBc.address || '').trim(),
+        napBcEmail: (primaryBc.email || '').trim(),
+        businessCentres: finalCentres,
+        brandedTerms: brandedTerms.trim(),
+      });
+    } catch (err) {
+      setApiError(err.message || 'Failed to update business centres in database.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     if (project) {
@@ -1687,6 +1872,19 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
       setNapBcWebsite(project.napBcWebsite || '');
       setNapBcAddress(project.napBcAddress || '');
       setNapBcEmail(project.napBcEmail || '');
+
+      if (project.businessCentres && Array.isArray(project.businessCentres) && project.businessCentres.length > 0) {
+        setBusinessCentres(project.businessCentres);
+      } else {
+        setBusinessCentres([{
+          name: project.napBusinessCentre || '',
+          phone: project.napBcPhone || '',
+          website: project.napBcWebsite || '',
+          address: project.napBcAddress || '',
+          email: project.napBcEmail || ''
+        }]);
+      }
+
       setBrandedTerms(project.brandedTerms || '');
       setActiveTab('basic_info');
       setConfirmDelete(false);
@@ -1705,6 +1903,7 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
     setSubmitting(true);
     setApiError('');
     try {
+      const primaryBc = businessCentres[0] || {};
       await onSave({
         name: name.trim() || project?.name,
         location,
@@ -1713,15 +1912,16 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
         traffic: traffic !== '' ? Number(traffic) : 0,
         status,
         isActive: status === 'Active',
-        napBusinessCentre: napBusinessCentre.trim(),
+        napBusinessCentre: (primaryBc.name || '').trim(),
         napPhone: napPhone.trim(),
         napWebsite: napWebsite.trim(),
         napAddress: napAddress.trim(),
         napEmail: napEmail.trim(),
-        napBcPhone: napBcPhone.trim(),
-        napBcWebsite: napBcWebsite.trim(),
-        napBcAddress: napBcAddress.trim(),
-        napBcEmail: napBcEmail.trim(),
+        napBcPhone: (primaryBc.phone || '').trim(),
+        napBcWebsite: (primaryBc.website || '').trim(),
+        napBcAddress: (primaryBc.address || '').trim(),
+        napBcEmail: (primaryBc.email || '').trim(),
+        businessCentres: businessCentres,
         brandedTerms: brandedTerms.trim(),
       });
       handleClose();
@@ -1764,9 +1964,8 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
   return (
     <Modal open={open} onClose={handleClose} title="Edit Project" maxWidth={680}
       footer={<>
-        <Btn variant="primary" onClick={handleSave} style={submitting ? { opacity: 0.6, pointerEvents: 'none' } : {}}>{submitting ? 'Saving…' : 'Save'}</Btn>
-        <Btn variant="outline" onClick={handleClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
-        <Btn variant="outline" onClick={() => setConfirmDelete(true)} style={{ flex: 'none', padding: '10px 16px', border: '1.5px solid var(--red)', color: 'var(--red)' }}>Delete</Btn>
+        <Btn variant="primary" onClick={handleSave} style={{ flex: 1, ...(submitting ? { opacity: 0.6, pointerEvents: 'none' } : {}) }}>{submitting ? 'Saving…' : 'Save Project'}</Btn>
+        <Btn variant="outline" onClick={() => setConfirmDelete(true)} style={{ flex: 1, border: '1.5px solid var(--red)', color: 'var(--red)' }}>Delete Project</Btn>
       </>}
     >
       {apiError && (
@@ -1802,7 +2001,7 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
             }}
           >
-            NAP Details
+            NAP
             {(napPhone || napWebsite || napAddress || napEmail || napBusinessCentre || napBcPhone || napBcWebsite || napBcAddress || napBcEmail) && (
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#5c4af2' }} />
             )}
@@ -1860,8 +2059,11 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* Section 1: Basic NAP */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent, #5c4af2)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                Basic NAP
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 3.5, height: 13, background: '#4f46e5', borderRadius: 2 }} />
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                  Headquarters
+                </span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <Input label="Phone" placeholder="e.g. +1 234 567 8900" value={napPhone} onChange={setNapPhone} />
@@ -1873,24 +2075,129 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
               </div>
             </div>
 
-            {/* Section 2: Business Centre NAP */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent, #5c4af2)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                Business Centre NAP
+            {/* Section 2: Business Centre Details */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 3.5, height: 13, background: '#4f46e5', borderRadius: 2 }} />
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                    Business Centre
+                  </span>
+                  {businessCentres.length > 1 && (
+                    <span style={{ fontSize: 10, background: '#eef2ff', color: '#4f46e5', padding: '2px 7px', borderRadius: 10, fontWeight: 600, border: '1px solid #c7d2fe' }}>
+                      {businessCentres.length}
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={addBusinessCentre}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    background: '#eef2ff', color: '#4f46e5',
+                    border: '1px solid #c7d2fe', borderRadius: 6,
+                    padding: '4px 10px', fontSize: 11.5, fontWeight: 600,
+                    cursor: 'pointer', transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = '#e0e7ff'; e.currentTarget.style.borderColor = '#a5b4fc'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = '#eef2ff'; e.currentTarget.style.borderColor = '#c7d2fe'; }}
+                >
+                  <Plus size={13} strokeWidth={2.5} /> Add Centre
+                </button>
               </div>
-              <Input label="Name" placeholder="Business centre name" value={napBusinessCentre} onChange={setNapBusinessCentre} />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <Input label="Phone" placeholder="e.g. +1 234 567 8900" value={napBcPhone} onChange={setNapBcPhone} />
-                <Input label="Website" placeholder="e.g. https://domain.com" value={napBcWebsite} onChange={setNapBcWebsite} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <Input label="Address" placeholder="Business centre address" value={napBcAddress} onChange={setNapBcAddress} />
-                <Input label="Email ID" placeholder="contact@domain.com" value={napBcEmail} onChange={setNapBcEmail} type="email" />
-              </div>
+
+              {businessCentres.map((bc, idx) => (
+                <div key={idx} style={{
+                  display: 'flex', flexDirection: 'column', gap: 10,
+                  padding: businessCentres.length > 1 ? '12px 14px' : '0px',
+                  border: businessCentres.length > 1 ? '1px solid var(--border)' : 'none',
+                  borderRadius: 10, background: businessCentres.length > 1 ? 'var(--surface-2, #fafafa)' : 'transparent'
+                }}>
+                  {businessCentres.length > 1 && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                        Centre #{idx + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeBusinessCentre(idx)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red, #dc2626)', padding: 2, display: 'flex', alignItems: 'center', opacity: 0.8 }}
+                        title="Remove Business Centre"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  )}
+                  <Input
+                    label="Name"
+                    placeholder="Business centre name"
+                    value={bc.name}
+                    onChange={v => updateBusinessCentre(idx, 'name', v)}
+                  />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <Input
+                      label="Phone"
+                      placeholder="e.g. +1 234 567 8900"
+                      value={bc.phone}
+                      onChange={v => updateBusinessCentre(idx, 'phone', v)}
+                    />
+                    <Input
+                      label="Landing Page"
+                      placeholder="e.g. https://domain.com"
+                      value={bc.website}
+                      onChange={v => updateBusinessCentre(idx, 'website', v)}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <Input
+                      label="Address"
+                      placeholder="Business centre address"
+                      value={bc.address}
+                      onChange={v => updateBusinessCentre(idx, 'address', v)}
+                    />
+                    <Input
+                      label="Email ID"
+                      placeholder="contact@domain.com"
+                      value={bc.email}
+                      onChange={v => updateBusinessCentre(idx, 'email', v)}
+                      type="email"
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
       </div>
+
+      {centreToDeleteIndex !== null && (
+        <Modal
+          open={true}
+          onClose={() => setCentreToDeleteIndex(null)}
+          title="Delete Business Centre"
+          maxWidth={460}
+          footer={<>
+            <Btn
+              variant="primary"
+              onClick={() => confirmRemoveBusinessCentre(centreToDeleteIndex)}
+              style={{ flex: 1, background: 'var(--red, #dc2626)' }}
+            >
+              Delete
+            </Btn>
+            <Btn
+              variant="outline"
+              onClick={() => setCentreToDeleteIndex(null)}
+              style={{ flex: 1 }}
+            >
+              Cancel
+            </Btn>
+          </>}
+        >
+          <div style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            Are you sure you want to delete <strong>{businessCentres[centreToDeleteIndex]?.name || `Centre #${centreToDeleteIndex + 1}`}</strong>?
+          </div>
+        </Modal>
+      )}
     </Modal>
   );
 }
@@ -4208,7 +4515,7 @@ function EditCompetitorModal({ open, onClose, competitor, onSave, onDelete }) {
     <Modal open={open} onClose={handleClose} title="Edit Competitor"
       footer={
         <>
-          <Btn variant="primary" onClick={handleSave} style={submitting ? { opacity: 0.6, pointerEvents: 'none' } : {}}>{submitting ? 'Saving…' : 'Save'}</Btn>
+          <Btn variant="primary" onClick={handleSave} style={submitting ? { opacity: 0.6, pointerEvents: 'none' } : {}}>{submitting ? 'Saving…' : 'Save Project'}</Btn>
           <Btn variant="outline" onClick={handleClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
           {onDelete && (
             <Btn variant="outline" onClick={() => setConfirmDelete(true)} style={{ flex: 'none', padding: '10px 16px', border: '1.5px solid var(--red)', color: 'var(--red)' }}>Delete</Btn>

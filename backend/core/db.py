@@ -299,6 +299,7 @@ def init_db():
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS nap_bc_website TEXT"))
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS nap_bc_address TEXT"))
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS nap_bc_email TEXT"))
+        conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS business_centres JSONB"))
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS branded_terms TEXT"))
 
         # --- Single Unified Monthly Operations Table -----------------
@@ -987,7 +988,7 @@ def create_domain(domain, project_name=None, target_regions=None, platforms=None
                    nap_business_centre=None, nap_phone=None, nap_website=None,
                    nap_address=None, nap_email=None,
                    nap_bc_phone=None, nap_bc_website=None, nap_bc_address=None, nap_bc_email=None,
-                   branded_terms=None):
+                   business_centres=None, branded_terms=None):
     """Registers a new domain <-> project pairing (one domain, one
     project). If project_name is blank, defaults to the domain string
     itself (matching the form's "Auto-generated if left blank" hint --
@@ -1014,8 +1015,8 @@ def create_domain(domain, project_name=None, target_regions=None, platforms=None
             raise ValueError(f"Domain '{domain}' already exists.")
 
         conn.execute(text("""
-            INSERT INTO domains (domain, project_name, project_slug, target_regions, platforms, domain_authority, users, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, nap_bc_phone, nap_bc_website, nap_bc_address, nap_bc_email, branded_terms, status, is_active)
-            VALUES (:domain, :project_name, :project_slug, :target_regions, :platforms, :domain_authority, CAST(:users AS JSONB), :nap_business_centre, :nap_phone, :nap_website, :nap_address, :nap_email, :nap_bc_phone, :nap_bc_website, :nap_bc_address, :nap_bc_email, :branded_terms, 'Active', TRUE)
+            INSERT INTO domains (domain, project_name, project_slug, target_regions, platforms, domain_authority, users, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, nap_bc_phone, nap_bc_website, nap_bc_address, nap_bc_email, business_centres, branded_terms, status, is_active)
+            VALUES (:domain, :project_name, :project_slug, :target_regions, :platforms, :domain_authority, CAST(:users AS JSONB), :nap_business_centre, :nap_phone, :nap_website, :nap_address, :nap_email, :nap_bc_phone, :nap_bc_website, :nap_bc_address, :nap_bc_email, CAST(:business_centres AS JSONB), :branded_terms, 'Active', TRUE)
         """), {
             "domain": domain, "project_name": project_name, "project_slug": project_slug,
             "target_regions": target_regions or [], "platforms": platforms or [],
@@ -1030,6 +1031,7 @@ def create_domain(domain, project_name=None, target_regions=None, platforms=None
             "nap_bc_website": nap_bc_website,
             "nap_bc_address": nap_bc_address,
             "nap_bc_email": nap_bc_email,
+            "business_centres": json.dumps(business_centres) if business_centres is not None else None,
             "branded_terms": branded_terms,
         })
 

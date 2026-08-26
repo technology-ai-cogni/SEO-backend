@@ -40,7 +40,7 @@ export const NAV_STRUCTURE = [
         label: 'Operations',
         type: 'section',
         items: [
-          { id: 'off-page-scheduler', label: 'Monthly Operations', path: 'search-visibility/off-page-scheduler' },
+          { id: 'off-page-scheduler', label: 'Off-Page', path: 'search-visibility/off-page-scheduler' },
         ],
       },
     ],
