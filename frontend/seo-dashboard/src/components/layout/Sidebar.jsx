@@ -1,29 +1,21 @@
 import { useState } from 'react';
 import { Home, LayoutDashboard, Search, Sparkles, FileText, FolderOpen, ChevronDown, ChevronRight, Settings, HelpCircle, Bell, Trash2, Users } from 'lucide-react';
 import { NAV_STRUCTURE } from '../../data/navigation';
-import { hasPermission, PERMISSIONS, canAccessRoute } from '../../lib/permissions';
+import { canAccessRoute } from '../../lib/permissions';
 
-const ICONS = { Home, LayoutDashboard, Search, Sparkles, FileText, FolderOpen };
+const ICONS = { Home, LayoutDashboard, Search, Sparkles, FileText, FolderOpen, Settings };
 
 const MODULE_COLORS = {
+  'settings-menu': { dot: '#6366f1', bg: '#e0e7ff' },
   'search-visibility': { dot: '#e74c6f', bg: '#fdeef2' },
   'ai-visibility': { dot: '#d4a017', bg: '#fef9e4' },
   'content-engine': { dot: '#3b82f6', bg: '#dbeafe' },
 };
 
 export default function Sidebar({ activePath, onNavigate, user }) {
-  const [expanded, setExpanded] = useState({ 'search-visibility': true });
+  const [expanded, setExpanded] = useState({ 'settings-menu': true, 'search-visibility': true });
 
   const toggle = (id) => setExpanded(p => ({ ...p, [id]: !p[id] }));
-
-  const bottomNavItems = [
-    { icon: Bell, label: 'Notifications', path: 'notifications' },
-    { icon: Users, label: 'Users', path: 'users', permission: PERMISSIONS.MANAGE_USERS },
-    { icon: Trash2, label: 'Recycle Bin', path: 'recycle-bin', permission: PERMISSIONS.RESTORE_PROJECT },
-    { icon: FileText, label: 'Logs', path: 'logs', permission: PERMISSIONS.VIEW_LOGS },
-    { icon: Settings, label: 'Settings', path: 'profile' },
-    { icon: HelpCircle, label: 'Help', path: 'help' },
-  ];
 
   return (
     <aside style={{
@@ -103,11 +95,7 @@ export default function Sidebar({ activePath, onNavigate, user }) {
                 onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--surface-2)'; }}
                 onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
               >
-                {color ? (
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: color.dot, flexShrink: 0 }} />
-                ) : (
-                  Icon && <Icon size={15} strokeWidth={isActive ? 2.5 : 2} />
-                )}
+                {Icon && <Icon size={15} strokeWidth={isActive ? 2.5 : 2} />}
                 <span style={{ flex: 1 }}>{item.label}</span>
                 {hasChildren && (isExpanded
                   ? <ChevronDown size={13} />
@@ -116,16 +104,18 @@ export default function Sidebar({ activePath, onNavigate, user }) {
               </button>
 
               {hasChildren && isExpanded && (
-                <div style={{ background: color ? `${color.bg}55` : 'transparent' }}>
+                <div style={{ background: color ? `${color.bg}33` : 'transparent' }}>
                   {item.children.map((section, si) => {
                     const allowedChildren = section.items.filter(child => canAccessRoute(user, child.path));
                     if (allowedChildren.length === 0) return null;
 
                     return (
                       <div key={si}>
-                        <div style={{ padding: '6px 16px 2px 34px', fontSize: 10.5, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
-                          {section.label}
-                        </div>
+                        {section.label && section.label !== 'CONFIGURATION' && (
+                          <div style={{ padding: '6px 16px 2px 34px', fontSize: 10.5, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                            {section.label}
+                          </div>
+                        )}
                         {allowedChildren.map(child => {
                           const childActive = activePath === child.path;
                           return (
@@ -162,46 +152,6 @@ export default function Sidebar({ activePath, onNavigate, user }) {
           );
         })}
       </nav>
-
-      {/* Bottom */}
-      <div style={{ padding: '12px 10px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {bottomNavItems.map(({ icon: Icon, label, path, permission }) => {
-          if (!canAccessRoute(user, path)) {
-            return null;
-          }
-          if (permission && !hasPermission(user, permission)) {
-            return null;
-          }
-          const isActive = activePath === path;
-          return (
-            <button
-              key={label}
-              onClick={() => onNavigate?.(path)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '7px 10px',
-                background: isActive ? 'var(--accent-light)' : 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                borderRadius: 'var(--radius-sm)',
-                color: isActive ? 'var(--accent)' : 'var(--text-muted)',
-                fontSize: 13,
-                fontFamily: 'var(--font-body)',
-                fontWeight: isActive ? 600 : 500,
-                width: '100%',
-                transition: 'background 0.15s, color 0.15s'
-              }}
-              onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--surface-2)'; }}
-              onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
-            >
-              <Icon size={15} strokeWidth={isActive ? 2.5 : 2} />
-              {label}
-            </button>
-          );
-        })}
-      </div>
     </aside>
   );
 }

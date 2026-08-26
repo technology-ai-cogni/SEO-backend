@@ -527,6 +527,22 @@ def init_db():
 
         # --- Outreach Sites Table ---
         conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS off_page_activities (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                activity_name TEXT NOT NULL,
+                project_name TEXT,
+                main_poc TEXT,
+                content_poc TEXT,
+                quantity INTEGER DEFAULT 0,
+                budget NUMERIC(12, 2) DEFAULT 0.00,
+                "user" TEXT,
+                period TEXT,
+                scheduler TEXT,
+                auditor TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+
             CREATE TABLE IF NOT EXISTS outreach_sites (
                 id BIGSERIAL PRIMARY KEY,
                 project_slug TEXT NOT NULL REFERENCES projects(slug),
@@ -2383,6 +2399,15 @@ def delete_recycle_bin_item(item_identifier):
                OR item_name = :p
         """), {"p": p})
 
+def get_latest_ai_analysis_run(project_slug: str, engine_name: str):
+    with engine.begin() as conn:
+        res = conn.execute(text("""
+            SELECT * FROM ai_analysis
+            WHERE (project_slug = :p OR project_name = :p) AND LOWER(engine) = :e
+            ORDER BY created_at DESC LIMIT 1
+        """), {"p": project_slug, "e": engine_name.lower().strip()}).first()
+        return _clean_for_json(dict(res._mapping)) if res else None
+
 
 def save_ai_analysis_run(
     project_slug: str,
@@ -2822,6 +2847,124 @@ def list_users() -> list:
         except Exception:
             return []
 
+
+
+
+def list_off_page_activities(project_name=None) -> list:
+    with engine.begin() as conn:
+        try:
+            if project_name:
+                res = conn.execute(
+                    text("SELECT * FROM off_page_activities WHERE project_name = :p ORDER BY created_at DESC"),
+                    {"p": project_name}
+                )
+            else:
+                res = conn.execute(text("SELECT * FROM off_page_activities ORDER BY created_at DESC"))
+            rows = [dict(r._mapping) for r in res]
+            return _clean_for_json(rows)
+        except Exception as e:
+            print(f"[db] Notice in list_off_page_activities: {e}")
+            return []
+
+
+def create_off_page_activity(data: dict) -> dict:
+    activity_id = str(uuid.uuid4())
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO off_page_activities (
+                    id, activity_name, project_name, main_poc, content_poc,
+                    quantity, budget, "user", period, scheduler, auditor
+                ) VALUES (
+                    :id, :activity_name, :project_name, :main_poc, :content_poc,
+                    :quantity, :budget, :user, :period, :scheduler, :auditor
+                )
+            """),
+            {
+                "id": activity_id,
+                "activity_name": data.get("activity_name", ""),
+                "project_name": data.get("project_name"),
+                "main_poc": data.get("main_poc"),
+                "content_poc": data.get("content_poc"),
+                "quantity": int(data.get("quantity") or 0),
+                "budget": float(data.get("budget") or 0.0),
+                "user": data.get("user"),
+                "period": data.get("period"),
+                "scheduler": data.get("scheduler"),
+                "auditor": data.get("auditor")
+            }
+        )
+        res = conn.execute(text("SELECT * FROM off_page_activities WHERE id = :id"), {"id": activity_id}).first()
+        return _clean_for_json(dict(res._mapping)) if res else {}
+
+
+def get_off_page_activity(activity_id: str):
+    with engine.begin() as conn:
+        res = conn.execute(text("SELECT * FROM off_page_activities WHERE id = :id"), {"id": activity_id}).first()
+        return _clean_for_json(dict(res._mapping)) if res else None
+
+
+def update_off_page_activity(activity_id: str, data: dict):
+    allowed = ["activity_name", "project_name", "main_poc", "content_poc", "quantity", "budget", "user", "period", "scheduler", "auditor"]
+    updates = []
+    params = {"id": activity_id}
+
+    for field in allowed:
+        if field in data and data[field] is not None:
+            if field == "user":
+                updates.append('"user" = :user')
+            else:
+                updates.append(f"{field} = :{field}")
+            params[field] = data[field]
+
+    if not updates:
+        return get_off_page_activity(activity_id)
+
+    updates.append("updated_at = now()")
+    query = f"UPDATE off_page_activities SET {', '.join(updates)} WHERE id = :id"
+
+    with engine.begin() as conn:
+        conn.execute(text(query), params)
+        res = conn.execute(text("SELECT * FROM off_page_activities WHERE id = :id"), {"id": activity_id}).first()
+        return _clean_for_json(dict(res._mapping)) if res else None
+
+
+def delete_off_page_activity(activity_id: str) -> bool:
+    with engine.begin() as conn:
+        res = conn.execute(text("DELETE FROM off_page_activities WHERE id = :id"), {"id": activity_id})
+        return res.rowcount > 0
+
+
+
+def bulk_insert_off_page_activities(records: list) -> list:
+    with engine.begin() as conn:
+        for rec in records:
+            activity_id = str(uuid.uuid4())
+            conn.execute(
+                text("""
+                    INSERT INTO off_page_activities (
+                        id, activity_name, project_name, main_poc, content_poc,
+                        quantity, budget, "user", period, scheduler, auditor
+                    ) VALUES (
+                        :id, :activity_name, :project_name, :main_poc, :content_poc,
+                        :quantity, :budget, :user, :period, :scheduler, :auditor
+                    )
+                """),
+                {
+                    "id": activity_id,
+                    "activity_name": str(rec.get("activity_name") or rec.get("Activity Name") or "Untitled Activity"),
+                    "project_name": rec.get("project_name") or rec.get("Project Name"),
+                    "main_poc": rec.get("main_poc") or rec.get("Main POC"),
+                    "content_poc": rec.get("content_poc") or rec.get("Content POC"),
+                    "quantity": int(rec.get("quantity") or rec.get("Quantity") or 0),
+                    "budget": float(rec.get("budget") or rec.get("Budget") or 0.0),
+                    "user": rec.get("user") or rec.get("User"),
+                    "period": rec.get("period") or rec.get("Period"),
+                    "scheduler": rec.get("scheduler") or rec.get("Scheduler"),
+                    "auditor": rec.get("auditor") or rec.get("Auditor")
+                }
+            )
+    return list_off_page_activities()
 
 if __name__ == "__main__":
     # Create/update the shared tables (run from the `backend/` directory):

@@ -13,10 +13,20 @@ export const NAV_STRUCTURE = [
     path: 'dashboard',
   },
   {
-    id: 'project-setup',
-    label: 'Project Setup',
-    icon: 'FolderOpen',
-    path: 'project-setup',
+    id: 'settings-menu',
+    label: 'Settings',
+    icon: 'Settings',
+    path: 'settings',
+    children: [
+      {
+        label: 'CONFIGURATION',
+        type: 'section',
+        items: [
+          { id: 'general-settings', label: 'General', path: 'settings/general' },
+          { id: 'project-setup', label: 'Project Setup', path: 'project-setup' },
+        ],
+      },
+    ],
   },
   {
     id: 'search-visibility',
@@ -41,6 +51,7 @@ export const NAV_STRUCTURE = [
         type: 'section',
         items: [
           { id: 'off-page-scheduler', label: 'Monthly Operations', path: 'search-visibility/off-page-scheduler' },
+          { id: 'calendar', label: 'Calendar', path: 'search-visibility/calendar' },
         ],
       },
     ],

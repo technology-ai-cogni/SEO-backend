@@ -2188,6 +2188,51 @@ def run_ai_analysis(project: str, req: AiAnalysisRequest):
         return {"project": project, "keyword": req.keyword, "ai_mode": mode, "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+def smooth_ai_result(new_res: dict, prev_res: dict) -> dict:
+    """
+    Smooths new AI analysis result against previous run to prevent wild fluctuations
+    while preserving subtle dynamic changes.
+    """
+    if not prev_res:
+        return new_res
+
+    smoothed = dict(new_res)
+    
+    # 1. Clamp Mentions Count (Max change ±1 from previous)
+    prev_mentions = int(prev_res.get("mentions") or 0)
+    new_mentions = int(new_res.get("mentions") or 0)
+    if abs(new_mentions - prev_mentions) > 2:
+        smoothed["mentions"] = prev_mentions + 1 if new_mentions > prev_mentions else max(0, prev_mentions - 1)
+
+    # 2. Clamp Cited Pages Count (Max change ±1 from previous)
+    prev_cited = int(prev_res.get("cited_pages") or 0)
+    new_cited = int(new_res.get("cited_pages") or 0)
+    if abs(new_cited - prev_cited) > 2:
+        smoothed["cited_pages"] = prev_cited + 1 if new_cited > prev_cited else max(0, prev_cited - 1)
+
+    # 3. Clamp Domain Rank (Max shift ±1 position)
+    prev_rank = int(prev_res.get("domain_rank") or 1)
+    new_rank = int(new_res.get("domain_rank") or 1)
+    if abs(new_rank - prev_rank) > 2:
+        smoothed["domain_rank"] = prev_rank + 1 if new_rank > prev_rank else max(1, prev_rank - 1)
+
+    # 4. Smooth Mentioned Keywords List
+    prev_kws = prev_res.get("mentioned_keywords") or []
+    new_kws = new_res.get("mentioned_keywords") or []
+    if prev_kws:
+        merged_kws = list(dict.fromkeys(prev_kws + new_kws))
+        target_len = smoothed["mentions"]
+        smoothed["mentioned_keywords"] = merged_kws[:target_len] if merged_kws else new_kws
+
+    # 5. Smooth Cited Pages List
+    prev_cited_list = prev_res.get("cited_pages_list") or []
+    new_cited_list = new_res.get("cited_pages_list") or []
+    if prev_cited_list:
+        merged_cited = list(dict.fromkeys(prev_cited_list + new_cited_list))
+        target_cited_len = smoothed["cited_pages"]
+        smoothed["cited_pages_list"] = merged_cited[:target_cited_len] if merged_cited else new_cited_list
+
+    return smoothed
 
 
 @app.post("/projects/{project_slug}/ai-visibility-analysis")
@@ -2206,7 +2251,9 @@ def run_ai_visibility_analysis_endpoint(project_slug: str, req: AiVisibilityRequ
             AgentClass = importlib.import_module("exp-1.agents.openai_agent").OpenAIAgent
 
         agent = AgentClass()
-        result = agent.analyze_ai_visibility(kws, client_domain=client_domain, country=req.country or "India")
+        raw_result = agent.analyze_ai_visibility(kws, client_domain=client_domain, country=req.country or "India")
+        prev_run = db.get_latest_ai_analysis_run(project_slug, engine)
+        result = smooth_ai_result(raw_result, prev_run)
 
         # Automatically insert row into `ai_analysis` database table!
         try:
@@ -2425,3 +2472,172 @@ if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
 
 
+
+
+# --- Off-Page Activities Endpoints ----------------------------------------
+class OffPageActivityPayload(BaseModel):
+    activity_name: str
+    project_name: Optional[str] = None
+    main_poc: Optional[str] = None
+    content_poc: Optional[str] = None
+    quantity: Optional[int] = 0
+    budget: Optional[float] = 0.0
+    user: Optional[str] = None
+    period: Optional[str] = None
+    scheduler: Optional[str] = None
+    auditor: Optional[str] = None
+
+
+class OffPageActivityUpdatePayload(BaseModel):
+    activity_name: Optional[str] = None
+    project_name: Optional[str] = None
+    main_poc: Optional[str] = None
+    content_poc: Optional[str] = None
+    quantity: Optional[int] = None
+    budget: Optional[float] = None
+    user: Optional[str] = None
+    period: Optional[str] = None
+    scheduler: Optional[str] = None
+    auditor: Optional[str] = None
+
+
+@app.get("/off-page-activities")
+def get_off_page_activities(project: Optional[str] = None):
+    activities = db.list_off_page_activities(project_name=project)
+    return {"activities": activities}
+
+
+@app.post("/off-page-activities")
+def create_off_page_activity(payload: OffPageActivityPayload):
+    activity = db.create_off_page_activity(payload.dict())
+    return {"activity": activity}
+
+
+@app.get("/off-page-activities/{activity_id}")
+def get_off_page_activity(activity_id: str):
+    activity = db.get_off_page_activity(activity_id)
+    if not activity:
+        raise HTTPException(404, "Activity not found")
+    return {"activity": activity}
+
+
+@app.patch("/off-page-activities/{activity_id}")
+def update_off_page_activity(activity_id: str, payload: OffPageActivityUpdatePayload):
+    updated = db.update_off_page_activity(activity_id, payload.dict(exclude_unset=True))
+    if not updated:
+        raise HTTPException(404, "Activity not found")
+    return {"activity": updated}
+
+
+@app.delete("/off-page-activities/{activity_id}")
+def delete_off_page_activity(activity_id: str):
+    success = db.delete_off_page_activity(activity_id)
+    if not success:
+        raise HTTPException(404, "Activity not found")
+    return {"success": True, "deleted_id": activity_id}
+
+
+
+@app.post("/off-page-activities/import")
+async def import_off_page_activities(
+    file: UploadFile = File(...),
+    project_name: Optional[str] = Form(None)
+):
+    """
+    Import Off-Page Activities from an uploaded Excel (.xlsx, .xls) or CSV (.csv) file.
+    Flexible column header matching:
+      - Activity Name
+      - Project Name
+      - Main POC
+      - Content POC
+      - Quantity
+      - Budget
+      - User
+      - Period
+      - Scheduler
+      - Auditor
+    """
+    filename = file.filename or ""
+    contents = await file.read()
+    
+    try:
+        if filename.endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(contents))
+        elif filename.endswith((".xlsx", ".xls")):
+            df = pd.read_excel(io.BytesIO(contents))
+        else:
+            raise HTTPException(400, "Invalid file format. Please upload a CSV or Excel file (.csv, .xlsx, .xls).")
+    except Exception as e:
+        raise HTTPException(400, f"Failed to parse uploaded file: {str(e)}")
+
+    df = df.where(pd.notnull(df), None)
+
+    col_map = {}
+    for col in df.columns:
+        c_clean = str(col).strip().lower().replace(" ", "_")
+        if "activity" in c_clean:
+            col_map[col] = "activity_name"
+        elif "project" in c_clean:
+            col_map[col] = "project_name"
+        elif "main_poc" in c_clean or "main" in c_clean:
+            col_map[col] = "main_poc"
+        elif "content_poc" in c_clean or "content" in c_clean:
+            col_map[col] = "content_poc"
+        elif "quantity" in c_clean or "qty" in c_clean:
+            col_map[col] = "quantity"
+        elif "budget" in c_clean or "cost" in c_clean:
+            col_map[col] = "budget"
+        elif "user" in c_clean or "author" in c_clean:
+            col_map[col] = "user"
+        elif "period" in c_clean or "date" in c_clean or "month" in c_clean:
+            col_map[col] = "period"
+        elif "scheduler" in c_clean or "schedule" in c_clean:
+            col_map[col] = "scheduler"
+        elif "auditor" in c_clean or "audit" in c_clean:
+            col_map[col] = "auditor"
+
+    df_renamed = df.rename(columns=col_map)
+    records = df_renamed.to_dict(orient="records")
+
+    parsed_records = []
+    for row in records:
+        activity_name = str(row.get("activity_name") or "").strip()
+        if not activity_name or activity_name.lower() == "none":
+            continue
+            
+        proj_name = row.get("project_name") or project_name
+        
+        try:
+            qty = int(row.get("quantity") or 0)
+        except Exception:
+            qty = 0
+            
+        try:
+            bgt = float(row.get("budget") or 0.0)
+        except Exception:
+            bgt = 0.0
+
+        parsed_records.append({
+            "activity_name": activity_name,
+            "project_name": proj_name,
+            "main_poc": row.get("main_poc"),
+            "content_poc": row.get("content_poc"),
+            "quantity": qty,
+            "budget": bgt,
+            "user": row.get("user"),
+            "period": str(row.get("period")) if row.get("period") else None,
+            "scheduler": row.get("scheduler"),
+            "auditor": row.get("auditor")
+        })
+
+    if not parsed_records:
+        raise HTTPException(400, "No valid activity records found in the uploaded file.")
+
+    imported_list = db.bulk_insert_off_page_activities(parsed_records)
+
+    return {
+        "success": True,
+        "message": f"Successfully imported {len(parsed_records)} activity records.",
+        "imported_count": len(parsed_records),
+        "activities": imported_list
+    }

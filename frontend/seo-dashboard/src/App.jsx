@@ -13,6 +13,8 @@ import ProjectSetupPage from './components/pages/ProjectSetupPage';
 import CompetitorsPage from './components/pages/CompetitorsPage';
 import PlaceholderPage from './components/pages/PlaceholderPage';
 import OffPageSchedulerPage from './components/pages/OffPageSchedulerPage';
+import CalendarPage from './components/pages/CalendarPage';
+import GeneralSettingsPage from './components/pages/GeneralSettingsPage';
 import LoginPage from './components/pages/LoginPage';
 import SignUpPage from './components/pages/SignUpPage';
 import ProfilePage from './components/pages/ProfilePage';
@@ -200,6 +202,7 @@ const PAGE_TITLES = {
   'notifications': { title: 'Notifications', subtitle: 'System notifications and workspace alerts' },
   'help': { title: 'Help & Support', subtitle: 'Documentation, guides, and assistance' },
   'signup': { title: 'Create Account', subtitle: 'Register for a new SEO workspace account' },
+  'settings/general': { title: 'General Settings', subtitle: 'System notifications, users, logs, and general configuration' },
   'project-setup': { title: 'Project Setup', subtitle: 'Manage domains, pages, competitors and connectors' },
   'project-setup/domain': { title: 'Project Setup · Domain', subtitle: 'Manage tracked domains' },
   'project-setup/pages': { title: 'Project Setup · Pages', subtitle: 'Manage target and blog pages' },
@@ -212,6 +215,7 @@ const PAGE_TITLES = {
   'search-visibility/top-pages': { title: 'Top Pages (Organic)', subtitle: 'Best performing pages by organic traffic' },
   'search-visibility/link-outreach': { title: 'Link Outreach', subtitle: 'Manage backlink acquisition campaigns' },
   'search-visibility/off-page-scheduler': { title: 'Monthly Operations', subtitle: 'Schedule off-page SEO activities' },
+  'search-visibility/calendar': { title: 'Calendar', subtitle: 'Operations planning across Saved, Scheduled, and Approved activities' },
   'search-visibility/on-page': { title: 'On-Page Optimization', subtitle: 'On-page SEO recommendations' },
   'search-visibility/competitors': { title: 'Project', subtitle: 'Competitor SEO intelligence' },
   'search-visibility/search/overview': { title: 'Search Overview', subtitle: 'High-level search performance summary' },
@@ -298,10 +302,20 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
     case 'login': return <LoginPage onNavigate={onNavigate} initialAdminMode={false} user={user} onLoginSuccess={onLoginSuccess} onLogout={onLogout} />;
     case 'admin-login': return <LoginPage onNavigate={onNavigate} initialAdminMode={true} user={user} onLoginSuccess={onLoginSuccess} onLogout={onLogout} />;
     case 'signup': return <SignUpPage onNavigate={onNavigate} user={user} onLoginSuccess={onLoginSuccess} />;
-    case 'profile': return <ProfilePage user={user} onUserUpdate={onLoginSuccess} onNavigate={onNavigate} />;
-    case 'users': return <UsersPage user={user} onNavigate={onNavigate} />;
-    case 'recycle-bin': return <RecycleBinPage user={user} onNavigate={onNavigate} />;
-    case 'logs': return <LogsPage user={user} onNavigate={onNavigate} />;
+    case 'settings':
+    case 'settings/general': return <GeneralSettingsPage initialTab="notifications" user={user} onNavigate={onNavigate} onUserUpdate={onLoginSuccess} />;
+    case 'settings/notifications':
+    case 'notifications': return <GeneralSettingsPage initialTab="notifications" user={user} onNavigate={onNavigate} onUserUpdate={onLoginSuccess} />;
+    case 'settings/users':
+    case 'users': return <GeneralSettingsPage initialTab="users" user={user} onNavigate={onNavigate} onUserUpdate={onLoginSuccess} />;
+    case 'settings/recycle-bin':
+    case 'recycle-bin': return <GeneralSettingsPage initialTab="recycle-bin" user={user} onNavigate={onNavigate} onUserUpdate={onLoginSuccess} />;
+    case 'settings/logs':
+    case 'logs': return <GeneralSettingsPage initialTab="logs" user={user} onNavigate={onNavigate} onUserUpdate={onLoginSuccess} />;
+    case 'settings/profile':
+    case 'profile': return <GeneralSettingsPage initialTab="settings" user={user} onNavigate={onNavigate} onUserUpdate={onLoginSuccess} />;
+    case 'settings/help':
+    case 'help': return <GeneralSettingsPage initialTab="help" user={user} onNavigate={onNavigate} onUserUpdate={onLoginSuccess} />;
     case 'dashboard': return <DashboardPage 
       activeProject={mockProject}
       keywords={topKeywords}
@@ -318,6 +332,7 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
     case 'ai-visibility/brand-performance':
     case 'ai-visibility/competitor-insights': return <AIVisibilityPage />;
     case 'search-visibility/off-page-scheduler': return <OffPageSchedulerPage user={user} />;
+    case 'search-visibility/calendar': return <CalendarPage user={user} />;
     case 'content-engine': return <ContentEnginePage />;
     default: {
       const info = PAGE_TITLES[path];
