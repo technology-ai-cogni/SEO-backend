@@ -88,25 +88,110 @@ function Input({ label, hint, placeholder, required, value, onChange, type = 'te
 }
 
 function Select({ label, options, value, onChange, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside, true);
+    document.addEventListener('click', handleClickOutside, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside, true);
+      document.removeEventListener('click', handleClickOutside, true);
+    };
+  }, []);
+
+  const selectedOption = options.find(o => (o.value || o) === value);
+  const displayLabel = selectedOption ? (selectedOption.label || selectedOption) : placeholder;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <div ref={ref} style={{ display: 'flex', flexDirection: 'column', gap: 4, position: 'relative' }}>
       {label && <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{label}</span>}
-      <div style={{ position: 'relative' }}>
-        <select
-          value={value}
-          onChange={e => onChange?.(e.target.value)}
-          style={{
-            width: '100%', appearance: 'none', border: '1.5px solid #d1d5db',
-            borderRadius: 8, padding: '10px 36px 10px 14px', fontSize: 13,
-            fontFamily: 'var(--font-body)', color: value ? 'var(--text-primary)' : 'var(--text-muted)',
-            background: '#fff', cursor: 'pointer', outline: 'none',
-          }}
-        >
-          {placeholder && <option value="">{placeholder}</option>}
-          {options.map(o => <option key={o.value || o} value={o.value || o}>{o.label || o}</option>)}
-        </select>
-        <ChevronDown size={14} color="var(--text-muted)" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-      </div>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          border: '1.5px solid #d1d5db',
+          borderRadius: 8,
+          padding: '10px 14px',
+          fontSize: 13,
+          fontFamily: 'var(--font-body)',
+          color: value ? 'var(--text-primary)' : 'var(--text-muted)',
+          background: '#fff',
+          cursor: 'pointer',
+          outline: 'none',
+          textAlign: 'left'
+        }}
+      >
+        <span>{displayLabel}</span>
+        <ChevronDown size={14} color="var(--text-muted)" />
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute',
+          top: '100%',
+          left: 0,
+          right: 0,
+          marginTop: 4,
+          background: '#ffffff',
+          border: '1px solid #e2e8f0',
+          borderRadius: 10,
+          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.15)',
+          maxHeight: 220,
+          overflowY: 'auto',
+          zIndex: 999
+        }}>
+          {placeholder && (
+            <div
+              onClick={() => { onChange?.(''); setOpen(false); }}
+              style={{
+                padding: '9px 14px',
+                fontSize: 12.5,
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                borderBottom: '1px solid #f1f5f9'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              {placeholder}
+            </div>
+          )}
+          {options.map(o => {
+            const val = o.value || o;
+            const lbl = o.label || o;
+            const isSelected = val === value;
+            return (
+              <div
+                key={val}
+                onClick={() => { onChange?.(val); setOpen(false); }}
+                style={{
+                  padding: '9px 14px',
+                  fontSize: 13,
+                  fontWeight: isSelected ? 700 : 500,
+                  color: isSelected ? '#4f46e5' : '#334155',
+                  background: isSelected ? '#eef2ff' : 'transparent',
+                  cursor: 'pointer',
+                  transition: 'background 0.15s'
+                }}
+                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#f1f5f9'; }}
+                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+              >
+                {lbl}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -654,7 +739,7 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
   const [share, setShare] = useState(false);
   const [regions, setRegions] = useState([]);
   const [platforms, setPlatforms] = useState([]);
-  const [da, setDa] = useState('');
+  const [industry, setIndustry] = useState('');
   const [napBusinessCentre, setNapBusinessCentre] = useState('');
   const [napPhone, setNapPhone] = useState('');
   const [napWebsite, setNapWebsite] = useState('');
@@ -720,9 +805,24 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
 
   const removeUser = (index) => setUsers(prev => prev.filter((_, i) => i !== index));
 
+  const industryOptions = [
+    { value: 'Education', label: 'Education' },
+    { value: 'Edtech', label: 'Edtech' },
+    { value: 'Real Estate', label: 'Real Estate' },
+    { value: 'Technology', label: 'Technology' },
+    { value: 'Consulting', label: 'Consulting' },
+    { value: 'F&B', label: 'F&B' },
+    { value: 'Hospitality', label: 'Hospitality' },
+    { value: 'Pet', label: 'Pet' },
+    { value: 'Restaurant / Cafe / QSR', label: 'Restaurant / Cafe / QSR' },
+    { value: 'D2C - Beauty & Wellness', label: 'D2C - Beauty & Wellness' },
+    { value: 'D2C - Consumer Goods', label: 'D2C - Consumer Goods' },
+    { value: 'D2C - Health', label: 'D2C - Health' },
+  ];
+
   const resetForm = () => {
     setDomain(''); setName(''); setShare(false); setRegions([]);
-    setPlatforms([]); setDa('');
+    setPlatforms([]); setIndustry('');
     setNapBusinessCentre(''); setNapPhone(''); setNapWebsite(''); setNapAddress(''); setNapEmail('');
     setNapBcPhone(''); setNapBcWebsite(''); setNapBcAddress(''); setNapBcEmail('');
     setBusinessCentres([{ name: '', phone: '', website: '', address: '', email: '' }]);
@@ -744,7 +844,7 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
         name: name.trim() || domain.trim(),
         regions,
         platforms,
-        da: da || null,
+        industry,
         nap_business_centre: (primaryBc.name || '').trim(),
         nap_phone: napPhone.trim(),
         nap_website: napWebsite.trim(),
@@ -846,7 +946,13 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
                 onRemove={r => setRegions(p => p.filter(x => x !== r))}
                 placeholder="e.g. India, Singapore, USA"
               />
-              <Input label="Domain Authority" placeholder="e.g. 42" value={da} onChange={setDa} type="number" />
+              <Select
+                label="Industry"
+                placeholder="Select Industry..."
+                value={industry}
+                onChange={setIndustry}
+                options={industryOptions}
+              />
             </div>
 
             <MultiSelect
@@ -856,45 +962,7 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
               onToggle={togglePlatform}
             />
 
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 2 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Add Users</span>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <Select
-                  placeholder="Type"
-                  value={userType}
-                  onChange={setUserType}
-                  options={[
-                    { value: 'agency', label: 'Agency' },
-                    { value: 'cxo', label: 'CXO' },
-                    { value: 'project_head', label: 'Project Head' },
-                    { value: 'team_member', label: 'Team Member' },
-                  ]}
-                />
-                <Input placeholder="User (Email ID)" value={userEmail} onChange={setUserEmail} type="email" />
-              </div>
-              <button onClick={addUser} style={{ alignSelf: 'flex-start', fontSize: 12.5, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)', fontWeight: 600, padding: '2px 0' }}>
-                + Add another user
-              </button>
-              
-              {users.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, maxHeight: 100, overflowY: 'auto' }}>
-                  {users.map((u, idx) => (
-                    <div key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '4px 10px', background: 'var(--surface-2)', borderRadius: 6 }}>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'var(--accent-light)', borderRadius: 99, padding: '2px 6px' }}>
-                        {userTypeLabels[u.type] || u.type}
-                      </span>
-                      <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>{u.email}</span>
-                      <button onClick={() => removeUser(idx)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0, lineHeight: 1, fontSize: 14 }}>×</button>
-                    </div>
-                  ))}
-                  
-                </div>
-              
-              )}
-              <Input label="Branded Terms" placeholder="e.g. Brand1, Brand2" value={brandedTerms} onChange={setBrandedTerms} />
-
-            </div>
+            <Input label="Branded Terms" placeholder="e.g. Brand1, Brand2" value={brandedTerms} onChange={setBrandedTerms} />
           </div>
         )}
 
@@ -1792,7 +1860,7 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
   const [platforms, setPlatforms] = useState([]);
-  const [da, setDa] = useState('');
+  const [industry, setIndustry] = useState('');
   const [traffic, setTraffic] = useState('');
   const [status, setStatus] = useState('Active');
   const [activeTab, setActiveTab] = useState('basic_info');

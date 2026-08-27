@@ -4,7 +4,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi, fetchDomainMetricsApi, runOrganicRankCheckApi } from '../../lib/projectsApi';
 import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions, canRunBrandDiscovery, isAssociateUser, canRunAiModelAnalysis, recordAiModelAnalysisRun } from '../../lib/permissions';
 
-function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 100, projectTotalKeywords = 514 }) {
+function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 0, projectTotalKeywords = 0 }) {
   const [hoverType, setHoverType] = useState(null); // null | 'mentions' | 'cited'
   const hoverTimeoutRef = useRef(null);
 
@@ -21,7 +21,7 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
   };
 
   const runKeywords = totalKeywords || 0;
-  const projectTotal = projectTotalKeywords || runKeywords || 100;
+  const projectTotal = projectTotalKeywords || runKeywords || 0;
 
   // Progress percentage based on ratio of keywords run vs project total keywords
   const keywordsRatioPercent = projectTotal > 0 ? Math.min(100, (runKeywords / projectTotal) * 100) : 0;
@@ -444,6 +444,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   const [projectKeywords, setProjectKeywords] = useState([]);
   const [projectPages, setProjectPages] = useState([]);
   const [unauthorizedModal, setUnauthorizedModal] = useState({ show: false, message: '' });
+  const [showDateModal, setShowDateModal] = useState(false);
   const [isAnalyzingOverlay, setIsAnalyzingOverlay] = useState(false);
 
   // Hidden cards state
@@ -707,17 +708,43 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   // Load cached AI analysis results & live domain metrics from localStorage whenever project changes
   useEffect(() => {
     if (!activeProject?.slug) return;
-    // Restore cached live DA if present 
+    // Restore cached live DA & Spam Score if present, or fetch live metrics
     const metricCacheKey = `bd_domain_metrics_${activeProject.slug}`;
+    let loadedCache = false;
     try {
       const cachedMetrics = localStorage.getItem(metricCacheKey);
       if (cachedMetrics) {
         const parsed = JSON.parse(cachedMetrics);
-        if (parsed?.da) {
-          setActiveProject(prev => prev ? { ...prev, da: parsed.da } : prev);
+        if (parsed?.da || parsed?.spam_score || parsed?.ss) {
+          loadedCache = true;
+          setActiveProject(prev => prev ? {
+            ...prev,
+            da: parsed.da ?? prev.da,
+            spam_score: parsed.spam_score || parsed.ss || prev.spam_score || '0%'
+          } : prev);
         }
       }
     } catch (e) { }
+
+    if (!loadedCache && activeProject?.domain) {
+      fetchDomainMetricsApi(activeProject.domain).then(res => {
+        if (res?.status === 'success' || res?.da) {
+          const metricsToSave = {
+            da: res.da || 0,
+            spam_score: res.spam_score || res.ss || '0%',
+            total_traffic: res.total_traffic || res.org_traffic || 0
+          };
+          try {
+            localStorage.setItem(metricCacheKey, JSON.stringify(metricsToSave));
+          } catch (err) { }
+          setActiveProject(prev => prev ? {
+            ...prev,
+            da: res.da ?? prev.da,
+            spam_score: res.spam_score || res.ss || prev.spam_score || '0%'
+          } : prev);
+        }
+      }).catch(err => console.warn('[PositionAnalysisPage] Failed to fetch domain metrics:', err));
+    }
 
     const tabs = ['overview', 'chatgpt', 'gemini', 'ai overview'];
     const newResults = {};
@@ -1340,6 +1367,24 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
 
   const badgeInfo = getRegionBadgeInfo(activeProject, selectedDate);
 
+  if (loading || !activeProject) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        background: '#f8fafc',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 40
+      }}>
+        <Sparkles size={36} color="#6366f1" className="animate-spin" style={{ marginBottom: 16 }} />
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0 }}>Loading Brand Discovery...</h3>
+        <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0' }}>Fetching project metrics, AI search engine positions, and analytics.</p>
+      </div>
+    );
+  }
+
   return (
     <div style={{
       position: 'relative',
@@ -1735,19 +1780,21 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         </div>
       </div>
 
-      {/* ─── QUICK METRICS (Between Header Bar and Cards) ─────────────────── */}
+      {/* ─── QUICK METRICS (Equally Distributed End-to-End) ─────────────────── */}
       <div style={{
-        display: 'flex',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(8, 1fr)',
+        width: '100%',
         alignItems: 'center',
-        justifyContent: 'center',
-        flexWrap: 'wrap',
-        gap: '16px 44px',
+        justifyItems: 'center',
         marginTop: 24,
-        marginBottom: 12,
+        marginBottom: 16,
+        padding: '0 4px',
         fontFamily: 'var(--font-body, system-ui, sans-serif)'
       }}>
         {[
           { label: 'Authority Score', value: activeProject?.da || 'N/A' },
+          { label: 'Spam Score', value: activeProject?.spam_score || activeProject?.ss || '0%' },
           { label: 'Organic Traffic', value: '0' },
           { label: 'Keywords', value: (kwCount || activeProject?.keywords || 0).toLocaleString() },
           { label: 'Total Pages', value: (pageCount || activeProject?.targetPages || 0).toLocaleString() },
@@ -3247,6 +3294,6 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         </div>
       )}
 
-      </div>
+    </div>
   );
 }

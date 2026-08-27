@@ -2,17 +2,17 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { Calendar, UploadCloud, Clock, Trash2, Play, CheckCircle, AlertCircle, FileSpreadsheet, X, Upload, ChevronDown, Filter, Pencil, Save, ShieldCheck, Users, Sparkles, Download } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import * as XLSX from 'xlsx';
-import { 
-  fetchDomainRows, 
-  fetchMonthlyImportsApi, 
-  createMonthlyImportApi, 
-  updateMonthlyImportApi, 
-  deleteMonthlyImportApi, 
+import {
+  fetchDomainRows,
+  fetchMonthlyImportsApi,
+  createMonthlyImportApi,
+  updateMonthlyImportApi,
+  deleteMonthlyImportApi,
   runAuditAllocationApi,
   runAiStatusCheckApi,
   runAiStatusCheckStreamApi,
-  fetchScheduledActivitiesApi, 
-  createScheduledActivityApi, 
+  fetchScheduledActivitiesApi,
+  createScheduledActivityApi,
   deleteScheduledActivityApi,
   fetchUsersApi
 } from '../../lib/projectsApi';
@@ -161,7 +161,7 @@ function normalizeRow(item, index) {
 
 export default function OffPageSchedulerPage({ user }) {
   const [activeTab, setActiveTab] = useState('import'); // 'import' or 'scheduler'
-  
+
   // Viewer & User Scoping Filters
   const isViewer = isReadOnlyUser(user);
   const isVendor = user?.category === 'Vendor' || user?.role?.toUpperCase() === 'VENDOR';
@@ -171,13 +171,13 @@ export default function OffPageSchedulerPage({ user }) {
   const userCanUpdate = canUpdate(user);
   const userCanDelete = canDelete(user);
   const userCanDownload = canDownload(user);
-  
+
   useEffect(() => {
     if (isViewer && activeTab === 'scheduler') {
       setActiveTab('import');
     }
   }, [isViewer, activeTab]);
-  
+
   // Modals & Details Visibility
   const [showImportModal, setShowImportModal] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
@@ -273,9 +273,9 @@ export default function OffPageSchedulerPage({ user }) {
   }, [selectedDataset?.id]);
 
   const FIELDS_TO_COMPARE = useMemo(() => [
-    'uid', 'keyword1', 'keyword2', 'landingPage', 'cluster', 'kwCategory', 
-    'activityName', 'wordCount', 'contentSpoc', 'topic', 'contentDoc', 
-    'status', 'publisher', 'pgSiteDomain', 'liveLink', 'remarks', 'solution', 
+    'uid', 'keyword1', 'keyword2', 'landingPage', 'cluster', 'kwCategory',
+    'activityName', 'wordCount', 'contentSpoc', 'topic', 'contentDoc',
+    'status', 'publisher', 'pgSiteDomain', 'liveLink', 'remarks', 'solution',
     'lastActivity', 'scheduledDate', 'scheduled_date', 'verified'
   ], []);
 
@@ -361,7 +361,7 @@ export default function OffPageSchedulerPage({ user }) {
 
   const handleDownloadRows = async (rowsToExport, datasetName = 'Off-Page') => {
     let exportData = rowsToExport || [];
-    
+
     // Fallback to selectedDataset rows if empty
     if ((!exportData || exportData.length === 0) && selectedDataset && selectedDataset.rowsData) {
       exportData = selectedDataset.rowsData;
@@ -503,12 +503,12 @@ export default function OffPageSchedulerPage({ user }) {
 
   // --- Initial Mock Data for Imports ---
   const initialImports = [
-    { 
-      id: 1, 
-      filename: 'backlinks_audit_august.csv', 
-      project: 'One World International School', 
-      rows: 3, 
-      date: '2026-08-01 10:24 AM', 
+    {
+      id: 1,
+      filename: 'backlinks_audit_august.csv',
+      project: 'One World International School',
+      rows: 3,
+      date: '2026-08-01 10:24 AM',
       status: 'Success',
       rowsData: [
         {
@@ -582,12 +582,12 @@ export default function OffPageSchedulerPage({ user }) {
         }
       ]
     },
-    { 
-      id: 2, 
-      filename: 'outreach_leads_sais.xlsx', 
-      project: 'Stamford American', 
-      rows: 2, 
-      date: '2026-08-02 02:15 PM', 
+    {
+      id: 2,
+      filename: 'outreach_leads_sais.xlsx',
+      project: 'Stamford American',
+      rows: 2,
+      date: '2026-08-02 02:15 PM',
       status: 'Success',
       rowsData: [
         {
@@ -645,7 +645,7 @@ export default function OffPageSchedulerPage({ user }) {
     try {
       const saved = localStorage.getItem('seo_imported_datasets');
       if (saved) return JSON.parse(saved);
-    } catch (e) {}
+    } catch (e) { }
     return initialImports;
   });
   const [selectedImportProject, setSelectedImportProject] = useState(mockProjects[0].name);
@@ -658,7 +658,7 @@ export default function OffPageSchedulerPage({ user }) {
     try {
       const saved = localStorage.getItem('seo_scheduled_actions');
       if (saved) return JSON.parse(saved);
-    } catch (e) {}
+    } catch (e) { }
     return [
       { id: 1, action: 'Run Backlink Audit', project: 'testing308', datetime: '2026-08-15T09:00', frequency: 'Weekly', status: 'Scheduled' },
       { id: 2, action: 'Trigger Outreach Emails', project: 'One World International School', datetime: '2026-08-20T14:30', frequency: 'One-Time', status: 'Scheduled' }
@@ -923,8 +923,8 @@ export default function OffPageSchedulerPage({ user }) {
       const formattedDate = now.toLocaleDateString() + ' ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
       // Check if entry for selected project exists
-      const existing = imports.find(imp => 
-        imp.project && selectedImportProject && 
+      const existing = imports.find(imp =>
+        imp.project && selectedImportProject &&
         imp.project.trim().toLowerCase() === selectedImportProject.trim().toLowerCase()
       );
 
@@ -991,19 +991,19 @@ export default function OffPageSchedulerPage({ user }) {
   // CSV Template download utility
   const downloadTemplateCSV = () => {
     const headers = [
-      'UID', 'Period', 'Scheduled Date', 'Keyword 1', 'Keyword 2', 'Landing Page', 'Cluster', 
-      'KW Category', 'Activity Name', 'Word Count', 'Content SPOC', 'Topic', 
-      'Content Doc', 'Status', 'POC', 'PG Site Domain', 
+      'UID', 'Period', 'Scheduled Date', 'Keyword 1', 'Keyword 2', 'Landing Page', 'Cluster',
+      'KW Category', 'Activity Name', 'Word Count', 'Content SPOC', 'Topic',
+      'Content Doc', 'Status', 'POC', 'PG Site Domain',
       'Live Link', 'Remarks', 'Solution', 'Last Activity', 'Updated Date'
     ];
     // Example row
     const row1 = [
-      'MO-8A3F9B12', 'Q3 2026', '2026-08-10', 'school fees', 'education cost', '/fees', 'Fees', 
-      'Commercial', 'Forum Quora', '1200', 'Sarah Chen', 'SG School Fees Guide', 
-      'https://docs.google.com/document/d/1', 'Published-Indexed', 'SgSchoolFinder', 'sgschoolfinder.com', 
+      'MO-8A3F9B12', 'Q3 2026', '2026-08-10', 'school fees', 'education cost', '/fees', 'Fees',
+      'Commercial', 'Forum Quora', '1200', 'Sarah Chen', 'SG School Fees Guide',
+      'https://docs.google.com/document/d/1', 'Published-Indexed', 'SgSchoolFinder', 'sgschoolfinder.com',
       'https://sgschoolfinder.com/link', 'Secured high DA link', 'Editorial Placement', 'Link validated', '2026-08-04'
     ];
-    const csvContent = "data:text/csv;charset=utf-8," 
+    const csvContent = "data:text/csv;charset=utf-8,"
       + [headers.join(','), row1.join(',')].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
@@ -1068,12 +1068,12 @@ export default function OffPageSchedulerPage({ user }) {
     const todayStr = getTodayFormatted();
     let updatedRows = null;
 
-    setImports(prevImports => 
+    setImports(prevImports =>
       prevImports.map(imp => {
         if (imp.id !== datasetId) return imp;
         const newRowsData = [...imp.rowsData];
-        newRowsData[rowIndex] = { 
-          ...newRowsData[rowIndex], 
+        newRowsData[rowIndex] = {
+          ...newRowsData[rowIndex],
           [field]: value,
           updatedDate: todayStr,
           updated_date: todayStr
@@ -1086,8 +1086,8 @@ export default function OffPageSchedulerPage({ user }) {
       setSelectedDataset(prev => {
         const newRowsData = updatedRows || [...prev.rowsData];
         if (!updatedRows) {
-           newRowsData[rowIndex] = { 
-            ...newRowsData[rowIndex], 
+          newRowsData[rowIndex] = {
+            ...newRowsData[rowIndex],
             [field]: value,
             updatedDate: todayStr,
             updated_date: todayStr
@@ -1108,7 +1108,7 @@ export default function OffPageSchedulerPage({ user }) {
     const remainingRows = currentRows.filter((_, idx) => !selectedRowIndices.includes(idx));
     const datasetId = selectedDataset.id;
 
-    setImports(prevImports => 
+    setImports(prevImports =>
       prevImports.map(imp => {
         if (imp.id !== datasetId) return imp;
         return { ...imp, rows: remainingRows.length, rowsData: remainingRows };
@@ -1127,8 +1127,8 @@ export default function OffPageSchedulerPage({ user }) {
     const currentRows = selectedDataset.rowsData || [];
     const updatedRows = currentRows.map((r, idx) => {
       if (selectedRowIndices.includes(idx)) {
-        return { 
-          ...r, 
+        return {
+          ...r,
           [field]: value,
           updatedDate: todayStr,
           updated_date: todayStr
@@ -1138,7 +1138,7 @@ export default function OffPageSchedulerPage({ user }) {
     });
 
     const datasetId = selectedDataset.id;
-    setImports(prevImports => 
+    setImports(prevImports =>
       prevImports.map(imp => {
         if (imp.id !== datasetId) return imp;
         return { ...imp, rowsData: updatedRows };
@@ -1155,11 +1155,11 @@ export default function OffPageSchedulerPage({ user }) {
     try {
       const datasetId = selectedDataset.id;
       const currentRows = selectedDataset.rowsData || [];
-      await updateMonthlyImportApi(datasetId, { 
+      await updateMonthlyImportApi(datasetId, {
         project: selectedDataset.project || selectedDataset.project_name,
         filename: selectedDataset.filename,
-        rows: currentRows.length, 
-        rowsData: currentRows 
+        rows: currentRows.length,
+        rowsData: currentRows
       });
       setOriginalRowsData(JSON.parse(JSON.stringify(currentRows)));
       setIsDirty(false);
@@ -1175,7 +1175,7 @@ export default function OffPageSchedulerPage({ user }) {
     setAuditAllocating(true);
     try {
       const datasetId = selectedDataset ? selectedDataset.id : null;
-      
+
       const assocMap = new Map();
       (systemAssociates || []).forEach(name => {
         if (name && name.trim() && name.toLowerCase() !== 'unassigned') {
@@ -1301,7 +1301,7 @@ export default function OffPageSchedulerPage({ user }) {
     const rows = selectedDataset.rowsData || [];
 
     const filteredRows = rows.filter(r => {
-      const matchSearch = !datasetSearch || 
+      const matchSearch = !datasetSearch ||
         (r.keyword1 || '').toLowerCase().includes(datasetSearch.toLowerCase()) ||
         (r.keyword2 || '').toLowerCase().includes(datasetSearch.toLowerCase()) ||
         (r.landingPage || '').toLowerCase().includes(datasetSearch.toLowerCase()) ||
@@ -1353,26 +1353,26 @@ export default function OffPageSchedulerPage({ user }) {
         {/* Back Link */}
         {!vendorProject && (
           <div style={{ marginBottom: 16 }}>
-            <button 
-              onClick={() => { 
+            <button
+              onClick={() => {
                 handleAttemptLeaveDataset(() => {
-                  setSelectedDataset(null); 
-                  setDatasetSearch(''); 
+                  setSelectedDataset(null);
+                  setDatasetSearch('');
                   setFilterActivity('ALL');
                   setFilterStatus('ALL');
                   setShowFilterPopover(false);
                   setSelectedRowIndices([]);
                 });
               }}
-              style={{ 
-                background: 'none', 
-                border: 'none', 
-                color: 'var(--accent)', 
-                fontSize: 13.5, 
-                fontWeight: 600, 
-                cursor: 'pointer', 
-                display: 'flex', 
-                alignItems: 'center', 
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--accent)',
+                fontSize: 13.5,
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
                 gap: 6,
                 padding: 0
               }}
@@ -1389,7 +1389,7 @@ export default function OffPageSchedulerPage({ user }) {
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 4 }}>
               {selectedDataset.project || selectedDataset.project_name}
             </h1>
-            
+
           </div>
 
           {/* Save Changes & Run Audit Buttons */}
@@ -1491,7 +1491,7 @@ export default function OffPageSchedulerPage({ user }) {
                                 Associate Allocations
                               </h4>
                             </div>
-                            <button 
+                            <button
                               onClick={() => setShowAssocPopover(false)}
                               style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#64748b', padding: 2 }}
                             >
@@ -1565,7 +1565,7 @@ export default function OffPageSchedulerPage({ user }) {
                 onMouseLeave={e => e.currentTarget.style.opacity = '1'}
               >
                 <Sparkles size={16} color="#ffffff" />
-                {aiChecking ? 'Running AI Audit Check...' : 'AI Audit Check'}
+                {aiChecking ? 'Running AI Audit Check...' : 'AI Audit'}
               </button>
             )}
 
@@ -1574,7 +1574,7 @@ export default function OffPageSchedulerPage({ user }) {
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#d97706' }} /> Unsaved changes
               </span>
             )}
-            
+
             {!isVendor && userCanEdit && (
               <button
                 onClick={handleSaveChanges}
@@ -1626,7 +1626,7 @@ export default function OffPageSchedulerPage({ user }) {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
             {/* Search Input */}
-            <input 
+            <input
               type="text"
               placeholder="Search keywords, landing pages, POCs..."
               value={datasetSearch}
@@ -1665,7 +1665,7 @@ export default function OffPageSchedulerPage({ user }) {
                 onMouseLeave={e => e.currentTarget.style.opacity = '1'}
               >
                 <Filter size={19} color={activeFieldFilterCount > 0 ? 'var(--accent)' : '#64748b'} style={{ strokeWidth: 1.8 }} />
-                
+
                 {activeFieldFilterCount > 0 && (
                   <span style={{
                     position: 'absolute',
@@ -1944,8 +1944,8 @@ export default function OffPageSchedulerPage({ user }) {
                       if (actualRow) {
                         const realIdx = updatedRows.indexOf(actualRow);
                         if (realIdx !== -1) {
-                          updatedRows[realIdx] = { 
-                            ...updatedRows[realIdx], 
+                          updatedRows[realIdx] = {
+                            ...updatedRows[realIdx],
                             verified: true,
                             updatedDate: todayStr,
                             updated_date: todayStr
@@ -2117,16 +2117,16 @@ export default function OffPageSchedulerPage({ user }) {
                     </th>
                   )}
                   {[
-                    'UID', 'Period', 'Scheduled Date', 'Keyword 1', 'Keyword 2', 'Cluster', 
-                    'KW Category', 'Activity Name', 'Word Count', 'Content SPOC', 'Topic', 
-                    'Content Doc', 'POC', 'PG Site Domain', 'Live Link', 'Status', 
+                    'UID', 'Period', 'Scheduled Date', 'Keyword 1', 'Keyword 2', 'Cluster',
+                    'KW Category', 'Activity Name', 'Word Count', 'Content SPOC', 'Topic',
+                    'Content Doc', 'POC', 'PG Site Domain', 'Live Link', 'Status',
                     'Remarks', 'Solution', 'Verified Status', 'Last Activity', 'Updated Date'
                   ].map((col, idx) => (
-                    <th key={idx} style={{ 
-                      padding: '14px 18px', 
-                      textAlign: 'left', 
-                      fontSize: 13, 
-                      fontWeight: 700, 
+                    <th key={idx} style={{
+                      padding: '14px 18px',
+                      textAlign: 'left',
+                      fontSize: 13,
+                      fontWeight: 700,
                       color: 'var(--text-muted)',
                       textTransform: 'uppercase',
                       letterSpacing: '0.04em'
@@ -2350,30 +2350,30 @@ export default function OffPageSchedulerPage({ user }) {
                       </td>
                       <td style={{ padding: '12px 16px', fontSize: 13, whiteSpace: 'nowrap' }}>
                         {(row.verified === true || row.verified === 'true') ? (
-                          <span style={{ 
-                            display: 'inline-flex', 
-                            alignItems: 'center', 
-                            gap: 4, 
-                            padding: '4px 10px', 
-                            borderRadius: 6, 
-                            fontSize: 11.5, 
-                            fontWeight: 700, 
-                            background: '#dcfce7', 
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '4px 10px',
+                            borderRadius: 6,
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            background: '#dcfce7',
                             color: '#15803d',
                             border: '1px solid #bbf7d0'
                           }}>
                             <CheckCircle size={13} /> Verified ✓
                           </span>
                         ) : (
-                          <span style={{ 
-                            display: 'inline-flex', 
-                            alignItems: 'center', 
-                            gap: 4, 
-                            padding: '4px 10px', 
-                            borderRadius: 6, 
-                            fontSize: 11.5, 
-                            fontWeight: 600, 
-                            background: '#f8fafc', 
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '4px 10px',
+                            borderRadius: 6,
+                            fontSize: 11.5,
+                            fontWeight: 600,
+                            background: '#f8fafc',
                             color: '#64748b',
                             border: '1px solid #e2e8f0'
                           }}>
@@ -2499,7 +2499,7 @@ export default function OffPageSchedulerPage({ user }) {
                 <label style={{ fontSize: 13.5, fontWeight: 700, color: '#0f172a' }}>
                   New Value for {BULK_EDIT_FIELD_OPTIONS.find(f => f.key === bulkEditField)?.label}
                 </label>
-                
+
                 {bulkEditField === 'status' ? (
                   <div style={{ position: 'relative', width: '100%' }}>
                     <select
@@ -2736,7 +2736,7 @@ export default function OffPageSchedulerPage({ user }) {
           }
         >
           <div style={{ padding: '8px 0 12px 0' }}>
-            
+
             <p style={{ fontSize: 13.5, color: '#64748b', margin: 0, lineHeight: 0.1 }}>
               Would you like to save your changes before leaving?
             </p>
@@ -2781,7 +2781,7 @@ export default function OffPageSchedulerPage({ user }) {
             Automate audits, import data sheets, and schedule link outreach actions.
           </p>
         </div>
-        
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {!isVendor && userCanUpdate && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -2884,7 +2884,7 @@ export default function OffPageSchedulerPage({ user }) {
                               Associate Allocations
                             </h4>
                           </div>
-                          <button 
+                          <button
                             onClick={() => setShowGlobalAssocPopover(false)}
                             style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#64748b', padding: 2 }}
                           >
@@ -3031,13 +3031,13 @@ export default function OffPageSchedulerPage({ user }) {
                 </thead>
                 <tbody>
                   {filteredImports.map(imp => (
-                    <tr 
-                      key={imp.id} 
+                    <tr
+                      key={imp.id}
                       onClick={() => setSelectedDataset(imp)}
-                      style={{ 
-                        borderBottom: '1px solid var(--border)', 
+                      style={{
+                        borderBottom: '1px solid var(--border)',
                         cursor: 'pointer',
-                        transition: 'background 0.15s ease' 
+                        transition: 'background 0.15s ease'
                       }}
                       onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
@@ -3058,30 +3058,30 @@ export default function OffPageSchedulerPage({ user }) {
                               setDeleteConfirmImport(imp);
                             }}
                             title="Delete Dataset"
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                color: '#ef4444',
-                                cursor: 'pointer',
-                                padding: '6px',
-                                borderRadius: 6,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                transition: 'all 0.15s ease'
-                              }}
-                              onMouseEnter={e => {
-                                e.currentTarget.style.background = '#fef2f2';
-                                e.currentTarget.style.color = '#dc2626';
-                              }}
-                              onMouseLeave={e => {
-                                e.currentTarget.style.background = 'none';
-                                e.currentTarget.style.color = '#ef4444';
-                              }}
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          )}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: '#ef4444',
+                              cursor: 'pointer',
+                              padding: '6px',
+                              borderRadius: 6,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              transition: 'all 0.15s ease'
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.background = '#fef2f2';
+                              e.currentTarget.style.color = '#dc2626';
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.background = 'none';
+                              e.currentTarget.style.color = '#ef4444';
+                            }}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -3574,7 +3574,7 @@ export default function OffPageSchedulerPage({ user }) {
         <div style={{ padding: '8px 0 16px 0' }}>
           <p style={{ fontSize: 14.5, color: '#64748b', margin: 0, lineHeight: 1.6 }}>
             Are you sure you want to delete <strong>this project's Off-Page data (records, scheduled activities)</strong> for <strong>{deleteConfirmImport?.project}</strong>? This action cannot be undone.
-f          </p>
+            f          </p>
         </div>
       </Modal>
       {/* Unsaved Changes Confirmation Modal */}
@@ -3661,7 +3661,7 @@ f          </p>
         }
       >
         <div style={{ padding: '8px 0 12px 0' }}>
-         
+
           <p style={{ fontSize: 13.5, color: '#64748b', margin: 0, lineHeight: 0.1 }}>
             Would you like to save your changes to the database before leaving?
           </p>
