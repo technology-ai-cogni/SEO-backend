@@ -285,9 +285,17 @@ function FilterFieldDropdown({ label, options, selectedValues, onToggle }) {
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
+  const getPlural = (str) => {
+    if (!str) return '';
+    const lower = str.toLowerCase();
+    if (lower.endsWith('y')) return str.slice(0, -1) + 'ies';
+    if (lower.endsWith('s')) return str + 'es';
+    return str + 's';
+  };
+
   const selectedCount = selectedValues.length;
   const buttonText = selectedCount === 0
-    ? `All ${label}s`
+    ? `All ${getPlural(label)}`
     : selectedCount === 1
       ? selectedValues[0]
       : `${selectedCount} selected`;
@@ -693,7 +701,6 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
 
   const platformOptions = [
     { value: 'ai_mode', label: 'AI Mode' },
-    { value: 'ai_overview', label: 'AI Overview' },
     { value: 'google', label: 'Google' },
     { value: 'chatgpt', label: 'ChatGPT' },
     { value: 'gemini', label: 'Gemini' },
@@ -869,8 +876,7 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
               <button onClick={addUser} style={{ alignSelf: 'flex-start', fontSize: 12.5, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)', fontWeight: 600, padding: '2px 0' }}>
                 + Add another user
               </button>
-              <Input label="Branded Terms" placeholder="e.g. Brand1, Brand2" value={brandedTerms} onChange={setBrandedTerms} />
-
+              
               {users.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, maxHeight: 100, overflowY: 'auto' }}>
                   {users.map((u, idx) => (
@@ -882,8 +888,12 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
                       <button onClick={() => removeUser(idx)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0, lineHeight: 1, fontSize: 14 }}>×</button>
                     </div>
                   ))}
+                  
                 </div>
+              
               )}
+              <Input label="Branded Terms" placeholder="e.g. Brand1, Brand2" value={brandedTerms} onChange={setBrandedTerms} />
+
             </div>
           </div>
         )}
@@ -1751,11 +1761,10 @@ function ChooseProjectModal({ open, onClose, onApply, projects, mode = 'findComp
 
 // ─── Table rows data ─────────────────────────────────────────────────────────
 
-const ALL_PLATFORMS = ['AI Mode', 'AI Overview', 'Google', 'ChatGPT', 'Gemini'];
+const ALL_PLATFORMS = ['AI Mode', 'Google', 'ChatGPT', 'Gemini'];
 
 const PLATFORM_BADGE_STYLES = {
   'AI Mode': { bg: '#ede9fe', color: '#7c3aed' },
-  'AI Overview': { bg: '#dbeafe', color: '#1d4ed8' },
   'Google': { bg: '#fef9c3', color: '#854d0e' },
   'ChatGPT': { bg: '#dcfce7', color: '#166534' },
   'Gemini': { bg: '#fce7f3', color: '#9d174d' },
@@ -1774,7 +1783,6 @@ const TABS = ['Domain', 'Intent', 'Pages', 'Competitors', 'Outreach', 'Connector
 
 const platformOptionsList = [
   { value: 'AI Mode', label: 'AI Mode' },
-  { value: 'AI Overview', label: 'AI Overview' },
   { value: 'Google', label: 'Google' },
   { value: 'ChatGPT', label: 'ChatGPT' },
   { value: 'Gemini', label: 'Gemini' },
@@ -2217,6 +2225,14 @@ function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteP
   const visibleProjects = projects.filter(p => {
     if (!p.domain || !String(p.domain).trim()) return false;
 
+    // Dataset / Project Name filter
+    if (domainFilters?.datasetName) {
+      const dsTarget = String(domainFilters.datasetName).toLowerCase();
+      const pName = String(p.name || '').toLowerCase();
+      const pDom = String(p.domain || '').toLowerCase();
+      if (pName !== dsTarget && pDom !== dsTarget) return false;
+    }
+
     // Platform filter (from filter pills or dropdown)
     const activePlat = filter || domainFilters?.platform;
     if (activePlat) {
@@ -2364,7 +2380,11 @@ function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteP
                     })()}
                   </div>
                 </td>
-                <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, color: 'var(--text-muted)' }}>—</td>
+                <td style={{ padding: '14px 16px', textAlign: 'right' }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {p.da !== null && p.da !== undefined && String(p.da).trim() !== '' ? p.da : '—'}
+                  </span>
+                </td>
                 <td style={{ padding: '14px 16px', textAlign: 'right' }}>
                   <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)' }}>{p.traffic}</span>
                 </td>
@@ -2439,7 +2459,7 @@ function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteP
     </>
   );
 }
-function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, totalLabel = 'Total  Pages', keywordsLabel = 'Keywords', deleteScopeLabel = 'the project and all its keywords', search, user }) {
+function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, totalLabel = 'Total  Pages', keywordsLabel = 'Keywords', deleteScopeLabel = 'the project and all its keywords', search, tableFilters, user }) {
   const userCanDelete = canDelete(user);
   const [confirmingProject, setConfirmingProject] = useState(null);
 
@@ -2447,14 +2467,63 @@ function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, tot
     await onDeleteProject?.(confirmingProject);
   };
 
-  const visiblePages = search && search.trim()
-    ? pages.filter(p => {
+  const visiblePages = pages.filter(p => {
+    if (search && search.trim()) {
       const q = search.trim().toLowerCase();
       const n = (p.name || '').toLowerCase();
       const d = (p.domain || '').toLowerCase();
-      return n.includes(q) || d.includes(q);
-    })
-    : pages;
+      if (!n.includes(q) && !d.includes(q)) return false;
+    }
+
+    if (tableFilters) {
+      const dsFilter = tableFilters.name || tableFilters.datasetName;
+      if (dsFilter && dsFilter.length > 0) {
+        const pName = (p.name || '').toLowerCase();
+        const pDom = (p.domain || '').toLowerCase();
+        const matches = dsFilter.some(val => {
+          const v = String(val).toLowerCase();
+          return pName === v || pDom === v;
+        });
+        if (!matches) return false;
+      }
+
+      const locFilter = tableFilters.location;
+      if (locFilter && locFilter.length > 0 && !locFilter.includes(p.location)) return false;
+
+      const pagesRange = tableFilters.totalPages;
+      if (pagesRange && (pagesRange.min !== '' || pagesRange.max !== '')) {
+        const val = Number(p.totalPages ?? p.keywords ?? 0);
+        if (pagesRange.min !== '' && val < Number(pagesRange.min)) return false;
+        if (pagesRange.max !== '' && val > Number(pagesRange.max)) return false;
+      }
+
+      const commRange = tableFilters.commercialPct;
+      if (commRange && (commRange.min !== '' || commRange.max !== '')) {
+        let commVal = 0;
+        if (p.commercialPct != null) {
+          const parts = String(p.commercialPct).split('/');
+          commVal = Number(parts[0]) || 0;
+        }
+        if (commRange.min !== '' && commVal < Number(commRange.min)) return false;
+        if (commRange.max !== '' && commVal > Number(commRange.max)) return false;
+      }
+
+      const blogRange = tableFilters.blogPages;
+      if (blogRange && (blogRange.min !== '' || blogRange.max !== '')) {
+        const val = Number(p.blogPages || 0);
+        if (blogRange.min !== '' && val < Number(blogRange.min)) return false;
+        if (blogRange.max !== '' && val > Number(blogRange.max)) return false;
+      }
+
+      const kwRange = tableFilters.keywords;
+      if (kwRange && (kwRange.min !== '' || kwRange.max !== '')) {
+        const val = Number(p.keywords ?? p.targetPages ?? 0);
+        if (kwRange.min !== '' && val < Number(kwRange.min)) return false;
+        if (kwRange.max !== '' && val > Number(kwRange.max)) return false;
+      }
+    }
+    return true;
+  });
 
   return (
     <>
@@ -2590,7 +2659,7 @@ const PAGE_BULK_FIELDS = [
 const KW_BULK_FIELDS = [
   { value: 'cluster', label: 'Cluster', type: 'text' },
   { value: 'category', label: 'Category', type: 'text' },
-  { value: 'type', label: 'Type', type: 'select', options: ['AI Overview', 'Google', 'ChatGPT', 'Gemini'] },
+  { value: 'type', label: 'Type', type: 'select', options: [ 'Google', 'ChatGPT', 'Gemini'] },
   { value: 'targetType', label: 'Target Type', type: 'select', options: ['Blogs', 'Landing Page', 'Topical Blogs'] },
   { value: 'targetSubtype', label: 'Target Subtype', type: 'select', options: ['Informational', 'Commercial'] },
   { value: 'targetGeo', label: 'Target Geo', type: 'text' },
@@ -2829,7 +2898,7 @@ function HeaderQuickSelect({ placeholder, options, onSet, value }) {
   );
 }
 
-function PageDetailView({ project, onBack, onUpdatePages, user }) {
+function PageDetailView({ project, onBack, onUpdatePages, search, user }) {
   const userCanEdit = canEdit(user);
   const userCanDelete = canDelete(user);
   const userCanDownload = canDownload(user);
@@ -2861,6 +2930,16 @@ function PageDetailView({ project, onBack, onUpdatePages, user }) {
   ];
 
   const filteredRows = rows.filter(r => {
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      const pageName = (r.pageName || r.page_name || r.name || '').toLowerCase();
+      const url = (r.url || r.page_url || '').toLowerCase();
+      const cluster = (r.cluster || '').toLowerCase();
+      const category = (r.category || '').toLowerCase();
+      const targetCategory = (r.targetCategory || '').toLowerCase();
+      const targetType = (r.targetType || '').toLowerCase();
+      if (!pageName.includes(q) && !url.includes(q) && !cluster.includes(q) && !category.includes(q) && !targetCategory.includes(q) && !targetType.includes(q)) return false;
+    }
     if (tableFilters.cluster?.length && !tableFilters.cluster.includes(r.cluster)) return false;
     if (tableFilters.category?.length && !tableFilters.category.includes(r.category)) return false;
     if (tableFilters.targetCategory?.length && !tableFilters.targetCategory.includes(r.targetCategory)) return false;
@@ -3226,7 +3305,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
   const kwFilterConfigs = [
     { key: 'cluster', label: 'Cluster', type: 'select' },
     { key: 'category', label: 'Category', type: 'select' },
-    { key: 'type', label: 'Type', type: 'select', options: ['AI Overview', 'Google', 'ChatGPT', 'Gemini'] },
+    { key: 'type', label: 'Type', type: 'select', options: ['Google', 'ChatGPT', 'Gemini'] },
     { key: 'targetType', label: 'Target Type', type: 'select', options: ['Blogs', 'Landing Page'] },
     { key: 'targetSubtype', label: 'Target Subtype', type: 'select', options: ['Informational', 'Commercial'] },
     { key: 'priority', label: 'Priority', type: 'select', options: ['P1', 'P2', 'P3', 'P4', 'P5'] },
@@ -4112,7 +4191,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
                 <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
               ))}
               <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-                <HeaderQuickSelect placeholder="Type" options={['AI Overview', 'Google', 'ChatGPT', 'Gemini']} onSet={v => bulkUpdate('type', v)} />
+                <HeaderQuickSelect placeholder="Type" options={['Google', 'ChatGPT', 'Gemini']} onSet={v => bulkUpdate('type', v)} />
               </th>
               <th style={{ padding: '6px 16px', textAlign: 'left' }}>
                 <HeaderQuickSelect placeholder="Target Type" options={['Blogs', 'Landing Page']} value={columnFilters.targetType} onSet={v => setColumnFilters(prev => ({ ...prev, targetType: v }))} />
@@ -4612,7 +4691,7 @@ function getSyncUniqueCounts(slug, competitors) {
   return { categoryCount: catSet.size, clusterCount: clusSet.size };
 }
 
-function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDeleteProject, loading, error, search, user }) {
+function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDeleteProject, loading, error, search, tableFilters, user }) {
   const userCanDelete = canDelete(user);
   const [page, setPage] = useState(1);
   const [deletingProject, setDeletingProject] = useState(null);
@@ -4701,6 +4780,41 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
         const d = (p.domain || '').toLowerCase();
         if (!n.includes(q) && !d.includes(q)) return false;
       }
+      if (tableFilters) {
+        const dsFilter = tableFilters.name || tableFilters.datasetName;
+        if (dsFilter && dsFilter.length > 0) {
+          const pName = (p.name || '').toLowerCase();
+          const pDom = (p.domain || '').toLowerCase();
+          const matches = dsFilter.some(val => {
+            const v = String(val).toLowerCase();
+            return pName === v || pDom === v;
+          });
+          if (!matches) return false;
+        }
+        const locFilter = tableFilters.location;
+        if (locFilter && locFilter.length > 0 && !locFilter.includes(p.location)) return false;
+
+        const clusterRange = tableFilters.clusterCount;
+        if (clusterRange && (clusterRange.min !== '' || clusterRange.max !== '')) {
+          const val = Number(p.clusterCount || 0);
+          if (clusterRange.min !== '' && val < Number(clusterRange.min)) return false;
+          if (clusterRange.max !== '' && val > Number(clusterRange.max)) return false;
+        }
+
+        const catRange = tableFilters.categoryCount;
+        if (catRange && (catRange.min !== '' || catRange.max !== '')) {
+          const val = Number(p.categoryCount || 0);
+          if (catRange.min !== '' && val < Number(catRange.min)) return false;
+          if (catRange.max !== '' && val > Number(catRange.max)) return false;
+        }
+
+        const compRange = tableFilters.competitorCount;
+        if (compRange && (compRange.min !== '' || compRange.max !== '')) {
+          const val = Number(p.competitorCount || 0);
+          if (compRange.min !== '' && val < Number(compRange.min)) return false;
+          if (compRange.max !== '' && val > Number(compRange.max)) return false;
+        }
+      }
       return true;
     });
   const pageCount = Math.max(1, Math.ceil(allRows.length / COMPETITORS_PAGE_SIZE));
@@ -4752,11 +4866,12 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                 onClick={() => onSelectProject(p)}>
                 <td style={{ padding: '14px 16px' }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)' }}
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--accent)', marginBottom: 2 }}
                     onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
                     onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
                     {p.name}
                   </div>
+                  {p.domain && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.domain}</div>}
                 </td>
                 <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{p.location}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-primary)' }}>{p.clusterCount}</td>
@@ -6381,14 +6496,50 @@ export default function ProjectSetupPage({ tab, user }) {
   const [selectedKwDetail, setSelectedKwDetail] = useState(null);
   const [prerequisiteModal, setPrerequisiteModal] = useState({ open: false, title: '', message: '', targetTab: '' });
   const [domainFilters, setDomainFilters] = useState({
-    platform: '', location: '', daMin: '', daMax: '', trafficMin: '', trafficMax: '',
+    datasetName: '', platform: '', location: '', daMin: '', daMax: '', trafficMin: '', trafficMax: '',
     keywordsMin: '', keywordsMax: '', targetPagesMin: '', targetPagesMax: '', blogPagesMin: '', blogPagesMax: '',
   });
   const [showDomainFilterDropdown, setShowDomainFilterDropdown] = useState(false);
   const activeDomainFilterCount = [
-    domainFilters.platform, domainFilters.location, domainFilters.daMin, domainFilters.daMax, domainFilters.trafficMin, domainFilters.trafficMax,
+    domainFilters.datasetName, domainFilters.platform, domainFilters.location, domainFilters.daMin, domainFilters.daMax, domainFilters.trafficMin, domainFilters.trafficMax,
     domainFilters.keywordsMin, domainFilters.keywordsMax, domainFilters.targetPagesMin, domainFilters.targetPagesMax, domainFilters.blogPagesMin, domainFilters.blogPagesMax,
   ].filter(Boolean).length;
+
+  const [intentTableFilters, setIntentTableFilters] = useState({
+    name: [], location: [], totalPages: { min: '', max: '' }, commercialPct: { min: '', max: '' }, blogPages: { min: '', max: '' }, keywords: { min: '', max: '' }
+  });
+  const [pagesTableFilters, setPagesTableFilters] = useState({
+    name: [], location: [], totalPages: { min: '', max: '' }, commercialPct: { min: '', max: '' }, blogPages: { min: '', max: '' }, keywords: { min: '', max: '' }
+  });
+  const [competitorsTableFilters, setCompetitorsTableFilters] = useState({
+    name: [], location: [], clusterCount: { min: '', max: '' }, categoryCount: { min: '', max: '' }, competitorCount: { min: '', max: '' }
+  });
+
+  const intentMainFilterConfigs = useMemo(() => [
+    { key: 'name', label: 'Project', type: 'select' },
+    { key: 'location', label: 'Location', type: 'select' },
+    { key: 'totalPages', label: 'Total KW', type: 'range' },
+    { key: 'commercialPct', label: 'Commercial vs Others', type: 'range' },
+    { key: 'blogPages', label: 'Blog Pages', type: 'range' },
+    { key: 'keywords', label: 'Landing Pages', type: 'range' },
+  ], []);
+
+  const pagesMainFilterConfigs = useMemo(() => [
+    { key: 'name', label: 'Project', type: 'select' },
+    { key: 'location', label: 'Location', type: 'select' },
+    { key: 'totalPages', label: 'Total Pages', type: 'range' },
+    { key: 'commercialPct', label: 'Commercial vs Others', type: 'range' },
+    { key: 'blogPages', label: 'Blog Pages', type: 'range' },
+    { key: 'keywords', label: 'Keywords', type: 'range' },
+  ], []);
+
+  const competitorsMainFilterConfigs = useMemo(() => [
+    { key: 'name', label: 'Project', type: 'select' },
+    { key: 'location', label: 'Location', type: 'select' },
+    { key: 'clusterCount', label: 'Cluster', type: 'range' },
+    { key: 'categoryCount', label: 'Categories', type: 'range' },
+    { key: 'competitorCount', label: 'Competitors', type: 'range' },
+  ], []);
   const domainFilterRef = useRef(null);
 
   useEffect(() => {
@@ -6568,6 +6719,7 @@ export default function ProjectSetupPage({ tab, user }) {
   const OUTREACH_TYPES = useMemo(() => ['Paid Guest', 'Classified Ads', 'Brand Mention', 'Business Listing'], []);
 
   const outreachFilterConfigs = useMemo(() => [
+    { key: 'datasetName', label: 'Project', type: 'select' },
     { key: 'type', label: 'Type', type: 'select', options: ['Paid Guest', 'Classified Ads', 'Brand Mention', 'Business Listing'] },
     { key: 'da', label: 'DA', type: 'range' },
     { key: 'pa', label: 'PA', type: 'range' },
@@ -6576,6 +6728,7 @@ export default function ProjectSetupPage({ tab, user }) {
   ], []);
 
   const [outreachTableFilters, setOutreachTableFilters] = useState({
+    datasetName: [],
     type: [],
     da: { min: '', max: '' },
     pa: { min: '', max: '' },
@@ -7446,6 +7599,64 @@ export default function ProjectSetupPage({ tab, user }) {
     });
   };
 
+  const getFilteredOutreachLinks = () => {
+    let filteredOutreach = outreachLinks;
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      filteredOutreach = filteredOutreach.filter(l => (
+        (l.url || '').toLowerCase().includes(q) ||
+        (l.domain || '').toLowerCase().includes(q) ||
+        (l.type || '').toLowerCase().includes(q)
+      ));
+    }
+    if (outreachTableFilters.datasetName && outreachTableFilters.datasetName.length > 0) {
+      filteredOutreach = filteredOutreach.filter(l => {
+        const dName = (l.domain || l.url || '').toLowerCase();
+        return outreachTableFilters.datasetName.some(val => dName.includes(String(val).toLowerCase()));
+      });
+    }
+    if (outreachTableFilters.type && outreachTableFilters.type.length > 0) {
+      filteredOutreach = filteredOutreach.filter(l => outreachTableFilters.type.includes(l.type || 'Paid Guest'));
+    }
+
+    const parseNum = (val) => {
+      if (val === null || val === undefined || val === '') return null;
+      if (typeof val === 'number') return isNaN(val) ? null : val;
+      const str = String(val).trim();
+      if (!str) return null;
+      const kMatch = str.match(/^([\d.]+)\s*k$/i);
+      if (kMatch) return Number(kMatch[1]) * 1000;
+      const mMatch = str.match(/^([\d.]+)\s*m$/i);
+      if (mMatch) return Number(mMatch[1]) * 1000000;
+      const cleaned = str.replace(/[^0-9.]/g, '');
+      if (!cleaned) return null;
+      const num = Number(cleaned);
+      return isNaN(num) ? null : num;
+    };
+
+    const applyRangeFilter = (rows, keys, fVal) => {
+      if (!fVal || (fVal.min === '' && fVal.max === '')) return rows;
+      const min = fVal.min !== '' ? Number(fVal.min) : -Infinity;
+      const max = fVal.max !== '' ? Number(fVal.max) : Infinity;
+      const keyList = Array.isArray(keys) ? keys : [keys];
+      return rows.filter(r => {
+        let val = null;
+        for (const k of keyList) {
+          val = parseNum(r[k]);
+          if (val !== null) break;
+        }
+        const numVal = val !== null ? val : 0;
+        return numVal >= min && numVal <= max;
+      });
+    };
+
+    filteredOutreach = applyRangeFilter(filteredOutreach, ['da'], outreachTableFilters.da);
+    filteredOutreach = applyRangeFilter(filteredOutreach, ['pa'], outreachTableFilters.pa);
+    filteredOutreach = applyRangeFilter(filteredOutreach, ['ss', 'spam_score', 'spamScore'], outreachTableFilters.ss);
+    filteredOutreach = applyRangeFilter(filteredOutreach, ['traffic', 'totalTraffic', 'total_traffic'], outreachTableFilters.traffic);
+    return filteredOutreach;
+  };
+
   const handleDownloadMainTab = () => {
     if (activeTab === 'Domain') {
       const rows = projects.map(p => ({
@@ -7495,6 +7706,20 @@ export default function ProjectSetupPage({ tab, user }) {
         CompLevel: c.compLevel,
       }));
       downloadCSV('competitors_summary', rows);
+    } else if (activeTab === 'Outreach') {
+      const list = getFilteredOutreachLinks();
+      const rows = list.map(l => ({
+        URL: l.url || l.domain || '',
+        Type: l.type || 'Paid Guest',
+        DA: l.da ?? '',
+        PA: l.pa ?? '',
+        'Spam Score': l.ss ?? '',
+        Traffic: l.totalTraffic || l.traffic || '',
+        'Region 1': l.region1Traffic || '',
+        'Region 2': l.region2Traffic || '',
+        'Region 3': l.region3Traffic || '',
+      }));
+      downloadCSV('outreach_sites', rows);
     }
   };
 
@@ -7504,7 +7729,7 @@ export default function ProjectSetupPage({ tab, user }) {
     (activeTab === 'Competitors' && selectedKwDetail !== null) ||
     (activeTab === 'Competitors' && selectedCompetitorProject !== null);
 
-  const filterTabs = ['AI Mode', 'AI Overview', 'Google', 'ChatGPT', 'Gemini'];
+  const filterTabs = ['AI Mode', 'Google', 'ChatGPT', 'Gemini'];
 
   const ctaByTab = {
     Domain: { label: 'Create project', onClick: () => setShowCreate(true) },
@@ -7619,6 +7844,18 @@ export default function ProjectSetupPage({ tab, user }) {
                       <button onClick={() => setShowDomainFilterDropdown(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
                         <X size={14} />
                       </button>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>Project Name</label>
+                      <select
+                        value={domainFilters.datasetName || ''}
+                        onChange={e => setDomainFilters(prev => ({ ...prev, datasetName: e.target.value }))}
+                        style={{ width: '100%', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12.5, outline: 'none' }}
+                      >
+                        <option value="">All Projects</option>
+                        {projects.map(p => <option key={p.id || p.name} value={p.name}>{p.name}</option>)}
+                      </select>
                     </div>
 
                     <div>
@@ -7769,6 +8006,33 @@ export default function ProjectSetupPage({ tab, user }) {
             </div>
           )}
 
+          {!isInDetailView && activeTab === 'Intent' && (
+            <TableFilterDropdown
+              filters={intentMainFilterConfigs}
+              rows={kwClusters}
+              activeFilters={intentTableFilters}
+              onFiltersChange={setIntentTableFilters}
+            />
+          )}
+
+          {!isInDetailView && activeTab === 'Pages' && (
+            <TableFilterDropdown
+              filters={pagesMainFilterConfigs}
+              rows={pages}
+              activeFilters={pagesTableFilters}
+              onFiltersChange={setPagesTableFilters}
+            />
+          )}
+
+          {!isInDetailView && activeTab === 'Competitors' && selectedCompetitorProject === null && (
+            <TableFilterDropdown
+              filters={competitorsMainFilterConfigs}
+              rows={projects}
+              activeFilters={competitorsTableFilters}
+              onFiltersChange={setCompetitorsTableFilters}
+            />
+          )}
+
           {!isInDetailView && activeTab === 'Outreach' && (
             <TableFilterDropdown
               filters={outreachFilterConfigs}
@@ -7895,8 +8159,9 @@ export default function ProjectSetupPage({ tab, user }) {
         ) : activeTab === 'Pages' && selectedPageProject !== null ? (
           <PageDetailView
             project={pages[selectedPageProject]}
+            search={search}
             user={user}
-            onBack={() => setSelectedPageProject(null)}
+            onBack={() => { setSelectedPageProject(null); setSearch(''); }}
             onUpdatePages={(updated) => {
               const slug = pages[selectedPageProject]?.slug;
               if (slug) {
@@ -7934,13 +8199,14 @@ export default function ProjectSetupPage({ tab, user }) {
         ) : (
           <div style={{ overflowX: 'auto' }}>
             {activeTab === 'Domain' && <DomainTab projects={projects} filter={filter} domainFilters={domainFilters} search={search} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} loading={projectsLoading} error={projectsError} user={user} />}
-            {activeTab === 'Intent' && <PagesTab pages={kwClusters} search={search} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's Intent data (keywords, categories, clusters)" user={user} />}
-            {activeTab === 'Pages' && <PagesTab pages={pages} search={search} onSelectProject={(i) => { const proj = pages[i]; if (!checkProjectPrerequisites(proj, 'Pages')) return; setSelectedPageProject(i); }} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" user={user} />}
+            {activeTab === 'Intent' && <PagesTab pages={kwClusters} search={search} tableFilters={intentTableFilters} onSelectProject={(i) => { setSelectedKwProject(i); setSearch(''); }} onDeleteProject={handleDeleteKwProject} loading={kwClustersLoading} error={kwClustersError} totalLabel="Total KW" keywordsLabel="Landing Pages" deleteScopeLabel="this project's Intent data (keywords, categories, clusters)" user={user} />}
+            {activeTab === 'Pages' && <PagesTab pages={pages} search={search} tableFilters={pagesTableFilters} onSelectProject={(i) => { const proj = pages[i]; if (!checkProjectPrerequisites(proj, 'Pages')) return; setSelectedPageProject(i); }} onDeleteProject={handleDeletePagesProject} deleteScopeLabel="this project's pages" user={user} />}
             {activeTab === 'Competitors' && selectedCompetitorProject === null && (
               <CompetitorProjectsTab
                 projects={projects}
                 competitors={competitors}
                 search={search}
+                tableFilters={competitorsTableFilters}
                 onSelectProject={(p) => { if (!checkProjectPrerequisites(p, 'Competitors')) return; setSelectedCompetitorProject(p); setFindCompetitorsMessage(''); }}
                 onDeleteProject={handleDeleteCompetitorProject}
                 loading={competitorsLoading}
@@ -7996,32 +8262,7 @@ export default function ProjectSetupPage({ tab, user }) {
                     </div>
                   );
                 }
-                let filteredOutreach = outreachLinks;
-                if (search && search.trim()) {
-                  const q = search.trim().toLowerCase();
-                  filteredOutreach = filteredOutreach.filter(l => (
-                    (l.url || '').toLowerCase().includes(q) ||
-                    (l.domain || '').toLowerCase().includes(q) ||
-                    (l.type || '').toLowerCase().includes(q)
-                  ));
-                }
-                if (outreachTableFilters.type && outreachTableFilters.type.length > 0) {
-                  filteredOutreach = filteredOutreach.filter(l => outreachTableFilters.type.includes(l.type || 'Paid Guest'));
-                }
-                const applyRangeFilter = (rows, key, fVal) => {
-                  if (!fVal || (fVal.min === '' && fVal.max === '')) return rows;
-                  const min = fVal.min !== '' ? Number(fVal.min) : -Infinity;
-                  const max = fVal.max !== '' ? Number(fVal.max) : Infinity;
-                  return rows.filter(r => {
-                    const val = Number(r[key] || 0);
-                    return val >= min && val <= max;
-                  });
-                };
-                filteredOutreach = applyRangeFilter(filteredOutreach, 'da', outreachTableFilters.da);
-                filteredOutreach = applyRangeFilter(filteredOutreach, 'pa', outreachTableFilters.pa);
-                filteredOutreach = applyRangeFilter(filteredOutreach, 'ss', outreachTableFilters.ss);
-                filteredOutreach = applyRangeFilter(filteredOutreach, 'totalTraffic', outreachTableFilters.traffic);
-
+                const filteredOutreach = getFilteredOutreachLinks();
                 const isAllSelected = filteredOutreach.length > 0 && filteredOutreach.every(lnk => selectedOutreachIds.has(lnk.id));
 
                 return (

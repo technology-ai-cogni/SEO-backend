@@ -236,10 +236,57 @@ def find_domain_record_for_row(row: dict, dataset_project_name: str = "") -> Opt
     return None
 
 
+def get_business_centres(domain_rec: Dict[str, Any]) -> List[Dict[str, str]]:
+    raw_bc = domain_rec.get("business_centres")
+    centres = []
+    if isinstance(raw_bc, str):
+        try:
+            parsed = json.loads(raw_bc)
+            if isinstance(parsed, list):
+                centres = parsed
+        except Exception:
+            pass
+    elif isinstance(raw_bc, list):
+        centres = raw_bc
+
+    if not centres and domain_rec.get("nap_business_centre"):
+        centres.append({
+            "name": (domain_rec.get("nap_business_centre") or "").strip(),
+            "phone": (domain_rec.get("nap_bc_phone") or "").strip(),
+            "website": (domain_rec.get("nap_bc_website") or "").strip(),
+            "address": (domain_rec.get("nap_bc_address") or "").strip(),
+            "email": (domain_rec.get("nap_bc_email") or "").strip(),
+        })
+
+    return centres
+
+
+def match_business_centre_for_row(row_landing_page: str, centres: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
+    if not row_landing_page or not centres:
+        return None
+
+    row_clean_url = row_landing_page.strip().lower()
+    row_root = extract_root_domain(row_clean_url)
+
+    for bc in centres:
+        bc_web = (bc.get("website") or bc.get("landing_page") or "").strip().lower()
+        if not bc_web:
+            continue
+        bc_root = extract_root_domain(bc_web)
+
+        if bc_root and row_root and bc_root == row_root:
+            return bc
+        if bc_web in row_clean_url or row_clean_url in bc_web:
+            return bc
+
+    return None
+
+
 def check_business_listing(
     live_link: str,
     domain_rec: Optional[Dict[str, Any]] = None,
-    rapidapi_key: Optional[str] = None
+    rapidapi_key: Optional[str] = None,
+    row_data: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Audits a Business Listing activity link:
@@ -329,41 +376,38 @@ def check_business_listing(
     # 4. NAP Details Verification
     if not link_broken and domain_rec and page_text:
         print(f"[Business Listing Audit] Verifying NAP details on page content...", flush=True)
-        expected_nap = {}
 
-        # Phone
-        phone_basic = (domain_rec.get("nap_phone") or "").strip()
-        phone_bc = (domain_rec.get("nap_bc_phone") or "").strip()
-        phones = list(filter(None, [phone_basic, phone_bc]))
+        row_lp = ""
+        if row_data:
+            row_lp = (row_data.get("landing_page") or row_data.get("Landing Page") or row_data.get("landingPage") or "").strip()
+
+        centres = get_business_centres(domain_rec)
+        matched_bc = match_business_centre_for_row(row_lp, centres) if row_lp else None
+
+        if matched_bc:
+            print(f"[Business Listing Audit] [!] Row Landing Page '{row_lp}' matched Business Centre: '{matched_bc.get('name')}'", flush=True)
+            phones = list(filter(None, [matched_bc.get("phone"), domain_rec.get("nap_phone"), domain_rec.get("nap_bc_phone")]))
+            addrs = list(filter(None, [matched_bc.get("address"), domain_rec.get("nap_address"), domain_rec.get("nap_bc_address")]))
+            emails = list(filter(None, [matched_bc.get("email"), domain_rec.get("nap_email"), domain_rec.get("nap_bc_email")]))
+            names = list(filter(None, [matched_bc.get("name"), domain_rec.get("nap_business_centre"), domain_rec.get("project_name")]))
+            websites = list(filter(None, [matched_bc.get("website"), row_lp, domain_rec.get("nap_website"), domain_rec.get("domain")]))
+        else:
+            print(f"[Business Listing Audit] Checking all available Headquarters & Business Centre NAP details...", flush=True)
+            phones = list(filter(None, [domain_rec.get("nap_phone"), domain_rec.get("nap_bc_phone")] + [c.get("phone") for c in centres]))
+            addrs = list(filter(None, [domain_rec.get("nap_address"), domain_rec.get("nap_bc_address")] + [c.get("address") for c in centres]))
+            emails = list(filter(None, [domain_rec.get("nap_email"), domain_rec.get("nap_bc_email")] + [c.get("email") for c in centres]))
+            names = list(filter(None, [domain_rec.get("nap_business_centre"), domain_rec.get("project_name")] + [c.get("name") for c in centres]))
+            websites = list(filter(None, [domain_rec.get("nap_website"), domain_rec.get("nap_bc_website"), domain_rec.get("domain")] + [c.get("website") for c in centres]))
+
+        expected_nap = {}
         if phones:
             expected_nap["Phone"] = phones
-
-        # Address
-        addr_basic = (domain_rec.get("nap_address") or "").strip()
-        addr_bc = (domain_rec.get("nap_bc_address") or "").strip()
-        addrs = list(filter(None, [addr_basic, addr_bc]))
         if addrs:
             expected_nap["Address"] = addrs
-
-        # Email
-        email_basic = (domain_rec.get("nap_email") or "").strip()
-        email_bc = (domain_rec.get("nap_bc_email") or "").strip()
-        emails = list(filter(None, [email_basic, email_bc]))
         if emails:
             expected_nap["Email"] = emails
-
-        # Business Name / Business Centre
-        name_bc = (domain_rec.get("nap_business_centre") or domain_rec.get("nap_business_name") or "").strip()
-        proj_name = (domain_rec.get("project_name") or "").strip()
-        names = list(filter(None, [name_bc, proj_name]))
         if names:
             expected_nap["Name"] = names
-
-        # Website
-        web_basic = (domain_rec.get("nap_website") or "").strip()
-        web_bc = (domain_rec.get("nap_bc_website") or "").strip()
-        dom_val = (domain_rec.get("domain") or "").strip()
-        websites = list(filter(None, [web_basic, web_bc, dom_val]))
         if websites:
             expected_nap["Website"] = websites
 

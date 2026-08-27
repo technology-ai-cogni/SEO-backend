@@ -13,22 +13,6 @@ export const NAV_STRUCTURE = [
     path: 'dashboard',
   },
   {
-    id: 'settings-menu',
-    label: 'Settings',
-    icon: 'Settings',
-    path: 'settings',
-    children: [
-      {
-        label: 'CONFIGURATION',
-        type: 'section',
-        items: [
-          { id: 'general-settings', label: 'General', path: 'settings/general' },
-          { id: 'project-setup', label: 'Project Setup', path: 'project-setup' },
-        ],
-      },
-    ],
-  },
-  {
     id: 'search-visibility',
     label: 'Search Visibility',
     icon: 'Search',
@@ -52,6 +36,22 @@ export const NAV_STRUCTURE = [
         items: [
           { id: 'off-page-scheduler', label: 'Off-Page', path: 'search-visibility/off-page-scheduler' },
           { id: 'calendar', label: 'Calendar', path: 'search-visibility/calendar' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'settings-menu',
+    label: 'Settings',
+    icon: 'Settings',
+    path: 'settings',
+    children: [
+      {
+        label: 'CONFIGURATION',
+        type: 'section',
+        items: [
+          { id: 'general-settings', label: 'General', path: 'settings/general' },
+          { id: 'project-setup', label: 'Project Setup', path: 'project-setup' },
         ],
       },
     ],

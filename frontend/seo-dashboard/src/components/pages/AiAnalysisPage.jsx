@@ -22,6 +22,14 @@ function MultiSelectField({ label, options, selectedValues = [], onChange }) {
     }
   };
 
+  const getPlural = (str) => {
+    if (!str) return '';
+    const lower = str.toLowerCase();
+    if (lower.endsWith('y')) return str.slice(0, -1) + 'ies';
+    if (lower.endsWith('s')) return str + 'es';
+    return str + 's';
+  };
+
   return (
     <div style={{ position: 'relative' }}>
       <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>
@@ -47,7 +55,7 @@ function MultiSelectField({ label, options, selectedValues = [], onChange }) {
         }}
       >
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {isAll ? `All ${label}s` : selectedValues.join(', ')}
+          {isAll ? `All ${getPlural(label)}` : selectedValues.join(', ')}
         </span>
         <ChevronDown size={14} color="#64748b" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
       </button>
@@ -77,7 +85,7 @@ function MultiSelectField({ label, options, selectedValues = [], onChange }) {
               onChange={() => onChange([])}
               style={{ accentColor: '#7c3aed' }}
             />
-            All {label}s
+            All {getPlural(label)}
           </label>
           {options.map(opt => {
             const isChecked = selectedValues.includes(opt);

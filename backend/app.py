@@ -897,7 +897,8 @@ async def _do_status_check_stream_gen(dataset_id: Optional[int], rows_payload: O
                         try:
                             bl_res = check_bl_fn(
                                 live_link=live_link,
-                                domain_rec=domain_rec
+                                domain_rec=domain_rec,
+                                row_data=r
                             )
                             r["status"] = bl_res.get("status", "Audited-LQ")
                             r["remarks"] = bl_res.get("remarks", "Pending")

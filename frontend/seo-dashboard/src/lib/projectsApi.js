@@ -431,7 +431,22 @@ export async function fetchDomainRows() {
 }
 
 export async function createProject({ name, domain, regions, platforms, da, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, nap_bc_phone, nap_bc_website, nap_bc_address, nap_bc_email, business_centres, branded_terms, users }) {
+  const normDomain = String(domain || '').trim().toLowerCase();
+  const normName = String(name || '').trim().toLowerCase();
   const slug = slugify(name);
+
+  // Check duplicate domain or project name before creation
+  const existingRows = await fetchDomainRows().catch(() => []);
+  const isDuplicate = existingRows.some(d => {
+    const dDom = String(d.domain || '').trim().toLowerCase();
+    const dName = String(d.name || '').trim().toLowerCase();
+    const dSlug = d.slug || slugify(d.name || '');
+    return (normDomain && dDom === normDomain) || (normName && dName === normName) || (slug && dSlug === slug);
+  });
+
+  if (isDuplicate) {
+    throw new Error("Use different domain or projectname, it's already used");
+  }
 
   if (isLocalMode) {
     const projects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
@@ -504,10 +519,17 @@ export async function createProject({ name, domain, regions, platforms, da, nap_
         users: users || [],
       }),
     });
-    if (backendRes.ok) {
+    if (!backendRes.ok) {
+      const errBody = await backendRes.json().catch(() => ({}));
+      const errMsg = errBody.detail || "Use different domain or projectname, it's already used";
+      throw new Error(errMsg);
+    } else {
       backendDomainData = await backendRes.json();
     }
   } catch (e) {
+    if (e.message === "Use different domain or projectname, it's already used") {
+      throw e;
+    }
     console.warn('[createProject] FastAPI POST /domains failed:', e);
   }
 

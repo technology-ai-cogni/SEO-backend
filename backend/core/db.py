@@ -1026,9 +1026,10 @@ def create_domain(domain, project_name=None, target_regions=None, platforms=None
     project_slug = get_or_create_project(project_name)
 
     with engine.begin() as conn:
-        existing = conn.execute(text("SELECT 1 FROM domains WHERE domain = :domain"), {"domain": domain}).fetchone()
-        if existing:
-            raise ValueError(f"Domain '{domain}' already exists.")
+        existing_domain = conn.execute(text("SELECT 1 FROM domains WHERE LOWER(domain) = LOWER(:domain)"), {"domain": domain}).fetchone()
+        existing_project = conn.execute(text("SELECT 1 FROM domains WHERE LOWER(project_name) = LOWER(:project_name) OR project_slug = :slug"), {"project_name": project_name, "slug": slugify(project_name)}).fetchone()
+        if existing_domain or existing_project:
+            raise ValueError("Use different domain or project name, it's already used")
 
         conn.execute(text("""
             INSERT INTO domains (domain, project_name, project_slug, target_regions, platforms, domain_authority, users, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, nap_bc_phone, nap_bc_website, nap_bc_address, nap_bc_email, business_centres, branded_terms, status, is_active)
