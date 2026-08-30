@@ -198,6 +198,8 @@ class CreateDomainRequest(BaseModel):
     project_name: Optional[str] = None  # auto-generated from `domain` if left blank
     target_regions: Optional[List[str]] = None
     platforms: Optional[List[str]] = None
+    industry: Optional[str] = None
+    industry_type: Optional[str] = None
     domain_authority: Optional[str] = None
     nap_business_centre: Optional[str] = None
     nap_phone: Optional[str] = None
@@ -419,6 +421,8 @@ def create_domain(payload: CreateDomainRequest):
         project_slug = db.create_domain(
             payload.domain, payload.project_name, payload.target_regions,
             payload.platforms, payload.domain_authority, users_payload,
+            industry=payload.industry or payload.industry_type,
+            industry_type=payload.industry_type or payload.industry,
             nap_business_centre=payload.nap_business_centre,
             nap_phone=payload.nap_phone,
             nap_website=payload.nap_website,
@@ -450,6 +454,17 @@ def create_domain(payload: CreateDomainRequest):
 def list_domains_endpoint():
     """Every domain that's been registered -- the project listing view."""
     return {"domains": db.list_domain_records()}
+
+
+@app.patch("/domains/{project_slug}")
+@app.put("/domains/{project_slug}")
+def update_domain_endpoint(project_slug: str, payload: Dict[str, Any]):
+    """Update domain fields including industry_type, industry, regions, etc."""
+    try:
+        db.update_domain_record(project_slug, payload)
+        return {"status": "success", "project_slug": project_slug}
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 # --- Monthly Operations API endpoints -----------------------------------
@@ -1584,6 +1599,7 @@ class CompetitorUpdateRequest(BaseModel):
 class CompetitorClassifierRequest(BaseModel):
     keyword: str
     urls: List[str]
+    project_slug: Optional[str] = None
 
 
 class CompetitorResultItem(BaseModel):
@@ -1873,22 +1889,24 @@ def classify_competitors(payload: CompetitorClassifierRequest):
     Classifies top URLs for a given keyword into website types (Official Entity / Platform)
     and determines whether each URL is a competitor (YES / NO) using OpenAI API.
     """
+    p_slug = payload.project_slug or 'All Projects'
+    print(f"\n[CLASSIFICATION API REQUEST] Project: '{p_slug}' | Received request to classify {len(payload.urls or [])} competitor URLs: {payload.urls}", flush=True)
     if not payload.urls:
         raise HTTPException(400, "urls array cannot be empty.")
     try:
         results = competitor_classifier.classify_urls(payload.keyword, payload.urls)
-        for item in results.get("results", []):
-            url = item.get("url")
-            wtype = item.get("website_type")
-            if url and wtype:
-                try:
-                    db.save_url_classification(url=url, domain=None, website_type=wtype, is_competitor=item.get("is_competitor"))
-                except Exception:
-                    pass
-                try:
-                    db.update_competitor_website_type(url, wtype)
-                except Exception:
-                    pass
+        classified_items = results.get("results", [])
+        print(f"[CLASSIFICATION API SUCCESS] Project: '{p_slug}' | Processed {len(classified_items)} URLs. Batch saving to DB in chunks of 5...", flush=True)
+
+        # Batch save to Database in chunks of 5 with project_slug filter
+        try:
+            db.batch_update_competitor_website_type(classified_items, project_slug=payload.project_slug, batch_size=5)
+        except Exception as db_batch_err:
+            print(f"[DB BATCH SAVE WARNING] Project: '{p_slug}' | Error: {db_batch_err}", flush=True)
+
+        for item in classified_items:
+            print(f"  -> Project: '{p_slug}' | URL: {item.get('url')} | Type: {item.get('website_type')} | IsCompetitor: {item.get('is_competitor')}", flush=True)
+
         return results
     except ValueError as ve:
         raise HTTPException(400, str(ve))
@@ -2355,6 +2373,16 @@ class AddOutreachSiteRequest(BaseModel):
     type: Optional[str] = None
     site_type: Optional[str] = None
     regions: Optional[List[str]] = None
+    sourced_by: Optional[str] = None
+    agency_name: Optional[str] = None
+    calculate_sp: Optional[bool] = False
+    sp_percentage: Optional[str] = None
+    landing_price: Optional[str] = None
+    selling_price: Optional[str] = None
+    country: Optional[str] = None
+    domain_industry: Optional[str] = None
+    status: Optional[str] = 'New site'
+    rejected_reason: Optional[str] = None
 
 
 @app.get("/outreach")
@@ -2402,6 +2430,16 @@ def add_outreach_site_endpoint(project_slug: str, req: AddOutreachSiteRequest):
             "region1_traffic": metrics["region1Traffic"],
             "region2_traffic": metrics["region2Traffic"],
             "region3_traffic": metrics["region3Traffic"],
+            "sourced_by": req.sourced_by,
+            "agency_name": req.agency_name,
+            "calculate_sp": req.calculate_sp,
+            "sp_percentage": req.sp_percentage,
+            "landing_price": req.landing_price,
+            "selling_price": req.selling_price,
+            "country": req.country,
+            "domain_industry": req.domain_industry,
+            "status": req.status or "New site",
+            "rejected_reason": req.rejected_reason,
             "metrics_json": metrics
         }
 
@@ -2657,3 +2695,9 @@ async def import_off_page_activities(
         "imported_count": len(parsed_records),
         "activities": imported_list
     }
+
+
+@app.get("/projects/{project_slug}/ai-analysis-history")
+def get_ai_analysis_history_endpoint(project_slug: str, engine: Optional[str] = None):
+    """Fallback endpoint for fetching AI Analysis history for a project."""
+    return {"status": "success", "history": []}

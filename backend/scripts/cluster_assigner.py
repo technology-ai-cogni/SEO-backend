@@ -75,77 +75,317 @@ def _strip_best_top(label):
     return stripped or label
 
 
-def cluster_categories(categories):
-    """categories: list of category name strings (may contain
-    duplicates -- harmless, just processed redundantly). Returns
-    {category_name: cluster_label} covering every one given."""
+def _find_dominant_cluster_word(categories: list) -> str:
+    """Finds the most frequent, significant entity word across a list of categories to use as a 1-word cluster name."""
+    cat_str = " ".join(categories).lower()
+    if "school" in cat_str:
+        return "Schools"
+
+    word_counts = {}
+    for cat in categories:
+        cleaned = _strip_best_top(cat)
+        words = re.findall(r"[A-Za-z0-9]+", cleaned.lower())
+        for w in set(words):
+            if w in ("best", "top", "in", "for", "of", "and", "the", "a", "an", "education", "fees", "admissions") or len(w) <= 2:
+                continue
+            singular = _singularize_word(w)
+            word_counts[singular] = word_counts.get(singular, 0) + 1
+
+    if word_counts:
+        best_word, _ = max(word_counts.items(), key=lambda x: x[1])
+        return _display_form(best_word, categories).title()
+
+    return "Schools"
+
+
+import math
+
+
+def cluster_categories(categories: list) -> dict:
+    """
+    Groups categories into parent clusters enforcing:
+    1. Cluster Name Length: 1 WORD default (e.g. 'Schools', 'Admissions', 'Education').
+       Only if a single word is not meaningful, use AT MOST 2 WORDS (e.g. 'CBSE Schools').
+    2. Cluster Scaling Ratio:
+       - 1 to 5 categories -> 1 cluster (math.ceil(N / 5))
+       - 6 to 10 categories -> 2 clusters
+       - 11 to 15 categories -> 3 clusters, and so on.
+    Returns: {category_name: cluster_label}
+    """
     if not categories:
         return {}
 
-    unique_cats = list(dict.fromkeys(categories))  # de-dupe, keep order
-    word_sets = {cat: _cluster_significant_words(cat) for cat in unique_cats}
-    parent = {cat: cat for cat in unique_cats}
+    unique_cats = list(dict.fromkeys(categories))
+    total_count = len(unique_cats)
+    target_cluster_count = max(1, math.ceil(total_count / 5))
 
-    for i in range(len(unique_cats)):
-        for j in range(i + 1, len(unique_cats)):
-            a, b = unique_cats[i], unique_cats[j]
-            wa, wb = word_sets[a], word_sets[b]
-            if not wa or not wb:
-                continue
-            if wa <= wb or wb <= wa:
-                _union(parent, a, b)
+    # Single cluster optimization: pick dominant entity word (e.g. 'Schools')
+    if target_cluster_count == 1:
+        dominant_label = _find_dominant_cluster_word(unique_cats)
+        return {cat: dominant_label for cat in unique_cats}
 
-    groups = {}
-    for cat in unique_cats:
-        root = _find(parent, cat)
-        groups.setdefault(root, []).append(cat)
+    try:
+        from services import category_checker
+        client = category_checker.get_openai_client()
 
-    assignment = {}
-    for members in groups.values():
-        if len(members) == 1 or not any(word_sets[m] for m in members):
-            label = _strip_best_top(members[0])
-            for cat in members:
-                assignment[cat] = label
-            continue
+        cat_list_str = "\n".join(f"- {c}" for c in unique_cats)
 
-        # Label = every word shared by a MAJORITY of this cluster's
-        # members -- same "majority, position-ordered" labeling style
-        # category_checker.py used, just applied to a correctly-formed
-        # group instead of a single-anchor-word group.
-        threshold = (len(members) + 1) // 2
-        shared_counts = {}
-        for cat in members:
-            for w in word_sets[cat]:
-                shared_counts[w] = shared_counts.get(w, 0) + 1
-        shared_words = {w for w, c in shared_counts.items() if c >= threshold}
-        if not shared_words:
-            shared_words = min((word_sets[c] for c in members if word_sets[c]), key=len)
-
-        position_totals, position_counts = {}, {}
-        for cat in members:
-            tokens = [_singularize_word(t) for t in re.findall(r"[A-Za-z0-9]+", cat.lower())]
-            for idx, t in enumerate(tokens):
-                if t in shared_words:
-                    position_totals[t] = position_totals.get(t, 0) + idx
-                    position_counts[t] = position_counts.get(t, 0) + 1
-
-        ordered_words = sorted(
-            shared_words,
-            key=lambda w: position_totals.get(w, 0) / position_counts.get(w, 1),
+        system_prompt = (
+            f"You are an expert SEO taxonomy engine. You are given a list of {total_count} category names.\n"
+            f"Your task is to group these categories into EXACTLY {target_cluster_count} parent cluster(s).\n\n"
+            "STRICT CLUSTER NAMING RULES:\n"
+            "1. Each cluster name MUST be 1 WORD (e.g. 'Schools', 'Admissions', 'Education', 'Preschool', 'Fees').\n"
+            "2. ONLY if a single word is not meaningful, you may use AT MOST 2 WORDS (e.g. 'CBSE Schools', 'International Schools').\n"
+            "3. NEVER use more than 2 words for any cluster name.\n"
+            "4. NEVER include 'Best' or 'Top' in any cluster name.\n"
+            "5. Capitalize cluster names properly (Title Case).\n\n"
+            "OUTPUT FORMAT:\n"
+            "Return ONLY a JSON object mapping each category string to its assigned Cluster name verbatim:\n"
+            "{\n"
+            '  "mappings": {\n'
+            '    "Category Name 1": "Cluster Name A",\n'
+            '    "Category Name 2": "Cluster Name A"\n'
+            "  }\n"
+            "}"
         )
-        cluster_label = " ".join(_display_form(w, members).title() for w in ordered_words) or members[0]
-        cluster_label = _strip_best_top(cluster_label)
 
-        for cat in members:
-            assignment[cat] = cluster_label
+        user_prompt = f"TARGET CLUSTER COUNT: {target_cluster_count}\n\nCATEGORIES:\n{cat_list_str}"
 
-    return assignment
+        resp = client.chat.completions.create(
+            model=category_checker.OPENAI_CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0
+        )
+
+        res_text = resp.choices[0].message.content.strip()
+        parsed = json.loads(res_text).get("mappings", {})
+
+        assignment = {}
+        for cat in unique_cats:
+            assigned = parsed.get(cat)
+            if not assigned:
+                for k, v in parsed.items():
+                    if k.lower() == cat.lower():
+                        assigned = v
+                        break
+
+            if assigned:
+                cleaned = _strip_best_top(assigned)
+                words = cleaned.split()
+                if len(words) > 2:
+                    cleaned = " ".join(words[:2])
+                assignment[cat] = cleaned
+            else:
+                words = _strip_best_top(cat).split()
+                assignment[cat] = words[0] if len(words) >= 1 else "General"
+
+        # Enforce EXACT unique cluster count limit (target_cluster_count)
+        distinct_clusters = list(dict.fromkeys(assignment.values()))
+        if len(distinct_clusters) > target_cluster_count:
+            allowed_clusters = distinct_clusters[:target_cluster_count]
+            primary_cluster = allowed_clusters[0]
+
+            for cat, current_cluster in list(assignment.items()):
+                if current_cluster not in allowed_clusters:
+                    matched = False
+                    for allowed in allowed_clusters:
+                        if allowed.lower() in current_cluster.lower() or current_cluster.lower() in allowed.lower():
+                            assignment[cat] = allowed
+                            matched = True
+                            break
+                    if not matched:
+                        assignment[cat] = primary_cluster
+
+        return assignment
+
+    except Exception as e:
+        print(f"[cluster_categories] Error: {e}")
+        fallback_label = _find_dominant_cluster_word(unique_cats)
+        return {cat: fallback_label for cat in unique_cats}
+import json
+
+
+def _extract_titles_from_meta(meta_obj):
+    titles = []
+    if isinstance(meta_obj, str):
+        try:
+            meta_obj = json.loads(meta_obj)
+        except Exception:
+            return []
+    if isinstance(meta_obj, dict):
+        top3 = meta_obj.get("top3") or []
+        for item in top3:
+            if isinstance(item, dict) and item.get("title"):
+                titles.append(item["title"])
+    return titles
+
+
+def batch_map_small_categories_to_major(small_categories_data: list, major_categories: list) -> dict:
+    """
+    Passes all small categories, their keywords, AND their SERP metadata (titles)
+    to OpenAI in a SINGLE batch call and returns a dict: { "Small Category Name": "Matched Major Category Name" }
+    """
+    if not small_categories_data or not major_categories:
+        return {}
+
+    try:
+        from services import category_checker
+        client = category_checker.get_openai_client()
+
+        major_list_str = "\n".join(f"{i + 1}. {name}" for i, name in enumerate(major_categories))
+        
+        small_items = []
+        for item in small_categories_data:
+            small_cat = item["category"]
+            sample_kws = ", ".join((item.get("keywords") or [])[:5])
+            sample_titles = " | ".join((item.get("serp_titles") or [])[:6])
+            
+            entry_str = f"- Category: '{small_cat}'\n  Keywords: {sample_kws}"
+            if sample_titles:
+                entry_str += f"\n  SERP Page Titles: {sample_titles}"
+            small_items.append(entry_str)
+        
+        small_list_str = "\n\n".join(small_items)
+
+        system_prompt = (
+            "You are an expert SEO taxonomist. Your job is to consolidate low-volume categories "
+            "(<= 5 keywords) into the SINGLE MOST SUITABLE Major Category from the provided list.\n\n"
+            "You are given each small category's name, its keywords, AND its SERP Metadata (top Google search result titles).\n\n"
+            "INSTRUCTIONS:\n"
+            "1. Analyze the category name, keywords, AND SERP page titles to determine true search intent.\n"
+            "2. You MUST assign every single Small Category to the BEST-FITTING Major Category.\n"
+            "3. Pick the Major Category that has the closest search intent, topic, or subject overlap.\n"
+            "4. Return ONLY a valid JSON object mapping each small category to its chosen Major Category verbatim.\n"
+            "Example Output:\n"
+            "{\n"
+            '  "mappings": {\n'
+            '    "Small Category 1": "Major Category A",\n'
+            '    "Small Category 2": "Major Category B"\n'
+            "  }\n"
+            "}"
+        )
+
+        user_prompt = (
+            f"MAJOR CATEGORIES (Choose only from these):\n{major_list_str}\n\n"
+            f"SMALL CATEGORIES TO MERGE (WITH KEYWORDS & SERP METADATA):\n{small_list_str}"
+        )
+
+        resp = client.chat.completions.create(
+            model=category_checker.OPENAI_CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0
+        )
+
+        res_text = resp.choices[0].message.content.strip()
+        parsed = json.loads(res_text).get("mappings", {})
+
+        validated = {}
+        for small_cat, assigned_major in parsed.items():
+            if not assigned_major:
+                continue
+            for major in major_categories:
+                if major.lower() == assigned_major.lower() or major.lower() in assigned_major.lower():
+                    validated[small_cat] = major
+                    break
+
+        return validated
+    except Exception as e:
+        print(f"[batch_map_small_categories_to_major] Error: {e}")
+        return {}
+
+
+def consolidate_small_categories(domain: str, min_threshold: int = 5):
+    """
+    Second pass check after full categorization:
+    Finds categories with <= min_threshold (5) keywords and reassigns ALL of their keywords
+    to the most suitable major category (> min_threshold keywords) via a single batch OpenAI call
+    incorporating keyword names AND SERP metadata (page titles).
+    """
+    try:
+        with db.engine.begin() as conn:
+            rows = conn.execute(db.text("""
+                SELECT category, count(*) AS keyword_count,
+                       array_agg(keyword) AS keywords,
+                       array_agg(meta) AS metas
+                FROM keyword_categories
+                WHERE project_name = :project_name AND category IS NOT NULL AND TRIM(category) != ''
+                GROUP BY category
+                ORDER BY keyword_count DESC
+            """), {"project_name": domain}).mappings().fetchall()
+
+            if not rows:
+                return
+
+            rows_dict = []
+            for r in rows:
+                r_dict = dict(r)
+                serp_titles = []
+                for m in (r_dict.get("metas") or []):
+                    serp_titles.extend(_extract_titles_from_meta(m))
+                r_dict["serp_titles"] = list(dict.fromkeys(serp_titles))  # dedupe titles
+                rows_dict.append(r_dict)
+
+            major_categories = [r["category"] for r in rows_dict if r["keyword_count"] > min_threshold]
+            small_category_rows = [r for r in rows_dict if r["keyword_count"] <= min_threshold]
+
+            if not small_category_rows or not major_categories:
+                return
+
+            print(f"[consolidate_small_categories] Found {len(small_category_rows)} small categories (<= {min_threshold} KWs) and {len(major_categories)} major categories for '{domain}'. Batch mapping using SERP metadata...")
+
+            mappings = batch_map_small_categories_to_major(small_category_rows, major_categories)
+
+            for small_row in small_category_rows:
+                small_cat = small_row["category"]
+                matched_major = mappings.get(small_cat)
+
+                # Fallback to the top major category if no explicit mapping was returned
+                if not matched_major:
+                    matched_major = major_categories[0]
+
+                if matched_major and matched_major != small_cat:
+                    print(f"[consolidate_small_categories] Merging '{small_cat}' ({small_row['keyword_count']} KWs) -> '{matched_major}'")
+                    conn.execute(db.text("""
+                        UPDATE keyword_categories
+                        SET category = :new_category
+                        WHERE project_name = :project_name AND category = :old_category
+                    """), {
+                        "new_category": matched_major,
+                        "project_name": domain,
+                        "old_category": small_cat
+                    })
+                    conn.execute(db.text("""
+                        DELETE FROM categories
+                        WHERE project_name = :project_name AND name = :old_category
+                    """), {
+                        "project_name": domain,
+                        "old_category": small_cat
+                    })
+    except Exception as e:
+        print(f"[consolidate_small_categories] Error consolidating categories for {domain}: {e}")
 
 
 def cluster_project(domain):
-    """Re-clusters this project's ENTIRE category list from scratch
-    (not just this run's categories) and persists the new cluster
-    assignment. Returns {category_name: cluster_name}."""
+    """Consolidates small categories (<= 5 keywords) into suitable major categories first,
+    then re-clusters this project's ENTIRE category list from scratch
+    and persists the new cluster assignment. Returns {category_name: cluster_name}."""
+    consolidate_small_categories(domain, min_threshold=5)
+    categories = db.list_category_names(domain)
+    assignment = cluster_categories(categories)
+    db.replace_domain_clusters(domain, assignment)
+    return assignment
+
+
+def recluster_only(domain):
+    """Runs ONLY parent clustering on existing categories WITHOUT modifying or consolidating categories."""
     categories = db.list_category_names(domain)
     assignment = cluster_categories(categories)
     db.replace_domain_clusters(domain, assignment)

@@ -63,6 +63,7 @@ import uuid
 import sys
 from decimal import Decimal
 import json
+from typing import Optional, List, Dict, Any
 
 def _clean_for_json(v):
     if v is None:
@@ -290,6 +291,8 @@ def init_db():
         """))
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'Active'"))
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE"))
+        conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS industry_type TEXT"))
+        conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS industry TEXT"))
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS nap_business_centre TEXT"))
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS nap_phone TEXT"))
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS nap_website TEXT"))
@@ -558,12 +561,32 @@ def init_db():
                 region1_traffic TEXT,
                 region2_traffic TEXT,
                 region3_traffic TEXT,
+                sourced_by TEXT,
+                agency_name TEXT,
+                calculate_sp BOOLEAN DEFAULT false,
+                sp_percentage TEXT,
+                landing_price TEXT,
+                selling_price TEXT,
+                country TEXT,
+                domain_industry TEXT,
+                status TEXT DEFAULT 'New site',
+                rejected_reason TEXT,
                 metrics_json JSONB,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            )
+            );
         """))
         conn.execute(text("ALTER TABLE outreach_sites ADD COLUMN IF NOT EXISTS type TEXT"))
+        conn.execute(text("ALTER TABLE outreach_sites ADD COLUMN IF NOT EXISTS sourced_by TEXT"))
+        conn.execute(text("ALTER TABLE outreach_sites ADD COLUMN IF NOT EXISTS agency_name TEXT"))
+        conn.execute(text("ALTER TABLE outreach_sites ADD COLUMN IF NOT EXISTS calculate_sp BOOLEAN DEFAULT false"))
+        conn.execute(text("ALTER TABLE outreach_sites ADD COLUMN IF NOT EXISTS sp_percentage TEXT"))
+        conn.execute(text("ALTER TABLE outreach_sites ADD COLUMN IF NOT EXISTS landing_price TEXT"))
+        conn.execute(text("ALTER TABLE outreach_sites ADD COLUMN IF NOT EXISTS selling_price TEXT"))
+        conn.execute(text("ALTER TABLE outreach_sites ADD COLUMN IF NOT EXISTS country TEXT"))
+        conn.execute(text("ALTER TABLE outreach_sites ADD COLUMN IF NOT EXISTS domain_industry TEXT"))
+        conn.execute(text("ALTER TABLE outreach_sites ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'New site'"))
+        conn.execute(text("ALTER TABLE outreach_sites ADD COLUMN IF NOT EXISTS rejected_reason TEXT"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_outreach_sites_project ON outreach_sites (project_slug)"))
 
 
@@ -578,6 +601,8 @@ def list_outreach_sites(project_slug: str = None):
             query = text("""
                 SELECT id, project_slug, url, domain, type, da, pa, ss, traffic,
                        total_traffic, region1_traffic, region2_traffic, region3_traffic,
+                       sourced_by, agency_name, calculate_sp, sp_percentage, landing_price,
+                       selling_price, country, domain_industry, status, rejected_reason,
                        metrics_json, created_at
                 FROM outreach_sites
                 WHERE project_slug = :slug
@@ -588,6 +613,8 @@ def list_outreach_sites(project_slug: str = None):
             query = text("""
                 SELECT id, project_slug, url, domain, type, da, pa, ss, traffic,
                        total_traffic, region1_traffic, region2_traffic, region3_traffic,
+                       sourced_by, agency_name, calculate_sp, sp_percentage, landing_price,
+                       selling_price, country, domain_industry, status, rejected_reason,
                        metrics_json, created_at
                 FROM outreach_sites
                 ORDER BY id DESC
@@ -606,11 +633,15 @@ def insert_outreach_site(project_slug: str, site_data: dict):
             text("""
                 INSERT INTO outreach_sites (
                     project_slug, url, domain, type, da, pa, ss, traffic,
-                    total_traffic, region1_traffic, region2_traffic, region3_traffic, metrics_json
+                    total_traffic, region1_traffic, region2_traffic, region3_traffic,
+                    sourced_by, agency_name, calculate_sp, sp_percentage, landing_price,
+                    selling_price, country, domain_industry, status, rejected_reason, metrics_json
                 )
                 VALUES (
                     :project_slug, :url, :domain, :type, :da, :pa, :ss, :traffic,
-                    :total_traffic, :region1_traffic, :region2_traffic, :region3_traffic, :metrics_json
+                    :total_traffic, :region1_traffic, :region2_traffic, :region3_traffic,
+                    :sourced_by, :agency_name, :calculate_sp, :sp_percentage, :landing_price,
+                    :selling_price, :country, :domain_industry, :status, :rejected_reason, :metrics_json
                 )
                 RETURNING id, created_at
             """),
@@ -627,6 +658,16 @@ def insert_outreach_site(project_slug: str, site_data: dict):
                 "region1_traffic": site_data.get("region1_traffic") or site_data.get("region1Traffic"),
                 "region2_traffic": site_data.get("region2_traffic") or site_data.get("region2Traffic"),
                 "region3_traffic": site_data.get("region3_traffic") or site_data.get("region3Traffic"),
+                "sourced_by": site_data.get("sourced_by") or site_data.get("sourcedOption"),
+                "agency_name": site_data.get("agency_name") or site_data.get("agencyName"),
+                "calculate_sp": bool(site_data.get("calculate_sp") or site_data.get("calculateSp")),
+                "sp_percentage": site_data.get("sp_percentage") or site_data.get("spPercentage"),
+                "landing_price": site_data.get("landing_price") or site_data.get("landingPrice"),
+                "selling_price": site_data.get("selling_price") or site_data.get("sellingPrice"),
+                "country": site_data.get("country"),
+                "domain_industry": site_data.get("domain_industry") or site_data.get("domainIndustry"),
+                "status": site_data.get("status") or "New site",
+                "rejected_reason": site_data.get("rejected_reason") or site_data.get("rejectedReason"),
                 "metrics_json": json.dumps(site_data.get("metrics_json", {})) if isinstance(site_data.get("metrics_json"), dict) else site_data.get("metrics_json")
             }
         ).mappings().first()
@@ -654,11 +695,45 @@ def update_outreach_site(site_id: int, updates: dict):
         return True
     set_clauses = []
     params = {"id": site_id}
-    allowed_keys = ["type", "da", "pa", "ss", "traffic", "total_traffic", "region1_traffic", "region2_traffic", "region3_traffic", "url", "domain"]
+    allowed_keys = [
+        "type", "da", "pa", "ss", "traffic", "total_traffic",
+        "region1_traffic", "region2_traffic", "region3_traffic",
+        "url", "domain", "sourced_by", "agency_name", "calculate_sp",
+        "sp_percentage", "landing_price", "selling_price", "country",
+        "domain_industry", "status", "rejected_reason"
+    ]
     for k, v in updates.items():
         db_key = k
         if db_key not in allowed_keys and k == "site_type":
             db_key = "type"
+        elif db_key not in allowed_keys and k == "landingPrice":
+            db_key = "landing_price"
+        elif db_key not in allowed_keys and k == "sellingPrice":
+            db_key = "selling_price"
+        elif db_key not in allowed_keys and k == "spPercentage":
+            db_key = "sp_percentage"
+        elif db_key not in allowed_keys and k == "domainIndustry":
+            db_key = "domain_industry"
+        elif db_key not in allowed_keys and (k == "sourcedOption" or k == "sourcedBy"):
+            db_key = "sourced_by"
+        elif db_key not in allowed_keys and k == "agencyName":
+            db_key = "agency_name"
+        elif db_key not in allowed_keys and k == "calculateSp":
+            db_key = "calculate_sp"
+        elif db_key not in allowed_keys and k == "rejectedReason":
+            db_key = "rejected_reason"
+            db_key = "selling_price"
+        elif db_key not in allowed_keys and k == "spPercentage":
+            db_key = "sp_percentage"
+        elif db_key not in allowed_keys and k == "domainIndustry":
+            db_key = "domain_industry"
+        elif db_key not in allowed_keys and (k == "sourcedOption" or k == "sourcedBy"):
+            db_key = "sourced_by"
+        elif db_key not in allowed_keys and k == "agencyName":
+            db_key = "agency_name"
+        elif db_key not in allowed_keys and k == "calculateSp":
+            db_key = "calculate_sp"
+
         if db_key in allowed_keys:
             set_clauses.append(f"{db_key} = :{db_key}")
             params[db_key] = v
@@ -799,6 +874,7 @@ def soft_delete_project(slug):
         page_rows = [dict(r) for r in conn.execute(text("SELECT * FROM pages WHERE project_name = :slug"), {"slug": slug}).mappings().fetchall()]
         comp_page_rows = [dict(r) for r in conn.execute(text("SELECT * FROM competitor_pages WHERE project_name = :slug"), {"slug": slug}).mappings().fetchall()]
         comp_rows = [dict(r) for r in conn.execute(text("SELECT * FROM competitors WHERE project_slug = :slug"), {"slug": slug}).mappings().fetchall()]
+        outreach_rows = [dict(r) for r in conn.execute(text("SELECT * FROM outreach_sites WHERE project_slug = :slug"), {"slug": slug}).mappings().fetchall()]
 
         def _clean_json(obj):
             if isinstance(obj, list):
@@ -817,6 +893,7 @@ def soft_delete_project(slug):
             "pages": _clean_json(page_rows),
             "competitor_pages": _clean_json(comp_page_rows),
             "competitors": _clean_json(comp_rows),
+            "outreach_sites": _clean_json(outreach_rows),
         }
 
         conn.execute(text("""
@@ -836,6 +913,7 @@ def soft_delete_project(slug):
         conn.execute(text("DELETE FROM pages WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM competitor_pages WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM competitors WHERE project_slug = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM outreach_sites WHERE project_slug = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM projects WHERE slug = :slug"), {"slug": slug})
 
 
@@ -922,6 +1000,22 @@ def restore_project(slug):
                 "type": comp.get("type"), "website_type": comp.get("website_type"),
             })
 
+        for os in archive_data.get("outreach_sites", []):
+            conn.execute(text("""
+                INSERT INTO outreach_sites (id, url, domain, type, da, pa, ss, traffic, total_traffic, region1_traffic, region2_traffic, region3_traffic, landing_price, selling_price, sp_percentage, country, domain_industry, status, rejected_reason, project_slug)
+                VALUES (:id, :url, :domain, :type, :da, :pa, :ss, :traffic, :total_traffic, :region1_traffic, :region2_traffic, :region3_traffic, :landing_price, :selling_price, :sp_percentage, :country, :domain_industry, :status, :rejected_reason, :project_slug)
+                ON CONFLICT (id) DO NOTHING
+            """), {
+                "id": os.get("id"), "url": os.get("url"), "domain": os.get("domain"), "type": os.get("type"),
+                "da": os.get("da"), "pa": os.get("pa"), "ss": os.get("ss"), "traffic": os.get("traffic"),
+                "total_traffic": os.get("total_traffic"), "region1_traffic": os.get("region1_traffic"),
+                "region2_traffic": os.get("region2_traffic"), "region3_traffic": os.get("region3_traffic"),
+                "landing_price": os.get("landing_price"), "selling_price": os.get("selling_price"),
+                "sp_percentage": os.get("sp_percentage"), "country": os.get("country"),
+                "domain_industry": os.get("domain_industry"), "status": os.get("status"),
+                "rejected_reason": os.get("rejected_reason"), "project_slug": slug
+            })
+
         conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": row["id"]})
 
 
@@ -937,6 +1031,7 @@ def delete_project(slug):
         conn.execute(text("DELETE FROM pages WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM competitor_pages WHERE project_name = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM competitors WHERE project_slug = :slug"), {"slug": slug})
+        conn.execute(text("DELETE FROM outreach_sites WHERE project_slug = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM projects WHERE slug = :slug"), {"slug": slug})
 
 
@@ -1000,7 +1095,7 @@ def delete_project_pages(slug):
 # --- Domains (the "Create Project" form) --------------------------------
 
 def create_domain(domain, project_name=None, target_regions=None, platforms=None,
-                   domain_authority=None, users=None,
+                   domain_authority=None, users=None, industry=None, industry_type=None,
                    nap_business_centre=None, nap_phone=None, nap_website=None,
                    nap_address=None, nap_email=None,
                    nap_bc_phone=None, nap_bc_website=None, nap_bc_address=None, nap_bc_email=None,
@@ -1024,6 +1119,7 @@ def create_domain(domain, project_name=None, target_regions=None, platforms=None
 
     project_name = (project_name or "").strip() or domain
     project_slug = get_or_create_project(project_name)
+    ind_val = industry or industry_type or ""
 
     with engine.begin() as conn:
         existing_domain = conn.execute(text("SELECT 1 FROM domains WHERE LOWER(domain) = LOWER(:domain)"), {"domain": domain}).fetchone()
@@ -1032,13 +1128,15 @@ def create_domain(domain, project_name=None, target_regions=None, platforms=None
             raise ValueError("Use different domain or project name, it's already used")
 
         conn.execute(text("""
-            INSERT INTO domains (domain, project_name, project_slug, target_regions, platforms, domain_authority, users, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, nap_bc_phone, nap_bc_website, nap_bc_address, nap_bc_email, business_centres, branded_terms, status, is_active)
-            VALUES (:domain, :project_name, :project_slug, :target_regions, :platforms, :domain_authority, CAST(:users AS JSONB), :nap_business_centre, :nap_phone, :nap_website, :nap_address, :nap_email, :nap_bc_phone, :nap_bc_website, :nap_bc_address, :nap_bc_email, CAST(:business_centres AS JSONB), :branded_terms, 'Active', TRUE)
+            INSERT INTO domains (domain, project_name, project_slug, target_regions, platforms, domain_authority, users, industry, industry_type, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, nap_bc_phone, nap_bc_website, nap_bc_address, nap_bc_email, business_centres, branded_terms, status, is_active)
+            VALUES (:domain, :project_name, :project_slug, :target_regions, :platforms, :domain_authority, CAST(:users AS JSONB), :industry, :industry_type, :nap_business_centre, :nap_phone, :nap_website, :nap_address, :nap_email, :nap_bc_phone, :nap_bc_website, :nap_bc_address, :nap_bc_email, CAST(:business_centres AS JSONB), :branded_terms, 'Active', TRUE)
         """), {
             "domain": domain, "project_name": project_name, "project_slug": project_slug,
             "target_regions": target_regions or [], "platforms": platforms or [],
             "domain_authority": domain_authority,
             "users": json.dumps(users) if users is not None else None,
+            "industry": ind_val,
+            "industry_type": ind_val,
             "nap_business_centre": nap_business_centre,
             "nap_phone": nap_phone,
             "nap_website": nap_website,
@@ -1087,6 +1185,80 @@ def get_domain_by_project_slug(project_slug):
             SELECT * FROM domains WHERE project_slug = :project_slug LIMIT 1
         """), {"project_slug": project_slug}).mappings().fetchone()
         return dict(row) if row else None
+
+
+def update_domain_record(project_slug: str, updates: dict):
+    if not project_slug or not updates:
+        return
+
+    allowed_keys = {
+        "project_name", "target_regions", "platforms", "industry", "industry_type",
+        "status", "is_active", "nap_business_centre", "nap_phone", "nap_website",
+        "nap_address", "nap_email", "nap_bc_phone", "nap_bc_website", "nap_bc_address",
+        "nap_bc_email", "business_centres", "branded_terms"
+    }
+
+    field_mappings = {
+        "name": "project_name",
+        "project_name": "project_name",
+        "regions": "target_regions",
+        "targetRegions": "target_regions",
+        "target_regions": "target_regions",
+        "targetPlatforms": "platforms",
+        "platforms": "platforms",
+        "industry": "industry",
+        "domain_industry": "industry_type",
+        "domainIndustry": "industry_type",
+        "industry_type": "industry_type",
+        "category": "industry",
+        "status": "status",
+        "isActive": "is_active",
+        "napBusinessCentre": "nap_business_centre",
+        "napPhone": "nap_phone",
+        "napWebsite": "nap_website",
+        "napAddress": "nap_address",
+        "napEmail": "nap_email",
+        "napBcPhone": "nap_bc_phone",
+        "napBcWebsite": "nap_bc_website",
+        "napBcAddress": "nap_bc_address",
+        "napBcEmail": "nap_bc_email",
+        "businessCentres": "business_centres",
+        "brandedTerms": "branded_terms"
+    }
+
+    set_clauses = []
+    params = {"project_slug": project_slug}
+
+    for k, v in updates.items():
+        db_col = field_mappings.get(k)
+        if db_col and db_col in allowed_keys and db_col not in params:
+            if db_col in ("business_centres",):
+                set_clauses.append(f"{db_col} = CAST(:{db_col} AS JSONB)")
+                params[db_col] = json.dumps(v) if isinstance(v, (list, dict)) else v
+            else:
+                set_clauses.append(f"{db_col} = :{db_col}")
+                params[db_col] = v
+
+    ind_val = updates.get("industry") or updates.get("industry_type") or updates.get("domain_industry") or updates.get("category")
+    if ind_val is not None:
+        if "industry" not in params:
+            set_clauses.append("industry = :industry_val")
+            params["industry_val"] = ind_val
+        if "industry_type" not in params:
+            set_clauses.append("industry_type = :industry_type_val")
+            params["industry_type_val"] = ind_val
+
+    if not set_clauses:
+        return
+
+    set_clauses.append("updated_at = now()")
+
+    with engine.begin() as conn:
+        conn.execute(text(f"""
+            UPDATE domains
+            SET {', '.join(set_clauses)}
+            WHERE project_slug = :project_slug OR LOWER(project_name) = LOWER(:project_slug)
+        """), params)
 
 
 # --- Jobs (shared, untouched) --------------------------------------------
@@ -1174,9 +1346,11 @@ def try_mark_clustering_triggered(job_id):
 def list_category_names(domain):
     with engine.begin() as conn:
         rows = conn.execute(text("""
-            SELECT name FROM categories WHERE project_name = :project_name ORDER BY id
+            SELECT DISTINCT category FROM keyword_categories
+            WHERE project_name = :project_name AND category IS NOT NULL AND TRIM(category) != ''
+            ORDER BY category
         """), {"project_name": domain}).fetchall()
-        return [r.name for r in rows]
+        return [r.category for r in rows if r.category]
 
 
 def add_category(domain, name):
@@ -1609,6 +1783,53 @@ def update_competitor_website_type(domain_or_url, website_type):
             text("UPDATE competitors SET website_type = :wtype, type = :wtype, updated_at = now() WHERE LOWER(domain) LIKE :dom OR LOWER(domain) = :exact"),
             {"wtype": website_type, "dom": f"%{clean_domain}%", "exact": clean_domain}
         )
+
+
+def batch_update_competitor_website_type(items: list, project_slug: Optional[str] = None, batch_size: int = 5):
+    """
+    Saves/updates competitor website_types in DB in batches of 5.
+    items: list of dicts [{"url": str, "website_type": str, "is_competitor": str}, ...]
+    """
+    if not items:
+        return
+
+    total = len(items)
+    for i in range(0, total, batch_size):
+        batch = items[i:i + batch_size]
+        print(f"[DB BATCH SAVE] Project: '{project_slug or 'All'}' | Saving batch of {len(batch)} items ({i+1} to {min(i+batch_size, total)} of {total})...", flush=True)
+        with engine.begin() as conn:
+            for item in batch:
+                url = item.get("url")
+                raw_wtype = item.get("website_type")
+                if not url or not raw_wtype:
+                    continue
+
+                wtype = "Listing" if raw_wtype == "Platform" else raw_wtype
+                clean_dom = str(url).strip().lower().replace("http://", "").replace("https://", "").replace("www.", "").split("/")[0]
+
+                if project_slug:
+                    res = conn.execute(
+                        text("""
+                            UPDATE competitors 
+                            SET website_type = :wtype, type = :wtype, updated_at = now() 
+                            WHERE project_slug = :pslug 
+                              AND (LOWER(domain) LIKE :dom OR LOWER(domain) = :exact OR LOWER(name) LIKE :dom OR LOWER(url) LIKE :dom)
+                        """),
+                        {"wtype": wtype, "dom": f"%{clean_dom}%", "exact": clean_dom, "pslug": project_slug}
+                    )
+                else:
+                    res = conn.execute(
+                        text("""
+                            UPDATE competitors 
+                            SET website_type = :wtype, type = :wtype, updated_at = now() 
+                            WHERE LOWER(domain) LIKE :dom OR LOWER(domain) = :exact OR LOWER(name) LIKE :dom OR LOWER(url) LIKE :dom
+                        """),
+                        {"wtype": wtype, "dom": f"%{clean_dom}%", "exact": clean_dom}
+                    )
+
+                rows_updated = res.rowcount
+                print(f"  [DB ROW UPDATED] Project: '{project_slug or 'All'}' | Domain/URL: '{clean_dom}' -> type: '{wtype}' ({rows_updated} competitor DB rows updated)", flush=True)
+                save_url_classification(url=url, domain=clean_dom, website_type=wtype, is_competitor=item.get("is_competitor"))
 
 
 def get_url_classification(url_or_domain: str):

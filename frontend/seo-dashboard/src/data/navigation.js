@@ -34,6 +34,7 @@ export const NAV_STRUCTURE = [
         label: 'Operations',
         type: 'section',
         items: [
+          { id: 'outreach', label: 'Outreach', path: 'search-visibility/outreach' },
           { id: 'off-page-scheduler', label: 'Off-Page', path: 'search-visibility/off-page-scheduler' },
           { id: 'calendar', label: 'Calendar', path: 'search-visibility/calendar' },
           { id: 'activity-table', label: 'Activity Table', path: 'search-visibility/activity-table' },

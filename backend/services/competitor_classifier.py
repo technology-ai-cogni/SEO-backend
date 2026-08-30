@@ -284,30 +284,78 @@ def classify_urls(
     model: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Classifies a list of top URLs for a given keyword.
+    Classifies a list of top URLs for a given keyword using parallel threads.
     Returns: {"keyword": str, "results": List[Dict[str, str]]}
     """
-    session = create_http_session()
-    cache: Dict[str, Dict[str, str]] = {}
-    results: List[Dict[str, str]] = []
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     try:
+        from core import db
+    except Exception:
+        db = None
+
+    session = create_http_session()
+    cache: Dict[str, Dict[str, str]] = {}
+    uncached_urls: List[str] = []
+
+    try:
+        # Step 1: Check DB cache first for all URLs
         for u in urls:
             clean_u = u.strip()
             if not clean_u:
                 continue
 
             if clean_u in cache:
-                results.append(cache[clean_u])
-            else:
-                res = classify_url(
-                    url=clean_u,
-                    session=session,
-                    api_key=api_key,
-                    model=model
-                )
-                cache[clean_u] = res
-                results.append(res)
+                continue
+
+            if db:
+                try:
+                    db_res = db.get_url_classification(clean_u)
+                    if db_res:
+                        print(f"  [DB CACHE HIT] '{clean_u}' -> {db_res.get('website_type')}", flush=True)
+                        logger.info(f"DB Cache Hit for {clean_u}: {db_res['website_type']}")
+                        cache[clean_u] = db_res
+                        continue
+                except Exception:
+                    pass
+
+            if clean_u not in uncached_urls:
+                uncached_urls.append(clean_u)
+
+        # Step 2: Process uncached URLs concurrently in parallel worker threads
+        if uncached_urls:
+            print(f"  [PARALLEL AI START] Launching AI classification for {len(uncached_urls)} uncached URLs concurrently...", flush=True)
+            def process_single_url(target_u: str):
+                local_sess = create_http_session()
+                try:
+                    res = classify_url(
+                        url=target_u,
+                        session=local_sess,
+                        api_key=api_key,
+                        model=model
+                    )
+                    print(f"  [AI CLASSIFIED] '{target_u}' -> {res.get('website_type')}", flush=True)
+                    return target_u, res
+                except Exception as e:
+                    print(f"  [AI CLASSIFY ERROR] '{target_u}': {e}", flush=True)
+                    logger.error(f"Error classifying URL {target_u}: {e}")
+                    fallback = {"url": target_u, "website_type": "Platform", "is_competitor": "NO"}
+                    return target_u, fallback
+                finally:
+                    local_sess.close()
+
+            max_workers = min(15, len(uncached_urls))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_url = {executor.submit(process_single_url, u): u for u in uncached_urls}
+                for future in as_completed(future_to_url):
+                    try:
+                        u_key, u_res = future.result()
+                        cache[u_key] = u_res
+                    except Exception as exc:
+                        u_target = future_to_url[future]
+                        cache[u_target] = {"url": u_target, "website_type": "Platform", "is_competitor": "NO"}
+
+        results = [cache[u.strip()] for u in urls if u.strip() in cache]
 
         return {
             "keyword": keyword,

@@ -518,7 +518,7 @@ from scripts import intent_classifier
 from scripts.exp_category_pipeline import serp_fetch, category_namer, classifiers, cluster_grouper
 
 # INTENT_WORKERS = 8
-INTENT_WORKERS = 15
+INTENT_WORKERS = 8
 # Only one categorize job runs at a time across this whole process --
 # see module docstring for why both engines need this.
 _category_lock = threading.Lock()
@@ -646,13 +646,7 @@ def _run_categorize_job_selenium(job_id, domain, rows):
     if job and job["status"] == "completed":
         if db.try_mark_clustering_triggered(job_id):
             try:
-                categories = db.list_category_names(domain)
-                assignment = cluster_grouper.cluster_categories(
-                    categories,
-                    location_words=category_namer._LOCATION_WORDS,
-                    extra_stopwords=category_namer._FILLER_WORDS,
-                )
-                db.replace_domain_clusters(domain, assignment)
+                cluster_project(domain)
             except Exception as e:
                 print(f"[hosted_categorize/selenium] cluster error for job {job_id}: {e}")
 
@@ -837,38 +831,20 @@ def _run_categorize_job_bright_data(job_id, domain, rows, country_code):
                 if res:
                     batch_results.append(res)
 
-        # Phase 3: Low-count category fallback (<3 count in batch) - Runs BEFORE Clustering
-        cat_counts = Counter(item["category"] for item in batch_results if item.get("category"))
-        if cat_counts:
-            top_category, max_freq = cat_counts.most_common(1)[0]
-            rare_categories = {c for c, count in cat_counts.items() if count < 3 and c != top_category}
-            if rare_categories and top_category:
-                print(f"[hosted_categorize/bright_data] Batch fallback: categories {rare_categories} (<3 count) falling back to top category '{top_category}'")
-                for item in batch_results:
-                    if item.get("category") in rare_categories:
-                        db.update_keyword_result(
-                            domain, item["row_id"], top_category, None, "processed",
-                            meta={"top3": item.get("top3")},
-                            computed_target_type=item.get("target_type"),
-                            computed_subtype=item.get("subtype")
-                        )
-
-        # Phase 4: All Clustering happens AFTER fallback is complete
+        # Phase 3: Intermediate Cluster Sync
         try:
-            assignment = category_checker.cluster_all_categories(domain)
-            db.replace_domain_clusters(domain, assignment)
+            cluster_project(domain)
         except Exception as e:
             print(f"[hosted_categorize/bright_data] Batch cluster sync error: {e}")
 
-    # Phase 3: Final Clustering Sync
+    # Phase 4: Final Consolidation and Clustering Sync
     job = db.get_job(job_id)
     if job and job["status"] == "completed":
         if db.try_mark_clustering_triggered(job_id):
             try:
-                assignment = category_checker.cluster_all_categories(domain)
-                db.replace_domain_clusters(domain, assignment)
+                cluster_project(domain)
             except Exception as e:
-                print(f"[hosted_categorize/bright_data] cluster error for job {job_id}: {e}")
+                print(f"[hosted_categorize/bright_data] Final cluster error for job {job_id}: {e}")
 
 
 # =====================================================================

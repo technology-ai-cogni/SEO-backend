@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Plus, Minus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2, RefreshCw, Filter, Download, Folder, FolderTree, AlertCircle } from 'lucide-react';
+import { Search, Plus, Minus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2, RefreshCw, Filter, Download, Folder, FolderTree, AlertCircle, CheckCircle2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { Badge } from '../ui/Card';
@@ -59,7 +59,7 @@ function downloadCSV(filename, rows) {
   URL.revokeObjectURL(url);
 }
 
-function Input({ label, hint, placeholder, required, value, onChange, type = 'text' }) {
+function Input({ label, hint, placeholder, required, value, onChange, type = 'text', disabled = false }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       {label && (
@@ -72,22 +72,24 @@ function Input({ label, hint, placeholder, required, value, onChange, type = 'te
       <input
         type={type}
         value={value}
+        disabled={disabled}
         onChange={e => onChange?.(e.target.value)}
         placeholder={placeholder}
         style={{
           width: '100%', border: '1.5px solid #d1d5db', borderRadius: 8,
           padding: '10px 14px', fontSize: 14, outline: 'none',
-          fontFamily: 'var(--font-body)', color: 'var(--text-primary)',
-          background: '#fff', transition: 'border-color 0.15s',
+          fontFamily: 'var(--font-body)', color: disabled ? 'var(--text-muted)' : 'var(--text-primary)',
+          background: disabled ? 'var(--surface-2, #f3f4f6)' : '#fff', transition: 'border-color 0.15s',
+          cursor: disabled ? 'not-allowed' : 'text',
         }}
-        onFocus={e => e.target.style.borderColor = '#5c4af2'}
-        onBlur={e => e.target.style.borderColor = '#d1d5db'}
+        onFocus={e => { if (!disabled) e.target.style.borderColor = '#5c4af2'; }}
+        onBlur={e => { if (!disabled) e.target.style.borderColor = '#d1d5db'; }}
       />
     </div>
   );
 }
 
-function Select({ label, options, value, onChange, placeholder }) {
+function Select({ label, options, value, onChange, placeholder, disabled = false }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -113,7 +115,8 @@ function Select({ label, options, value, onChange, placeholder }) {
       {label && <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{label}</span>}
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        disabled={disabled}
+        onClick={() => { if (!disabled) setOpen(!open); }}
         style={{
           width: '100%',
           display: 'flex',
@@ -124,9 +127,9 @@ function Select({ label, options, value, onChange, placeholder }) {
           padding: '10px 14px',
           fontSize: 13,
           fontFamily: 'var(--font-body)',
-          color: value ? 'var(--text-primary)' : 'var(--text-muted)',
-          background: '#fff',
-          cursor: 'pointer',
+          color: disabled ? 'var(--text-muted)' : (value ? 'var(--text-primary)' : 'var(--text-muted)'),
+          background: disabled ? 'var(--surface-2, #f3f4f6)' : '#fff',
+          cursor: disabled ? 'not-allowed' : 'pointer',
           outline: 'none',
           textAlign: 'left'
         }}
@@ -148,7 +151,7 @@ function Select({ label, options, value, onChange, placeholder }) {
           boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.15)',
           maxHeight: 220,
           overflowY: 'auto',
-          zIndex: 999
+          zIndex: 99999
         }}>
           {placeholder && (
             <div
@@ -528,7 +531,7 @@ function TableFilterDropdown({ filters, rows, activeFilters, onFiltersChange }) 
       } else {
         const set = new Set();
         (rows || []).forEach(r => {
-          const v = r[f.key];
+          const v = r[f.key] ?? (f.key === 'category' ? (r.targetCategory ?? r.category) : f.key === 'targetCategory' ? (r.category ?? r.targetCategory) : (f.key === 'cluster' ? (r.targetCluster ?? r.cluster) : null));
           if (v != null && v !== '') {
             String(v).split(',').forEach(item => {
               const trimmed = item.trim();
@@ -684,7 +687,7 @@ function RobotClusterIcon({ busy, size = 26 }) {
 
 // ─── Modal wrapper ──────────────────────────────────────────────────────────
 
-function Modal({ open, onClose, title, children, footer, maxWidth = 520, style = {} }) {
+function Modal({ open, onClose, title, children, footer, maxWidth = 520, style = {}, bodyStyle = {} }) {
   if (!open) return null;
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
@@ -698,7 +701,7 @@ function Modal({ open, onClose, title, children, footer, maxWidth = 520, style =
             <X size={20} />
           </button>
         </div>
-        <div style={{ padding: '20px 28px 20px', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto', flex: 1 }}>
+        <div style={{ padding: '20px 28px 20px', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto', flex: 1, ...bodyStyle }}>
           {children}
         </div>
         {footer && (
@@ -1391,7 +1394,7 @@ function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedPro
   };
 
   const downloadSampleTemplate = async () => {
-    const headers = ['KW', 'SV', 'KW Diff', 'Type', 'Cluster', 'Category', 'Target Type', 'Target Subtype', 'Target Geo', 'Priority', 'he'];
+    const headers = ['KW', 'SV', 'KW Diff', 'Type', 'Cluster', 'Category', 'Target Type', 'Target Subtype', 'Target Geo', 'Priority', 'Landing Page'];
     const sampleRows = [
       ['school admission form', 14800, 20, 'Organic', 'ICSE Board', 'Icse vs cbse', 'Landing Page', 'Informational', 'India', 'P1', 'URL'],
       ['best schools in bangalore', 12100, 28, 'SERP', 'High School', 'Fees Structure', 'Landing Page', 'Commercial', 'India', 'P2', 'URL'],
@@ -1684,7 +1687,7 @@ function ChooseProjectModal({ open, onClose, onApply, projects, mode = 'findComp
     <Modal
       open={open}
       onClose={handleClose}
-      title={showTree ? "Find Competitors" : "Choose Project"}
+      title={showTree ? "Classify Competitors" : "Choose Project"}
       footer={
         <>
           <Btn
@@ -1858,10 +1861,9 @@ const platformOptionsList = [
 
 function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
   const [name, setName] = useState('');
-  const [location, setLocation] = useState('');
+  const [regions, setRegions] = useState([]);
   const [platforms, setPlatforms] = useState([]);
   const [industry, setIndustry] = useState('');
-  const [traffic, setTraffic] = useState('');
   const [status, setStatus] = useState('Active');
   const [activeTab, setActiveTab] = useState('basic_info');
   const [napBusinessCentre, setNapBusinessCentre] = useState('');
@@ -1882,6 +1884,21 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
   const [apiError, setApiError] = useState('');
 
   const [centreToDeleteIndex, setCentreToDeleteIndex] = useState(null);
+
+  const industryOptions = [
+    { value: 'Education', label: 'Education' },
+    { value: 'Edtech', label: 'Edtech' },
+    { value: 'Real Estate', label: 'Real Estate' },
+    { value: 'Technology', label: 'Technology' },
+    { value: 'Consulting', label: 'Consulting' },
+    { value: 'F&B', label: 'F&B' },
+    { value: 'Hospitality', label: 'Hospitality' },
+    { value: 'Pet', label: 'Pet' },
+    { value: 'Restaurant / Cafe / QSR', label: 'Restaurant / Cafe / QSR' },
+    { value: 'D2C - Beauty & Wellness', label: 'D2C - Beauty & Wellness' },
+    { value: 'D2C - Consumer Goods', label: 'D2C - Consumer Goods' },
+    { value: 'D2C - Health', label: 'D2C - Health' },
+  ];
 
   const addBusinessCentre = () => {
     setBusinessCentres(prev => [...prev, { name: '', phone: '', website: '', address: '', email: '' }]);
@@ -1906,10 +1923,15 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
       const primaryBc = finalCentres[0] || {};
       await onSave({
         name: name.trim() || project?.name,
-        location,
+        location: regions.join(', '),
+        target_regions: regions,
+        targetRegions: regions,
+        regions: regions,
         targetPlatforms: platforms,
-        da: da !== '' ? Number(da) : null,
-        traffic: traffic !== '' ? Number(traffic) : 0,
+        industry: industry,
+        domain_industry: industry,
+        domainIndustry: industry,
+        category: industry,
         status,
         isActive: status === 'Active',
         napBusinessCentre: (primaryBc.name || '').trim(),
@@ -1934,10 +1956,16 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
   useEffect(() => {
     if (project) {
       setName(project.name || '');
-      setLocation(project.location || '');
+      let initialRegions = [];
+      if (Array.isArray(project.target_regions) && project.target_regions.length > 0) initialRegions = project.target_regions;
+      else if (Array.isArray(project.targetRegions) && project.targetRegions.length > 0) initialRegions = project.targetRegions;
+      else if (Array.isArray(project.regions) && project.regions.length > 0) initialRegions = project.regions;
+      else if (project.location) {
+        initialRegions = String(project.location).split(',').map(s => s.trim()).filter(Boolean);
+      }
+      setRegions(initialRegions);
       setPlatforms(project.targetPlatforms || ALL_PLATFORMS);
-      setDa(project.da ?? '');
-      setTraffic(project.traffic ?? '');
+      setIndustry(project.industry || project.domain_industry || project.domainIndustry || project.category || '');
       setStatus(project.status || (project.isActive ? 'Active' : 'Inactive'));
       setNapBusinessCentre(project.napBusinessCentre || '');
       setNapPhone(project.napPhone || '');
@@ -1982,10 +2010,15 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
       const primaryBc = businessCentres[0] || {};
       await onSave({
         name: name.trim() || project?.name,
-        location,
+        location: regions.join(', '),
+        target_regions: regions,
+        targetRegions: regions,
+        regions: regions,
         targetPlatforms: platforms,
-        da: da !== '' ? Number(da) : null,
-        traffic: traffic !== '' ? Number(traffic) : 0,
+        industry: industry,
+        domain_industry: industry,
+        domainIndustry: industry,
+        category: industry,
         status,
         isActive: status === 'Active',
         napBusinessCentre: (primaryBc.name || '').trim(),
@@ -2097,13 +2130,13 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <Select
-                label="Location"
-                placeholder="Select a location"
-                value={location}
-                onChange={setLocation}
-                options={COUNTRIES}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+              <CountryTagInput
+                label="Target Regions"
+                tags={regions}
+                onAdd={r => setRegions(p => [...p, r])}
+                onRemove={r => setRegions(p => p.filter(x => x !== r))}
+                placeholder="e.g. India, Singapore, USA"
               />
               <Select
                 label="Status"
@@ -2114,16 +2147,20 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
               />
             </div>
 
-            <MultiSelect
-              label="Target Platforms"
-              options={platformOptionsList}
-              selected={platforms}
-              onToggle={togglePlatform}
-            />
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <Input label="Domain Authority" placeholder="e.g. 42" value={da} onChange={setDa} type="number" />
-              <Input label="Traffic" placeholder="e.g. 44.29" value={traffic} onChange={setTraffic} type="number" />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+              <Select
+                label="Industry"
+                placeholder="Select Industry..."
+                value={industry}
+                onChange={setIndustry}
+                options={industryOptions}
+              />
+              <MultiSelect
+                label="Target Platforms"
+                options={platformOptionsList}
+                selected={platforms}
+                onToggle={togglePlatform}
+              />
             </div>
 
             <Input label="Branded Terms" placeholder="e.g. Brand1, Brand2" value={brandedTerms} onChange={setBrandedTerms} />
@@ -2274,6 +2311,125 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
           </div>
         </Modal>
       )}
+    </Modal>
+  );
+}
+
+function EditOutreachSiteModal({ open, onClose, site, onSave, onDelete }) {
+  const [url, setUrl] = useState('');
+  const [type, setType] = useState('Paid Guest');
+  const [da, setDa] = useState('');
+  const [pa, setPa] = useState('');
+  const [ss, setSs] = useState('');
+  const [traffic, setTraffic] = useState('');
+  const [region1Traffic, setRegion1Traffic] = useState('');
+  const [region2Traffic, setRegion2Traffic] = useState('');
+  const [region3Traffic, setRegion3Traffic] = useState('');
+  const [landingPrice, setLandingPrice] = useState('');
+  const [sellingPrice, setSellingPrice] = useState('');
+  const [spPercentage, setSpPercentage] = useState('');
+  const [country, setCountry] = useState('');
+  const [domainIndustry, setDomainIndustry] = useState('');
+  const [status, setStatus] = useState('New site');
+  const [rejectedReason, setRejectedReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (site) {
+      setUrl(site.url || '');
+      setType(site.type || site.site_type || 'Paid Guest');
+      setDa(site.da ?? '');
+      setPa(site.pa ?? '');
+      setSs(site.ss ?? '');
+      setTraffic(site.totalTraffic || site.traffic || '');
+      setRegion1Traffic(site.region1Traffic || '');
+      setRegion2Traffic(site.region2Traffic || '');
+      setRegion3Traffic(site.region3Traffic || '');
+      setLandingPrice(site.landingPrice ?? '');
+      setSellingPrice(site.sellingPrice ?? '');
+      setSpPercentage(site.spPercentage ?? '');
+      setCountry(site.country || '');
+      setDomainIndustry(site.domainIndustry || '');
+      setStatus(site.status || 'New site');
+      setRejectedReason(site.rejectedReason || site.rejected_reason || '');
+      setSubmitting(false);
+    }
+  }, [site]);
+
+  if (!open || !site) return null;
+
+  const handleSave = async () => {
+    const siteType = site.type || site.site_type || 'Paid Guest';
+    if ((siteType === 'Paid Guest' || siteType === 'Paid Guest Post') && !String(landingPrice).trim()) {
+      alert('Landing Price is required for Paid Guest sites.');
+      return;
+    }
+
+    let calculatedSp = landingPrice !== '' ? String(landingPrice) : '';
+    const lp = parseFloat(String(landingPrice).replace(/[^0-9.]/g, ''));
+    const pct = parseFloat(String(spPercentage).replace(/[^0-9.]/g, ''));
+    if (!isNaN(lp) && !isNaN(pct) && pct > 0) {
+      const computed = lp + (lp * (pct / 100));
+      calculatedSp = Number.isInteger(computed) ? String(computed) : computed.toFixed(2);
+    }
+
+    setSubmitting(true);
+    try {
+      await onSave(site.id, {
+        url: url.trim(),
+        type,
+        da: da !== '' ? String(da) : '',
+        pa: pa !== '' ? String(pa) : '',
+        ss: ss !== '' ? String(ss) : '',
+        traffic: traffic !== '' ? String(traffic) : '',
+        totalTraffic: traffic !== '' ? String(traffic) : '',
+        region1Traffic: region1Traffic !== '' ? String(region1Traffic) : '',
+        region2Traffic: region2Traffic !== '' ? String(region2Traffic) : '',
+        region3Traffic: region3Traffic !== '' ? String(region3Traffic) : '',
+        landingPrice: landingPrice !== '' ? String(landingPrice) : '',
+        sellingPrice: calculatedSp,
+        spPercentage: spPercentage !== '' ? String(spPercentage) : '',
+        country: country.trim(),
+        domainIndustry: domainIndustry.trim(),
+        status,
+        rejectedReason: rejectedReason.trim(),
+        rejected_reason: rejectedReason.trim(),
+      });
+      onClose();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Edit Outreach Site" maxWidth={540}
+      footer={<>
+        <Btn variant="primary" onClick={handleSave} style={{ flex: 1, ...(submitting ? { opacity: 0.6, pointerEvents: 'none' } : {}) }}>
+          {submitting ? 'Saving…' : 'Save Changes'}
+        </Btn>
+        {onDelete && (
+          <Btn variant="outline" onClick={() => { onClose(); onDelete(site); }} style={{ border: '1.5px solid var(--red, #dc2626)', color: 'var(--red, #dc2626)' }}>
+            Delete Site
+          </Btn>
+        )}
+      </>}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ padding: '10px 14px', background: 'var(--surface-2, #fafafa)', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, color: 'var(--text-secondary)' }}>
+          Editing: <strong style={{ color: 'var(--text-primary)' }}>{url || site?.url || site?.domain}</strong>
+        </div>
+
+        <Input label="Rejected Reason" placeholder="e.g. Low DA, High SS" value={rejectedReason} onChange={setRejectedReason} />
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <Input label="Landing Price" placeholder="e.g. 150" value={landingPrice} onChange={setLandingPrice} />
+          <Input label="Selling Price %" placeholder="e.g. 33%" value={spPercentage} onChange={setSpPercentage} />
+        </div>
+
+        <Input label="Industry Type" placeholder="e.g. Technology" value={domainIndustry} onChange={setDomainIndustry} />
+      </div>
     </Modal>
   );
 }
@@ -2720,8 +2876,9 @@ function EditPageModal({ open, onClose, page, onSave }) {
 const PAGE_BULK_FIELDS = [
   { value: 'cluster', label: 'Cluster', type: 'text' },
   { value: 'category', label: 'Category', type: 'text' },
-  { value: 'targetCategory', label: 'Target Type', type: 'select', options: ['Blogs', 'Landing Page'] },
-  { value: 'targetType', label: 'Target Subtype', type: 'select', options: ['Commercial', 'Informational'] },
+  { value: 'targetType', label: 'Target Type', type: 'select', options: ['Blogs', 'Landing Page'] },
+  { value: 'targetSubtype', label: 'Target Subtype', type: 'select', options: ['Informational', 'Commercial'] },
+  { value: 'priority', label: 'Priority', type: 'select', options: ['P1', 'P2', 'P3', 'P4', 'P5'] },
 ];
 
 const KW_BULK_FIELDS = [
@@ -2741,6 +2898,14 @@ const COMPETITOR_BULK_FIELDS = [
   { value: 'type', label: 'Type', type: 'select', options: ['Official Entity', 'Listing'] },
 ];
 
+const COMPETITOR_PAGE_BULK_FIELDS = [
+  { value: 'cluster', label: 'Cluster', type: 'text' },
+  { value: 'targetCategory', label: 'Category', type: 'text' },
+  { value: 'targetType', label: 'Target Type', type: 'select', options: ['Blogs', 'Landing Page'] },
+  { value: 'targetSubtype', label: 'Target Subtype', type: 'select', options: ['Informational', 'Commercial'] },
+  { value: 'priority', label: 'Priority', type: 'select', options: ['P1', 'P2', 'P3', 'P4', 'P5'] },
+];
+
 function BulkEditModal({ open, onClose, count, onApply, fields, itemLabel = 'page' }) {
   const [field, setField] = useState('');
   const [value, setValue] = useState('');
@@ -2757,7 +2922,7 @@ function BulkEditModal({ open, onClose, count, onApply, fields, itemLabel = 'pag
   };
 
   return (
-    <Modal open={open} onClose={() => { onClose(); setField(''); setValue(''); }} title="Bulk Edit"
+    <Modal open={open} onClose={() => { onClose(); setField(''); setValue(''); }} title="Bulk Edit" bodyStyle={{ minHeight: 340, paddingBottom: 140 }}
       footer={<><Btn variant="primary" onClick={handleApply}>Apply to {count} {itemLabel}{count !== 1 ? 's' : ''}</Btn><Btn variant="outline" onClick={() => { onClose(); setField(''); setValue(''); }} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
     >
       <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>
@@ -3165,13 +3330,6 @@ function PageDetailView({ project, onBack, onUpdatePages, search, user }) {
           activeFilters={tableFilters}
           onFiltersChange={setTableFilters}
         />
-        {userCanEdit && (
-          <ActionsDropdown
-            selectedCount={selectedRows.size}
-            onBulkEdit={() => setShowBulkEdit(true)}
-            onBulkDelete={() => setShowBulkDelete(true)}
-          />
-        )}
         {userCanDownload && (
           <button
             onClick={() => downloadCSV(`${project?.name || 'pages'}_detail`, filteredRows)}
@@ -3190,6 +3348,13 @@ function PageDetailView({ project, onBack, onUpdatePages, search, user }) {
           </button>
         )}
         <div style={{ flex: 1 }} />
+        {userCanEdit && selectedRows.size > 0 && (
+          <ActionsDropdown
+            selectedCount={selectedRows.size}
+            onBulkEdit={() => setShowBulkEdit(true)}
+            onBulkDelete={() => setShowBulkDelete(true)}
+          />
+        )}
         {saveError && (
           <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError}</span>
         )}
@@ -3741,12 +3906,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
       if (columnFilters.targetSubtype && r.targetSubtype !== columnFilters.targetSubtype) return false;
       if (tableFilters.cluster?.length && !tableFilters.cluster.includes(r.cluster)) return false;
       if (tableFilters.category?.length && !tableFilters.category.includes(r.category)) return false;
-      if (tableFilters.type?.length) {
-        if (!tableFilters.type.includes(r.type)) return false;
-      } else {
-        const isGoogle = !r.type || r.type === 'Google' || r.type?.toLowerCase() === 'google';
-        if (!isGoogle) return false;
-      }
+      if (tableFilters.type?.length && !tableFilters.type.includes(r.type)) return false;
       if (tableFilters.targetType?.length && !tableFilters.targetType.includes(r.targetType)) return false;
       if (tableFilters.targetSubtype?.length && !tableFilters.targetSubtype.includes(r.targetSubtype)) return false;
       if (tableFilters.priority?.length && !tableFilters.priority.includes(r.priority)) return false;
@@ -4517,7 +4677,7 @@ function CompetitorDetailView({ competitor, onBack, user }) {
             {detailsLoading ? (
               <tr><td colSpan={11} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
             ) : details.length === 0 ? (
-              <tr><td colSpan={11} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No detail entries yet. Click <strong>Find Competitors</strong> to run an analysis.</td></tr>
+              <tr><td colSpan={11} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No detail entries yet. Click <strong>Classify Competitors</strong> to run an analysis.</td></tr>
             ) : details.map((d, i) => (
               <tr key={i} style={{ borderBottom: i < details.length - 1 ? '1px solid var(--border)' : 'none' }}
                 onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
@@ -4566,7 +4726,7 @@ function CompetitorDetailView({ competitor, onBack, user }) {
             {detailsLoading ? (
               <tr><td colSpan={2} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
             ) : pagedKeywordRows.length === 0 ? (
-              <tr><td colSpan={2} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No ranking keyword data yet. Click <strong>Find Competitors</strong> to run an analysis.</td></tr>
+              <tr><td colSpan={2} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No ranking keyword data yet. Click <strong>Classify Competitors</strong> to run an analysis.</td></tr>
             ) : pagedKeywordRows.map(([kw, pos], i) => (
               <tr key={kw} style={{ borderBottom: i < pagedKeywordRows.length - 1 ? '1px solid var(--border)' : 'none' }}
                 onMouseEnter={e => e.currentTarget.style.background = '#fafbfc'}
@@ -5486,7 +5646,7 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
 
       {(!rows || rows.length === 0) ? (
         <div style={{ padding: '24px 20px', background: '#fafbfc', borderBottom: '1px solid var(--border)', fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', marginBottom: 16 }}>
-          No categories selected. Click <strong>Find Competitors</strong> to select categories.
+          No categories selected. Click <strong>Classify Competitors</strong> to select categories.
         </div>
       ) : (
         <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', marginBottom: 20 }}>
@@ -5706,7 +5866,7 @@ function formatCleanName(raw) {
   return str || raw;
 }
 
-function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, onBack, onSelectCompetitor, onSelectKwDetail, onDeleteCompetitor, onSaveCompetitor, onBulkEditCompetitors, onBulkDeleteCompetitors, onFindCompetitors, onAddPages, hasPendingChanges, saving, saveError, onSaveChanges, loading, error, top3KwByCategory, top3KwLoading, search, findingCompetitors, user }) {
+function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, onBack, onSelectCompetitor, onSelectKwDetail, onDeleteCompetitor, onSaveCompetitor, onAutoSaveCompetitors, onBulkEditCompetitors, onBulkDeleteCompetitors, onFindCompetitors, onAddPages, hasPendingChanges, saving, saveError, onSaveChanges, loading, error, top3KwByCategory, top3KwLoading, search, findingCompetitors, user, subView: controlledSubView, onSubViewChange, triggerClassifyCompetitors, onClassifyingChange }) {
   const userCanEdit = canEdit(user);
   const userCanUpdate = canUpdate(user);
   const userCanDownload = canDownload(user);
@@ -5716,14 +5876,99 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [bulkError, setBulkError] = useState('');
+  const [classifyingCompetitors, setClassifyingCompetitors] = useState(false);
+  const [showBulkEditPages, setShowBulkEditPages] = useState(false);
+  const [showBulkDeletePages, setShowBulkDeletePages] = useState(false);
+  const [pagePendingUpdates, setPagePendingUpdates] = useState({});
+  const [pagePendingDeleteIds, setPagePendingDeleteIds] = useState(new Set());
+  const [savingPages, setSavingPages] = useState(false);
 
-  // Sub-view mode inside CompetitorsTab: 'competitors' | 'pages'
-  const [subView, setSubView] = useState('competitors');
+  const handleBulkEditPagesApply = (field, value) => {
+    const updatedIds = Array.from(selectedPageIds);
+    setPageRows(prev => prev.map(r => {
+      const key = r.id || r.url;
+      if (selectedPageIds.has(key)) {
+        return { ...r, [field]: value };
+      }
+      return r;
+    }));
+    setPagePendingUpdates(prev => {
+      const next = { ...prev };
+      updatedIds.forEach(id => {
+        if (typeof id === 'number') {
+          next[id] = { ...(next[id] || {}), [field]: value };
+        }
+      });
+      return next;
+    });
+    setSelectedPageIds(new Set());
+    setShowBulkEditPages(false);
+  };
+
+  const handleBulkDeletePages = () => {
+    const idsToDelete = Array.from(selectedPageIds);
+    setPageRows(prev => prev.filter(r => !selectedPageIds.has(r.id || r.url)));
+    setPagePendingDeleteIds(prev => {
+      const next = new Set(prev);
+      idsToDelete.forEach(id => {
+        if (typeof id === 'number') next.add(id);
+      });
+      return next;
+    });
+    setSelectedPageIds(new Set());
+    setShowBulkDeletePages(false);
+  };
+
+  const handleDeletePageRow = (key, rowId) => {
+    setPageRows(prev => prev.filter(r => (r.id || r.url) !== key));
+    if (typeof rowId === 'number') {
+      setPagePendingDeleteIds(prev => new Set(prev).add(rowId));
+    }
+  };
+
+  const handleSavePageChanges = async () => {
+    setSavingPages(true);
+    setBulkError('');
+    try {
+      if (pagePendingDeleteIds.size > 0) {
+        await bulkDeleteCompetitorPageRows(Array.from(pagePendingDeleteIds));
+      }
+      const updatePromises = Object.entries(pagePendingUpdates).map(([id, updates]) =>
+        updateCompetitorPageRow(id, updates)
+      );
+      if (updatePromises.length > 0) {
+        await Promise.all(updatePromises);
+      }
+      setPagePendingUpdates({});
+      setPagePendingDeleteIds(new Set());
+    } catch (err) {
+      setBulkError(err.message || 'Failed to save page changes.');
+    } finally {
+      setSavingPages(false);
+    }
+  };
+
+  const [localSubView, setLocalSubView] = useState('competitors');
+  const subView = controlledSubView !== undefined ? controlledSubView : localSubView;
+  const setSubView = onSubViewChange || setLocalSubView;
+
+  useEffect(() => {
+    onClassifyingChange?.(classifyingCompetitors);
+  }, [classifyingCompetitors, onClassifyingChange]);
+
+  useEffect(() => {
+    if (triggerClassifyCompetitors > 0) {
+      handleClassifyCategoryCompetitors();
+    }
+  }, [triggerClassifyCompetitors]);
+
+  const hasPagePending = Object.keys(pagePendingUpdates).length > 0 || pagePendingDeleteIds.size > 0;
+  const isPendingSave = subView === 'competitors' ? hasPendingChanges : hasPagePending;
   const [pageRows, setPageRows] = useState([]);
   const [pagesLoading, setPagesLoading] = useState(false);
   const [selectedPageIds, setSelectedPageIds] = useState(new Set());
-  const [pageFilterTargetCategory, setPageFilterTargetCategory] = useState('');
   const [pageFilterTargetType, setPageFilterTargetType] = useState('');
+  const [pageFilterTargetSubtype, setPageFilterTargetSubtype] = useState('');
 
   const competitorsRef = useRef(competitors);
   useEffect(() => { competitorsRef.current = competitors; }, [competitors]);
@@ -5740,9 +5985,45 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
     }
   }, [subView, scopedProject?.slug]);
 
+  const [pageTableFilters, setPageTableFilters] = useState({
+    cluster: [],
+    category: [],
+    targetType: [],
+    targetSubtype: [],
+    priority: [],
+  });
+
+  const pagesFilterConfigs = [
+    { key: 'cluster', label: 'Cluster', type: 'select' },
+    { key: 'category', label: 'Category', type: 'select' },
+    { key: 'targetType', label: 'Target Type', type: 'select', options: ['Blogs', 'Landing Page'] },
+    { key: 'targetSubtype', label: 'Target Subtype', type: 'select', options: ['Informational', 'Commercial'] },
+    { key: 'priority', label: 'Priority', type: 'select', options: ['P1', 'P2', 'P3', 'P4', 'P5'] },
+  ];
+
   const filteredPageRows = pageRows.filter(r => {
-    if (pageFilterTargetCategory && r.targetCategory !== pageFilterTargetCategory) return false;
-    if (pageFilterTargetType && r.targetType !== pageFilterTargetType) return false;
+    if (pageTableFilters.cluster && pageTableFilters.cluster.length > 0) {
+      const val = r.cluster || r.targetCluster;
+      if (!val || !pageTableFilters.cluster.includes(val)) return false;
+    }
+    if (pageTableFilters.category && pageTableFilters.category.length > 0) {
+      const val = r.category || r.targetCategory;
+      if (!val || !pageTableFilters.category.includes(val)) return false;
+    }
+    if (pageTableFilters.targetType && pageTableFilters.targetType.length > 0) {
+      const val = r.targetType || r.type;
+      if (!val || !pageTableFilters.targetType.includes(val)) return false;
+    }
+    if (pageTableFilters.targetSubtype && pageTableFilters.targetSubtype.length > 0) {
+      const val = r.targetSubtype || r.subtype;
+      if (!val || !pageTableFilters.targetSubtype.includes(val)) return false;
+    }
+    if (pageTableFilters.priority && pageTableFilters.priority.length > 0) {
+      const val = r.priority;
+      if (!val || !pageTableFilters.priority.includes(val)) return false;
+    }
+    if (pageFilterTargetType && (r.targetType !== pageFilterTargetType && r.type !== pageFilterTargetType)) return false;
+    if (pageFilterTargetSubtype && (r.targetSubtype !== pageFilterTargetSubtype && r.subtype !== pageFilterTargetSubtype)) return false;
     return true;
   });
 
@@ -5767,33 +6048,32 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
     });
   };
 
-  const handleDeletePageRow = async (key) => {
-    setPageRows(prev => prev.filter((r, i) => (r.id || i) !== key));
-    if (typeof key === 'number') {
-      try { await deleteCompetitorPageRow(key); } catch (e) { }
-    }
-  };
+
 
   const [categorySummaryRows, setCategorySummaryRows] = useState([]);
   const [categorySummaryLoading, setCategorySummaryLoading] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState(null);
-  const [classifyingCompetitors, setClassifyingCompetitors] = useState(false);
   const [classifiedTypes, setClassifiedTypes] = useState({});
 
   const handleClassifyCategoryCompetitors = async () => {
-    const unclassified = paged.filter(c => {
-      const existing = classifiedTypes[c.domain] || classifiedTypes[c.name] || classifiedTypes[c.url] || c.type || c.websiteType;
-      return !existing;
+    const targets = baseFiltered && baseFiltered.length > 0 ? baseFiltered : paged;
+
+    const unclassifiedTargets = targets.filter(c => {
+      const raw = classifiedTypes[c.domain] || classifiedTypes[c.name] || classifiedTypes[c.url] || c.websiteType || c.type;
+      const typeStr = String(raw || '').trim();
+      const isDone = typeStr && ['Official Entity', 'Listing', 'Platform'].includes(typeStr) && typeStr !== 'Desktop';
+      return !isDone;
     });
 
-    const urlsToClassify = unclassified
+    const urlsToClassify = unclassifiedTargets
       .map(c => c.url || c.domain || c.name)
       .filter(Boolean);
+
     if (urlsToClassify.length === 0) return;
 
     setClassifyingCompetitors(true);
     try {
-      const results = await classifyCompetitorUrls(urlsToClassify, categoryFilter || '');
+      const results = await classifyCompetitorUrls(urlsToClassify, categoryFilter || '', scopedProject?.slug || '');
       const newMap = { ...classifiedTypes };
       (results || []).forEach(res => {
         const rawType = res.website_type || res.websiteType || res.type;
@@ -5805,14 +6085,27 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
       });
       setClassifiedTypes(newMap);
 
-      (results || []).forEach(res => {
+      const allResults = results || [];
+      const autoSaveItems = [];
+      allResults.forEach(res => {
         const rawType = res.website_type || res.websiteType || res.type;
         const finalType = rawType === 'Platform' ? 'Listing' : rawType;
-        const targetComp = paged.find(c => (c.domain === res.url || c.name === res.url || c.url === res.url));
-        if (targetComp && finalType && onSaveCompetitor) {
-          onSaveCompetitor(targetComp, { device: finalType, type: finalType });
+        const targetComp = targets.find(c => (c.domain === res.url || c.name === res.url || c.url === res.url || c.domain === res.domain));
+        if (targetComp && finalType) {
+          autoSaveItems.push({ id: targetComp.id, updates: { device: finalType, type: finalType, websiteType: finalType } });
         }
       });
+
+      if (autoSaveItems.length > 0) {
+        if (onAutoSaveCompetitors) {
+          onAutoSaveCompetitors(autoSaveItems);
+        } else if (onSaveCompetitor) {
+          autoSaveItems.forEach(item => {
+            const targetComp = targets.find(c => c.id === item.id);
+            if (targetComp) onSaveCompetitor(targetComp, item.updates);
+          });
+        }
+      }
     } catch (err) {
       console.error('Failed to classify competitor URLs:', err);
     } finally {
@@ -5990,7 +6283,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
     <>
       {scopedProject && (
         <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* Row 1: Back, Project Name, Filters & Tools */}
+          {/* Row 1: Back, Project Name, Refresh Button (No Border), Filter & Download */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 0', fontFamily: 'var(--font-body)', fontSize: 13 }}
               onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
@@ -5999,130 +6292,145 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
             </button>
             <div style={{ height: 20, width: 1, background: 'var(--border)' }} />
             <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{scopedProject.name}</span>
-            {subView === 'competitors' && (
-              <>
-                <TableFilterDropdown
-                  filters={competitorFilterConfigs}
-                  rows={baseFiltered}
-                  activeFilters={tableFilters}
-                  onFiltersChange={setTableFilters}
-                />
-                <ActionsDropdown
-                  selectedCount={selectedIds.size}
-                  onBulkEdit={() => setShowBulkEdit(true)}
-                  onBulkDelete={() => setShowBulkDelete(true)}
-                />
-                {userCanDownload && (
-                  <button
-                    onClick={() => {
-                      const rowsToExport = filtered.map(c => ({
-                        Competitor: c.name || c.domain,
-                        Domain: c.domain,
-                        Device: c.device || 'Desktop',
-                        Location: c.location,
-                        DA: c.da ?? '',
-                        'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
-                        'Total KWs': c.totalKw,
-                        'SERP Comp Level': c.serpCompLevel,
-                        'Comp Level': c.compLevel,
-                      }));
-                      downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
-                    }}
-                    title="Download CSV"
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      background: 'var(--surface-2)', color: 'var(--text-secondary)',
-                      border: '1px solid var(--border)', borderRadius: 8,
-                      padding: '7px 10px', cursor: 'pointer',
-                      fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-                    onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-                  >
-                    <Download size={14} />
-                  </button>
-                )}
-              </>
-            )}
-            <div style={{ flex: 1 }} />
-            {(saveError || bulkError) && (
-              <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError || bulkError}</span>
-            )}
-            {hasPendingChanges && !saving && (
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Unsaved changes</span>
-            )}
-            {hasPendingChanges && (
+            {userCanUpdate && (
               <button
-                onClick={onSaveChanges}
-                disabled={saving}
+                onClick={() => onFindCompetitors?.()}
+                disabled={findingCompetitors}
+                title="Refresh analysis"
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
-                  padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: saving ? 'default' : 'pointer',
-                  fontFamily: 'var(--font-body)', opacity: saving ? 0.6 : 1, transition: 'opacity 0.15s',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'none', color: 'var(--text-muted)',
+                  border: 'none', borderRadius: 6,
+                  padding: '4px', cursor: findingCompetitors ? 'default' : 'pointer',
+                  fontFamily: 'var(--font-body)', transition: 'color 0.15s',
                 }}
-                onMouseEnter={e => { if (!saving) e.currentTarget.style.opacity = '0.85'; }}
-                onMouseLeave={e => { if (!saving) e.currentTarget.style.opacity = '1'; }}
+                onMouseEnter={e => { if (!findingCompetitors) e.currentTarget.style.color = 'var(--text-primary)'; }}
+                onMouseLeave={e => { if (!findingCompetitors) e.currentTarget.style.color = 'var(--text-muted)'; }}
               >
-                {saving ? 'Saving…' : 'Save Changes'}
+                <RefreshCw size={15} style={{ animation: findingCompetitors ? 'spin 1s linear infinite' : 'none' }} />
+              </button>
+            )}
+
+            <TableFilterDropdown
+              filters={subView === 'competitors' ? competitorFilterConfigs : pagesFilterConfigs}
+              rows={subView === 'competitors' ? baseFiltered : pageRows}
+              activeFilters={subView === 'competitors' ? tableFilters : pageTableFilters}
+              onFiltersChange={subView === 'competitors' ? setTableFilters : setPageTableFilters}
+            />
+            {userCanDownload && (
+              <button
+                onClick={() => {
+                  if (subView === 'competitors') {
+                    const rowsToExport = filtered.map(c => ({
+                      Competitor: c.name || c.domain,
+                      Domain: c.domain,
+                      Device: c.device || 'Desktop',
+                      Location: c.location,
+                      DA: c.da ?? '',
+                      'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
+                      'Total KWs': c.totalKw,
+                      'SERP Comp Level': c.serpCompLevel,
+                      'Comp Level': c.compLevel,
+                    }));
+                    downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
+                  } else {
+                    const rowsToExport = filteredPageRows.map(r => ({
+                      'Page Name': r.pageName || r.name || r.title || (r.url ? r.url.split('/').filter(Boolean).pop() : '') || '—',
+                      URL: r.url || '',
+                      Cluster: r.cluster || r.targetCluster || '—',
+                      Category: r.targetCategory || r.category || '—',
+                      'Target Type': r.targetType || r.type || '—',
+                      'Target Subtype': r.targetSubtype || r.subtype || '—',
+                      Priority: r.priority || '—',
+                      'Competitor Domain': r.competitorDomain || r.domain || '—',
+                      Keywords: r.targetKeywords || r.keywordsCount || r.keywords || 0,
+                      Traffic: r.totalTraffic || r.traffic || 0,
+                    }));
+                    downloadCSV(`${scopedProject?.name || 'competitor'}_pages`, rowsToExport);
+                  }
+                }}
+                title="Download CSV"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'var(--surface-2)', color: 'var(--text-secondary)',
+                  border: '1px solid var(--border)', borderRadius: 8,
+                  padding: '7px 10px', cursor: 'pointer',
+                  fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+              >
+                <Download size={14} />
               </button>
             )}
           </div>
 
-          {/* Row 2: Find Competitors and Add Pages buttons below Project Name */}
-          {(userCanUpdate || userCanEdit) && (
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', paddingTop: 2 }}>
-              {userCanUpdate && (
-                <button
-                  onClick={() => {
-                    if (subView === 'competitors') {
-                      onFindCompetitors?.();
-                    } else {
-                      setSubView('competitors');
-                    }
-                  }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    background: subView === 'competitors' ? '#0f1523' : '#fff',
-                    color: subView === 'competitors' ? '#fff' : '#0f1523',
-                    border: subView === 'competitors' ? 'none' : '1.5px solid #0f1523',
-                    borderRadius: 8,
-                    padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                    fontFamily: 'var(--font-body)', transition: 'all 0.15s',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
-                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-                >
-                  Find Competitors
-                </button>
-              )}
-              {userCanEdit && (
-                <button
-                  onClick={() => {
-                    if (subView === 'pages') {
-                      onAddPages?.();
-                    } else {
-                      setSubView('pages');
-                    }
-                  }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    background: subView === 'pages' ? '#0f1523' : '#fff',
-                    color: subView === 'pages' ? '#fff' : '#0f1523',
-                    border: subView === 'pages' ? 'none' : '1.5px solid #0f1523',
-                    borderRadius: 8,
-                    padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                    fontFamily: 'var(--font-body)', transition: 'all 0.15s',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
-                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-                >
-                  <Plus size={14} />
-                  Add Pages
-                </button>
-              )}
+          {/* Row 2: Sub-view Switcher Tabs directly below domain name */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', background: 'var(--surface-2)', padding: 4, borderRadius: 9, border: '1px solid var(--border)' }}>
+              <button
+                onClick={() => setSubView('competitors')}
+                style={{
+                  padding: '6px 16px', fontSize: 13.5, fontWeight: 600, borderRadius: 7, border: 'none', cursor: 'pointer',
+                  background: subView === 'competitors' ? '#fff' : 'transparent',
+                  color: subView === 'competitors' ? 'var(--text-primary)' : 'var(--text-muted)',
+                  boxShadow: subView === 'competitors' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                  transition: 'all 0.15s'
+                }}
+              >
+                Competitors
+              </button>
+              <button
+                onClick={() => setSubView('pages')}
+                style={{
+                  padding: '6px 16px', fontSize: 13.5, fontWeight: 600, borderRadius: 7, border: 'none', cursor: 'pointer',
+                  background: subView === 'pages' ? '#fff' : 'transparent',
+                  color: subView === 'pages' ? 'var(--text-primary)' : 'var(--text-muted)',
+                  boxShadow: subView === 'pages' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                  transition: 'all 0.15s'
+                }}
+              >
+                Pages
+              </button>
             </div>
-          )}
+            <div style={{ flex: 1 }} />
+            {subView === 'competitors' && selectedIds.size > 0 && (
+              <ActionsDropdown
+                selectedCount={selectedIds.size}
+                onBulkEdit={() => setShowBulkEdit(true)}
+                onBulkDelete={() => setShowBulkDelete(true)}
+              />
+            )}
+            {subView === 'pages' && selectedPageIds.size > 0 && (
+              <ActionsDropdown
+                selectedCount={selectedPageIds.size}
+                onBulkEdit={() => setShowBulkEditPages(true)}
+                onBulkDelete={() => setShowBulkDeletePages(true)}
+              />
+            )}
+            {(saveError || bulkError) && (
+              <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError || bulkError}</span>
+            )}
+            {isPendingSave && !(saving || savingPages) && (
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Unsaved changes</span>
+            )}
+            {isPendingSave && (
+              <button
+                onClick={subView === 'competitors' ? onSaveChanges : handleSavePageChanges}
+                disabled={saving || savingPages}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                  padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: (saving || savingPages) ? 'default' : 'pointer',
+                  fontFamily: 'var(--font-body)', opacity: (saving || savingPages) ? 0.6 : 1, transition: 'opacity 0.15s',
+                }}
+                onMouseEnter={e => { if (!saving && !savingPages) e.currentTarget.style.opacity = '0.85'; }}
+                onMouseLeave={e => { if (!saving && !savingPages) e.currentTarget.style.opacity = '1'; }}
+              >
+                {(saving || savingPages) ? 'Saving…' : 'Save Changes'}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -6150,10 +6458,10 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                   <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>{h}</th>
                 ))}
                 <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-                  <HeaderQuickSelect placeholder="Target Type" options={['Blogs', 'Landing Page']} value={pageFilterTargetCategory} onSet={setPageFilterTargetCategory} />
+                  <HeaderQuickSelect placeholder="Target Type" options={['Blogs', 'Landing Page']} value={pageFilterTargetType} onSet={setPageFilterTargetType} />
                 </th>
                 <th style={{ padding: '6px 16px', textAlign: 'left' }}>
-                  <HeaderQuickSelect placeholder="Target Subtype" options={['Commercial', 'Informational']} value={pageFilterTargetType} onSet={setPageFilterTargetType} />
+                  <HeaderQuickSelect placeholder="Target Subtype" options={['Commercial', 'Informational']} value={pageFilterTargetSubtype} onSet={setPageFilterTargetSubtype} />
                 </th>
                 <th style={{ padding: '10px 16px' }}></th>
               </tr>
@@ -6186,11 +6494,11 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                   <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', maxWidth: 200 }}>{r.pageName || r.name || r.kw || '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--accent)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.url || r.landingPage || '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.cluster || '—'}</td>
-                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.category || '—'}</td>
-                  <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetCategory ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetCategory || '—'}</td>
-                  <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetType ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetType || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.category || r.targetCategory || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetType ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetType || r.type || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetSubtype ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetSubtype || r.subtype || '—'}</td>
                   <td style={{ padding: '10px 16px' }}>
-                    <button onClick={() => handleDeletePageRow(r.id || i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
+                    <button onClick={() => handleDeletePageRow(r.id || i, r.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
                       onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
                       <Trash2 size={14} />
@@ -6228,23 +6536,15 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
               <button
                 onClick={() => setCategoryFilter(null)}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  background: '#fff',
-                  border: '1px solid var(--border)',
-                  borderRadius: 6,
-                  padding: '5px 12px',
-                  cursor: 'pointer',
-                  color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-body)',
-                  fontSize: 12.5,
-                  fontWeight: 600
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--text-muted)', padding: '4px 0',
+                  fontFamily: 'var(--font-body)', fontSize: 13, fontWeight: 600
                 }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--text-primary)'}
-                onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+                onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
+                onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
               >
-                <ArrowLeft size={14} /> Back
+                <ArrowLeft size={16} /> Back
               </button>
               <div style={{ height: 18, width: 1, background: 'var(--border)' }} />
               <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -6451,6 +6751,8 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
       />
       <BulkEditModal open={showBulkEdit} onClose={() => setShowBulkEdit(false)} count={selectedIds.size} onApply={handleBulkEditApply} fields={COMPETITOR_BULK_FIELDS} itemLabel="competitor" />
       <BulkDeleteModal open={showBulkDelete} onClose={() => setShowBulkDelete(false)} count={selectedIds.size} onConfirm={handleBulkDelete} itemLabel="competitor" />
+      <BulkEditModal open={showBulkEditPages} onClose={() => setShowBulkEditPages(false)} count={selectedPageIds.size} onApply={handleBulkEditPagesApply} fields={COMPETITOR_PAGE_BULK_FIELDS} itemLabel="page" />
+      <BulkDeleteModal open={showBulkDeletePages} onClose={() => setShowBulkDeletePages(false)} count={selectedPageIds.size} onConfirm={handleBulkDeletePages} itemLabel="page" />
     </>
   );
 }
@@ -6518,7 +6820,7 @@ function PrerequisiteModal({ open, onClose, title, message, actionLabel, onActio
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export default function ProjectSetupPage({ tab, user }) {
+export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, user }) {
   const isReadOnly = isReadOnlyUser(user);
   const userCanEdit = canEdit(user);
   const userCanDelete = canDelete(user);
@@ -6561,6 +6863,9 @@ export default function ProjectSetupPage({ tab, user }) {
   const [competitorSaveError, setCompetitorSaveError] = useState('');
   const [top3KwByCategory, setTop3KwByCategory] = useState({});
   const [top3KwLoading, setTop3KwLoading] = useState(false);
+  const [competitorSubView, setCompetitorSubView] = useState('competitors');
+  const [triggerClassifyCompetitors, setTriggerClassifyCompetitors] = useState(0);
+  const [classifyingCompetitors, setClassifyingCompetitors] = useState(false);
   const [selectedKwDetail, setSelectedKwDetail] = useState(null);
   const [prerequisiteModal, setPrerequisiteModal] = useState({ open: false, title: '', message: '', targetTab: '' });
   const [domainFilters, setDomainFilters] = useState({
@@ -6776,13 +7081,42 @@ export default function ProjectSetupPage({ tab, user }) {
   const [outreachLinks, setOutreachLinks] = useState([]);
   const [outreachLoading, setOutreachLoading] = useState(false);
   const [showAddOutreach, setShowAddOutreach] = useState(false);
+  const [selectedOutreachProject, setSelectedOutreachProject] = useState('');
   const [newOutreachLink, setNewOutreachLink] = useState('');
   const [newOutreachType, setNewOutreachType] = useState('Paid Guest');
+  const [sourcedOption, setSourcedOption] = useState('internal');
+  const [agencyName, setAgencyName] = useState('');
+  const [calculateSp, setCalculateSp] = useState(false);
+  const [spPercentage, setSpPercentage] = useState('');
+  const [outreachLandingPrice, setOutreachLandingPrice] = useState('');
+  const [outreachSellingPrice, setOutreachSellingPrice] = useState('');
+
+  const calculatedSellingPrice = useMemo(() => {
+    if (!calculateSp) return outreachSellingPrice || outreachLandingPrice;
+    const lp = parseFloat(String(outreachLandingPrice).replace(/[^0-9.]/g, ''));
+    const pct = parseFloat(spPercentage);
+    if (!isNaN(lp) && !isNaN(pct)) {
+      const sp = lp + (lp * (pct / 100));
+      return Number.isInteger(sp) ? String(sp) : sp.toFixed(2);
+    }
+    return outreachSellingPrice || outreachLandingPrice;
+  }, [calculateSp, outreachLandingPrice, spPercentage, outreachSellingPrice]);
   const [outreachCsvRows, setOutreachCsvRows] = useState([]);
   const [outreachFileName, setOutreachFileName] = useState('');
   const [outreachError, setOutreachError] = useState('');
   const [addingOutreach, setAddingOutreach] = useState(false);
   const [deletingOutreachLink, setDeletingOutreachLink] = useState(null);
+  const [editingOutreachSite, setEditingOutreachSite] = useState(null);
+
+  const handleSaveOutreachSiteModal = (siteId, updatedFields) => {
+    setOutreachLinks(prev => prev.map(s => s.id === siteId ? { ...s, ...updatedFields } : s));
+    setOutreachPendingUpdates(prev => {
+      const next = new Map(prev);
+      const existing = next.get(siteId) || {};
+      next.set(siteId, { ...existing, ...updatedFields });
+      return next;
+    });
+  };
 
   const OUTREACH_TYPES = useMemo(() => ['Paid Guest', 'Classified Ads', 'Brand Mention', 'Business Listing'], []);
 
@@ -6808,11 +7142,12 @@ export default function ProjectSetupPage({ tab, user }) {
   const [showBulkEditOutreach, setShowBulkEditOutreach] = useState(false);
   const [showBulkDeleteOutreachConfirm, setShowBulkDeleteOutreachConfirm] = useState(false);
   const [bulkEditOutreachData, setBulkEditOutreachData] = useState({
-    type: 'Paid Guest',
-    da: '',
-    pa: '',
-    ss: '',
-    traffic: ''
+    landingPrice: '',
+    sellingPrice: '',
+    spPercentage: '',
+    country: '',
+    domainIndustry: '',
+    rejectedReason: ''
   });
 
   const [outreachPendingUpdates, setOutreachPendingUpdates] = useState(new Map());
@@ -6850,18 +7185,366 @@ export default function ProjectSetupPage({ tab, user }) {
     });
   };
 
+  const STATUS_OPTIONS = useMemo(() => ['New site', 'Shortlisted', 'Need Negotiation', 'Rejected'], []);
+
+  const handleOutreachStatusChange = (lnkId, newStatus) => {
+    setOutreachLinks(prev => prev.map(l => l.id === lnkId ? { ...l, status: newStatus } : l));
+    setOutreachPendingUpdates(prev => {
+      const next = new Map(prev);
+      const existing = next.get(lnkId) || {};
+      next.set(lnkId, { ...existing, status: newStatus });
+      return next;
+    });
+  };
+
+  const REJECTED_REASONS = useMemo(() => [
+    'Low DA',
+    'High SS',
+    'Irrelevant Industry',
+    'Low Traffic',
+    'Irrelevant Country Traffic'
+  ], []);
+
+  const handleOutreachRejectedReasonChange = (lnkId, newReason) => {
+    setOutreachLinks(prev => prev.map(l => l.id === lnkId ? { ...l, rejectedReason: newReason } : l));
+    setOutreachPendingUpdates(prev => {
+      const next = new Map(prev);
+      const existing = next.get(lnkId) || {};
+      next.set(lnkId, { ...existing, rejected_reason: newReason });
+      return next;
+    });
+  };
+
+  const [validatingOutreach, setValidatingOutreach] = useState(false);
+
+  const parseMetricNum = (val) => {
+    if (val === null || val === undefined || val === '') return null;
+    if (typeof val === 'number') return isNaN(val) ? null : val;
+    const str = String(val).trim();
+    if (!str || str === '-') return null;
+
+    // 1. Check if parentheses contain exact integer e.g. "(7,625)" or "(5,095)"
+    const parenMatch = str.match(/\(([\d,]+)\)/);
+    if (parenMatch) {
+      const rawInParen = parenMatch[1].replace(/,/g, '');
+      const parsedInParen = parseFloat(rawInParen);
+      if (!isNaN(parsedInParen)) return parsedInParen;
+    }
+
+    // 2. Check for 'k' or 'm' notation e.g. "7.6K", "5.1k"
+    const lower = str.toLowerCase();
+    const kmMatch = lower.match(/([\d.]+)\s*([km])/);
+    if (kmMatch) {
+      const num = parseFloat(kmMatch[1]);
+      const unit = kmMatch[2];
+      if (!isNaN(num)) {
+        return unit === 'm' ? num * 1000000 : num * 1000;
+      }
+    }
+
+    // 3. Fallback: extract first valid sequence of numbers
+    const plainMatch = lower.match(/[\d,.]+/);
+    if (plainMatch) {
+      const clean = plainMatch[0].replace(/,/g, '');
+      const parsed = parseFloat(clean);
+      return isNaN(parsed) ? null : parsed;
+    }
+
+    return null;
+  };
+
+  const COUNTRY_CODE_MAP = {
+    'india': 'in', 'in': 'in',
+    'united states': 'us', 'usa': 'us', 'us': 'us',
+    'united kingdom': 'uk', 'gb': 'uk', 'uk': 'uk',
+    'singapore': 'sg', 'sg': 'sg',
+    'australia': 'au', 'au': 'au',
+    'united arab emirates': 'ae', 'uae': 'ae', 'ae': 'ae',
+    'canada': 'ca', 'ca': 'ca',
+    'germany': 'de', 'de': 'de',
+    'france': 'fr', 'fr': 'fr',
+    'japan': 'jp', 'jp': 'jp',
+    'malaysia': 'my', 'my': 'my',
+    'philippines': 'ph', 'ph': 'ph',
+    'saudi arabia': 'sa', 'sa': 'sa',
+    'south africa': 'za', 'za': 'za',
+    'new zealand': 'nz', 'nz': 'nz',
+    'indonesia': 'id', 'id': 'id',
+    'thailand': 'th', 'th': 'th',
+    'vietnam': 'vn', 'vn': 'vn',
+    'brazil': 'br', 'br': 'br',
+    'mexico': 'mx', 'mx': 'mx',
+    'spain': 'es', 'es': 'es',
+    'italy': 'it', 'it': 'it',
+    'netherlands': 'nl', 'nl': 'nl'
+  };
+
+  const parseRegionData = (regionStr) => {
+    if (!regionStr || regionStr === '-') return null;
+    const str = String(regionStr).trim();
+    const parts = str.split(':');
+    if (parts.length >= 2) {
+      const rawCountry = parts[0].trim().toLowerCase();
+      const rawTraffic = parts.slice(1).join(':').trim();
+      const trafficNum = parseMetricNum(rawTraffic);
+      const normalizedCountry = COUNTRY_CODE_MAP[rawCountry] || rawCountry;
+      return { country: normalizedCountry, rawCountry, traffic: trafficNum || 0 };
+    }
+    const trafficNum = parseMetricNum(str);
+    return { country: '', rawCountry: '', traffic: trafficNum || 0 };
+  };
+
+  const handleValidateOutreachSites = () => {
+    if (!outreachLinks || outreachLinks.length === 0) return;
+    setValidatingOutreach(true);
+    setOutreachSaveError(null);
+
+    let rejectedCount = 0;
+    let shortlistedCount = 0;
+    const newPending = new Map(outreachPendingUpdates);
+
+    const updatedLinks = outreachLinks.map(lnk => {
+      const reasons = [];
+
+      // 1. DA < 25 -> Low DA
+      const daNum = parseMetricNum(lnk.da);
+      if (daNum !== null && daNum < 25) {
+        reasons.push('Low DA');
+      }
+
+      // 2. Spam Score > 3% -> High SS
+      const ssNum = parseMetricNum(lnk.ss);
+      if (ssNum !== null && ssNum > 3) {
+        reasons.push('High SS');
+      }
+
+      // 3. Traffic < 5000 -> Low Traffic
+      const totalTrafficNum = parseMetricNum(lnk.totalTraffic || lnk.traffic);
+      if (totalTrafficNum !== null && totalTrafficNum < 5000) {
+        reasons.push('Low Traffic');
+      }
+
+      // 4. Country traffic check against all countries in site's country field
+      const targetCountryStr = getOutreachCountry(lnk);
+      const targetCountryCodes = new Set();
+      if (targetCountryStr && targetCountryStr !== '-') {
+        targetCountryStr.split(',').forEach(c => {
+          const clean = c.trim().toLowerCase();
+          if (clean) {
+            const mappedCode = COUNTRY_CODE_MAP[clean] || clean;
+            targetCountryCodes.add(mappedCode);
+            targetCountryCodes.add(clean);
+          }
+        });
+      }
+
+      const parsedRegions = [
+        parseRegionData(lnk.region1Traffic),
+        parseRegionData(lnk.region2Traffic),
+        parseRegionData(lnk.region3Traffic)
+      ].filter(Boolean);
+
+      let targetCountryTrafficSum = 0;
+      let hasTargetMatch = false;
+
+      if (targetCountryCodes.size > 0 && parsedRegions.length > 0) {
+        parsedRegions.forEach(r => {
+          if (r.country && (targetCountryCodes.has(r.country) || targetCountryCodes.has(r.rawCountry))) {
+            hasTargetMatch = true;
+            targetCountryTrafficSum += r.traffic;
+          }
+        });
+
+        if (!hasTargetMatch || targetCountryTrafficSum < 1500) {
+          reasons.push('Irrelevant Country Traffic');
+        }
+      } else {
+        const r1 = parseMetricNum(lnk.region1Traffic);
+        const r2 = parseMetricNum(lnk.region2Traffic);
+        const r3 = parseMetricNum(lnk.region3Traffic);
+        const regionTraffics = [r1, r2, r3].filter(n => n !== null);
+        const maxRegion = regionTraffics.length > 0 ? Math.max(...regionTraffics) : null;
+
+        if (maxRegion !== null && maxRegion < 1500) {
+          reasons.push('Irrelevant Country Traffic');
+        } else if (maxRegion === null && totalTrafficNum !== null && totalTrafficNum < 1500) {
+          reasons.push('Irrelevant Country Traffic');
+        }
+      }
+
+      if (reasons.length > 0) {
+        rejectedCount++;
+        const combinedReason = reasons.join(', ');
+        newPending.set(lnk.id, { ...(newPending.get(lnk.id) || {}), status: 'Rejected', rejected_reason: combinedReason });
+        return { ...lnk, status: 'Rejected', rejectedReason: combinedReason };
+      } else {
+        shortlistedCount++;
+        newPending.set(lnk.id, { ...(newPending.get(lnk.id) || {}), status: 'Shortlisted', rejected_reason: '' });
+        return { ...lnk, status: 'Shortlisted', rejectedReason: '' };
+      }
+    });
+
+    setOutreachLinks(updatedLinks);
+    setOutreachPendingUpdates(newPending);
+    setValidatingOutreach(false);
+
+    alert(`Validation Complete: ${shortlistedCount} site(s) Shortlisted, ${rejectedCount} site(s) Rejected. Please click 'Save changes' to persist.`);
+  };
+
+  const formatRegions = (regions) => {
+    if (!regions) return '';
+    if (Array.isArray(regions)) {
+      const clean = regions.map(r => String(r).trim()).filter(Boolean);
+      return clean.join(', ');
+    }
+    if (typeof regions === 'string') {
+      const str = regions.trim();
+      if (str.startsWith('[') && str.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(str);
+          if (Array.isArray(parsed)) return parsed.map(r => String(r).trim()).filter(Boolean).join(', ');
+        } catch (_) {}
+      }
+      return str;
+    }
+    return String(regions);
+  };
+
+  const getOutreachCountry = (lnk) => {
+    if (!lnk) return '-';
+
+    // 1. Look up the outreach site's own associated project slug/name
+    const siteSlug = String(lnk.project_slug || lnk.project_name || lnk.projectSlug || lnk.datasetName || lnk.slug || '').toLowerCase();
+
+    if (siteSlug && projects && projects.length > 0) {
+      const matchedProj = projects.find(p => {
+        const pSlug = String(p.slug || p.project_slug || '').toLowerCase();
+        const pDom = String(p.domain || '').replace(/^https?:\/\//i, '').replace(/\/.*$/, '').replace(/^www\./i, '').toLowerCase();
+        const pName = String(p.name || '').toLowerCase();
+        return (
+          pSlug === siteSlug ||
+          pDom === siteSlug ||
+          pName === siteSlug ||
+          (pSlug && siteSlug.includes(pSlug)) ||
+          (pDom && siteSlug.includes(pDom))
+        );
+      });
+
+      if (matchedProj) {
+        const regs = formatRegions(matchedProj.target_regions || matchedProj.targetRegions || matchedProj.regions);
+        if (regs) return regs;
+      }
+    }
+
+    // 2. Direct country property stored on lnk if specified
+    if (lnk.country && lnk.country !== '-' && String(lnk.country).trim() !== '') {
+      return formatRegions(lnk.country);
+    }
+
+    // 3. Fallback to active project if site is for active project
+    const activeSlug = String(activeProject?.project_slug || activeProject?.slug || '').toLowerCase();
+    if (siteSlug && activeSlug && siteSlug === activeSlug) {
+      const activeRegs = formatRegions(activeProject?.target_regions || activeProject?.targetRegions || activeProject?.regions);
+      if (activeRegs) return activeRegs;
+    }
+
+    return '-';
+  };
+
+  const getOutreachIndustry = (lnk) => {
+    if (!lnk) return '-';
+
+    // 1. Direct industry property on lnk if specified
+    if (lnk.domainIndustry && lnk.domainIndustry !== '-' && String(lnk.domainIndustry).trim() !== '') {
+      return lnk.domainIndustry;
+    }
+    if (lnk.industry && lnk.industry !== '-' && String(lnk.industry).trim() !== '') {
+      return lnk.industry;
+    }
+    if (lnk.category && lnk.category !== '-' && String(lnk.category).trim() !== '') {
+      return lnk.category;
+    }
+
+    // 2. Look up the outreach site's associated project from projects (domains table)
+    const siteSlug = String(
+      lnk.project_slug || lnk.project_name || lnk.projectSlug || lnk.datasetName || lnk.slug || selectedOutreachProject || activeProject?.slug || ''
+    ).toLowerCase();
+
+    if (projects && projects.length > 0) {
+      const matchedProj = projects.find(p => {
+        const pSlug = String(p.slug || p.project_slug || '').toLowerCase();
+        const pDom = String(p.domain || '').replace(/^https?:\/\//i, '').replace(/\/.*$/, '').replace(/^www\./i, '').toLowerCase();
+        const pName = String(p.name || '').toLowerCase();
+        return (
+          pSlug === siteSlug ||
+          pDom === siteSlug ||
+          pName === siteSlug ||
+          (pSlug && siteSlug.includes(pSlug)) ||
+          (pDom && siteSlug.includes(pDom))
+        );
+      });
+
+      if (matchedProj) {
+        const ind = matchedProj.industry || matchedProj.domain_industry || matchedProj.domainIndustry || matchedProj.category || matchedProj.platforms || matchedProj.type || '';
+        if (ind && ind !== '-') return ind;
+      }
+    }
+
+    // 3. Fallback to activeProject industry/category
+    const activeInd = activeProject?.industry || activeProject?.domain_industry || activeProject?.domainIndustry || activeProject?.category || activeProject?.platforms || '';
+    if (activeInd && activeInd !== '-') return activeInd;
+
+    // 4. Fallback to first project industry/category
+    if (projects && projects.length > 0) {
+      const firstInd = projects[0]?.industry || projects[0]?.domain_industry || projects[0]?.domainIndustry || projects[0]?.category || projects[0]?.platforms || '';
+      if (firstInd && firstInd !== '-') return firstInd;
+    }
+
+    return '-';
+  };
+
+  const getOutreachDomain = (lnk) => {
+    const siteSlug = (lnk?.datasetName || lnk?.project_slug || lnk?.slug || '').toLowerCase();
+    if (siteSlug && projects && projects.length > 0) {
+      const matchedProj = projects.find(p => (p.slug || p.project_slug || p.domain || '').toLowerCase() === siteSlug);
+      if (matchedProj?.domain) return matchedProj.domain;
+    }
+    if (activeProject?.domain) return activeProject.domain;
+    if (projects && projects.length > 0 && projects[0]?.domain) return projects[0].domain;
+    return lnk?.domain || '-';
+  };
+
   const handleBulkEditOutreachSave = () => {
     const ids = Array.from(selectedOutreachIds);
     if (!ids.length) return;
 
     const updates = {};
-    if (bulkEditOutreachData.type) updates.type = bulkEditOutreachData.type;
+    if (bulkEditOutreachData.landingPrice !== undefined && bulkEditOutreachData.landingPrice !== '') updates.landingPrice = bulkEditOutreachData.landingPrice;
+    if (bulkEditOutreachData.spPercentage !== undefined && bulkEditOutreachData.spPercentage !== '') updates.spPercentage = bulkEditOutreachData.spPercentage;
+    if (bulkEditOutreachData.country !== undefined && bulkEditOutreachData.country !== '') updates.country = bulkEditOutreachData.country;
+    if (bulkEditOutreachData.domainIndustry !== undefined && bulkEditOutreachData.domainIndustry !== '') updates.domainIndustry = bulkEditOutreachData.domainIndustry;
+    if (bulkEditOutreachData.rejectedReason !== undefined && bulkEditOutreachData.rejectedReason !== '') {
+      updates.rejectedReason = bulkEditOutreachData.rejectedReason;
+      updates.rejected_reason = bulkEditOutreachData.rejectedReason;
+    }
 
     setOutreachLinks(prev => prev.map(l => {
       if (selectedOutreachIds.has(l.id)) {
+        const finalLp = updates.landingPrice !== undefined ? updates.landingPrice : (l.landingPrice || '');
+        const finalPct = updates.spPercentage !== undefined ? updates.spPercentage : (l.spPercentage || '');
+
+        let computedSp = finalLp;
+        const lp = parseFloat(String(finalLp).replace(/[^0-9.]/g, ''));
+        const pct = parseFloat(String(finalPct).replace(/[^0-9.]/g, ''));
+        if (!isNaN(lp) && !isNaN(pct) && pct > 0) {
+          const spVal = lp + (lp * (pct / 100));
+          computedSp = Number.isInteger(spVal) ? String(spVal) : spVal.toFixed(2);
+        }
+
+        const fullRowUpdates = { ...updates, sellingPrice: computedSp, selling_price: computedSp };
         return {
           ...l,
-          ...(updates.type ? { type: updates.type } : {})
+          ...fullRowUpdates
         };
       }
       return l;
@@ -6876,29 +7559,46 @@ export default function ProjectSetupPage({ tab, user }) {
       return next;
     });
 
+    setBulkEditOutreachData({
+      landingPrice: '',
+      sellingPrice: '',
+      spPercentage: '',
+      country: '',
+      domainIndustry: '',
+      rejectedReason: ''
+    });
     setShowBulkEditOutreach(false);
     setSelectedOutreachIds(new Set());
   };
 
-  const handleBulkDeleteOutreachConfirm = () => {
+  const handleBulkDeleteOutreachConfirm = async () => {
     const ids = Array.from(selectedOutreachIds);
     if (!ids.length) return;
+    const pSlug = selectedOutreachProject || activeProject?.project_slug || activeProject?.slug || 'global';
 
     setOutreachLinks(prev => prev.filter(l => !selectedOutreachIds.has(l.id)));
-
-    setOutreachPendingDeleteIds(prev => {
-      const next = new Set(prev);
-      ids.forEach(id => next.add(id));
-      return next;
-    });
-
     setShowBulkDeleteOutreachConfirm(false);
     setSelectedOutreachIds(new Set());
+
+    try {
+      await bulkDeleteOutreachSitesApi(pSlug, ids);
+    } catch (err) {
+      console.error('Failed to bulk delete outreach sites:', err);
+    }
   };
 
-  const handleDeleteOutreachLink = (id) => {
+  const handleDeleteOutreachLink = async (id) => {
+    if (!id) return;
+    const pSlug = selectedOutreachProject || activeProject?.project_slug || activeProject?.slug || 'global';
+
     setOutreachLinks(prev => prev.filter(lnk => lnk.id !== id));
-    setOutreachPendingDeleteIds(prev => new Set(prev).add(id));
+    if (editingOutreachSite?.id === id) setEditingOutreachSite(null);
+
+    try {
+      await deleteOutreachSiteApi(pSlug, id);
+    } catch (err) {
+      console.error('Failed to delete outreach site:', err);
+    }
   };
 
   const handleSaveOutreachChanges = async () => {
@@ -6925,10 +7625,22 @@ export default function ProjectSetupPage({ tab, user }) {
   };
 
   const downloadOutreachSampleTemplate = async () => {
-    const headers = ['URL', 'Type'];
+    const headers = [
+      'Site',
+      'Type',
+      'Landing Price'
+    ];
     const sampleRows = [
-      ['https://example.com/outreach', 'Paid Guest'],
-      ['https://businessdirectory.org/listing', 'Business Listing'],
+      [
+        'https://example.com/outreach',
+        'Paid Guest',
+        '150'
+      ],
+      [
+        'https://businessdirectory.org/listing',
+        'Business Listing',
+        '80'
+      ],
     ];
 
     const thinGrayBorder = { style: 'thin', color: { argb: 'FF999999' } };
@@ -6936,7 +7648,7 @@ export default function ProjectSetupPage({ tab, user }) {
 
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Outreach Sites');
-    sheet.columns = headers.map(h => ({ header: h, width: Math.max(14, h.length + 4) }));
+    sheet.columns = headers.map(h => ({ header: h, width: Math.max(18, h.length + 6) }));
 
     sheet.getRow(1).eachCell(cell => {
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC0C000' } };
@@ -6964,12 +7676,70 @@ export default function ProjectSetupPage({ tab, user }) {
     URL.revokeObjectURL(url);
   };
 
+  const parseRowFields = (cols, headerMap = null) => {
+    const getVal = (idx, ...headerNames) => {
+      if (headerMap) {
+        for (const h of headerNames) {
+          const cleanH = h.toLowerCase().trim();
+          if (cleanH in headerMap && cols[headerMap[cleanH]] !== undefined) {
+            return String(cols[headerMap[cleanH]] ?? '').trim();
+          }
+        }
+      }
+      return idx !== null && cols[idx] !== undefined ? String(cols[idx] ?? '').trim() : '';
+    };
+
+    const url = getVal(0, 'site', 'url', 'domain', 'website');
+    const type = getVal(1, 'type', 'site type', 'website type') || 'Paid Guest';
+
+    let lp = getVal(null, 'landing price', 'lp', 'landingprice');
+    let sp = getVal(null, 'selling price', 'sp', 'sellingprice');
+    let spPct = getVal(null, 'selling price %', 'sp %', 'sp percentage', 'sp_percentage');
+    let country = getVal(null, 'country', 'location');
+    let industry = getVal(null, 'industry type', 'industry', 'domain industry', 'category');
+
+    if (!headerMap) {
+      if (cols.length >= 10) {
+        lp = String(cols[9] ?? '').trim();
+        sp = String(cols[10] ?? '').trim();
+        spPct = String(cols[11] ?? '').trim();
+        country = String(cols[12] ?? '').trim();
+        industry = String(cols[13] ?? '').trim();
+      } else {
+        lp = String(cols[2] ?? '').trim();
+        sp = String(cols[3] ?? '').trim();
+        spPct = String(cols[4] ?? '').trim();
+        country = String(cols[5] ?? '').trim();
+        industry = String(cols[6] ?? '').trim();
+      }
+    }
+
+    return {
+      url,
+      type,
+      landingPrice: lp,
+      sellingPrice: sp,
+      spPercentage: spPct,
+      country,
+      domainIndustry: industry,
+      status: 'New site',
+      rejectedReason: '',
+    };
+  };
+
   const parseOutreachDelimited = (text, delimiter) => {
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     if (lines.length <= 1) return [];
-    return lines.slice(1).map(line => {
+
+    const headerLine = lines[0].split(delimiter).map(c => c.trim().replace(/^"|"$/g, '').toLowerCase());
+    const headerMap = {};
+    headerLine.forEach((h, idx) => { headerMap[h] = idx; });
+    const hasRecognizedHeader = ['site', 'url', 'domain', 'type'].some(k => k in headerMap);
+
+    const dataLines = hasRecognizedHeader ? lines.slice(1) : lines;
+    return dataLines.map(line => {
       const cols = line.split(delimiter).map(c => c.trim().replace(/^"|"$/g, ''));
-      return { url: cols[0] || '', type: cols[1] || 'Paid Guest' };
+      return parseRowFields(cols, hasRecognizedHeader ? headerMap : null);
     }).filter(r => r.url);
   };
 
@@ -6977,22 +7747,58 @@ export default function ProjectSetupPage({ tab, user }) {
     const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-    return rows.slice(1).map(cols => ({
-      url: String(cols[0] ?? '').trim(),
-      type: String(cols[1] ?? '').trim() || 'Paid Guest',
-    })).filter(r => r.url);
+    if (!rows || rows.length <= 1) return [];
+
+    const firstRow = (rows[0] || []).map(c => String(c).trim().toLowerCase());
+    const headerMap = {};
+    firstRow.forEach((h, idx) => { headerMap[h] = idx; });
+    const hasRecognizedHeader = ['site', 'url', 'domain', 'type'].some(k => k in headerMap);
+
+    const dataRows = hasRecognizedHeader ? rows.slice(1) : rows;
+    return dataRows.map(cols => parseRowFields(cols, hasRecognizedHeader ? headerMap : null)).filter(r => r.url);
+  };
+
+  const validateAndSetOutreachCsvRows = (rows, fileName) => {
+    if (!rows || rows.length === 0) {
+      const msg = 'The uploaded file does not contain any valid site rows.';
+      setOutreachError(msg);
+      setOutreachFileName('');
+      setOutreachCsvRows([]);
+      alert(msg);
+      return;
+    }
+
+    // Check for Paid Guest rows missing Landing Price
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const rowType = String(r.type || 'Paid Guest').trim();
+      const rowLp = String(r.landingPrice || '').trim();
+
+      if ((rowType === 'Paid Guest' || rowType === 'Paid Guest Post') && !rowLp) {
+        const errorMsg = `Landing price not there! Landing Price column/value is required for Paid Guest site (Row #${i + 1}: ${r.url || 'site'}).`;
+        setOutreachError(errorMsg);
+        setOutreachFileName('');
+        setOutreachCsvRows([]);
+        alert(errorMsg);
+        return;
+      }
+    }
+
+    setOutreachError('');
+    setOutreachFileName(fileName);
+    setOutreachCsvRows(rows);
   };
 
   const handleOutreachFileUpload = (file) => {
     if (!file) return;
-    setOutreachFileName(file.name);
+    setOutreachError('');
     const ext = file.name.split('.').pop().toLowerCase();
 
     if (ext === 'xlsx' || ext === 'xls') {
       const reader = new FileReader();
       reader.onload = (e) => {
         const rows = parseOutreachExcel(e.target.result);
-        setOutreachCsvRows(rows);
+        validateAndSetOutreachCsvRows(rows, file.name);
       };
       reader.readAsArrayBuffer(file);
     } else {
@@ -7000,7 +7806,7 @@ export default function ProjectSetupPage({ tab, user }) {
       reader.onload = (e) => {
         const delimiter = ext === 'tsv' ? '\t' : ',';
         const rows = parseOutreachDelimited(e.target.result, delimiter);
-        setOutreachCsvRows(rows);
+        validateAndSetOutreachCsvRows(rows, file.name);
       };
       reader.readAsText(file);
     }
@@ -7025,6 +7831,8 @@ export default function ProjectSetupPage({ tab, user }) {
         if (!cancelled) {
           const mapped = sites.map(s => ({
             id: s.id,
+            project_slug: s.project_slug || s.project_name || s.projectSlug || '',
+            project_name: s.project_name || s.project_slug || s.projectName || '',
             url: s.url,
             domain: s.domain,
             type: s.type || s.site_type || s.website_type || 'Paid Guest',
@@ -7035,7 +7843,14 @@ export default function ProjectSetupPage({ tab, user }) {
             totalTraffic: s.total_traffic || s.totalTraffic,
             region1Traffic: s.region1_traffic || s.region1Traffic,
             region2Traffic: s.region2_traffic || s.region2Traffic,
-            region3Traffic: s.region3_traffic || s.region3Traffic
+            region3Traffic: s.region3_traffic || s.region3Traffic,
+            landingPrice: s.landing_price || s.landingPrice || '',
+            sellingPrice: s.selling_price || s.sellingPrice || '',
+            spPercentage: s.sp_percentage || s.spPercentage || s.sp || '',
+            country: s.country || s.location || '',
+            domainIndustry: s.domain_industry || s.domainIndustry || s.industry || s.category || '',
+            status: s.status || 'New site',
+            rejectedReason: s.rejected_reason || s.rejectedReason || '',
           }));
           setOutreachLinks(mapped);
         }
@@ -7048,20 +7863,47 @@ export default function ProjectSetupPage({ tab, user }) {
       });
     return () => { cancelled = true; };
   }, [activeTab]);
+  useEffect(() => {
+    if (showAddOutreach) {
+      if (!selectedOutreachProject) {
+        setSelectedOutreachProject(activeProject?.slug || (projects && projects[0] ? projects[0].slug : ''));
+      }
+    }
+  }, [showAddOutreach, activeProject, projects]);
 
   const handleAddOutreachLink = async (e) => {
     if (e) e.preventDefault();
     setOutreachError('');
 
-    const pSlug = activeProject?.project_slug || activeProject?.slug;
+    const pSlug = selectedOutreachProject || activeProject?.project_slug || activeProject?.slug;
     if (!pSlug) {
-      setOutreachError('Please select or create a project first.');
+      setOutreachError('Please select a project first.');
       return;
     }
 
-    const targetRegions = activeProject?.target_regions || null;
+    const chosenProj = (projects || []).find(p => p.slug === pSlug) || activeProject;
+    const targetRegions = chosenProj?.target_regions || chosenProj?.targetRegions || null;
 
     if (outreachCsvRows.length > 0) {
+      for (let i = 0; i < outreachCsvRows.length; i++) {
+        const r = outreachCsvRows[i];
+        const siteUrl = String(r.url || '').trim();
+        if (!siteUrl) {
+          setOutreachError(`Site URL is required (Row #${i + 1}).`);
+          return;
+        }
+        const rowType = r.type || newOutreachType || 'Paid Guest';
+        const rowLp = r.landingPrice ? String(r.landingPrice).trim() : (outreachLandingPrice ? String(outreachLandingPrice).trim() : '');
+        if ((rowType === 'Paid Guest' || rowType === 'Paid Guest Post') && !rowLp) {
+          setOutreachError(`Landing Price (LP) is required for Paid Guest site (Row #${i + 1}: ${siteUrl}).`);
+          return;
+        }
+        if (calculateSp && !rowLp) {
+          setOutreachError(`Landing Price (LP) is required when Calculate SP is ON (Row #${i + 1}: ${siteUrl}).`);
+          return;
+        }
+      }
+
       setAddingOutreach(true);
       try {
         const newMappedSites = [];
@@ -7069,20 +7911,52 @@ export default function ProjectSetupPage({ tab, user }) {
           let link = r.url;
           if (!/^https?:\/\//i.test(link)) link = 'https://' + link;
           try {
-            const newSite = await addOutreachSiteApi(pSlug, link, targetRegions, r.type || 'Paid Guest');
+            const rowLp = r.landingPrice ? String(r.landingPrice).trim() : (outreachLandingPrice ? String(outreachLandingPrice).trim() : '');
+            let rowSp = r.sellingPrice || rowLp;
+            if (calculateSp && spPercentage) {
+              const lpNum = parseFloat(String(rowLp).replace(/[^0-9.]/g, ''));
+              const pctNum = parseFloat(String(spPercentage).replace(/[^0-9.]/g, ''));
+              if (!isNaN(lpNum) && !isNaN(pctNum) && pctNum > 0) {
+                const computed = lpNum + (lpNum * (pctNum / 100));
+                rowSp = Number.isInteger(computed) ? String(computed) : computed.toFixed(2);
+              }
+            }
+            const rowPct = calculateSp && spPercentage ? `${spPercentage}%` : (r.spPercentage || '');
+
+            const extraFields = {
+              sourced_by: sourcedOption,
+              agency_name: agencyName,
+              calculate_sp: calculateSp,
+              sp_percentage: rowPct,
+              landing_price: rowLp,
+              selling_price: rowSp,
+              country: r.country || '',
+              domain_industry: r.domainIndustry || '',
+              status: r.status || 'New site'
+            };
+            const newSite = await addOutreachSiteApi(pSlug, link, targetRegions, r.type || 'Paid Guest', extraFields);
+
             newMappedSites.push({
               id: newSite.id,
+              project_slug: pSlug,
+              project_name: pSlug,
               url: newSite.url,
               domain: newSite.domain,
               type: newSite.type || r.type || 'Paid Guest',
-              da: newSite.da,
-              pa: newSite.pa,
-              ss: newSite.ss,
-              traffic: newSite.traffic,
-              totalTraffic: newSite.total_traffic || newSite.totalTraffic,
-              region1Traffic: newSite.region1_traffic || newSite.region1Traffic,
-              region2Traffic: newSite.region2_traffic || newSite.region2Traffic,
-              region3Traffic: newSite.region3_traffic || newSite.region3Traffic
+              da: r.da || newSite.da,
+              pa: r.pa || newSite.pa,
+              ss: r.ss || newSite.ss,
+              traffic: r.traffic || newSite.traffic,
+              totalTraffic: r.traffic || newSite.total_traffic || newSite.totalTraffic,
+              region1Traffic: r.region1Traffic || newSite.region1_traffic || newSite.region1Traffic,
+              region2Traffic: r.region2Traffic || newSite.region2_traffic || newSite.region2Traffic,
+              region3Traffic: r.region3Traffic || newSite.region3_traffic || newSite.region3Traffic,
+              landingPrice: rowLp,
+              sellingPrice: rowSp,
+              spPercentage: rowPct,
+              country: r.country || newSite.country || targetRegions || '',
+              domainIndustry: r.domainIndustry || newSite.domain_industry || '',
+              status: r.status || newSite.status || 'New site',
             });
           } catch (err) {
             console.error('Failed to import outreach site:', link, err);
@@ -7103,7 +7977,7 @@ export default function ProjectSetupPage({ tab, user }) {
 
     let link = newOutreachLink.trim();
     if (!link) {
-      setOutreachError('Link cannot be empty.');
+      setOutreachError('Site URL is required.');
       return;
     }
 
@@ -7124,12 +7998,53 @@ export default function ProjectSetupPage({ tab, user }) {
       return;
     }
 
+    if ((newOutreachType === 'Paid Guest' || newOutreachType === 'Paid Guest Post') && !String(outreachLandingPrice).trim()) {
+      setOutreachError('Landing Price (LP) is required for Paid Guest site.');
+      return;
+    }
+
+    if (sourcedOption === 'agency' && !agencyName.trim()) {
+      setOutreachError('Agency Name is required when Sourced is Agency.');
+      return;
+    }
+
+    if (calculateSp) {
+      if (!String(outreachLandingPrice).trim()) {
+        setOutreachError('Landing Price (LP) is required when Calculate SP is toggled ON.');
+        return;
+      }
+      if (!String(spPercentage).trim()) {
+        setOutreachError('Percentage (%) is required when Calculate SP is toggled ON.');
+        return;
+      }
+    }
+
     setAddingOutreach(true);
     try {
       const targetRegions = activeProject?.target_regions || null;
-      const newSite = await addOutreachSiteApi(pSlug, link, targetRegions, newOutreachType || 'Paid Guest');
+      const lpVal = outreachLandingPrice ? String(outreachLandingPrice).trim() : '';
+      const spVal = calculateSp
+        ? (calculatedSellingPrice ? calculatedSellingPrice : lpVal)
+        : (outreachSellingPrice ? String(outreachSellingPrice).trim() : lpVal);
+
+      const extraFields = {
+        sourced_by: sourcedOption,
+        agency_name: agencyName,
+        calculate_sp: calculateSp,
+        sp_percentage: calculateSp && spPercentage ? `${spPercentage}%` : '',
+        landing_price: lpVal,
+        selling_price: spVal,
+        country: '',
+        domain_industry: '',
+        status: 'New site'
+      };
+
+      const newSite = await addOutreachSiteApi(pSlug, link, targetRegions, newOutreachType || 'Paid Guest', extraFields);
+
       const mappedSite = {
         id: newSite.id,
+        project_slug: pSlug,
+        project_name: pSlug,
         url: newSite.url,
         domain: newSite.domain,
         type: newSite.type || newOutreachType || 'Paid Guest',
@@ -7140,12 +8055,24 @@ export default function ProjectSetupPage({ tab, user }) {
         totalTraffic: newSite.total_traffic || newSite.totalTraffic,
         region1Traffic: newSite.region1_traffic || newSite.region1Traffic,
         region2Traffic: newSite.region2_traffic || newSite.region2Traffic,
-        region3Traffic: newSite.region3_traffic || newSite.region3Traffic
+        region3Traffic: newSite.region3_traffic || newSite.region3Traffic,
+        landingPrice: lpVal || newSite.landing_price || '',
+        sellingPrice: spVal || newSite.selling_price || '',
+        spPercentage: calculateSp && spPercentage ? `${spPercentage}%` : (newSite.sp_percentage || ''),
+        country: newSite.country || activeProject?.target_regions || activeProject?.location || '',
+        domainIndustry: newSite.domain_industry || '',
+        status: newSite.status || 'New site'
       };
 
       setOutreachLinks(prev => [mappedSite, ...prev]);
       setNewOutreachLink('');
       setNewOutreachType('Paid Guest');
+      setSourcedOption('internal');
+      setAgencyName('');
+      setCalculateSp(false);
+      setSpPercentage('');
+      setOutreachLandingPrice('');
+      setOutreachSellingPrice('');
       setShowAddOutreach(false);
     } catch (err) {
       setOutreachError(err.message || 'Failed to add outreach site & fetch metrics.');
@@ -7481,6 +8408,17 @@ export default function ProjectSetupPage({ tab, user }) {
     setCompetitors(prev => prev.map(c => c.id === competitor.id ? { ...c, ...updates } : c));
   };
 
+  const handleAutoSaveCompetitors = (autoSaveItems) => {
+    if (!autoSaveItems || autoSaveItems.length === 0) return;
+    const updateMap = new Map(autoSaveItems.map(item => [item.id, item.updates]));
+    setCompetitors(prev => prev.map(c => updateMap.has(c.id) ? { ...c, ...updateMap.get(c.id) } : c));
+    setCompetitorPendingUpdates(prev => {
+      const next = new Map(prev);
+      autoSaveItems.forEach(item => next.delete(item.id));
+      return next;
+    });
+  };
+
   const handleDeleteCompetitor = (idx) => {
     const competitor = competitors[idx];
     setCompetitorPendingDeleteIds(prev => new Set(prev).add(competitor.id));
@@ -7546,7 +8484,7 @@ export default function ProjectSetupPage({ tab, user }) {
     try {
       const { competitors: found, message } = await findCompetitors(project.slug, { useAi: true });
       handleFoundCompetitors(found);
-      setFindCompetitorsMessage(found.length === 0 ? (message || '0 competitors found.') : `Found ${found.length} competitor${found.length === 1 ? '' : 's'}.`);
+      // setFindCompetitorsMessage(found.length === 0 ? (message || '0 competitors found.') : `Found ${found.length} competitor${found.length === 1 ? '' : 's'}.`);
     } catch (err) {
       setFindCompetitorsMessage(err.message || 'Failed to find competitors.');
       createAuditLogApi({
@@ -7777,15 +8715,22 @@ export default function ProjectSetupPage({ tab, user }) {
     } else if (activeTab === 'Outreach') {
       const list = getFilteredOutreachLinks();
       const rows = list.map(l => ({
-        URL: l.url || l.domain || '',
+        Site: l.url || l.domain || '',
         Type: l.type || 'Paid Guest',
         DA: l.da ?? '',
         PA: l.pa ?? '',
-        'Spam Score': l.ss ?? '',
+        SS: l.ss ?? '',
         Traffic: l.totalTraffic || l.traffic || '',
         'Region 1': l.region1Traffic || '',
         'Region 2': l.region2Traffic || '',
         'Region 3': l.region3Traffic || '',
+        'Landing Price': String(l.landingPrice || '').replace(/^\$/, ''),
+        'Selling Price': String(l.sellingPrice || '').replace(/^\$/, ''),
+        'Selling Price %': l.spPercentage || '',
+        Country: getOutreachCountry(l),
+        'Industry Type': l.domainIndustry || '',
+        Status: l.status || 'New site',
+        'Rejected Reason': l.rejectedReason || l.rejected_reason || '',
       }));
       downloadCSV('outreach_sites', rows);
     }
@@ -7814,41 +8759,43 @@ export default function ProjectSetupPage({ tab, user }) {
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 0 }}>
       {/* Page title */}
       <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 12 }}>
-        Project Setup
+        {isStandaloneOutreach ? 'Outreach' : 'Project Setup'}
       </h1>
 
       {/* Horizontal tabs */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 0, borderBottom: '2px solid var(--border)', marginBottom: 12 }}>
-        {TABS.map((t, index) => (
-          <Fragment key={t}>
-            <button
-              onClick={() => handleTabClick(t)}
-              style={{
-                padding: '8px 16px',
-                fontSize: 14,
-                fontWeight: activeTab === t ? 600 : 500,
-                color: activeTab === t ? 'var(--text-primary)' : 'var(--text-muted)',
-                background: 'none',
-                border: 'none',
-                borderBottom: activeTab === t ? '2px solid var(--accent)' : '2px solid transparent',
-                marginBottom: -2,
-                cursor: 'pointer',
-                fontFamily: 'var(--font-body)',
-                transition: 'color 0.15s, border-color 0.15s',
-              }}
-              onMouseEnter={e => { if (activeTab !== t) e.currentTarget.style.color = 'var(--text-secondary)'; }}
-              onMouseLeave={e => { if (activeTab !== t) e.currentTarget.style.color = 'var(--text-muted)'; }}
-            >
-              {t}
-            </button>
-            {index < TABS.length - 1 && (
-              <span style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 2px', userSelect: 'none' }}>
-                ›
-              </span>
-            )}
-          </Fragment>
-        ))}
-      </div>
+      {!isStandaloneOutreach && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 0, borderBottom: '2px solid var(--border)', marginBottom: 12 }}>
+          {['Domain', 'Intent', 'Pages', 'Competitors', 'Connectors'].map((t, index, arr) => (
+            <Fragment key={t}>
+              <button
+                onClick={() => handleTabClick(t)}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: 14,
+                  fontWeight: activeTab === t ? 600 : 500,
+                  color: activeTab === t ? 'var(--text-primary)' : 'var(--text-muted)',
+                  background: 'none',
+                  border: 'none',
+                  borderBottom: activeTab === t ? '2px solid var(--accent)' : '2px solid transparent',
+                  marginBottom: -2,
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font-body)',
+                  transition: 'color 0.15s, border-color 0.15s',
+                }}
+                onMouseEnter={e => { if (activeTab !== t) e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                onMouseLeave={e => { if (activeTab !== t) e.currentTarget.style.color = 'var(--text-muted)'; }}
+              >
+                {t}
+              </button>
+              {index < arr.length - 1 && (
+                <span style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 2px', userSelect: 'none' }}>
+                  ›
+                </span>
+              )}
+            </Fragment>
+          ))}
+        </div>
+      )}
 
       {/* Main card */}
       <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)' }}>
@@ -8149,21 +9096,48 @@ export default function ProjectSetupPage({ tab, user }) {
                   Choose project
                 </button>
               ) : (
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <button
-                    onClick={handleRefreshCompetitors}
-                    disabled={competitorsRefreshing}
-                    title="Refresh"
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      background: 'none', border: '1.5px solid var(--border)', borderRadius: 8, padding: 9,
-                      cursor: competitorsRefreshing ? 'default' : 'pointer', color: 'var(--text-muted)',
-                    }}
-                    onMouseEnter={e => { if (!competitorsRefreshing) { e.currentTarget.style.borderColor = 'var(--border-hover)'; e.currentTarget.style.color = 'var(--text-primary)'; } }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
-                  >
-                    <RefreshCw size={14} className={competitorsRefreshing ? 'spin-icon' : ''} />
-                  </button>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  {competitorSubView === 'competitors' && canUpdate(user) && (competitors || []).filter(c => {
+                    const pSlug = (c.projectSlug || c.project_slug || c.project_name || '').toLowerCase();
+                    const targetSlug = (selectedCompetitorProject?.slug || selectedCompetitorProject?.name || '').toLowerCase();
+                    return pSlug === targetSlug;
+                  }).some(c => {
+                    const typeStr = String(c.websiteType || c.type || '').trim();
+                    const isDone = typeStr && ['Official Entity', 'Listing', 'Platform'].includes(typeStr) && typeStr !== 'Desktop';
+                    return !isDone;
+                  }) && (
+                    <button
+                      onClick={() => setTriggerClassifyCompetitors(prev => prev + 1)}
+                      disabled={classifyingCompetitors}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                        padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: classifyingCompetitors ? 'default' : 'pointer',
+                        fontFamily: 'var(--font-body)', opacity: classifyingCompetitors ? 0.7 : 1, transition: 'all 0.15s',
+                      }}
+                      onMouseEnter={e => { if (!classifyingCompetitors) e.currentTarget.style.opacity = '0.85'; }}
+                      onMouseLeave={e => { if (!classifyingCompetitors) e.currentTarget.style.opacity = '1'; }}
+                    >
+                      <RefreshCw size={15} style={{ animation: classifyingCompetitors ? 'spin 1s linear infinite' : 'none' }} />
+                      Classify Competitors
+                    </button>
+                  )}
+                  {competitorSubView === 'pages' && canEdit(user) && (
+                    <button
+                      onClick={() => setShowAddPages(true)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                        padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
+                        fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+                      onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                    >
+                      <Plus size={15} />
+                      Add Pages
+                    </button>
+                  )}
                 </div>
               )
             ) : (
@@ -8174,6 +9148,24 @@ export default function ProjectSetupPage({ tab, user }) {
                     onBulkEdit={() => setShowBulkEditOutreach(true)}
                     onBulkDelete={() => setShowBulkDeleteOutreachConfirm(true)}
                   />
+                )}
+                {activeTab === 'Outreach' && userCanEdit && (
+                  <button
+                    onClick={handleValidateOutreachSites}
+                    disabled={validatingOutreach || outreachLinks.length === 0}
+                    title="Validate sites based on DA (<25), Spam Score (>3%), Traffic (<5000), and Country Traffic (<1500)"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      background: '#4f46e5', color: '#fff', border: 'none', borderRadius: 8,
+                      padding: '8px 16px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
+                      fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                      opacity: validatingOutreach || outreachLinks.length === 0 ? 0.6 : 1
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
+                    onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                  >
+                    {validatingOutreach ? 'Validating…' : 'Validate Sites'}
+                  </button>
                 )}
                 {activeTab === 'Outreach' && userCanEdit && (hasOutreachPendingChanges || outreachSaving) && (
                   <button
@@ -8300,10 +9292,15 @@ export default function ProjectSetupPage({ tab, user }) {
                 onSelectKwDetail={setSelectedKwDetail}
                 onDeleteCompetitor={handleDeleteCompetitor}
                 onSaveCompetitor={handleSaveCompetitor}
+                onAutoSaveCompetitors={handleAutoSaveCompetitors}
                 onBulkEditCompetitors={handleBulkEditCompetitors}
                 onBulkDeleteCompetitors={handleBulkDeleteCompetitors}
                 onFindCompetitors={() => runFindCompetitors(selectedCompetitorProject)}
-                onAddPages={() => setShowAddPages(true)}
+                onAddPages={() => { setCompetitorSubView('pages'); setShowAddPages(true); }}
+                subView={competitorSubView}
+                onSubViewChange={setCompetitorSubView}
+                triggerClassifyCompetitors={triggerClassifyCompetitors}
+                onClassifyingChange={setClassifyingCompetitors}
                 hasPendingChanges={hasCompetitorPendingChanges}
                 saving={competitorSaving}
                 saveError={competitorSaveError}
@@ -8351,7 +9348,7 @@ export default function ProjectSetupPage({ tab, user }) {
                     )}
 
                     <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 950 }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1550 }}>
                         <thead>
                           <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
                             <th style={{ padding: '10px 14px', textAlign: 'center', width: 40 }}>
@@ -8368,10 +9365,10 @@ export default function ProjectSetupPage({ tab, user }) {
                                 {isAllSelected && <Check size={13} color="#fff" strokeWidth={3} />}
                               </div>
                             </th>
-                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 280 }}>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 240 }}>
                               Site
                             </th>
-                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 170 }}>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 160 }}>
                               Type
                             </th>
                             <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
@@ -8395,7 +9392,28 @@ export default function ProjectSetupPage({ tab, user }) {
                             <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
                               Region 3
                             </th>
-                            <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 100 }}>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                              Landing Price
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                              Selling Price
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                              Selling Price %
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                              Country
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                              Industry Type
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 160 }}>
+                              Status
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 180 }}>
+                              Rejected Reason
+                            </th>
+                            <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', width: 80 }}>
                               Action
                             </th>
                           </tr>
@@ -8404,6 +9422,22 @@ export default function ProjectSetupPage({ tab, user }) {
                           {filteredOutreach.map((lnk) => {
                             const isSelected = selectedOutreachIds.has(lnk.id);
                             const currentType = lnk.type || lnk.site_type || lnk.website_type || 'Paid Guest';
+                            const currentStatus = lnk.status || 'New site';
+                            const currentReason = lnk.rejectedReason || lnk.rejected_reason || '';
+                            const getBadgeStyle = (st) => {
+                              switch (st) {
+                                case 'Shortlisted':
+                                  return { background: '#dcfce7', color: '#15803d', border: '1px solid #86efac' };
+                                case 'Need Negotiation':
+                                  return { background: '#fef3c7', color: '#b45309', border: '1px solid #fde047' };
+                                case 'Rejected':
+                                  return { background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5' };
+                                case 'New site':
+                                default:
+                                  return { background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' };
+                              }
+                            };
+
                             return (
                               <tr key={lnk.id} style={{ borderBottom: '1px solid var(--border)', background: isSelected ? '#f0f9ff' : 'transparent' }}
                                 onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#fafbfc'; }}
@@ -8422,22 +9456,11 @@ export default function ProjectSetupPage({ tab, user }) {
                                     {isSelected && <Check size={13} color="#fff" strokeWidth={3} />}
                                   </div>
                                 </td>
-                                <td style={{ padding: '14px 16px', fontSize: 13.5, width: 280, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                <td style={{ padding: '14px 16px', fontSize: 13.5, width: 240, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                   <a href={lnk.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}
                                     onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
                                     onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
-                                    {(() => {
-                                      try {
-                                        const parsed = new URL(lnk.url);
-                                        const baseUrl = `${parsed.protocol}//${parsed.hostname}`;
-                                        if (lnk.url.length > baseUrl.length + 3) {
-                                          return `${baseUrl}...`;
-                                        }
-                                        return lnk.url;
-                                      } catch (_) {
-                                        return lnk.url;
-                                      }
-                                    })()}
+                                    {lnk.url}
                                   </a>
                                 </td>
                                 <td style={{ padding: '10px 16px', fontSize: 13.5, textAlign: 'left' }}>
@@ -8487,27 +9510,89 @@ export default function ProjectSetupPage({ tab, user }) {
                                 <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
                                   {lnk.region3Traffic || '-'}
                                 </td>
+                                <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                                  {lnk.landingPrice !== undefined && lnk.landingPrice !== null && lnk.landingPrice !== '' ? String(lnk.landingPrice).replace(/^\$/, '') : '-'}
+                                </td>
+                                <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                                  {lnk.sellingPrice !== undefined && lnk.sellingPrice !== null && lnk.sellingPrice !== '' ? String(lnk.sellingPrice).replace(/^\$/, '') : '-'}
+                                </td>
+                                <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                                  {lnk.spPercentage !== undefined && lnk.spPercentage !== null && lnk.spPercentage !== '' ? (String(lnk.spPercentage).endsWith('%') ? lnk.spPercentage : `${lnk.spPercentage}%`) : '-'}
+                                </td>
+                                <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                                  {getOutreachCountry(lnk)}
+                                </td>
+                                <td style={{ padding: '14px 16px', fontSize: 13.5, textAlign: 'left', color: 'var(--text-primary)' }}>
+                                  {getOutreachIndustry(lnk)}
+                                </td>
+                                <td style={{ padding: '10px 16px', fontSize: 13.5, textAlign: 'left' }}>
+                                  <select
+                                    value={STATUS_OPTIONS.includes(currentStatus) ? currentStatus : 'New site'}
+                                    onChange={(e) => handleOutreachStatusChange(lnk.id, e.target.value)}
+                                    style={{
+                                      padding: '5px 10px',
+                                      fontSize: 12,
+                                      fontWeight: 600,
+                                      borderRadius: 6,
+                                      outline: 'none',
+                                      cursor: 'pointer',
+                                      ...getBadgeStyle(currentStatus)
+                                    }}
+                                  >
+                                    {STATUS_OPTIONS.map(st => (
+                                      <option key={st} value={st} style={{ background: '#ffffff', color: '#0f172a' }}>
+                                        {st}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td style={{ padding: '10px 16px', fontSize: 13.5, textAlign: 'left' }}>
+                                  <select
+                                    value={currentReason}
+                                    onChange={(e) => handleOutreachRejectedReasonChange(lnk.id, e.target.value)}
+                                    style={{
+                                      padding: '5px 10px',
+                                      fontSize: 12,
+                                      fontWeight: 500,
+                                      borderRadius: 6,
+                                      border: '1.5px solid var(--border)',
+                                      background: 'var(--surface)',
+                                      color: 'var(--text-primary)',
+                                      outline: 'none',
+                                      cursor: 'pointer',
+                                      minWidth: 160
+                                    }}
+                                  >
+                                    <option value="">Select reason...</option>
+                                    {currentReason && !REJECTED_REASONS.includes(currentReason) && (
+                                      <option value={currentReason}>{currentReason}</option>
+                                    )}
+                                    {REJECTED_REASONS.map(r => (
+                                      <option key={r} value={r}>{r}</option>
+                                    ))}
+                                  </select>
+                                </td>
                                 <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                                  {userCanDelete && (
+                                  {userCanEdit && (
                                     <button
-                                      onClick={() => setDeletingOutreachLink(lnk)}
-                                      title="Delete domain"
+                                      onClick={() => setEditingOutreachSite(lnk)}
+                                      title="Edit outreach site"
                                       style={{
                                         background: 'none',
                                         border: 'none',
-                                        color: 'var(--red, #dc2626)',
+                                        color: 'var(--text-muted)',
                                         cursor: 'pointer',
                                         padding: '6px 8px',
                                         borderRadius: 6,
                                         display: 'inline-flex',
                                         alignItems: 'center',
-                                        justify: 'center',
+                                        justifyContent: 'center',
                                         transition: 'background 0.15s'
                                       }}
-                                      onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
+                                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                                       onMouseLeave={e => e.currentTarget.style.background = 'none'}
                                     >
-                                      <Trash2 size={15} color="var(--red, #dc2626)" />
+                                      <Edit2 size={15} color="var(--text-muted)" />
                                     </button>
                                   )}
                                 </td>
@@ -8517,6 +9602,14 @@ export default function ProjectSetupPage({ tab, user }) {
                         </tbody>
                       </table>
                     </div>
+
+                    <EditOutreachSiteModal
+                      open={editingOutreachSite !== null}
+                      onClose={() => setEditingOutreachSite(null)}
+                      site={editingOutreachSite}
+                      onSave={handleSaveOutreachSiteModal}
+                      onDelete={(s) => setDeletingOutreachLink(s)}
+                    />
                   </div>
                 );
               })()
@@ -8621,6 +9714,10 @@ export default function ProjectSetupPage({ tab, user }) {
           setShowAddOutreach(false);
           setOutreachError('');
           setNewOutreachLink('');
+          setSourcedOption('internal');
+          setAgencyName('');
+          setCalculateSp(false);
+          setSpPercentage('');
           setOutreachCsvRows([]);
           setOutreachFileName('');
         }}
@@ -8643,6 +9740,10 @@ export default function ProjectSetupPage({ tab, user }) {
               setShowAddOutreach(false);
               setOutreachError('');
               setNewOutreachLink('');
+              setSourcedOption('internal');
+              setAgencyName('');
+              setCalculateSp(false);
+              setSpPercentage('');
               setOutreachCsvRows([]);
               setOutreachFileName('');
             }
@@ -8664,115 +9765,382 @@ export default function ProjectSetupPage({ tab, user }) {
           </div>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
-              Outreach Site*
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. https://example.com/outreach"
-              value={newOutreachLink}
-              onChange={(e) => { setNewOutreachLink(e.target.value); setOutreachError(''); }}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                fontSize: 13.5,
-                background: 'var(--surface)',
-                border: '1.5px solid var(--border)',
-                borderRadius: 8,
-                color: 'var(--text-primary)',
-                outline: 'none'
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleAddOutreachLink();
-              }}
-            />
-            <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-              Supports full URLs and plain domains (e.g. google.com)
-            </span>
-          </div>
+          <Select
+            label="Choose Project *"
+            placeholder={projects?.length ? 'Select a project' : 'No projects yet — add one in the Domain tab'}
+            value={selectedOutreachProject}
+            onChange={setSelectedOutreachProject}
+            options={(projects || []).filter(p => p.name || p.domain).map(p => ({ value: p.slug, label: p.name || p.domain }))}
+          />
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
-              Type*
-            </label>
-            <select
-              value={newOutreachType}
-              onChange={(e) => setNewOutreachType(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                fontSize: 13.5,
-                background: 'var(--surface)',
-                border: '1.5px solid var(--border)',
-                borderRadius: 8,
-                color: 'var(--text-primary)',
-                outline: 'none',
-                cursor: 'pointer'
-              }}
-            >
-              <option value="Paid Guest">Paid Guest</option>
-              <option value="Classified Ads">Classified Ads</option>
-              <option value="Brand Mention">Brand Mention</option>
-              <option value="Business Listing">Business Listing</option>
-            </select>
-          </div>
+          {/* MODE A: IF FILE IS UPLOADED -> Hide Single Site Form, Show File Card & Calculate SP for File */}
+          {outreachFileName ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  Selected File for Import
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { setOutreachFileName(''); setOutreachCsvRows([]); setOutreachError(''); }}
+                  style={{ border: 'none', background: 'none', color: '#dc2626', fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)', fontSize: 12.5, padding: 0 }}
+                >
+                  Remove
+                </button>
+              </div>
 
-          <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
-
-          {/* Import Outreach Sites section */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Import Outreach Sites</span>
-              <button
-                type="button"
-                onClick={downloadOutreachSampleTemplate}
-                style={{ border: 'none', background: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)', fontSize: 12.5, padding: 0 }}
-              >
-                Download sample template
-              </button>
-            </div>
-            <input
-              type="file"
-              accept=".csv,.tsv,.xls,.xlsx"
-              id="outreach-csv-upload"
-              style={{ display: 'none' }}
-              onChange={e => { handleOutreachFileUpload(e.target.files[0]); e.target.value = ''; }}
-            />
-            <div
-              style={{
-                border: `2px dashed ${outreachFileName ? 'var(--accent)' : '#d1d5db'}`,
+              <div style={{
+                border: '2px dashed var(--accent)',
                 borderRadius: 10,
                 padding: '20px',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: 8,
-                background: outreachFileName ? 'var(--accent-light)' : 'var(--surface-2)',
-                cursor: 'pointer'
-              }}
-              onClick={() => document.getElementById('outreach-csv-upload').click()}
-              onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--accent)'; }}
-              onDragLeave={e => { e.currentTarget.style.borderColor = outreachFileName ? 'var(--accent)' : '#d1d5db'; }}
-              onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--accent)'; handleOutreachFileUpload(e.dataTransfer.files[0]); }}
-              onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
-              onMouseLeave={e => { if (!outreachFileName) e.currentTarget.style.borderColor = '#d1d5db'; }}
-            >
-              {outreachFileName ? (
+                background: 'var(--accent-light)',
+              }}>
+                <Check size={22} color="var(--accent)" />
+                <span style={{ fontSize: 14, color: 'var(--accent)', fontWeight: 600 }}>{outreachFileName}</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {outreachCsvRows.length} site{outreachCsvRows.length !== 1 ? 's' : ''} parsed and ready to import
+                </span>
+              </div>
+
+              {/* Calculate SP for File */}
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+                padding: '14px 16px',
+                background: 'var(--surface-2)',
+                border: '1.5px solid var(--border)',
+                borderRadius: 10,
+                marginTop: 4
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', cursor: 'pointer' }} onClick={() => setCalculateSp(p => !p)}>
+                    Calculate Selling Price
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setCalculateSp(p => !p)}
+                    style={{
+                      width: 36, height: 20, borderRadius: 10,
+                      background: calculateSp ? '#7c3aed' : '#cbd5e1',
+                      border: 'none', padding: 2, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center',
+                      justifyContent: calculateSp ? 'flex-end' : 'flex-start',
+                      transition: 'background-color 0.2s'
+                    }}
+                  >
+                    <div style={{
+                      width: 16, height: 16, borderRadius: '50%',
+                      background: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                    }} />
+                  </button>
+                </div>
+
+                {calculateSp && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}></span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        placeholder="Enter value"
+                        value={spPercentage}
+                        onChange={(e) => setSpPercentage(e.target.value)}
+                        style={{
+                          width: 120,
+                          padding: '8px 12px',
+                          fontSize: 13.5,
+                          background: 'var(--surface)',
+                          border: '1.5px solid var(--border)',
+                          borderRadius: 8,
+                          color: 'var(--text-primary)',
+                          outline: 'none'
+                        }}
+                      />
+                      <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>%</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* MODE B & INITIAL: SINGLE SITE ENTRY & OPTIONAL FILE DROPZONE */
+            <>
+              {/* Single Site Form */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                    Outreach Site*
+                  </label>
+                  {newOutreachLink && (
+                    <button
+                      type="button"
+                      onClick={() => setNewOutreachLink('')}
+                      style={{ border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: 11.5, cursor: 'pointer', padding: 0 }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  placeholder="e.g. https://example.com/outreach"
+                  value={newOutreachLink}
+                  onChange={(e) => { setNewOutreachLink(e.target.value); setOutreachError(''); }}
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    fontSize: 13.5,
+                    background: 'var(--surface)',
+                    border: '1.5px solid var(--border)',
+                    borderRadius: 8,
+                    color: 'var(--text-primary)',
+                    outline: 'none'
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAddOutreachLink();
+                  }}
+                />
+                <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                  Supports full URLs and plain domains (e.g. google.com)
+                </span>
+              </div>
+
+              {/* Show Single Site additional fields once URL is typed */}
+              {newOutreachLink.trim() !== '' && (
                 <>
-                  <Check size={20} color="var(--accent)" />
-                  <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>{outreachFileName}</span>
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{outreachCsvRows.length} site{outreachCsvRows.length !== 1 ? 's' : ''} ready to import</span>
-                </>
-              ) : (
-                <>
-                  <Upload size={20} color="var(--text-muted)" />
-                  <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>Click to upload or drag a file</span>
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>CSV, TSV, Excel · Columns: URL, Type</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                      Type*
+                    </label>
+                    <select
+                      value={newOutreachType}
+                      onChange={(e) => setNewOutreachType(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        fontSize: 13.5,
+                        background: 'var(--surface)',
+                        border: '1.5px solid var(--border)',
+                        borderRadius: 8,
+                        color: 'var(--text-primary)',
+                        outline: 'none',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <option value="Paid Guest">Paid Guest</option>
+                      <option value="Classified Ads">Classified Ads</option>
+                      <option value="Brand Mention">Brand Mention</option>
+                      <option value="Business Listing">Business Listing</option>
+                    </select>
+                  </div>
+
+                  {(newOutreachType === 'Paid Guest' || newOutreachType === 'Paid Guest Post') && (
+                    <>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                          Sourced*
+                        </label>
+                        <select
+                          value={sourcedOption}
+                          onChange={(e) => setSourcedOption(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '10px 14px',
+                            fontSize: 13.5,
+                            background: 'var(--surface)',
+                            border: '1.5px solid var(--border)',
+                            borderRadius: 8,
+                            color: 'var(--text-primary)',
+                            outline: 'none',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <option value="internal">Internal</option>
+                          <option value="agency">Agency</option>
+                        </select>
+                      </div>
+
+                      {sourcedOption === 'agency' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                            Agency Name*
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Write agency name..."
+                            value={agencyName}
+                            onChange={(e) => setAgencyName(e.target.value)}
+                            style={{
+                              width: '100%',
+                              padding: '10px 14px',
+                              fontSize: 13.5,
+                              background: 'var(--surface)',
+                              border: '1.5px solid var(--border)',
+                              borderRadius: 8,
+                              color: 'var(--text-primary)',
+                              outline: 'none'
+                            }}
+                          />
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                          Landing Price *
+                        </label>
+                        <input
+                          type="number"
+                          placeholder="e.g. 100"
+                          value={outreachLandingPrice}
+                          onChange={(e) => setOutreachLandingPrice(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '10px 14px',
+                            fontSize: 13.5,
+                            background: 'var(--surface)',
+                            border: '1.5px solid var(--border)',
+                            borderRadius: 8,
+                            color: 'var(--text-primary)',
+                            outline: 'none'
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', cursor: 'pointer' }} onClick={() => setCalculateSp(p => !p)}>
+                            Calculate SP
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setCalculateSp(p => !p)}
+                            style={{
+                              width: 36, height: 20, borderRadius: 10,
+                              background: calculateSp ? '#7c3aed' : '#cbd5e1',
+                              border: 'none', padding: 2, cursor: 'pointer',
+                              display: 'flex', alignItems: 'center',
+                              justifyContent: calculateSp ? 'flex-end' : 'flex-start',
+                              transition: 'background-color 0.2s'
+                            }}
+                          >
+                            <div style={{
+                              width: 16, height: 16, borderRadius: '50%',
+                              background: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                            }} />
+                          </button>
+                        </div>
+
+                        {calculateSp && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 2 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                placeholder="Enter value"
+                                value={spPercentage}
+                                onChange={(e) => setSpPercentage(e.target.value)}
+                                style={{
+                                  width: 120,
+                                  padding: '8px 12px',
+                                  fontSize: 13.5,
+                                  background: 'var(--surface)',
+                                  border: '1.5px solid var(--border)',
+                                  borderRadius: 8,
+                                  color: 'var(--text-primary)',
+                                  outline: 'none'
+                                }}
+                              />
+                              <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>%</span>
+                            </div>
+                            {calculatedSellingPrice && (
+                              <span style={{ fontSize: 12.5, fontWeight: 600, color: '#7c3aed' }}>
+                                Calculated Selling Price (SP): {calculatedSellingPrice}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </>
               )}
-            </div>
-          </div>
+
+              {/* HIDE File Upload section & OR divider IF user has typed a single site link */}
+              {!newOutreachLink.trim() && (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '12px 0 6px 0' }}>
+                    <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                    <span style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: 'var(--text-muted)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '1px',
+                      padding: '3px 12px',
+                      borderRadius: 12,
+                      background: 'var(--surface-2)',
+                      border: '1.5px solid var(--border)'
+                    }}>
+                      OR
+                    </span>
+                    <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                        Import CSV / Excel <span style={{ fontSize: 11.5, fontWeight: 400, color: 'var(--text-muted)' }}>(Optional)</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={downloadOutreachSampleTemplate}
+                        style={{ border: 'none', background: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)', fontSize: 12.5, padding: 0 }}
+                      >
+                        Download sample template
+                      </button>
+                    </div>
+                    <input
+                      type="file"
+                      accept=".csv,.tsv,.xls,.xlsx"
+                      id="outreach-csv-upload"
+                      style={{ display: 'none' }}
+                      onChange={e => { handleOutreachFileUpload(e.target.files[0]); e.target.value = ''; }}
+                    />
+                    <div
+                      style={{
+                        border: '2px dashed #d1d5db',
+                        borderRadius: 10,
+                        padding: '20px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: 8,
+                        background: 'var(--surface-2)',
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => document.getElementById('outreach-csv-upload').click()}
+                      onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--accent)'; }}
+                      onDragLeave={e => { e.currentTarget.style.borderColor = '#d1d5db'; }}
+                      onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--accent)'; handleOutreachFileUpload(e.dataTransfer.files[0]); }}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+                      onMouseLeave={e => e.currentTarget.style.borderColor = '#d1d5db'}
+                    >
+                      <Upload size={20} color="var(--text-muted)" />
+                      <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>Click to upload or drag a file</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>CSV, TSV, Excel · Columns: Site, Type, Landing Price</span>
+                    </div>
+                  </div>
+                </>
+              )}
+            </>
+          )}
         </div>
       </Modal>
       {deletingOutreachLink && (
@@ -8795,28 +10163,37 @@ export default function ProjectSetupPage({ tab, user }) {
           title={`Bulk Edit Outreach Sites (${selectedOutreachIds.size} Selected)`}
           footer={<>
             <Btn variant="primary" onClick={handleBulkEditOutreachSave}>Apply Changes</Btn>
-            <Btn variant="outline" onClick={() => setShowBulkEditOutreach(false)}>Cancel</Btn>
           </>}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Type</label>
-              <select
-                value={bulkEditOutreachData.type}
-                onChange={(e) => setBulkEditOutreachData(prev => ({ ...prev, type: e.target.value }))}
-                style={{ width: '100%', padding: '10px 14px', fontSize: 13.5, background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', outline: 'none' }}
-              >
-                {OUTREACH_TYPES.map(opt => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
-            </div>
+            <Input
+              label="Rejected Reason"
+              placeholder="e.g. Low DA, High SS"
+              value={bulkEditOutreachData.rejectedReason || ''}
+              onChange={(val) => setBulkEditOutreachData(prev => ({ ...prev, rejectedReason: val }))}
+            />
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                
-              </div>
-              
+              <Input
+                label="Landing Price"
+                placeholder="e.g. 150"
+                value={bulkEditOutreachData.landingPrice || ''}
+                onChange={(val) => setBulkEditOutreachData(prev => ({ ...prev, landingPrice: val }))}
+              />
+              <Input
+                label="Selling Price %"
+                placeholder="e.g. 33%"
+                value={bulkEditOutreachData.spPercentage || ''}
+                onChange={(val) => setBulkEditOutreachData(prev => ({ ...prev, spPercentage: val }))}
+              />
             </div>
+
+            <Input
+              label="Industry Type"
+              placeholder="e.g. Technology"
+              value={bulkEditOutreachData.domainIndustry || ''}
+              onChange={(val) => setBulkEditOutreachData(prev => ({ ...prev, domainIndustry: val }))}
+            />
           </div>
         </Modal>
       )}

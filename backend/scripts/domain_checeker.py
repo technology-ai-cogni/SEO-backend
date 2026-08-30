@@ -184,9 +184,9 @@ def fetch_seranking_regional_traffic(target_info: dict, regions: list = None, ap
         full_url = f"{url}?domain={quote(domain)}&source={code}&with_subdomains=1"
         req = Request(full_url, headers=headers)
         
-        for attempt in range(2):
+        for attempt in range(3):
             try:
-                with urlopen(req, timeout=5) as resp:
+                with urlopen(req, timeout=6) as resp:
                     data = json.loads(resp.read().decode('utf-8'))
                     raw = data.get("data", data)
                     
@@ -219,11 +219,11 @@ def fetch_seranking_regional_traffic(target_info: dict, regions: list = None, ap
                         }
                     return None
             except Exception:
-                time.sleep(0.2)
+                time.sleep(0.3 * (attempt + 1))
         return None
 
     results = []
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         futures = [executor.submit(fetch_single_region, r) for r in regions]
         for future in as_completed(futures):
             res = future.result()
@@ -241,7 +241,7 @@ def format_number(val) -> str:
     if not isinstance(val, (int, float)):
         return str(val)
     if val >= 1_000_000:
-        return f"{val / 1_000_000:.2f}M ({val:,})"
+        return f"{val / 1_000_000:.1f}M ({val:,})"
     elif val >= 1_000:
         return f"{val / 1_000:.1f}K ({val:,})"
     return f"{val:,}"
@@ -266,10 +266,12 @@ def check_domain_metrics(link_input: str, rapidapi_key: str = None, regions: lis
     # RapidAPI Total Organic Traffic used for main traffic & totalTraffic (fallback to SE Ranking sum if None/0)
     org_traffic_val = da_data.get("org_traffic", 0) if isinstance(da_data, dict) else 0
     
-    # Calculate SE Ranking regional sum
+    # Calculate SE Ranking regional sum & max single region traffic
     regional_sum = sum(r.get("total_traffic", 0) for r in regional_data if isinstance(r, dict))
+    max_single_region_traffic = max((r.get("total_traffic", 0) for r in regional_data if isinstance(r, dict)), default=0)
 
-    final_traffic_val = org_traffic_val if (org_traffic_val is not None and org_traffic_val > 0) else regional_sum
+    # Ensure total traffic is never lower than a single region's traffic or regional sum
+    final_traffic_val = max(org_traffic_val or 0, max_single_region_traffic, regional_sum)
     formatted_main_traffic = format_number(final_traffic_val)
 
     # Format Top 3 Regions from SE Ranking purely for regional breakdown

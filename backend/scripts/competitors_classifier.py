@@ -338,10 +338,12 @@ def classify_urls(
     model: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Classifies a list of top URLs for a given keyword.
+    Classifies a list of top URLs for a given keyword using parallel threads.
     Checks DB cache first to avoid re-classifying existing URLs/domains.
     Returns: {"keyword": str, "results": List[Dict[str, str]]}
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     try:
         from core import db
     except Exception:
@@ -349,47 +351,68 @@ def classify_urls(
 
     session = create_http_session()
     cache: Dict[str, Dict[str, str]] = {}
-    results: List[Dict[str, str]] = []
+    uncached_urls: List[str] = []
 
     try:
+        # Step 1: Fast check in cache/DB for all URLs
         for u in urls:
             clean_u = u.strip()
             if not clean_u:
                 continue
 
             if clean_u in cache:
-                results.append(cache[clean_u])
                 continue
 
-            # 1. Check Database cache first!
             if db:
                 try:
                     db_res = db.get_url_classification(clean_u)
                     if db_res:
                         logger.info(f"DB Cache Hit for {clean_u}: {db_res['website_type']}")
                         cache[clean_u] = db_res
-                        results.append(db_res)
                         continue
                 except Exception as db_err:
                     logger.warning(f"DB lookup warning for {clean_u}: {db_err}")
 
-            # 2. Run AI Scraping & Classification if not cached
-            res = classify_url(
-                url=clean_u,
-                session=session,
-                api_key=api_key,
-                model=model
-            )
+            if clean_u not in uncached_urls:
+                uncached_urls.append(clean_u)
 
-            # 3. Save new classification to DB
-            if db:
+        # Step 2: Classify uncached URLs in parallel threads concurrently
+        if uncached_urls:
+            def process_single_url(target_u: str):
+                local_sess = create_http_session()
                 try:
-                    db.save_url_classification(clean_u, res.get("website_type", "Platform"), res.get("is_competitor", "NO"))
-                except Exception as db_save_err:
-                    logger.warning(f"DB save warning for {clean_u}: {db_save_err}")
+                    res = classify_url(
+                        url=target_u,
+                        session=local_sess,
+                        api_key=api_key,
+                        model=model,
+                    )
+                    if db:
+                        try:
+                            db.save_url_classification(target_u, res.get("website_type", "Platform"), res.get("is_competitor", "NO"))
+                        except Exception as db_save_err:
+                            logger.warning(f"DB save warning for {target_u}: {db_save_err}")
+                    return target_u, res
+                except Exception as e:
+                    logger.error(f"Error classifying URL {target_u}: {e}")
+                    fallback = {"url": target_u, "website_type": "Platform", "is_competitor": "NO"}
+                    return target_u, fallback
+                finally:
+                    local_sess.close()
 
-            cache[clean_u] = res
-            results.append(res)
+            max_workers = min(15, len(uncached_urls))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_url = {executor.submit(process_single_url, u): u for u in uncached_urls}
+                for future in as_completed(future_to_url):
+                    try:
+                        u_key, u_res = future.result()
+                        cache[u_key] = u_res
+                    except Exception as exc:
+                        u_target = future_to_url[future]
+                        cache[u_target] = {"url": u_target, "website_type": "Platform", "is_competitor": "NO"}
+
+        # Preserve original URL ordering in results
+        results = [cache[u.strip()] for u in urls if u.strip() in cache]
 
         return {
             "keyword": keyword,

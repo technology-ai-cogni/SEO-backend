@@ -185,6 +185,92 @@ function AccountUpdateModal({ open, onClose, data }) {
   );
 }
 
+function GlobalCustomAlertModal({ open, onClose, data }) {
+  if (!open || !data) return null;
+  const { title = 'Notification', message = '' } = data;
+  const isError = /required|missing|invalid|fail|error|not there|denied|cannot|already exists|low da/i.test(message);
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(15, 23, 42, 0.65)',
+        backdropFilter: 'blur(4px)',
+        zIndex: 999999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: '#ffffff',
+          borderRadius: 20,
+          width: '100%',
+          maxWidth: 440,
+          padding: '28px 30px',
+          boxShadow: '0 25px 60px -12px rgba(0, 0, 0, 0.3)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          textAlign: 'center',
+          position: 'relative'
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: '50%',
+            background: isError ? '#fef2f2' : '#f0fdf4',
+            color: isError ? '#dc2626' : '#16a34a',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 16,
+            border: `1px solid ${isError ? '#fca5a5' : '#86efac'}`
+          }}
+        >
+          {isError ? <ShieldAlert size={28} /> : <ShieldCheck size={28} />}
+        </div>
+
+        <h3 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: '0 0 10px 0', fontFamily: 'var(--font-display, inherit)' }}>
+          {title}
+        </h3>
+
+        <p style={{ fontSize: 13.5, color: '#475569', margin: '0 0 24px 0', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+          {message}
+        </p>
+
+        <button
+          onClick={onClose}
+          style={{
+            width: '100%',
+            padding: '11px 20px',
+            fontSize: 14,
+            fontWeight: 700,
+            color: '#ffffff',
+            background: isError ? '#dc2626' : '#0f172a',
+            border: 'none',
+            borderRadius: 10,
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+            transition: 'opacity 0.15s'
+          }}
+          onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
+          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+        >
+          OK
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const mockProject = {
   domain: "owis.org",
   name: "OWIS",
@@ -214,6 +300,7 @@ const PAGE_TITLES = {
   'search-visibility/ai-analysis': { title: 'Top Pages (AI)', subtitle: 'Mentions and Citations analytics across AI Search Engines' },
   'search-visibility/keywords': { title: 'Keywords', subtitle: `${totalKeywordCount.toLocaleString()} tracked keywords` },
   'search-visibility/top-pages': { title: 'Top Pages (Organic)', subtitle: 'Best performing pages by organic traffic' },
+  'search-visibility/outreach': { title: 'Outreach', subtitle: 'Manage guest posts, classified ads, brand mentions, and business listings' },
   'search-visibility/link-outreach': { title: 'Link Outreach', subtitle: 'Manage backlink acquisition campaigns' },
   'search-visibility/off-page-scheduler': { title: 'Off-Page', subtitle: 'Schedule off-page SEO activities' },
   'search-visibility/calendar': { title: 'Calendar', subtitle: 'Operations planning across Saved, Scheduled, and Approved activities' },
@@ -333,6 +420,7 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
     case 'ai-visibility/overview':
     case 'ai-visibility/brand-performance':
     case 'ai-visibility/competitor-insights': return <AIVisibilityPage />;
+    case 'search-visibility/outreach': return <ProjectSetupPage user={user} tab="Outreach" isStandaloneOutreach={true} />;
     case 'search-visibility/off-page-scheduler': return <OffPageSchedulerPage user={user} />;
     case 'search-visibility/calendar': return <CalendarPage user={user} />;
     case 'search-visibility/activity-table': return <ActivityTablePage user={user} />;
@@ -371,6 +459,17 @@ export default function App() {
   });
 
   const [accountUpdateModal, setAccountUpdateModal] = useState(null);
+  const [customAlertModal, setCustomAlertModal] = useState({ open: false, title: 'Notification', message: '' });
+
+  useEffect(() => {
+    window.alert = (msg) => {
+      setCustomAlertModal({
+        open: true,
+        title: 'Notification',
+        message: String(msg || '')
+      });
+    };
+  }, []);
 
   // Track user in a ref to avoid stale closures during async redirects (like LoginPage timeout)
   const userRef = useRef(user);
@@ -457,7 +556,7 @@ export default function App() {
         justLoggedInRef.current = false;
         setActivePath(currentUser?.role?.toUpperCase() === 'VENDOR' ? 'search-visibility/off-page-scheduler' : 'search-visibility/position-analysis');
       } else {
-        setActivePath(currentUser?.role?.toUpperCase() === 'VENDOR' ? 'search-visibility/off-page-scheduler' : 'home');
+        setActivePath('home');
       }
     } else if (!currentUser && (path !== 'landing' && path !== 'login' && path !== 'signup' && path !== 'admin-login')) {
       setActivePath('landing');
@@ -508,6 +607,7 @@ export default function App() {
       <>
         {renderPage(activePath, handleNavigate, user, handleLoginSuccess, handleLogout)}
         <AccountUpdateModal open={Boolean(accountUpdateModal)} data={accountUpdateModal} onClose={() => setAccountUpdateModal(null)} />
+        <GlobalCustomAlertModal open={customAlertModal.open} data={customAlertModal} onClose={() => setCustomAlertModal(prev => ({ ...prev, open: false }))} />
       </>
     );
   }
@@ -529,6 +629,7 @@ export default function App() {
         </main>
       </div>
       <AccountUpdateModal open={Boolean(accountUpdateModal)} data={accountUpdateModal} onClose={() => setAccountUpdateModal(null)} />
+      <GlobalCustomAlertModal open={customAlertModal.open} data={customAlertModal} onClose={() => setCustomAlertModal(prev => ({ ...prev, open: false }))} />
     </div>
   );
 }

@@ -25,7 +25,7 @@ def _should_retry(rank, matched_links):
     """Flags a keyword for retry if top_links is empty or if rank is 101 and fewer than 30 links were fetched."""
     if not matched_links or len(matched_links) == 0:
         return True
-    if (rank is None or rank == 101) and len(matched_links) < 30:
+    if (rank is None or rank == 101) and len(matched_links) < 25:
         return True
     return False
 

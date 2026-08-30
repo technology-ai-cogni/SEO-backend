@@ -1145,6 +1145,11 @@ def _brightdata_fetch(target_url):
         print(f"[Bright Data Error] Failed for URL: '{target_url}' | Reason: {last_error}")
         return None
 
+    brd_error = resp.headers.get("x-brd-err-msg") or resp.headers.get("x-brd-error")
+    if brd_error:
+        print(f"[Bright Data API Error] {brd_error} | URL: '{target_url}'")
+        return None
+
     content_type = resp.headers.get("content-type", "")
     if "application/json" in content_type:
         try:

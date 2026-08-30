@@ -265,6 +265,10 @@ function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
     napBcEmail: row.nap_bc_email || null,
     businessCentres: row.business_centres || null,
     brandedTerms: row.branded_terms || null,
+    industry: row.industry || row.industry_type || row.domain_industry || row.category || null,
+    industry_type: row.industry_type || row.industry || row.domain_industry || row.category || null,
+    domain_industry: row.domain_industry || row.industry || row.industry_type || row.category || null,
+    target_regions: Array.isArray(row.target_regions) ? row.target_regions : (row.target_regions ? [row.target_regions] : []),
   };
 }
 
@@ -430,7 +434,7 @@ export async function fetchDomainRows() {
   return mergedDomains.map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
 }
 
-export async function createProject({ name, domain, regions, platforms, da, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, nap_bc_phone, nap_bc_website, nap_bc_address, nap_bc_email, business_centres, branded_terms, users }) {
+export async function createProject({ name, domain, regions, platforms, da, industry, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, nap_bc_phone, nap_bc_website, nap_bc_address, nap_bc_email, business_centres, branded_terms, users }) {
   const normDomain = String(domain || '').trim().toLowerCase();
   const normName = String(name || '').trim().toLowerCase();
   const slug = slugify(name);
@@ -469,6 +473,8 @@ export async function createProject({ name, domain, regions, platforms, da, nap_
       target_regions: regions || [],
       platforms: (platforms || []).map(v => PLATFORM_LABELS[v] || v),
       domain_authority: da != null ? String(da) : null,
+      industry: industry || null,
+      industry_type: industry || null,
       nap_business_centre: nap_business_centre || null,
       nap_phone: nap_phone || null,
       nap_website: nap_website || null,
@@ -505,6 +511,8 @@ export async function createProject({ name, domain, regions, platforms, da, nap_
         target_regions: regions || [],
         platforms: (platforms || []).map(v => PLATFORM_LABELS[v] || v),
         domain_authority: da != null ? String(da) : null,
+        industry: industry || null,
+        industry_type: industry || null,
         nap_business_centre: nap_business_centre || null,
         nap_phone: nap_phone || null,
         nap_website: nap_website || null,
@@ -549,6 +557,8 @@ export async function createProject({ name, domain, regions, platforms, da, nap_
         target_regions: regions || [],
         platforms: (platforms || []).map(v => PLATFORM_LABELS[v] || v),
         domain_authority: da != null ? String(da) : null,
+        industry: industry || null,
+        industry_type: industry || null,
         nap_business_centre: nap_business_centre || null,
         nap_phone: nap_phone || null,
         nap_website: nap_website || null,
@@ -568,13 +578,14 @@ export async function createProject({ name, domain, regions, platforms, da, nap_
       })
       .select()
       .single();
+
     supabaseDomainData = insertedDomain;
   } catch (e) {
     console.warn('[createProject] Supabase domain insert failed:', e);
   }
 
   createAuditLogApi({
-    user_email: getActiveUserEmail(),
+    userEmail: getActiveUserEmail(),
     action: `Project Created: ${domain}`,
     status: 'Success',
     project_name: slug,
@@ -589,6 +600,8 @@ export async function createProject({ name, domain, regions, platforms, da, nap_
     target_regions: regions || [],
     platforms: (platforms || []).map(v => PLATFORM_LABELS[v] || v),
     domain_authority: da != null ? String(da) : null,
+    industry: industry || null,
+    industry_type: industry || null,
     users: users || [],
   };
 
@@ -607,6 +620,11 @@ export async function updateDomainRow(id, updates) {
     if ('targetPlatforms' in updates) dbUpdates.platforms = updates.targetPlatforms;
     if ('da' in updates) dbUpdates.domain_authority = updates.da != null ? String(updates.da) : null;
     if ('traffic' in updates) dbUpdates.traffic = String(updates.traffic);
+    if ('industry' in updates || 'industry_type' in updates || 'domain_industry' in updates || 'category' in updates) {
+      const indVal = updates.industry || updates.industry_type || updates.domain_industry || updates.category || '';
+      dbUpdates.industry = indVal;
+      dbUpdates.industry_type = indVal;
+    }
     if ('status' in updates) {
       dbUpdates.status = updates.status;
       dbUpdates.is_active = updates.status === 'Active';
@@ -639,6 +657,11 @@ export async function updateDomainRow(id, updates) {
   if ('targetPlatforms' in updates) dbUpdates.platforms = updates.targetPlatforms;
   if ('da' in updates) dbUpdates.domain_authority = updates.da != null ? String(updates.da) : null;
   if ('traffic' in updates) dbUpdates.traffic = String(updates.traffic);
+  if ('industry' in updates || 'industry_type' in updates || 'domain_industry' in updates || 'category' in updates) {
+    const indVal = updates.industry || updates.industry_type || updates.domain_industry || updates.category || '';
+    dbUpdates.industry = indVal;
+    dbUpdates.industry_type = indVal;
+  }
   if ('status' in updates) {
     dbUpdates.status = updates.status;
     dbUpdates.is_active = updates.status === 'Active';
@@ -659,9 +682,25 @@ export async function updateDomainRow(id, updates) {
   if ('brandedTerms' in updates) dbUpdates.branded_terms = updates.brandedTerms;
 
   const { data, error } = await supabase.from('domains').update(dbUpdates).eq('id', id).select().single();
-  if (error) throw error;
-  const kwCounts = await fetchKwCountsForSlug(data.project_slug);
-  return domainRowToProject(data, kwCounts);
+
+  // Also sync to FastAPI backend PostgreSQL database
+  try {
+    const projSlug = data?.project_slug || updates.project_slug || updates.slug;
+    if (projSlug) {
+      await fetch(`${CATEGORY_API_BASE}/domains/${projSlug}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dbUpdates)
+      }).catch(() => {});
+    }
+  } catch (e) {
+    console.warn('[updateDomainRow] FastAPI PATCH /domains sync skipped:', e);
+  }
+
+  if (error && !data) throw error;
+  const targetData = data || { id, ...dbUpdates };
+  const kwCounts = await fetchKwCountsForSlug(targetData.project_slug || '');
+  return domainRowToProject(targetData, kwCounts);
 }
 
 export async function deleteDomainRow(id, slug) {
@@ -1873,12 +1912,12 @@ export async function runAiAnalysis(projectSlug, keyword, aiMode, domain, countr
 
 
 
-export async function classifyCompetitorUrls(urls, keyword = '') {
+export async function classifyCompetitorUrls(urls, keyword = '', projectSlug = '') {
   if (!urls || urls.length === 0) return [];
   const res = await fetch(`${CATEGORY_API_BASE}/competitors/classify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ urls, keyword }),
+    body: JSON.stringify({ urls, keyword, project_slug: projectSlug }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
@@ -2473,15 +2512,29 @@ export async function fetchOutreachSitesApi(projectSlug) {
   return [];
 }
 
-export async function addOutreachSiteApi(projectSlug, url, regions = null, type = 'Paid Guest') {
+export async function addOutreachSiteApi(projectSlug, url, regions = null, type = 'Paid Guest', extraFields = {}) {
   if (!projectSlug) throw new Error('Project slug is required');
   let backendSite = null;
+
+  const normalizedExtra = {};
+  for (const [k, v] of Object.entries(extraFields || {})) {
+    if (k === 'landingPrice') normalizedExtra.landing_price = v;
+    else if (k === 'sellingPrice') normalizedExtra.selling_price = v;
+    else if (k === 'spPercentage') normalizedExtra.sp_percentage = v;
+    else if (k === 'domainIndustry') normalizedExtra.domain_industry = v;
+    else if (k === 'sourcedOption' || k === 'sourcedBy') normalizedExtra.sourced_by = v;
+    else if (k === 'agencyName') normalizedExtra.agency_name = v;
+    else if (k === 'calculateSp') normalizedExtra.calculate_sp = Boolean(v);
+    else if (k === 'rejectedReason') normalizedExtra.rejected_reason = v;
+    else normalizedExtra[k] = v;
+  }
+
   // Try backend
   try {
     const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, regions, type })
+      body: JSON.stringify({ url, regions, type, ...normalizedExtra })
     });
     if (res.ok) {
       const data = await res.json();
@@ -2497,7 +2550,14 @@ export async function addOutreachSiteApi(projectSlug, url, regions = null, type 
   if (supabase) {
     try {
       const domain = url.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').split('?')[0];
-      const supabaseRow = { project_slug: projectSlug, url, domain, type, ...(regions ? { metrics_json: { regions } } : {}) };
+      const supabaseRow = {
+        project_slug: projectSlug,
+        url,
+        domain,
+        type,
+        ...normalizedExtra,
+        ...(regions ? { metrics_json: { regions } } : {})
+      };
       if (backendSite?.id) {
         await supabase.from('outreach_sites').upsert({ ...supabaseRow, id: backendSite.id }, { onConflict: 'id' });
       } else {
@@ -2534,12 +2594,24 @@ export async function deleteOutreachSiteApi(projectSlug, siteId) {
 
 export async function updateOutreachSiteApi(projectSlug, siteId, updates) {
   if (!projectSlug || !siteId) return;
+  const normalizedUpdates = {};
+  for (const [k, v] of Object.entries(updates || {})) {
+    if (k === 'landingPrice') normalizedUpdates.landing_price = v;
+    else if (k === 'sellingPrice') normalizedUpdates.selling_price = v;
+    else if (k === 'spPercentage') normalizedUpdates.sp_percentage = v;
+    else if (k === 'domainIndustry') normalizedUpdates.domain_industry = v;
+    else if (k === 'sourcedOption' || k === 'sourcedBy') normalizedUpdates.sourced_by = v;
+    else if (k === 'agencyName') normalizedUpdates.agency_name = v;
+    else if (k === 'calculateSp') normalizedUpdates.calculate_sp = Boolean(v);
+    else if (k === 'rejectedReason') normalizedUpdates.rejected_reason = v;
+    else normalizedUpdates[k] = v;
+  }
   // Backend update
   try {
     const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach/${siteId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ updates })
+      body: JSON.stringify({ updates: normalizedUpdates })
     });
     if (!res.ok) console.warn('[updateOutreachSiteApi] Backend update failed');
   } catch (e) {
@@ -2548,7 +2620,7 @@ export async function updateOutreachSiteApi(projectSlug, siteId, updates) {
   // Supabase update
   if (supabase) {
     try {
-      await supabase.from('outreach_sites').update(updates).eq('id', siteId);
+      await supabase.from('outreach_sites').update(normalizedUpdates).eq('id', siteId);
     } catch (e) {
       console.warn('[updateOutreachSiteApi] Supabase update failed:', e);
     }
@@ -2580,12 +2652,24 @@ export async function bulkDeleteOutreachSitesApi(projectSlug, ids) {
 
 export async function bulkUpdateOutreachSitesApi(projectSlug, ids, updates) {
   if (!projectSlug || !ids || !ids.length) return;
+  const normalizedUpdates = {};
+  for (const [k, v] of Object.entries(updates || {})) {
+    if (k === 'landingPrice') normalizedUpdates.landing_price = v;
+    else if (k === 'sellingPrice') normalizedUpdates.selling_price = v;
+    else if (k === 'spPercentage') normalizedUpdates.sp_percentage = v;
+    else if (k === 'domainIndustry') normalizedUpdates.domain_industry = v;
+    else if (k === 'sourcedOption' || k === 'sourcedBy') normalizedUpdates.sourced_by = v;
+    else if (k === 'agencyName') normalizedUpdates.agency_name = v;
+    else if (k === 'calculateSp') normalizedUpdates.calculate_sp = Boolean(v);
+    else if (k === 'rejectedReason') normalizedUpdates.rejected_reason = v;
+    else normalizedUpdates[k] = v;
+  }
   // Backend bulk update
   try {
     const res = await fetch(`${CATEGORY_API_BASE}/projects/${encodeURIComponent(projectSlug)}/outreach/bulk-update`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids, updates })
+      body: JSON.stringify({ ids, updates: normalizedUpdates })
     });
     if (!res.ok) console.warn('[bulkUpdateOutreachSitesApi] Backend bulk update failed');
   } catch (e) {
@@ -2595,7 +2679,7 @@ export async function bulkUpdateOutreachSitesApi(projectSlug, ids, updates) {
   if (supabase) {
     try {
       for (const id of ids) {
-        await supabase.from('outreach_sites').update(updates).eq('id', id);
+        await supabase.from('outreach_sites').update(normalizedUpdates).eq('id', id);
       }
     } catch (e) {
       console.warn('[bulkUpdateOutreachSitesApi] Supabase bulk update failed:', e);

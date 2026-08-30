@@ -25,9 +25,11 @@ state surviving a fork() boundary is a classic native-crash source).
 import os
 import time
 from urllib.parse import quote, urlparse
-
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- Bright Data credentials -----------------------------------------------
 BRIGHTDATA_API_KEY = os.environ.get("BRIGHTDATA_API_KEY")
@@ -132,6 +134,11 @@ def fetch_serp_page(keyword, start=0, country_code=None, num=None):
             break
 
     if last_error is not None or resp is None:
+        return None
+
+    brd_error = resp.headers.get("x-brd-err-msg") or resp.headers.get("x-brd-error")
+    if brd_error:
+        print(f"[Bright Data API Error] {brd_error}")
         return None
 
     content_type = resp.headers.get("content-type", "")

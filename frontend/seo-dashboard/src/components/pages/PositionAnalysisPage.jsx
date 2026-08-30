@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ExternalLink, Search, ChevronDown, CheckCircle, Lock, ShieldAlert, Calendar, Sparkles } from 'lucide-react';
+import { ExternalLink, Search, ChevronDown, CheckCircle, Lock, ShieldAlert, Calendar, Sparkles, RefreshCw } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi, fetchDomainMetricsApi, runOrganicRankCheckApi } from '../../lib/projectsApi';
 import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions, canRunBrandDiscovery, isAssociateUser, canRunAiModelAnalysis, recordAiModelAnalysisRun } from '../../lib/permissions';
@@ -1329,7 +1329,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   const { mentions, cited } = computeLiveMetrics();
 
   const getRegionBadgeInfo = (project, dateVal) => {
-    const loc = (project?.target_regions || project?.location || project?.country || 'US').toLowerCase();
+    let rawLoc = project?.target_regions || project?.location || project?.country || 'US';
+    if (Array.isArray(rawLoc)) {
+      rawLoc = rawLoc.join(', ');
+    } else if (typeof rawLoc !== 'string') {
+      rawLoc = String(rawLoc || 'US');
+    }
+    const loc = rawLoc.toLowerCase();
 
     let flag = '🇺🇸';
     let code = 'US';
