@@ -135,6 +135,7 @@ from pydantic import BaseModel
 from core import db
 from services import category_checker, competitor_classifier
 from scripts.hosted_categorize import run_categorize_job_in_background
+from scripts.cluster_assigner import cluster_project as cluster_assigner_project
 from scripts.hosted_rank_check import run_rank_check_job_in_background
 from scripts.comp_analysis import find_competitors_for_rows
 from auth.router import router as auth_router
@@ -1223,13 +1224,17 @@ def get_project_clusters(project: str):
 
 @app.post("/projects/{project}/recluster")
 def recluster_project(project: str):
-    """Manually re-run the deterministic clustering pass over this
-    project's entire category list. Normally this happens automatically
-    once a job's categorization finishes -- this endpoint is for
-    re-running it on demand."""
+    """Manually re-run clustering over this project's entire category list.
+    Runs the full cluster_project() pipeline which first consolidates any
+    categories with fewer than 5 keywords (merging them into the nearest
+    major category), then re-clusters from scratch. Normally this also
+    happens automatically once a categorization job finishes -- this
+    endpoint is for re-running it on demand."""
     proj = _resolve_project_or_404(project)
-    assignment = category_checker.cluster_all_categories(proj["slug"])
-    db.replace_domain_clusters(proj["slug"], assignment)
+    # Use cluster_assigner.cluster_project() -- NOT the old cluster_all_categories().
+    # cluster_project() runs consolidate_small_categories() (min-5 check) FIRST,
+    # then re-clusters, ensuring no category ends up with < 5 keywords.
+    assignment = cluster_assigner_project(proj["slug"])
     try:
         db.insert_audit_log(
             user_email="system",

@@ -336,7 +336,35 @@ def consolidate_small_categories(domain: str, min_threshold: int = 5):
             major_categories = [r["category"] for r in rows_dict if r["keyword_count"] > min_threshold]
             small_category_rows = [r for r in rows_dict if r["keyword_count"] <= min_threshold]
 
-            if not small_category_rows or not major_categories:
+            if not small_category_rows:
+                return
+
+            # Edge case: no category exceeds the threshold (e.g. small project with < 10 total KWs).
+            # Use the category with the most keywords as the single consolidation target.
+            if not major_categories:
+                majority_cat = rows_dict[0]["category"]  # rows are ORDER BY keyword_count DESC
+                print(f"[consolidate_small_categories] No major categories found for '{domain}' -- all categories have <= {min_threshold} KWs. Merging all into majority category: '{majority_cat}'")
+                for row in rows_dict[1:]:  # skip the majority category itself
+                    small_cat = row["category"]
+                    if small_cat == majority_cat:
+                        continue
+                    print(f"[consolidate_small_categories] Merging '{small_cat}' ({row['keyword_count']} KWs) -> '{majority_cat}'")
+                    conn.execute(db.text("""
+                        UPDATE keyword_categories
+                        SET category = :new_category
+                        WHERE project_name = :project_name AND category = :old_category
+                    """), {
+                        "new_category": majority_cat,
+                        "project_name": domain,
+                        "old_category": small_cat
+                    })
+                    conn.execute(db.text("""
+                        DELETE FROM categories
+                        WHERE project_name = :project_name AND name = :old_category
+                    """), {
+                        "project_name": domain,
+                        "old_category": small_cat
+                    })
                 return
 
             print(f"[consolidate_small_categories] Found {len(small_category_rows)} small categories (<= {min_threshold} KWs) and {len(major_categories)} major categories for '{domain}'. Batch mapping using SERP metadata...")
