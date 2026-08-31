@@ -166,7 +166,7 @@ export default function OffPageSchedulerPage({ user }) {
   const isViewer = isReadOnlyUser(user);
   const isVendor = user?.category === 'Vendor' || user?.role?.toUpperCase() === 'VENDOR';
   const isAdmin = user?.role?.toUpperCase() === 'ADMIN';
-  const vendorProject = !isAdmin && user?.assigned_project && user.assigned_project !== 'All Projects' ? user.assigned_project : null;
+  const vendorProject = !isAdmin && user?.assigned_project && user.assigned_project !== 'All Projects' && user.assigned_project.toLowerCase() !== 'none' ? user.assigned_project : null;
   const userCanEdit = canEdit(user);
   const userCanUpdate = canUpdate(user);
   const userCanDelete = canDelete(user);
@@ -492,14 +492,17 @@ export default function OffPageSchedulerPage({ user }) {
 
   const projectList = useMemo(() => {
     const rawList = (dbProjects.length > 0 ? dbProjects : mockProjects).filter(p => p.status !== 'Inactive' && p.isActive !== false);
-    if (!vendorProject) return rawList;
-    const vProjLower = vendorProject.toLowerCase().trim();
-    const filtered = rawList.filter(p => {
-      const pName = String(p.name || p.project_name || p.domain || p.slug || '').toLowerCase();
-      return pName.includes(vProjLower) || vProjLower.includes(pName);
-    });
-    return filtered.length > 0 ? filtered : [{ slug: 'vendor-assigned', name: vendorProject, domain: vendorProject, status: 'Active' }];
-  }, [dbProjects, vendorProject]);
+    if (!isAdmin) {
+      if (!vendorProject) return [];
+      const vProjLower = vendorProject.toLowerCase().trim();
+      const filtered = rawList.filter(p => {
+        const pName = String(p.name || p.project_name || p.domain || p.slug || '').toLowerCase();
+        return pName.includes(vProjLower) || vProjLower.includes(pName);
+      });
+      return filtered.length > 0 ? filtered : [{ slug: 'assigned-proj', name: vendorProject, domain: vendorProject, status: 'Active' }];
+    }
+    return rawList;
+  }, [dbProjects, vendorProject, isAdmin]);
 
   // --- Initial Mock Data for Imports ---
   const initialImports = [
@@ -704,24 +707,30 @@ export default function OffPageSchedulerPage({ user }) {
     return () => { isMounted = false; };
   }, []);
 
-  // Vendor project scoped datasets & schedules
+  // Scoped datasets & schedules for allocated projects
   const filteredImports = useMemo(() => {
-    if (!vendorProject) return imports;
-    const vProjLower = vendorProject.toLowerCase().trim();
-    return imports.filter(imp => {
-      const pName = String(imp.project || imp.project_name || imp.domain || '').toLowerCase();
-      return pName.includes(vProjLower) || vProjLower.includes(pName);
-    });
-  }, [imports, vendorProject]);
+    if (!isAdmin) {
+      if (!vendorProject) return [];
+      const vProjLower = vendorProject.toLowerCase().trim();
+      return imports.filter(imp => {
+        const pName = String(imp.project || imp.project_name || imp.domain || '').toLowerCase();
+        return pName.includes(vProjLower) || vProjLower.includes(pName);
+      });
+    }
+    return imports;
+  }, [imports, vendorProject, isAdmin]);
 
   const filteredSchedules = useMemo(() => {
-    if (!vendorProject) return schedules;
-    const vProjLower = vendorProject.toLowerCase().trim();
-    return schedules.filter(sch => {
-      const pName = String(sch.project || sch.project_name || sch.domain || '').toLowerCase();
-      return pName.includes(vProjLower) || vProjLower.includes(pName);
-    });
-  }, [schedules, vendorProject]);
+    if (!isAdmin) {
+      if (!vendorProject) return [];
+      const vProjLower = vendorProject.toLowerCase().trim();
+      return schedules.filter(sch => {
+        const pName = String(sch.project || sch.project_name || sch.domain || '').toLowerCase();
+        return pName.includes(vProjLower) || vProjLower.includes(pName);
+      });
+    }
+    return schedules;
+  }, [schedules, vendorProject, isAdmin]);
 
   const handleDownloadMonthlyOperations = async () => {
     try {
@@ -1295,6 +1304,31 @@ export default function OffPageSchedulerPage({ user }) {
     });
     return sorted;
   }, [activeDatasetRows]);
+
+  // Restriction: When a project is not allocated to an associate or to anyone (non-admin),
+  // they should not be able to see the off-page
+  if (!isAdmin && !vendorProject) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center', background: '#f8fafc', minHeight: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{
+          maxWidth: 480,
+          background: '#ffffff',
+          padding: 36,
+          borderRadius: 16,
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+        }}>
+          <div style={{ width: 52, height: 52, borderRadius: 14, background: '#f1f5f9', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto', border: '1px solid #cbd5e1' }}>
+            <Lock size={26} />
+          </div>
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>No Project Allocated</h2>
+          <p style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.5, margin: 0 }}>
+            Off-Page is hidden and restricted because no project is allocated to your account. Please contact an administrator to assign a project from the Users page.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // Render Dataset details view when selected
   if (selectedDataset) {
@@ -2746,29 +2780,6 @@ export default function OffPageSchedulerPage({ user }) {
     );
   }
 
-  if (!isAdmin && !vendorProject) {
-    return (
-      <div style={{ padding: 40, textAlign: 'center', background: '#f8fafc', minHeight: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{
-          maxWidth: 480,
-          background: '#ffffff',
-          padding: 36,
-          borderRadius: 16,
-          border: '1px solid #e2e8f0',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
-        }}>
-          <div style={{ width: 52, height: 52, borderRadius: 14, background: '#fff7ed', color: '#ea580c', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto', border: '1px solid #fed7aa' }}>
-            <Lock size={26} />
-          </div>
-          <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>No Project Assigned</h2>
-          <p style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.5, margin: 0 }}>
-            Off-Page is hidden and restricted until a project is allotted to your account by a system Administrator. Please contact your admin to assign a project from the Users page.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 0 }}>
       {/* Header Panel with Title & Top-Right Button */}
@@ -2951,31 +2962,6 @@ export default function OffPageSchedulerPage({ user }) {
         </div>
       </div>
 
-      {/* Vendor Project Scope Alert Banner */}
-      {vendorProject && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          background: '#fff7ed',
-          border: '1.5px solid #fed7aa',
-          padding: '12px 18px',
-          borderRadius: 12,
-          marginBottom: 20,
-          color: '#c2410c',
-          boxShadow: '0 2px 4px rgba(249, 115, 22, 0.08)'
-        }}>
-          <ShieldCheck size={20} color="#ea580c" />
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 800, color: '#9a3412' }}>
-              Assigned Project Scope Active
-            </div>
-            <div style={{ fontSize: 12.5, color: '#c2410c', marginTop: 2 }}>
-              Your account is scoped to <strong>"{vendorProject}"</strong>. Showing monthly operations data and datasets for this assigned project only.
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Modern Tabs Navigation */}
       <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid var(--border)', marginBottom: 24 }}>

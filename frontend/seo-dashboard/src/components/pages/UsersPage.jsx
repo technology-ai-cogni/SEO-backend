@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Users, UserPlus, Shield, CheckCircle, AlertCircle, RefreshCw, X, Search,
-  Trash2, Eye, EyeOff, UserCheck, UserX, Key, Mail, User, Save, Layers, Lock, ChevronDown, Calendar
+  Trash2, Eye, EyeOff, UserCheck, UserX, Key, Mail, User, Save, Layers, Lock, ChevronDown, Calendar, Info
 } from 'lucide-react';
 import {
   hasPermission, PERMISSIONS, CATEGORIES, ROLES, ROLE_DISPLAY_NAMES, CATEGORY_ROLES_MAP
@@ -448,6 +448,7 @@ export default function UsersPage({ user, onNavigate }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [showModuleInfo, setShowModuleInfo] = useState(false);
   const [attendanceRecords, setAttendanceRecords] = useState(() => {
     try {
       const saved = localStorage.getItem('seo_users_attendance');
@@ -512,7 +513,7 @@ export default function UsersPage({ user, onNavigate }) {
     role: ROLES.INTERNAL_ASSOCIATE,
     section_access: 'Default',
     permissions: 'Default',
-    assigned_project: 'All Projects',
+    assigned_project: 'None',
     status: 'Active'
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -532,12 +533,13 @@ export default function UsersPage({ user, onNavigate }) {
       (data || []).forEach(u => {
         const uRole = u.role?.toUpperCase() || ROLES.INTERNAL_ASSOCIATE;
         const uCat = deriveCategoryFromRole(uRole, u.category);
+        const defaultProj = uRole === 'ADMIN' ? 'All Projects' : (u.assigned_project && u.assigned_project !== 'All Projects' ? u.assigned_project : 'None');
         map[u.id] = {
           category: uCat,
           role: uRole,
           section_access: u.section_access || 'Default',
           permissions: u.permissions || 'Default',
-          assigned_project: u.assigned_project || 'All Projects',
+          assigned_project: defaultProj,
           isDirty: false
         };
       });
@@ -1351,24 +1353,24 @@ export default function UsersPage({ user, onNavigate }) {
                               {currentRoleKey !== 'ADMIN' ? (
                                 <select
                                   disabled={isSelf}
-                                  value={currentEdit.assigned_project && currentEdit.assigned_project !== 'All Projects' ? currentEdit.assigned_project : ''}
+                                  value={currentEdit.assigned_project && currentEdit.assigned_project !== 'All Projects' ? currentEdit.assigned_project : 'None'}
                                   onChange={e => handleInlineFieldChange(u.id, 'assigned_project', e.target.value)}
                                   style={{
                                     padding: '6px 8px',
                                     fontSize: 12,
-                                    fontWeight: 700,
+                                    fontWeight: 600,
                                     borderRadius: 6,
-                                    border: '1.5px solid #f97316',
-                                    background: isSelf ? '#f8fafc' : '#fff7ed',
-                                    color: isSelf ? '#94a3b8' : '#c2410c',
+                                    border: '1px solid #cbd5e1',
+                                    background: isSelf ? '#f8fafc' : '#ffffff',
+                                    color: isSelf ? '#94a3b8' : (currentEdit.assigned_project === 'None' || !currentEdit.assigned_project || currentEdit.assigned_project === 'All Projects' ? '#64748b' : '#0f172a'),
                                     cursor: isSelf ? 'not-allowed' : 'pointer',
                                     outline: 'none',
                                     width: '100%'
                                   }}
                                   title={isSelf ? "You cannot modify your own assigned project" : "Assigned project scope for this user"}
                                 >
-                                  <option value="">-- Select Project --</option>
-                                  {projectOptions.filter(p => p !== 'All Projects').map(pName => (
+                                  <option value="None">None</option>
+                                  {projectOptions.filter(p => p !== 'All Projects' && p !== 'None').map(pName => (
                                     <option key={pName} value={pName}>{pName}</option>
                                   ))}
                                 </select>
@@ -1757,8 +1759,46 @@ export default function UsersPage({ user, onNavigate }) {
               {/* Section Access & Permissions */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
-                  <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
-                    Module Access (Multiple)
+                  <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
+                    <span>Module Access</span>
+                    <span
+                      style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}
+                      onMouseEnter={() => setShowModuleInfo(true)}
+                      onMouseLeave={() => setShowModuleInfo(false)}
+                      title="You can choose multiple modules"
+                    >
+                      <Info size={13} style={{ color: '#64748b' }} />
+                      {showModuleInfo && (
+                        <div style={{
+                          position: 'absolute',
+                          bottom: '100%',
+                          left: '50%',
+                          transform: 'translateX(-50%)',
+                          marginBottom: 6,
+                          background: '#0f172a',
+                          color: '#ffffff',
+                          fontSize: 11.5,
+                          fontWeight: 500,
+                          padding: '5px 10px',
+                          borderRadius: 6,
+                          whiteSpace: 'nowrap',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
+                          zIndex: 100,
+                          pointerEvents: 'none'
+                        }}>
+                          You can choose multiple modules
+                          <div style={{
+                            position: 'absolute',
+                            top: '100%',
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            borderWidth: 4,
+                            borderStyle: 'solid',
+                            borderColor: '#0f172a transparent transparent transparent'
+                          }} />
+                        </div>
+                      )}
+                    </span>
                   </label>
                   <ModuleAccessMultiSelect
                     value={formData.section_access}
@@ -1793,26 +1833,26 @@ export default function UsersPage({ user, onNavigate }) {
               {/* Assigned Project selector for non-admin roles */}
               {(formData.role || '').toUpperCase() !== 'ADMIN' && (
                 <div style={{ marginTop: 12 }}>
-                  <label style={{ fontSize: 12.5, fontWeight: 700, color: '#c2410c', display: 'block', marginBottom: 5 }}>
+                  <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
                     Assigned Project Scope
                   </label>
                   <select
-                    value={formData.assigned_project && formData.assigned_project !== 'All Projects' ? formData.assigned_project : ''}
+                    value={formData.assigned_project && formData.assigned_project !== 'All Projects' ? formData.assigned_project : 'None'}
                     onChange={e => setFormData({ ...formData, assigned_project: e.target.value })}
                     style={{
                       width: '100%',
-                      padding: '9px 12px',
+                      padding: '8px 12px',
                       fontSize: 13,
-                      fontWeight: 700,
+                      fontWeight: 600,
                       borderRadius: 8,
-                      border: '1.5px solid #f97316',
-                      background: '#fff7ed',
-                      color: '#c2410c',
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: (!formData.assigned_project || formData.assigned_project === 'None' || formData.assigned_project === 'All Projects') ? '#64748b' : '#0f172a',
                       outline: 'none'
                     }}
                   >
-                    <option value="">-- Select Project --</option>
-                    {projectOptions.filter(p => p !== 'All Projects').map(pName => (
+                    <option value="None">None</option>
+                    {projectOptions.filter(p => p !== 'All Projects' && p !== 'None').map(pName => (
                       <option key={pName} value={pName}>{pName}</option>
                     ))}
                   </select>

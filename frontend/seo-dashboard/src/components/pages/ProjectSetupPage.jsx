@@ -6500,25 +6500,6 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                 </span>
               )}
             </div>
-            {userCanUpdate && (
-              <button
-                onClick={() => onFindCompetitors?.()}
-                disabled={findingCompetitors}
-                title="Refresh analysis"
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'none', color: 'var(--text-muted)',
-                  border: 'none', borderRadius: 6,
-                  padding: '4px', cursor: findingCompetitors ? 'default' : 'pointer',
-                  fontFamily: 'var(--font-body)', transition: 'color 0.15s',
-                }}
-                onMouseEnter={e => { if (!findingCompetitors) e.currentTarget.style.color = 'var(--text-primary)'; }}
-                onMouseLeave={e => { if (!findingCompetitors) e.currentTarget.style.color = 'var(--text-muted)'; }}
-              >
-                <RefreshCw size={15} style={{ animation: findingCompetitors ? 'spin 1s linear infinite' : 'none' }} />
-              </button>
-            )}
-
             <TableFilterDropdown
               filters={subView === 'competitors' ? competitorFilterConfigs : pagesFilterConfigs}
               rows={subView === 'competitors' ? baseFiltered : pageRows}
@@ -6571,34 +6552,51 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
             )}
           </div>
 
-          {/* Row 2: Sub-view Switcher Tabs directly below domain name */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ display: 'flex', background: 'var(--surface-2)', padding: 4, borderRadius: 9, border: '1px solid var(--border)' }}>
+          {/* Row 2: Action Buttons */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {userCanUpdate && (
               <button
-                onClick={() => setSubView('competitors')}
+                onClick={() => onFindCompetitors?.()}
+                disabled={findingCompetitors}
                 style={{
-                  padding: '6px 16px', fontSize: 13.5, fontWeight: 600, borderRadius: 7, border: 'none', cursor: 'pointer',
-                  background: subView === 'competitors' ? '#fff' : 'transparent',
-                  color: subView === 'competitors' ? 'var(--text-primary)' : 'var(--text-muted)',
-                  boxShadow: subView === 'competitors' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
-                  transition: 'all 0.15s'
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                  padding: '7px 18px', fontSize: 13.5, fontWeight: 600,
+                  cursor: findingCompetitors ? 'default' : 'pointer',
+                  fontFamily: 'var(--font-body)', opacity: findingCompetitors ? 0.7 : 1,
+                  transition: 'opacity 0.15s',
                 }}
+                onMouseEnter={e => { if (!findingCompetitors) e.currentTarget.style.opacity = '0.85'; }}
+                onMouseLeave={e => { if (!findingCompetitors) e.currentTarget.style.opacity = '1'; }}
               >
-                Competitors
+                {findingCompetitors ? (
+                  <>
+                    <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                    Finding Competitors…
+                  </>
+                ) : (
+                  'Find Competitors'
+                )}
               </button>
+            )}
+            {userCanEdit && (
               <button
-                onClick={() => setSubView('pages')}
+                onClick={() => onAddPages?.()}
                 style={{
-                  padding: '6px 16px', fontSize: 13.5, fontWeight: 600, borderRadius: 7, border: 'none', cursor: 'pointer',
-                  background: subView === 'pages' ? '#fff' : 'transparent',
-                  color: subView === 'pages' ? 'var(--text-primary)' : 'var(--text-muted)',
-                  boxShadow: subView === 'pages' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
-                  transition: 'all 0.15s'
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: '#fff', color: 'var(--text-primary)',
+                  border: '1.5px solid var(--border)', borderRadius: 8,
+                  padding: '7px 18px', fontSize: 13.5, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  transition: 'all 0.15s',
                 }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                onMouseLeave={e => e.currentTarget.style.background = '#fff'}
               >
-                Pages
+                <Plus size={15} />
+                Add Pages
               </button>
-            </div>
+            )}
             <div style={{ flex: 1 }} />
             {subView === 'competitors' && selectedIds.size > 0 && (
               <ActionsDropdown
@@ -9376,49 +9374,22 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
                   Choose project
                 </button>
               ) : (
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  {competitorSubView === 'competitors' && canUpdate(user) && (competitors || []).filter(c => {
-                    const pSlug = (c.projectSlug || c.project_slug || c.project_name || '').toLowerCase();
-                    const targetSlug = (selectedCompetitorProject?.slug || selectedCompetitorProject?.name || '').toLowerCase();
-                    return pSlug === targetSlug;
-                  }).some(c => {
-                    const typeStr = String(c.websiteType || c.type || '').trim();
-                    const isDone = typeStr && ['Official Entity', 'Listing', 'Platform'].includes(typeStr) && typeStr !== 'Desktop';
-                    return !isDone;
-                  }) && (
-                    <button
-                      onClick={() => setTriggerClassifyCompetitors(prev => prev + 1)}
-                      disabled={classifyingCompetitors}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
-                        padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: classifyingCompetitors ? 'default' : 'pointer',
-                        fontFamily: 'var(--font-body)', opacity: classifyingCompetitors ? 0.7 : 1, transition: 'all 0.15s',
-                      }}
-                      onMouseEnter={e => { if (!classifyingCompetitors) e.currentTarget.style.opacity = '0.85'; }}
-                      onMouseLeave={e => { if (!classifyingCompetitors) e.currentTarget.style.opacity = '1'; }}
-                    >
-                      <RefreshCw size={15} style={{ animation: classifyingCompetitors ? 'spin 1s linear infinite' : 'none' }} />
-                      Classify Competitors
-                    </button>
-                  )}
-                  {competitorSubView === 'pages' && canEdit(user) && (
-                    <button
-                      onClick={() => setShowAddPages(true)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
-                        padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
-                        fontFamily: 'var(--font-body)', transition: 'all 0.15s',
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
-                      onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-                    >
-                      <Plus size={15} />
-                      Add Pages
-                    </button>
-                  )}
-                </div>
+                <button
+                  onClick={handleRefreshCompetitors}
+                  disabled={competitorsRefreshing}
+                  title="Refresh competitors"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: '#fff', color: 'var(--text-muted)',
+                    border: '1.5px solid var(--border)', borderRadius: 8,
+                    padding: '8px', cursor: competitorsRefreshing ? 'default' : 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { if (!competitorsRefreshing) { e.currentTarget.style.borderColor = 'var(--border-hover)'; e.currentTarget.style.color = 'var(--text-primary)'; } }}
+                  onMouseLeave={e => { if (!competitorsRefreshing) { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; } }}
+                >
+                  <RefreshCw size={15} style={{ animation: competitorsRefreshing ? 'spin 1s linear infinite' : 'none' }} />
+                </button>
               )
             ) : (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

@@ -362,7 +362,7 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
             Your account profile ({user?.role || 'User'}) does not have permission to view or change this section. Access is restricted by default unless explicitly granted by your system Administrator.
           </p>
           <button
-            onClick={() => onNavigate(isVendor ? 'search-visibility/off-page-scheduler' : 'home')}
+            onClick={() => onNavigate(isVendor && canAccessRoute(user, 'search-visibility/off-page-scheduler') ? 'search-visibility/off-page-scheduler' : 'home')}
             style={{
               padding: '9px 20px',
               fontSize: 13,
@@ -421,7 +421,31 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
     case 'ai-visibility/brand-performance':
     case 'ai-visibility/competitor-insights': return <AIVisibilityPage />;
     case 'search-visibility/outreach': return <ProjectSetupPage user={user} tab="Outreach" isStandaloneOutreach={true} />;
-    case 'search-visibility/off-page-scheduler': return <OffPageSchedulerPage user={user} />;
+    case 'search-visibility/off-page-scheduler': {
+      if (!canAccessRoute(user, 'search-visibility/off-page-scheduler')) {
+        return (
+          <div style={{ padding: 40, textAlign: 'center', background: '#f8fafc', minHeight: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{
+              maxWidth: 480,
+              background: '#ffffff',
+              padding: 36,
+              borderRadius: 16,
+              border: '1px solid #e2e8f0',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+            }}>
+              <div style={{ width: 52, height: 52, borderRadius: 14, background: '#f1f5f9', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto', border: '1px solid #cbd5e1' }}>
+                <Lock size={26} />
+              </div>
+              <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>No Project Allocated</h2>
+              <p style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.5, margin: 0 }}>
+                Off-Page is hidden and restricted because no project is currently allocated to your account. Please contact an administrator to assign a project from the Users page.
+              </p>
+            </div>
+          </div>
+        );
+      }
+      return <OffPageSchedulerPage user={user} />;
+    }
     case 'search-visibility/calendar': return <CalendarPage user={user} />;
     case 'search-visibility/activity-table': return <AgencyPage user={user} />;
     case 'content-engine': return <ContentEnginePage />;
@@ -448,7 +472,9 @@ export default function App() {
       if (saved) {
         const uData = JSON.parse(saved);
         if (uData?.role?.toUpperCase() === 'VENDOR') {
-          return 'search-visibility/off-page-scheduler';
+          return canAccessRoute(uData, 'search-visibility/off-page-scheduler')
+            ? 'search-visibility/off-page-scheduler'
+            : 'home';
         }
         return 'search-visibility/position-analysis';
       }
@@ -477,7 +503,7 @@ export default function App() {
 
   useEffect(() => {
     userRef.current = user;
-    if (user?.role?.toUpperCase() === 'VENDOR' && activePath !== 'search-visibility/off-page-scheduler' && activePath !== 'profile' && activePath !== 'help' && activePath !== 'notifications') {
+    if (user?.role?.toUpperCase() === 'VENDOR' && canAccessRoute(user, 'search-visibility/off-page-scheduler') && activePath !== 'search-visibility/off-page-scheduler' && activePath !== 'profile' && activePath !== 'help' && activePath !== 'notifications') {
       setActivePath('search-visibility/off-page-scheduler');
     }
   }, [user, activePath]);
@@ -544,17 +570,19 @@ export default function App() {
 
   const handleNavigate = (path) => {
     const currentUser = userRef.current;
-    if (currentUser?.role?.toUpperCase() === 'VENDOR' && path !== 'profile' && path !== 'notifications' && path !== 'help' && path !== 'search-visibility/off-page-scheduler') {
+    if (currentUser?.role?.toUpperCase() === 'VENDOR' && canAccessRoute(currentUser, 'search-visibility/off-page-scheduler') && path !== 'profile' && path !== 'notifications' && path !== 'help' && path !== 'search-visibility/off-page-scheduler') {
       setActivePath('search-visibility/off-page-scheduler');
       return;
     }
 
     if (currentUser && (path === 'landing' || path === 'login' || path === 'signup' || path === 'admin-login')) {
-      setActivePath(currentUser?.role?.toUpperCase() === 'VENDOR' ? 'search-visibility/off-page-scheduler' : 'search-visibility/position-analysis');
+      const defaultVendorPath = canAccessRoute(currentUser, 'search-visibility/off-page-scheduler') ? 'search-visibility/off-page-scheduler' : 'home';
+      setActivePath(currentUser?.role?.toUpperCase() === 'VENDOR' ? defaultVendorPath : 'search-visibility/position-analysis');
     } else if (currentUser && path === 'home') {
       if (justLoggedInRef.current) {
         justLoggedInRef.current = false;
-        setActivePath(currentUser?.role?.toUpperCase() === 'VENDOR' ? 'search-visibility/off-page-scheduler' : 'search-visibility/position-analysis');
+        const defaultVendorPath = canAccessRoute(currentUser, 'search-visibility/off-page-scheduler') ? 'search-visibility/off-page-scheduler' : 'home';
+        setActivePath(currentUser?.role?.toUpperCase() === 'VENDOR' ? defaultVendorPath : 'search-visibility/position-analysis');
       } else {
         setActivePath('home');
       }
@@ -576,7 +604,8 @@ export default function App() {
     const secAccess = userData?.section_access;
 
     if (role === 'VENDOR') {
-      setActivePath('search-visibility/off-page-scheduler');
+      const defaultVendorPath = canAccessRoute(userData, 'search-visibility/off-page-scheduler') ? 'search-visibility/off-page-scheduler' : 'home';
+      setActivePath(defaultVendorPath);
     } else if (secAccess === 'Project Setup') {
       setActivePath('project-setup');
     } else if (secAccess === 'Search Visibility') {

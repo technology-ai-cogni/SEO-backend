@@ -13,18 +13,28 @@ import UsersPage from './UsersPage';
 import RecycleBinPage from './RecycleBinPage';
 import LogsPage from './LogsPage';
 import ProfilePage from './ProfilePage';
+import { canAccessRoute } from '../../lib/permissions';
 
 export default function GeneralSettingsPage({ initialTab = 'settings', user, onNavigate, onUserUpdate }) {
-  const [activeTab, setActiveTab] = useState(initialTab);
+  const canSeeUsers = canAccessRoute(user, 'users');
+  const canSeeRecycleBin = canAccessRoute(user, 'recycle-bin');
+  const canSeeLogs = canAccessRoute(user, 'logs');
 
   const tabs = [
     { id: 'settings', label: 'Account Settings', icon: SettingsIcon },
-    { id: 'users', label: 'Users', icon: Users },
-    { id: 'recycle-bin', label: 'Recycle Bin', icon: Trash2 },
-    { id: 'logs', label: 'Logs', icon: FileText },
+    ...(canSeeUsers ? [{ id: 'users', label: 'Users', icon: Users }] : []),
+    ...(canSeeRecycleBin ? [{ id: 'recycle-bin', label: 'Recycle Bin', icon: Trash2 }] : []),
+    ...(canSeeLogs ? [{ id: 'logs', label: 'Logs', icon: FileText }] : []),
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'help', label: 'Help', icon: HelpCircle },
   ];
+
+  const [activeTab, setActiveTab] = useState(() => {
+    if (initialTab === 'users' && !canSeeUsers) return 'settings';
+    if (initialTab === 'recycle-bin' && !canSeeRecycleBin) return 'settings';
+    if (initialTab === 'logs' && !canSeeLogs) return 'settings';
+    return initialTab;
+  });
 
   return (
     <div style={{ padding: '24px 32px', minHeight: '100vh', background: '#f8fafc' }}>
@@ -34,7 +44,9 @@ export default function GeneralSettingsPage({ initialTab = 'settings', user, onN
           General Settings
         </h1>
         <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0 0' }}>
-          Manage user permissions, account configurations, system notifications, logs, and recycle bin.
+          {canSeeUsers || canSeeRecycleBin || canSeeLogs
+            ? 'Manage user permissions, account configurations, system notifications, logs, and recycle bin.'
+            : 'Manage account configurations, security, and system notifications.'}
         </p>
       </div>
 

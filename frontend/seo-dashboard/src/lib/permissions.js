@@ -131,6 +131,19 @@ export function canAccessRoute(user, routePath) {
   const userRole = user.role.toUpperCase();
   if (userRole === 'ADMIN') return true;
 
+  // Off-Page restriction: when a project is not allocated to an associate or to anyone, they should not be able to see the off-page
+  if (routePath === 'search-visibility/off-page-scheduler' || routePath.startsWith('search-visibility/off-page-scheduler')) {
+    const hasAllocatedProject = Boolean(
+      user?.assigned_project &&
+      user.assigned_project.trim() !== '' &&
+      user.assigned_project.trim() !== 'All Projects' &&
+      user.assigned_project.trim().toLowerCase() !== 'none'
+    );
+    if (!hasAllocatedProject) {
+      return false;
+    }
+  }
+
   const sectionAccess = (user.section_access || 'Default').trim();
   const lowerAccess = sectionAccess.toLowerCase();
   const userPerms = (user.permissions || 'Default').trim().toLowerCase();
