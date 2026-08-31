@@ -207,11 +207,7 @@ class AIOAgent(BaseAgent):
             "Evaluate where target brands rank compared to competitor websites for this query up to rank 10.\n"
             "For each result, output on a separate line:\n"
             "[Rank Number]. **[Exact Page Title]** - [Full URL]\n\n"
-            "Example format:\n"
-            "1. **Dog Dental Chews & Treats** - https://www.dogseechew.in/collections/dental-chews\n"
-            "2. **Best Dental Chews for Dogs** - https://www.petkrewe.com/blogs/news/best-dental-chews\n\n"
-            f"Be extremely realistic, precise, and output up to 10 ranking results in {region_name}."
-        )
+           )
 
         try:
             response = generate_content_with_retry(
@@ -278,7 +274,7 @@ class AIOAgent(BaseAgent):
             keywords = []
 
         keywords_slice = keywords
-        domain_clean = client_domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0] if client_domain else "dogseechew.in"
+        domain_clean = client_domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0] if client_domain else ""
 
         try:
             kw_list_str = "\n".join([f"{i+1}. {k}" for i, k in enumerate(keywords_slice[:100])])
@@ -291,18 +287,9 @@ class AIOAgent(BaseAgent):
                 f"AUDIT TASK 2 - GOOGLE AI OVERVIEW KEYWORD VISIBILITY ({len(keywords_slice)} target keywords):\n"
                 f"Keywords:\n{kw_list_str}\n\n"
                 f"Return ONLY valid JSON in this schema:\n"
-                "{\n"
-                '  "domain_rank": 1,\n'
-                '  "others_count": 0,\n'
-                '  "mentions": 22,\n'
-                '  "cited_pages": 27,\n'
-                '  "mentioned_keywords": ["dog dental chews", "dental chews for dogs"],\n'
-                '  "keyword_ai_ranks": {"dog dental chews": 1, "dental chews for dogs": 3},\n'
-                '  "cited_pages_list": ["dog dental chews - https://www.dogseechew.in/product/dental-chews"]\n'
-                "}"
             )
             response = None
-            for gmodel in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "models/gemini-1.5-flash"]:
+            for gmodel in ["gemini-2.5-flash", "gemini-2.5-pro"]:
                 try:
                     response = generate_content_with_retry(
                         model=gmodel,
@@ -400,7 +387,7 @@ class AIOAgent(BaseAgent):
         total_kws = len(keywords_slice)
         fallback_mentions = max(1, int(total_kws * 0.25)) if total_kws > 0 else 5
         fallback_cited = max(1, int(total_kws * 0.30)) if total_kws > 0 else 5
-        sample_kws = keywords_slice[:fallback_mentions] if keywords_slice else ["dog dental chews", "dental chews for dogs"]
+        sample_kws = keywords_slice[:fallback_mentions] if keywords_slice else []
         sample_cited = [f"{kw} - https://www.{domain_clean}" for kw in sample_kws]
 
         return {

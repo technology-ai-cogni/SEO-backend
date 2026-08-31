@@ -132,7 +132,7 @@ function PdfUploadBox({ label, fileName, onFileSelect, onRemove }) {
   );
 }
 
-export default function ActivityTablePage({ user }) {
+export default function AgencyPage({ user }) {
   const [vendors, setVendors] = useState([]);
   const [invoices, setInvoices] = useState({}); // { [vendorId]: [invoiceObj, ...] }
   const [expandedVendorIds, setExpandedVendorIds] = useState(new Set());
@@ -205,7 +205,7 @@ export default function ActivityTablePage({ user }) {
         }
       }
     } catch (err) {
-      console.warn('[ActivityTablePage] Supabase load notice:', err);
+      console.warn('[AgencyPage] Supabase load notice:', err);
     }
 
     // Fallback to localStorage if empty
@@ -382,7 +382,7 @@ export default function ActivityTablePage({ user }) {
       try {
         await supabase.from('activity_vendors').upsert(vendorRecord);
       } catch (err) {
-        console.warn('[ActivityTablePage] Supabase vendor save notice:', err);
+        console.warn('[AgencyPage] Supabase vendor save notice:', err);
       }
     }
 
@@ -463,7 +463,7 @@ export default function ActivityTablePage({ user }) {
       try {
         await supabase.from('activity_invoices').upsert(invoiceRecord);
       } catch (err) {
-        console.warn('[ActivityTablePage] Supabase invoice save notice:', err);
+        console.warn('[AgencyPage] Supabase invoice save notice:', err);
       }
     }
 
@@ -512,7 +512,7 @@ export default function ActivityTablePage({ user }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.5px' }}>
-            Activity Table
+            Agency
           </h1>
           <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0' }}>
             Vendor records, agreements, and invoice tree repository across SEO operations.

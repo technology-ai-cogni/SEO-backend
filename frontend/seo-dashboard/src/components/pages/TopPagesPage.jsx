@@ -155,6 +155,40 @@ function ColumnHeaderFilter({ title, options = [], selectedValues, onChange }) {
   );
 }
 
+
+// URL Normalizer & Validator for LLM Cited Pages
+function normalizeAndValidateUrl(itemStr, targetDomain, registeredPages = []) {
+  if (!itemStr) return '';
+  const str = String(itemStr).trim();
+  
+  // Extract HTTP/HTTPS URL if present
+  const httpMatch = str.match(/https?:\/\/[^\s"'<>]+/i);
+  if (httpMatch) {
+    let cleanUrl = httpMatch[0].replace(/[.,;)]+$/, '');
+    return cleanUrl;
+  }
+
+  // Clean domain base
+  const cleanDomain = String(targetDomain || '').replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim();
+  const domainBase = cleanDomain ? `https://${cleanDomain}` : 'https://example.com';
+
+  // Check if string contains a subpath or match against registered pages
+  const lowerStr = str.toLowerCase();
+  if (registeredPages && registeredPages.length > 0) {
+    const matchedPage = registeredPages.find(p => {
+      const pUrl = (p.url || p.landingPage || p.page_url || '').toLowerCase();
+      const pKw = (p.kw || p.keyword || '').toLowerCase();
+      return (pUrl && lowerStr.includes(pUrl)) || (pKw && lowerStr.includes(pKw));
+    });
+    if (matchedPage && (matchedPage.url || matchedPage.landingPage)) {
+      return matchedPage.url || matchedPage.landingPage;
+    }
+  }
+
+  // Fallback to domain root URL
+  return domainBase;
+}
+
 export default function TopPagesPage({ user }) {
   const userCanDownload = canDownload(user);
   const [projects, setProjects] = useState([]);

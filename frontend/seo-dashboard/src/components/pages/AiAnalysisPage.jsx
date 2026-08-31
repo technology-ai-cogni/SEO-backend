@@ -366,48 +366,55 @@ export default function AiAnalysisPage({ user }) {
 
   const handleRunAnalysis = async () => {
     if (!activeProject?.slug || analyzing) return;
-    const engineResult = getActiveEngineResult();
-    const hasEngineData = !!engineResult;
 
-    if (!canRunAiModelAnalysis(user, activeProject.slug, selectedEngine, hasEngineData)) {
+    if (!canRunAiModelAnalysis(user, activeProject.slug, 'all', false)) {
       alert('Permission Denied: You do not have permission to run AI analysis.');
       return;
     }
     setAnalyzing(true);
     try {
       const domain = activeProject?.domain || activeProject?.name || '';
-      const kwList = projectKeywords.map(k => k.kw || k.keyword).filter(Boolean);
+      const kwList = projectKeywords.map(k => (typeof k === 'string' ? k : (k.kw || k.keyword || k.name))).filter(Boolean);
       
-      const res = await runAiVisibilityAnalysis(activeProject.slug, domain, 'India', kwList, selectedEngine);
-      const resObj = res?.result || {};
-      
-      // Update shared localStorage key used by Brand Discovery (PositionAnalysisPage)
-      const engKey = selectedEngine.toLowerCase().trim();
-      localStorage.setItem(`ai_results_${activeProject.slug}_${engKey}`, JSON.stringify([resObj]));
-      saveHitToPeriodHistory(activeProject.slug, engKey, resObj);
-      
-      // Auto-persist directly to Supabase table `ai_analysis`
-      if (supabase && res?.result) {
-        try {
-          await supabase.from('ai_analysis').insert([{
-            project_slug: activeProject.slug,
-            project_name: activeProject.name || activeProject.slug,
-            domain: domain,
-            country: 'India',
-            engine: selectedEngine,
-            ai_visibility: resObj.ai_visibility || 0,
-            mentions: resObj.mentions || 0,
-            cited_pages: resObj.cited_pages || 0,
-            total_keywords: resObj.total_keywords || kwList.length,
-            mentioned_keywords: resObj.mentioned_keywords || [],
-            cited_pages_list: resObj.cited_pages_list || []
-          }]);
-        } catch (sbErr) {
-          console.warn('[AiAnalysisPage] Supabase insert warning:', sbErr);
-        }
-      }
-      
-      recordAiModelAnalysisRun(user, activeProject.slug, selectedEngine);
+      const engines = ['chatgpt', 'gemini', 'ai overview'];
+
+      await Promise.all(
+        engines.map(async (engKey) => {
+          try {
+            const res = await runAiVisibilityAnalysis(activeProject.slug, domain, 'India', kwList, engKey);
+            const resObj = res?.result || {};
+            
+            // Update shared localStorage key used by Brand Discovery & Top Pages AI
+            localStorage.setItem(`ai_results_${activeProject.slug}_${engKey}`, JSON.stringify([resObj]));
+            saveHitToPeriodHistory(activeProject.slug, engKey, resObj);
+            
+            // Auto-persist directly to Supabase table `ai_analysis`
+            if (supabase && res?.result) {
+              try {
+                await supabase.from('ai_analysis').insert([{
+                  project_slug: activeProject.slug,
+                  project_name: activeProject.name || activeProject.slug,
+                  domain: domain,
+                  country: 'India',
+                  engine: engKey,
+                  ai_visibility: resObj.ai_visibility || 0,
+                  mentions: resObj.mentions || 0,
+                  cited_pages: resObj.cited_pages || 0,
+                  total_keywords: resObj.total_keywords || kwList.length,
+                  mentioned_keywords: resObj.mentioned_keywords || [],
+                  cited_pages_list: resObj.cited_pages_list || []
+                }]);
+              } catch (sbErr) {
+                console.warn('[AiAnalysisPage] Supabase insert warning:', sbErr);
+              }
+            }
+          } catch (err) {
+            console.error(`[AiAnalysisPage] Analysis run error for ${engKey}:`, err);
+          }
+        })
+      );
+
+      recordAiModelAnalysisRun(user, activeProject.slug, 'all');
       await loadProjectData(activeProject.slug);
     } catch (err) {
       console.error('[AiAnalysisPage] Analysis run error:', err);

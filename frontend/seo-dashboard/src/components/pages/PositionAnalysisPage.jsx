@@ -715,12 +715,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       const cachedMetrics = localStorage.getItem(metricCacheKey);
       if (cachedMetrics) {
         const parsed = JSON.parse(cachedMetrics);
-        if (parsed?.da || parsed?.spam_score || parsed?.ss) {
+        if ((parsed?.da || parsed?.spam_score || parsed?.ss) && parsed?.spam_score !== '0%') {
           loadedCache = true;
           setActiveProject(prev => prev ? {
             ...prev,
             da: parsed.da ?? prev.da,
-            spam_score: parsed.spam_score || parsed.ss || prev.spam_score || '0%'
+            spam_score: parsed.spam_score || parsed.ss || prev.spam_score || '0%',
+            total_traffic: parsed.total_traffic || prev.total_traffic || '0'
           } : prev);
         }
       }
@@ -728,19 +729,23 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
 
     if (!loadedCache && activeProject?.domain) {
       fetchDomainMetricsApi(activeProject.domain).then(res => {
-        if (res?.status === 'success' || res?.da) {
+        const m = res?.metrics || res;
+        if (res?.status === 'success' || m?.da || m?.ss) {
+          const liveDa = m.da ?? 0;
+          const liveSs = m.ss || m.spam_score || '0%';
           const metricsToSave = {
-            da: res.da || 0,
-            spam_score: res.spam_score || res.ss || '0%',
-            total_traffic: res.total_traffic || res.org_traffic || 0
+            da: liveDa,
+            spam_score: liveSs,
+            ss: liveSs
           };
           try {
             localStorage.setItem(metricCacheKey, JSON.stringify(metricsToSave));
           } catch (err) { }
           setActiveProject(prev => prev ? {
             ...prev,
-            da: res.da ?? prev.da,
-            spam_score: res.spam_score || res.ss || prev.spam_score || '0%'
+            da: liveDa,
+            spam_score: liveSs,
+            ss: liveSs
           } : prev);
         }
       }).catch(err => console.warn('[PositionAnalysisPage] Failed to fetch domain metrics:', err));
@@ -848,11 +853,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
 
   const handleAiAnalysis = async (e, options = {}) => {
     if (e) e.preventDefault();
-    const { analyzeAll = false, targetEngine = null } = options;
+    const analyzeAll = true;
+    const targetEngine = null;
 
     if (!activeProject?.slug) return;
     const domain = activeProject.domain || activeProject.name || '';
-    const kwList = topKeywords.map(k => k.keyword).filter(Boolean);
+    const kwSource = (topKeywords && topKeywords.length > 0) ? topKeywords : projectKeywords;
+    const kwList = kwSource.map(k => (typeof k === 'string' ? k : (k.kw || k.keyword || k.name))).filter(Boolean);
     const countryName = activeProject.location || 'India';
 
     setIsAnalyzingOverlay(true);
@@ -1799,7 +1806,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         fontFamily: 'var(--font-body, system-ui, sans-serif)'
       }}>
         {[
-          { label: 'Authority Score', value: activeProject?.da || 'N/A' },
+          { label: 'Authority Score', value: activeProject?.da ?? 'N/A' },
           { label: 'Spam Score', value: activeProject?.spam_score || activeProject?.ss || '0%' },
           { label: 'Organic Traffic', value: '0' },
           { label: 'Keywords', value: (kwCount || activeProject?.keywords || 0).toLocaleString() },
@@ -1916,7 +1923,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       {userCanRunActions && canRunAiModelAnalysis(user, activeProject?.slug, aiTab, currentTabResults.length > 0) && (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
                           <button
-                            onClick={(e) => handleAiAnalysis(e, { targetEngine: aiTab.toLowerCase() })}
+                            onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
                             disabled={isCurrentTabAnalyzing || !topKeywords.length}
                             title="Run AI Analysis"
                             style={{
@@ -2010,7 +2017,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       {userCanRunActions && (
                         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
                           <button
-                            onClick={(e) => handleAiAnalysis(e, { targetEngine: aiTab.toLowerCase() })}
+                            onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
                             disabled={!!analyzingTabs[aiTab.toLowerCase()]}
                             style={{
                               display: 'flex',

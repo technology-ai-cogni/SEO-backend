@@ -204,10 +204,10 @@ class OpenAIAgent(BaseAgent):
         """
         import json
         if not keywords:
-            keywords = ["dog dental chews", "dental chews for dogs"]
+            keywords = []
 
         keywords_slice = keywords
-        domain_clean = client_domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0] if client_domain else "dogseechew.in"
+        domain_clean = client_domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0] if client_domain else ""
 
         if not OPENAI_API_KEY or not _client:
             return {
@@ -239,16 +239,7 @@ class OpenAIAgent(BaseAgent):
                 f"- 'keyword_ai_ranks': Object mapping each target keyword string to its AI recommendation rank position for '{domain_clean}' (e.g. 1 if top recommended, 2, 3, or 101 if not ranked/mentioned).\n"
                 f"- 'cited_pages_list': Array of strings formatted as '[Keyword] - [Page Title/URL]' for cited pages.\n\n"
                 f"JSON schema:\n"
-                "{\n"
-                '  "domain_rank": 1,\n'
-                '  "others_count": 0,\n'
-                '  "mentions": 28,\n'
-                '  "cited_pages": 34,\n'
-                '  "mentioned_keywords": ["dog dental chews", "dental chews for dogs"],\n'
-                '  "keyword_ai_ranks": {"dog dental chews": 1, "dental chews for dogs": 3},\n'
-                '  "cited_pages_list": ["dog dental chews - https://www.dogseechew.in/product/dental-chews"]\n'
-                "}"
-            )
+               )
 
             try:
                 response = _client.chat.completions.create(

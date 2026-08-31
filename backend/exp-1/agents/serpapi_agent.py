@@ -8,13 +8,19 @@ import sys
 from pathlib import Path
 from .base_agent import BaseAgent
 
-# Ensure scripts directory is in path
-backend_dir = Path(__file__).resolve().parent.parent.parent
+# Ensure exp-1 and scripts directories are in sys.path
+exp1_dir = Path(__file__).resolve().parent.parent
+backend_dir = exp1_dir.parent
 scripts_dir = backend_dir / "scripts"
+if str(exp1_dir) not in sys.path:
+    sys.path.insert(0, str(exp1_dir))
 if str(scripts_dir) not in sys.path:
-    sys.path.append(str(scripts_dir))
+    sys.path.insert(0, str(scripts_dir))
 
-from agentic_rank_checker import fetch_serp_brightdata
+try:
+    from agentic_rank_checker import fetch_serp_brightdata
+except Exception:
+    fetch_serp_brightdata = None
 
 class SerpAPIAgent(BaseAgent):
     name = "serpapi"

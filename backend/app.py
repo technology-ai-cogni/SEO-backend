@@ -1,3 +1,14 @@
+import sys
+import os
+from pathlib import Path
+
+# Ensure backend and exp-1 directories are in sys.path for AI agents
+_curr_dir = Path(__file__).resolve().parent
+_exp1_dir = _curr_dir / "exp-1"
+if str(_exp1_dir) not in sys.path:
+    sys.path.insert(0, str(_exp1_dir))
+if str(_curr_dir) not in sys.path:
+    sys.path.insert(0, str(_curr_dir))
 """
 Backend API -- category checking, scoped by PROJECT.
 
@@ -181,12 +192,18 @@ def start_expired_projects_cleanup_loop():
 
 @app.on_event("startup")
 def _startup_event():
-    """CREATE TABLE/COLUMN IF NOT EXISTS only (see db.init_db()) -- safe to
-    run on every boot, so a fresh table/column added here shows up in
-    production on the next deploy without a manual `python -m core.db`
-    step."""
-    db.init_db()
-    start_expired_projects_cleanup_loop()
+    """Run init_db in a background thread to prevent blocking server startup."""
+    import threading
+    def _async_init():
+        try:
+            db.init_db()
+        except Exception as e:
+            print(f"[db] Background init_db notice: {e}")
+    threading.Thread(target=_async_init, daemon=True).start()
+    try:
+        start_expired_projects_cleanup_loop()
+    except Exception as e:
+        print(f"[cleanup] Cleanup loop notice: {e}")
 
 
 class DomainUser(BaseModel):
@@ -2704,5 +2721,9 @@ async def import_off_page_activities(
 
 @app.get("/projects/{project_slug}/ai-analysis-history")
 def get_ai_analysis_history_endpoint(project_slug: str, engine: Optional[str] = None):
-    """Fallback endpoint for fetching AI Analysis history for a project."""
-    return {"status": "success", "history": []}
+    """Endpoint for fetching AI Analysis history for a project."""
+    try:
+        rows = db.get_ai_analysis_history(project_slug, engine)
+        return {"status": "success", "history": rows}
+    except Exception as e:
+        return {"status": "success", "history": []}

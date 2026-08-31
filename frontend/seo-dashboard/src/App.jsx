@@ -14,7 +14,7 @@ import CompetitorsPage from './components/pages/CompetitorsPage';
 import PlaceholderPage from './components/pages/PlaceholderPage';
 import OffPageSchedulerPage from './components/pages/OffPageSchedulerPage';
 import CalendarPage from './components/pages/CalendarPage';
-import ActivityTablePage from './components/pages/ActivityTablePage';
+import AgencyPage from './components/pages/AgencyPage';
 import GeneralSettingsPage from './components/pages/GeneralSettingsPage';
 import LoginPage from './components/pages/LoginPage';
 import SignUpPage from './components/pages/SignUpPage';
@@ -304,7 +304,7 @@ const PAGE_TITLES = {
   'search-visibility/link-outreach': { title: 'Link Outreach', subtitle: 'Manage backlink acquisition campaigns' },
   'search-visibility/off-page-scheduler': { title: 'Off-Page', subtitle: 'Schedule off-page SEO activities' },
   'search-visibility/calendar': { title: 'Calendar', subtitle: 'Operations planning across Saved, Scheduled, and Approved activities' },
-  'search-visibility/activity-table': { title: 'Activity Table', subtitle: 'Manage vendor activities, agreements, and invoice PDFs' },
+  'search-visibility/activity-table': { title: 'Agency', subtitle: 'Manage vendor activities, agreements, and invoice PDFs' },
   'search-visibility/on-page': { title: 'On-Page Optimization', subtitle: 'On-page SEO recommendations' },
   'search-visibility/competitors': { title: 'Project', subtitle: 'Competitor SEO intelligence' },
   'search-visibility/search/overview': { title: 'Search Overview', subtitle: 'High-level search performance summary' },
@@ -423,7 +423,7 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
     case 'search-visibility/outreach': return <ProjectSetupPage user={user} tab="Outreach" isStandaloneOutreach={true} />;
     case 'search-visibility/off-page-scheduler': return <OffPageSchedulerPage user={user} />;
     case 'search-visibility/calendar': return <CalendarPage user={user} />;
-    case 'search-visibility/activity-table': return <ActivityTablePage user={user} />;
+    case 'search-visibility/activity-table': return <AgencyPage user={user} />;
     case 'content-engine': return <ContentEnginePage />;
     default: {
       const info = PAGE_TITLES[path];
