@@ -34,7 +34,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
       const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
       const apiBase = isLocalhost
         ? 'http://127.0.0.1:8000'
-        : (import.meta.env.VITE_API_BASE || `${window.location.protocol}//${window.location.hostname}:8000`);
+        : (import.meta.env.VITE_API_BASE || `${window.location.protocol}//${window.location.hostname}`);
 
       try {
         res = await fetch(`${apiBase}/auth/login`, {

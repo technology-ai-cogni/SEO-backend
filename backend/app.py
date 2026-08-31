@@ -769,6 +769,25 @@ async def _do_quora_single_audit_coro(qc_mod, topic, live_link, landing_page):
                 pass
 
 
+async def _do_reddit_single_audit_coro(rc_mod, topic, live_link, landing_page):
+    """Reddit audit using API-based checker (no browser scraping needed)."""
+    audit_fn = getattr(rc_mod, "do_reddit_single_audit", None) if rc_mod else None
+    http_fallback_fn = getattr(rc_mod, "check_reddit_http_fallback", None) if rc_mod else None
+
+    if not audit_fn:
+        if http_fallback_fn:
+            return http_fallback_fn(live_link, topic, landing_page)
+        return "Audited-LQ", "Not in Top3, No upvotes", "Quora : Reddit- Add More Upvotes"
+
+    try:
+        return await audit_fn(topic, live_link, landing_page)
+    except Exception as e:
+        print(f"[reddit-checker] API audit error: {e}", flush=True)
+        if http_fallback_fn:
+            return http_fallback_fn(live_link, topic, landing_page)
+        return "Audited-LQ", "Not in Top3, No upvotes", "Quora : Reddit- Add More Upvotes"
+
+
 async def _do_status_check_stream_gen(dataset_id: Optional[int], rows_payload: Optional[List[Dict[str, Any]]]):
     imports = db.list_monthly_imports()
     target_imports = [imp for imp in imports if str(imp.get("id")) == str(dataset_id)] if dataset_id else imports
@@ -801,12 +820,62 @@ async def _do_status_check_stream_gen(dataset_id: Optional[int], rows_payload: O
                 live_lower = live_link.lower()
 
                 # Explicit Activity Classification
-                is_forum_quora = "quora" in act_lower or "quora" in topic_lower or "quora" in live_lower or "forum" in act_lower
-                is_business_listing = not is_forum_quora and any(term in act_lower for term in ["business listing", "business-listing", "businesslisting", "classified ads", "classified", "classifieds", "classified ad", "classified-ads"])
-                is_paid_guest_post = not is_forum_quora and not is_business_listing
+                is_forum_reddit = "reddit" in act_lower or "reddit.com" in topic_lower or "reddit.com" in live_lower
+                is_forum_quora = not is_forum_reddit and ("quora" in act_lower or "quora" in topic_lower or "quora" in live_lower or "forum" in act_lower)
+                is_business_listing = not is_forum_quora and not is_forum_reddit and any(term in act_lower for term in ["business listing", "business-listing", "businesslisting", "classified ads", "classified", "classifieds", "classified ad", "classified-ads"])
+                is_paid_guest_post = not is_forum_quora and not is_forum_reddit and not is_business_listing
 
-                # Route 1: Forum Quora -> scripts/quora-checker.py
-                if is_forum_quora:
+                # Route 1a: Forum Reddit -> scripts/reddit-checker.py (API-based, no scraping)
+                if is_forum_reddit:
+                    total_checked += 1
+                    if not topic and not live_link:
+                        r["status"] = "Flagged-Indexation"
+                        r["remarks"] = "Flagged-Indexation (Invalid Topic URL)"
+                        r["solution"] = "Quora : Reddit- Post New Answer"
+                    else:
+                        # Dynamically import reddit-checker.py
+                        rc_mod = None
+                        rc_candidates = [
+                            os.path.join(os.path.dirname(__file__), "scripts", "reddit-checker.py"),
+                            os.path.join(os.path.dirname(__file__), "scripts", "reddit_checker.py"),
+                            os.path.join(os.path.dirname(__file__), "..", "scripts", "reddit-checker.py"),
+                            os.path.join(os.path.dirname(__file__), "reddit-checker.py")
+                        ]
+                        for rpath in rc_candidates:
+                            if os.path.exists(rpath):
+                                try:
+                                    spec = importlib.util.spec_from_file_location("reddit_checker_dynamic", rpath)
+                                    rc_mod = importlib.util.module_from_spec(spec)
+                                    spec.loader.exec_module(rc_mod)
+                                    break
+                                except Exception as re_err:
+                                    print(f"[app] Error loading {rpath}: {re_err}", file=sys.stderr, flush=True)
+
+                        try:
+                            status, remarks, solution = await asyncio.to_thread(
+                                run_in_proactor_loop,
+                                _do_reddit_single_audit_coro,
+                                rc_mod,
+                                topic,
+                                live_link,
+                                landing_page
+                            )
+                            r["status"] = status
+                            r["remarks"] = remarks
+                            r["solution"] = solution
+                        except Exception as r_err:
+                            print(f"[app] Reddit audit thread error: {r_err}", file=sys.stderr, flush=True)
+                            r["status"] = "Audited-LQ"
+                            r["remarks"] = "Not in Top3, No upvotes"
+                            r["solution"] = "Quora : Reddit- Add More Upvotes"
+
+                    now_date = time.strftime("%Y-%m-%d")
+                    r["updatedDate"] = now_date
+                    r["updated_date"] = now_date
+                    r["lastActivity"] = f"AI Status Checked on {now_date}"
+
+                # Route 1b: Forum Quora -> scripts/quora-checker.py
+                elif is_forum_quora:
                     total_checked += 1
                     if not topic and not live_link:
                         r["status"] = "Flagged-Indexation"

@@ -160,11 +160,41 @@ _KEYWORD_PASS_THROUGH_COLUMNS = [
 
 def init_db():
     """Create every shared table if it doesn't exist yet. Safe to run
-    repeatedly."""
+    repeatedly.  Uses a lock timeout + retry to avoid deadlocks when
+    another process holds an open read lock on the same tables.
+    If all retries fail due to locks, the app still starts (tables already exist)."""
     if not os.environ.get("DATABASE_URL"):
         print("[Warning] Skipping DB init: DATABASE_URL is not set.")
         return
+
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            _init_db_inner()
+            return  # success
+        except Exception as e:
+            err_str = str(e).lower()
+            if "deadlock" in err_str or "lock" in err_str:
+                print(f"[DB Init] Lock/deadlock on attempt {attempt}/{max_retries}: {e}")
+                if attempt < max_retries:
+                    import time as _time
+                    _time.sleep(2 * attempt)  # backoff: 2s, 4s
+                    continue
+                else:
+                    # All retries failed — but tables already exist on production,
+                    # so the app can still run. Log warning and continue.
+                    print(f"[DB Init] WARNING: All {max_retries} init_db attempts failed due to database locks.")
+                    print(f"[DB Init] Tables already exist — app will continue without migration.")
+                    print(f"[DB Init] Run 'python kill_db_locks.py' to clear stuck connections, then restart.")
+                    return
+            raise  # non-lock error — propagate
+
+
+def _init_db_inner():
+    """Actual init_db logic, separated so the outer function can retry."""
     with engine.begin() as conn:
+        # Set a lock timeout so ALTER TABLE fails fast instead of deadlocking
+        conn.execute(text("SET lock_timeout = '5s'"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id UUID PRIMARY KEY,
@@ -859,8 +889,28 @@ def list_recycle_bin_items(item_type=None):
 
 def soft_delete_project(slug):
     """Archives a project and all its associated data into the `recycle_bin` table,
-    then purges active records from main tables so creating a new project with the same name starts 100% fresh."""
+    then purges active records from main tables so creating a new project with the same name starts 100% fresh.
+    Retries on deadlock/lock errors up to 3 times with backoff."""
+    import time as _time
+
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            _soft_delete_project_inner(slug)
+            return  # success
+        except Exception as e:
+            err_str = str(e).lower()
+            if ("deadlock" in err_str or "lock" in err_str) and attempt < max_retries:
+                print(f"[DB] soft_delete_project deadlock on attempt {attempt}/{max_retries}, retrying in {2 * attempt}s...")
+                _time.sleep(2 * attempt)
+                continue
+            raise
+
+
+def _soft_delete_project_inner(slug):
+    """Inner logic for soft_delete_project, separated for retry."""
     with engine.begin() as conn:
+        conn.execute(text("SET lock_timeout = '10s'"))
         proj_row = conn.execute(text("SELECT * FROM projects WHERE slug = :slug"), {"slug": slug}).mappings().fetchone()
         if not proj_row:
             return

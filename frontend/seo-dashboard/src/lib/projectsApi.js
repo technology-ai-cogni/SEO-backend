@@ -1068,7 +1068,7 @@ export function getApiBaseUrl() {
     if (host === 'localhost' || host === '127.0.0.1') {
       return 'http://127.0.0.1:5000';
     }
-    return `${window.location.protocol}//${host}:8000`;
+    return `${window.location.protocol}//${host}`;
   }
   return 'http://127.0.0.1:5000';
 }
