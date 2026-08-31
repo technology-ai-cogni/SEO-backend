@@ -3308,7 +3308,13 @@ function PageDetailView({ project, onBack, onUpdatePages, search, user }) {
         </button>
         <div style={{ height: 20, width: 1, background: 'var(--border)' }} />
         <div>
-          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{project.name}</span>
+          <div>
+            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{project.name}</span>
+          </div>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            {filteredRows.length} page{filteredRows.length !== 1 ? 's' : ''}
+            {(search || tableFilters.cluster?.length || tableFilters.category?.length || tableFilters.targetCategory?.length || tableFilters.targetType?.length) ? ` of ${rows.length}` : ''}
+          </span>
         </div>
         <button
           onClick={handleRefresh}
@@ -3358,7 +3364,6 @@ function PageDetailView({ project, onBack, onUpdatePages, search, user }) {
         {saveError && (
           <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError}</span>
         )}
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{filteredRows.length} page{filteredRows.length !== 1 ? 's' : ''}</span>
         {(hasPendingChanges || saving) && (
           <button
             onClick={handleSave}
@@ -6291,7 +6296,17 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
               <ArrowLeft size={16} /> Back
             </button>
             <div style={{ height: 20, width: 1, background: 'var(--border)' }} />
-            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{scopedProject.name}</span>
+            <div>
+              <div>
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{scopedProject.name}</span>
+              </div>
+              {subView === 'pages' && (
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {filteredPageRows.length} page{filteredPageRows.length !== 1 ? 's' : ''}
+                  {pageRows.length !== filteredPageRows.length ? ` of ${pageRows.length}` : ''}
+                </span>
+              )}
+            </div>
             {userCanUpdate && (
               <button
                 onClick={() => onFindCompetitors?.()}

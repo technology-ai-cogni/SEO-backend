@@ -574,7 +574,7 @@ export default function TopPagesPage({ user }) {
             boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
           }}>
             {/* Left Side: Dashboard: domain.com v */}
-            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <h1 style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -657,6 +657,10 @@ export default function TopPagesPage({ user }) {
                   <ExternalLink size={16} />
                 </a>
               </h1>
+              <span style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>
+                {filteredPages.length} page{filteredPages.length !== 1 ? 's' : ''}
+                {pagesData.length !== filteredPages.length ? ` of ${pagesData.length}` : ''}
+              </span>
             </div>
 
             {/* Right Side: Country Selector & Date Picker */}

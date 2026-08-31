@@ -1,30 +1,7 @@
 import { useState } from 'react';
-import { Search, Eye, EyeOff, Lock, Mail, ShieldCheck, Briefcase, HelpCircle, Loader2 } from 'lucide-react';
-
-function isRoleAllowedForLoginCard(userRole, selectedCard) {
-  if (!userRole) return true;
-  const role = userRole.toUpperCase();
-  const card = selectedCard.toUpperCase();
-
-  if (card === 'ADMIN') {
-    return role === 'ADMIN';
-  }
-
-  if (card === 'VENDOR') {
-    return role === 'VENDOR';
-  }
-
-  if (card === 'USER') {
-    // User login card allows all Team Leads, Sr. Associates, Associates, and standard users!
-    return role !== 'ADMIN' && role !== 'VENDOR';
-  }
-
-  return true;
-}
+import { Search, Eye, EyeOff, Lock, Mail, HelpCircle, Loader2 } from 'lucide-react';
 
 export default function LoginPage({ onNavigate, initialAdminMode = false, user = null, onLoginSuccess = null, onLogout = null, isEmbedded = false }) {
-  const [selectedRole, setSelectedRole] = useState(initialAdminMode ? 'ADMIN' : 'USER');
-  const isAdmin = selectedRole === 'ADMIN';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -34,8 +11,8 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [focusedField, setFocusedField] = useState(null);
 
-  const activeColor = selectedRole === 'ADMIN' ? '#d97706' : selectedRole === 'VENDOR' ? '#dc2626' : 'var(--accent, #7c3aed)';
-  const activeGlow = selectedRole === 'ADMIN' ? 'rgba(217, 119, 6, 0.15)' : selectedRole === 'VENDOR' ? 'rgba(220, 38, 38, 0.15)' : 'rgba(124, 58, 237, 0.15)';
+  const accentColor = 'var(--accent, #7c3aed)';
+  const accentGlow = 'rgba(124, 58, 237, 0.15)';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -94,13 +71,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
           return;
         }
 
-        if (dbUser && dbUser.role && !isRoleAllowedForLoginCard(dbUser.role, selectedRole)) {
-          setErrorMsg(`Access Denied: Only ${selectedRole} accounts are authorized to log in using this card.`);
-          setIsLoading(false);
-          return;
-        }
-
-        loggedInUser = dbUser || { email: email.trim(), name: email.split('@')[0], role: selectedRole, status: 'Active' };
+        loggedInUser = dbUser || { email: email.trim(), name: email.split('@')[0], role: 'USER', status: 'Active' };
       } else if (res && !res.ok) {
         const errData = await res.json().catch(() => null);
         setErrorMsg(errData?.detail || 'Invalid email or password.');
@@ -118,7 +89,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
           }
           loggedInUser = matched;
         } else {
-          loggedInUser = { email: email.trim(), name: email.split('@')[0], role: selectedRole, status: 'Active' };
+          loggedInUser = { email: email.trim(), name: email.split('@')[0], role: 'USER', status: 'Active' };
         }
       }
     } catch (err) {
@@ -128,7 +99,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
     }
 
     setIsLoading(false);
-    setSubmittedMessage(`Login successful! Logged in as ${selectedRole}.`);
+    setSubmittedMessage('Login successful!');
 
     if (onLoginSuccess && loggedInUser) {
       onLoginSuccess(loggedInUser);
@@ -141,76 +112,27 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
       maxWidth: 430,
       background: '#ffffff',
       border: '1px solid rgba(226, 232, 240, 0.9)',
-      borderTop: `3.5px solid ${activeColor}`,
+      borderTop: `3.5px solid ${accentColor}`,
       borderRadius: 20,
       boxShadow: '0 20px 40px -15px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.04)',
       padding: '34px 30px',
       transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
       position: 'relative'
     }}>
-      {/* Role Mode Segmented Control */}
-      <div style={{
-        display: 'flex',
-        background: '#f1f5f9',
-        borderRadius: 12,
-        padding: 4,
-        marginBottom: 24,
-        gap: 4
-      }}>
-        {[
-          { key: 'USER', label: 'User Login' },
-          { key: 'VENDOR', label: 'Vendor' },
-          { key: 'ADMIN', label: 'Admin' }
-        ].map(rItem => {
-          const isSel = selectedRole === rItem.key;
-          const rColor = rItem.key === 'ADMIN' ? '#d97706' : rItem.key === 'VENDOR' ? '#dc2626' : 'var(--accent)';
-          return (
-            <button
-              key={rItem.key}
-              type="button"
-              onClick={() => setSelectedRole(rItem.key)}
-              style={{
-                flex: 1,
-                padding: '7px 10px',
-                border: 'none',
-                borderRadius: 8,
-                background: isSel ? '#ffffff' : 'transparent',
-                color: isSel ? rColor : '#64748b',
-                fontWeight: isSel ? 700 : 500,
-                fontSize: 12.5,
-                fontFamily: 'var(--font-body)',
-                cursor: 'pointer',
-                boxShadow: isSel ? '0 2px 5px rgba(0,0,0,0.06)' : 'none',
-                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
-              }}
-            >
-              {rItem.label}
-            </button>
-          );
-        })}
-      </div>
-
       {/* Header Icon & Brand */}
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <div style={{
           width: 48,
           height: 48,
-          background: selectedRole === 'ADMIN' ? '#fef3c7' : selectedRole === 'VENDOR' ? '#fef2f2' : '#f5f3ff',
-          border: `1.5px solid ${selectedRole === 'ADMIN' ? '#fde68a' : selectedRole === 'VENDOR' ? '#fca5a5' : '#ddd6fe'}`,
+          background: '#f5f3ff',
+          border: '1.5px solid #ddd6fe',
           borderRadius: 14,
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
           marginBottom: 12,
-          transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)'
         }}>
-          {selectedRole === 'ADMIN' ? (
-            <ShieldCheck size={24} color="#d97706" />
-          ) : selectedRole === 'VENDOR' ? (
-            <Briefcase size={24} color="#dc2626" />
-          ) : (
-            <Search size={24} color="var(--accent)" />
-          )}
+          <Search size={24} color="var(--accent)" />
         </div>
 
         <h2 style={{
@@ -221,9 +143,8 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
           lineHeight: 1.3,
           marginBottom: 6,
           letterSpacing: '-0.3px',
-          transition: 'color 0.2s ease'
         }}>
-          {selectedRole === 'ADMIN' ? 'Admin Access' : selectedRole === 'VENDOR' ? 'Vendor Portal' : 'Welcome Back'}
+          Welcome Back
         </h2>
 
         <p style={{
@@ -231,13 +152,8 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
           color: '#64748b',
           lineHeight: 1.45,
           margin: 0,
-          transition: 'color 0.2s ease'
         }}>
-          {selectedRole === 'ADMIN'
-            ? 'Enter administrative credentials to manage settings'
-            : selectedRole === 'VENDOR'
-              ? 'Enter vendor credentials to manage assigned projects'
-              : 'Log in to access your SEO workspace'}
+          Log in to access your SEO workspace
         </p>
       </div>
 
@@ -344,13 +260,13 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
             alignItems: 'center',
             gap: 10,
             background: '#f8fafc',
-            border: `1.5px solid ${focusedField === 'email' ? activeColor : '#e2e8f0'}`,
+            border: `1.5px solid ${focusedField === 'email' ? accentColor : '#e2e8f0'}`,
             borderRadius: 10,
             padding: '9px 13px',
-            boxShadow: focusedField === 'email' ? `0 0 0 3.5px ${activeGlow}` : 'none',
+            boxShadow: focusedField === 'email' ? `0 0 0 3.5px ${accentGlow}` : 'none',
             transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
           }}>
-            <Mail size={16} color={focusedField === 'email' ? activeColor : "#94a3b8"} style={{ transition: 'color 0.2s' }} />
+            <Mail size={16} color={focusedField === 'email' ? accentColor : "#94a3b8"} style={{ transition: 'color 0.2s' }} />
             <input
               type="email"
               required
@@ -393,7 +309,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
               style={{
                 fontSize: 12.5,
                 fontWeight: 600,
-                color: activeColor,
+                color: accentColor,
                 textDecoration: 'none',
                 transition: 'color 0.2s'
               }}
@@ -409,13 +325,13 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
             alignItems: 'center',
             gap: 10,
             background: '#f8fafc',
-            border: `1.5px solid ${focusedField === 'password' ? activeColor : '#e2e8f0'}`,
+            border: `1.5px solid ${focusedField === 'password' ? accentColor : '#e2e8f0'}`,
             borderRadius: 10,
             padding: '9px 13px',
-            boxShadow: focusedField === 'password' ? `0 0 0 3.5px ${activeGlow}` : 'none',
+            boxShadow: focusedField === 'password' ? `0 0 0 3.5px ${accentGlow}` : 'none',
             transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
           }}>
-            <Lock size={16} color={focusedField === 'password' ? activeColor : "#94a3b8"} style={{ transition: 'color 0.2s' }} />
+            <Lock size={16} color={focusedField === 'password' ? accentColor : "#94a3b8"} style={{ transition: 'color 0.2s' }} />
             <input
               type={showPassword ? 'text' : 'password'}
               required
@@ -464,7 +380,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
             alignItems: 'center',
             justifyContent: 'center',
             gap: 8,
-            background: activeColor,
+            background: accentColor,
             color: '#ffffff',
             border: 'none',
             borderRadius: 10,
@@ -475,7 +391,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
             cursor: isLoading ? 'not-allowed' : 'pointer',
             opacity: isLoading ? 0.8 : 1,
             transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-            boxShadow: `0 4px 12px ${activeGlow}`
+            boxShadow: `0 4px 12px ${accentGlow}`
           }}
           onMouseEnter={e => { if (!isLoading) e.currentTarget.style.transform = 'translateY(-1px)'; }}
           onMouseLeave={e => { if (!isLoading) e.currentTarget.style.transform = 'translateY(0)'; }}
@@ -486,7 +402,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
               <span>Authenticating...</span>
             </>
           ) : (
-            <span>{selectedRole === 'ADMIN' ? 'Log in as Admin' : selectedRole === 'VENDOR' ? 'Log in as Vendor' : 'Log in'}</span>
+            <span>Log in</span>
           )}
         </button>
       </form>
