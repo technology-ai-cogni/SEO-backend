@@ -1247,6 +1247,7 @@ export default function OffPageSchedulerPage({ user }) {
     if (!selectedDataset) return;
     setAiChecking(true);
     try {
+      let finalRows = [...(selectedDataset.rowsData || [])];
       const res = await runAiStatusCheckStreamApi(
         {
           dataset_id: selectedDataset.id,
@@ -1258,18 +1259,38 @@ export default function OffPageSchedulerPage({ user }) {
               if (!prev || !prev.rowsData) return prev;
               const newRows = [...prev.rowsData];
               newRows[index] = { ...newRows[index], ...row };
+              finalRows = newRows;
               return { ...prev, rowsData: newRows };
             });
           }
         }
       );
 
+      // Automatically save the AI audit results to DB
+      await updateMonthlyImportApi(selectedDataset.id, {
+        project: selectedDataset.project || selectedDataset.project_name,
+        filename: selectedDataset.filename,
+        rows: finalRows.length,
+        rowsData: finalRows
+      }).catch(e => console.warn('Auto-save error after AI audit:', e));
+
+      // Reset unsaved state so it never prompts to save changes
+      setOriginalRowsData(JSON.parse(JSON.stringify(finalRows)));
+      setIsDirty(false);
+      setSavingState('saved');
+      setTimeout(() => setSavingState(''), 3500);
+
       const freshImports = await fetchMonthlyImportsApi().catch(() => null);
       if (freshImports && freshImports.length > 0) {
         setImports(freshImports);
+        const updatedDs = freshImports.find(imp => String(imp.id) === String(selectedDataset.id));
+        if (updatedDs) {
+          setSelectedDataset(updatedDs);
+          setOriginalRowsData(JSON.parse(JSON.stringify(updatedDs.rowsData || [])));
+        }
       }
 
-      setAuditSuccessMsg(res?.message || 'AI Audit Check completed successfully!');
+      setAuditSuccessMsg(res?.message || 'AI Audit Check completed & saved automatically!');
       setTimeout(() => setAuditSuccessMsg(''), 5000);
     } catch (err) {
       setAuditSuccessMsg(`AI Audit Check notice: ${err.message}`);
@@ -1571,7 +1592,7 @@ export default function OffPageSchedulerPage({ user }) {
                 onMouseLeave={e => e.currentTarget.style.opacity = '1'}
               >
                 <Sparkles size={16} color="#ffffff" />
-                {aiChecking ? 'Running AI Audit Check...' : 'AI Audit'}
+                {aiChecking ? 'Running AI Audit ...' : 'AI Audit'}
               </button>
             )}
 
@@ -3532,7 +3553,7 @@ export default function OffPageSchedulerPage({ user }) {
         <div style={{ padding: '8px 0 16px 0' }}>
           <p style={{ fontSize: 14.5, color: '#64748b', margin: 0, lineHeight: 1.6 }}>
             Are you sure you want to delete <strong>this project's Off-Page data (records, scheduled activities)</strong> for <strong>{deleteConfirmImport?.project}</strong>? This action cannot be undone.
-            </p>
+          </p>
         </div>
       </Modal>
       {/* Unsaved Changes Confirmation Modal */}

@@ -363,12 +363,14 @@ def _init_db_inner():
                 solution TEXT,
                 last_activity TEXT,
                 updated_date TEXT,
+                fetched_data JSONB,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
         conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS uid TEXT"))
         conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS fetched_data JSONB"))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS scheduled_activities (
@@ -2800,6 +2802,14 @@ def _insert_monthly_operation_rows(conn, filename, project_name, rows_data):
             p = f"_{idx}"
             is_ver = r.get("verified")
             verified_bool = (is_ver is True) or (isinstance(is_ver, str) and is_ver.lower() == "true")
+            f_data = r.get("fetched_data", r.get("fetchedData"))
+            if isinstance(f_data, (dict, list)):
+                f_data_str = json.dumps(f_data)
+            elif isinstance(f_data, str) and f_data.strip():
+                f_data_str = f_data
+            else:
+                f_data_str = None
+
             params.update({
                 f"uid{p}": _generate_uid(r.get("uid")),
                 f"filename{p}": filename,
@@ -2824,13 +2834,15 @@ def _insert_monthly_operation_rows(conn, filename, project_name, rows_data):
                 f"solution{p}": r.get("solution", ""),
                 f"verified{p}": verified_bool,
                 f"last_activity{p}": r.get("lastActivity", r.get("last_activity", "")),
-                f"updated_date{p}": r.get("updatedDate", r.get("updated_date", ""))
+                f"updated_date{p}": r.get("updatedDate", r.get("updated_date", "")),
+                f"fetched_data{p}": f_data_str
             })
             values_sql_parts.append(f"""(
                 :uid{p}, :filename{p}, :project_name{p}, :period{p}, :scheduled_date{p}, :keyword1{p}, :keyword2{p},
                 :landing_page{p}, :cluster{p}, :kw_category{p}, :activity_name{p}, :word_count{p},
                 :content_spoc{p}, :topic{p}, :content_doc{p}, :status{p}, :publisher{p},
-                :pg_site_domain{p}, :live_link{p}, :remarks{p}, :solution{p}, :verified{p}, :last_activity{p}, :updated_date{p}
+                :pg_site_domain{p}, :live_link{p}, :remarks{p}, :solution{p}, :verified{p}, :last_activity{p}, :updated_date{p},
+                CAST(:fetched_data{p} AS jsonb)
             )""")
 
         sql = f"""
@@ -2838,7 +2850,8 @@ def _insert_monthly_operation_rows(conn, filename, project_name, rows_data):
                 uid, filename, project_name, period, scheduled_date, keyword1, keyword2,
                 landing_page, cluster, kw_category, activity_name, word_count,
                 content_spoc, topic, content_doc, status, publisher,
-                pg_site_domain, live_link, remarks, solution, verified, last_activity, updated_date
+                pg_site_domain, live_link, remarks, solution, verified, last_activity, updated_date,
+                fetched_data
             ) VALUES {','.join(values_sql_parts)}
         """
         conn.execute(text(sql), params)
@@ -2854,7 +2867,8 @@ def list_monthly_imports():
                    topic, content_doc as "contentDoc", status, publisher,
                    pg_site_domain as "pgSiteDomain", live_link as "liveLink",
                    remarks, solution, verified, last_activity as "lastActivity",
-                   updated_date as "updatedDate", created_at
+                   updated_date as "updatedDate", fetched_data as "fetchedData",
+                   fetched_data, created_at
             FROM monthly_operations
             ORDER BY id ASC
         """)).mappings().fetchall()
@@ -2940,6 +2954,14 @@ def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, d
                 r_uid = _generate_uid(r.get("uid"))
                 is_ver = r.get("verified")
                 verified_bool = (is_ver is True) or (isinstance(is_ver, str) and is_ver.lower() == "true")
+                f_data = r.get("fetched_data", r.get("fetchedData"))
+                if isinstance(f_data, (dict, list)):
+                    f_data_str = json.dumps(f_data)
+                elif isinstance(f_data, str) and f_data.strip():
+                    f_data_str = f_data
+                else:
+                    f_data_str = None
+
                 if r_id and isinstance(r_id, int) and r_id in existing_ids:
                     input_ids.add(r_id)
                     update_param_list.append({
@@ -2967,7 +2989,8 @@ def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, d
                         "solution": r.get("solution", ""),
                         "verified": verified_bool,
                         "last_activity": r.get("lastActivity", r.get("last_activity", "")),
-                        "updated_date": r.get("updatedDate", r.get("updated_date", ""))
+                        "updated_date": r.get("updatedDate", r.get("updated_date", "")),
+                        "fetched_data": f_data_str
                     })
                 else:
                     new_rows_list.append(r)
@@ -3006,13 +3029,15 @@ def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, d
                             f"solution{p}": u["solution"],
                             f"verified{p}": u["verified"],
                             f"last_activity{p}": u["last_activity"],
-                            f"updated_date{p}": u["updated_date"]
+                            f"updated_date{p}": u["updated_date"],
+                            f"fetched_data{p}": u["fetched_data"]
                         })
                         values_parts.append(f"""(
                             CAST(:id{p} AS bigint), :uid{p}, :filename{p}, :project_name{p}, :period{p}, :scheduled_date{p},
                             :keyword1{p}, :keyword2{p}, :landing_page{p}, :cluster{p}, :kw_category{p}, :activity_name{p},
                             :word_count{p}, :content_spoc{p}, :topic{p}, :content_doc{p}, :status{p}, :publisher{p},
-                            :pg_site_domain{p}, :live_link{p}, :remarks{p}, :solution{p}, CAST(:verified{p} AS boolean), :last_activity{p}, :updated_date{p}
+                            :pg_site_domain{p}, :live_link{p}, :remarks{p}, :solution{p}, CAST(:verified{p} AS boolean), :last_activity{p}, :updated_date{p},
+                            CAST(:fetched_data{p} AS jsonb)
                         )""")
 
                     sql = f"""
@@ -3041,12 +3066,14 @@ def update_monthly_import(import_id, rows_data=None, filename=None, rows=None, d
                             verified = v.verified,
                             last_activity = v.last_activity,
                             updated_date = v.updated_date,
+                            fetched_data = COALESCE(v.fetched_data, m.fetched_data),
                             updated_at = now()
                         FROM (VALUES {','.join(values_parts)}) AS v(
                             id, uid, filename, project_name, period, scheduled_date,
                             keyword1, keyword2, landing_page, cluster, kw_category, activity_name,
                             word_count, content_spoc, topic, content_doc, status, publisher,
-                            pg_site_domain, live_link, remarks, solution, verified, last_activity, updated_date
+                            pg_site_domain, live_link, remarks, solution, verified, last_activity, updated_date,
+                            fetched_data
                         )
                         WHERE m.id = v.id
                     """
