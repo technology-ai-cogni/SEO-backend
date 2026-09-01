@@ -265,9 +265,7 @@ class AIOAgent(BaseAgent):
 
     def analyze_ai_visibility(self, keywords: list, client_domain: str = None, country: str = "India") -> dict:
         """
-        Analyze AI Visibility across keywords for client domain specifically on Google AI Overview (SGE).
-        Returns total mentions count, total cited pages count, composite score,
-        list of mentioned keywords, and list of cited pages.
+        Analyze AI Visibility across keywords for client domain using Google AI Overviews.
         """
         import json
         if not keywords:
@@ -278,18 +276,33 @@ class AIOAgent(BaseAgent):
 
         try:
             kw_list_str = "\n".join([f"{i+1}. {k}" for i, k in enumerate(keywords_slice[:100])])
-            user_prompt = (
-                f"You MUST perform your search audit specifically on Google AI Overviews (SGE / Google AI Overviews) for target domain '{domain_clean}' (URL: https://www.{domain_clean}) in region '{country}'.\n\n"
-                f"AUDIT TASK 1 - DOMAIN COMPETITOR RANK IN GOOGLE AI OVERVIEWS:\n"
-                f"Evaluate where '{domain_clean}' ranks overall in Google AI Overviews organic snippets and citations among industry competitors.\n"
-                f"- Return 'domain_rank': Integer rank position (e.g., 1 if top recommended brand, 2, 3, or 101 if not ranked in top 100).\n"
-                f"- Return 'others_count': Integer count of competitors ahead of '{domain_clean}'.\n\n"
-                f"AUDIT TASK 2 - GOOGLE AI OVERVIEW KEYWORD VISIBILITY ({len(keywords_slice)} target keywords):\n"
-                f"Keywords:\n{kw_list_str}\n\n"
-                f"Return ONLY valid JSON in this schema:\n"
-            )
+            user_prompt = f"""You are Google AI Overviews (SGE) performing an organic AI search visibility audit for target domain '{domain_clean}' in region '{country}'.
+
+Target Keywords:
+{kw_list_str}
+
+CRITICAL REQUIREMENT - EVALUATE MENTIONS AND CITATIONS SEPARATELY TO PRODUCE TWO DISTINCT LISTS:
+
+1. MENTIONS (Brand Recommendations):
+Which of the passed keywords cause Google AI Overviews to mention '{domain_clean}' in its summary snippet text? Return as 'mentioned_keywords' (Array of keyword strings).
+
+2. CITATIONS (Source Cards & Links):
+Which of the passed keywords cause Google AI Overviews to display '{domain_clean}' as a source citation card or link pill? Return as 'cited_pages_list' (Array of keyword strings). (Note: Mentions and Citations are distinct SGE search features).
+
+3. AI RANKS:
+Return 'keyword_ai_ranks' object mapping each mentioned keyword to its AI recommendation rank position.
+
+Return ONLY valid JSON with these fields (DO NOT return URLs):
+- 'mentions': Total count of mentioned keywords.
+- 'cited_pages': Total count of cited keywords.
+- 'mentioned_keywords': Array of mentioned keyword strings.
+- 'cited_pages_list': Array of cited keyword strings.
+- 'keyword_ai_ranks': Object mapping mentioned keywords to rank integers.
+- 'domain_rank': Integer overall rank position.
+- 'others_count': Integer count of competitors ahead.
+"""
             response = None
-            for gmodel in ["gemini-2.5-flash", "gemini-2.5-pro"]:
+            for gmodel in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]:
                 try:
                     response = generate_content_with_retry(
                         model=gmodel,
@@ -328,6 +341,7 @@ class AIOAgent(BaseAgent):
             mentions_raw = parsed.get("mentioned_keywords") or []
             cited_raw = parsed.get("cited_pages_list") or []
             kw_ranks_raw = parsed.get("keyword_ai_ranks") or {}
+            kw_urls_raw = parsed.get("keyword_urls") or {}
 
             mentions_kws = []
             seen_m = set()
@@ -366,38 +380,34 @@ class AIOAgent(BaseAgent):
 
             total_kws = len(keywords_slice)
 
-            if mentions_count > 0 or cited_count > 0:
-                vis_score = round((mentions_count / total_kws) * 100) if total_kws > 0 else 0
-                return {
-                    "ai_visibility": vis_score,
-                    "mentions": mentions_count,
-                    "cited_pages": cited_count,
-                    "mentioned_keywords": mentions_kws,
-                    "keyword_ai_ranks": keyword_ai_ranks,
-                    "cited_pages_list": cited_list,
-                    "domain_rank": domain_rank_val,
-                    "others_count": others_count_val,
-                    "total_keywords": total_kws,
-                    "domain": domain_clean,
-                    "status": "ok"
-                }
+            vis_score = round((mentions_count / total_kws) * 100) if total_kws > 0 else 0
+            return {
+                "ai_visibility": vis_score,
+                "mentions": mentions_count,
+                "cited_pages": cited_count,
+                "mentioned_keywords": mentions_kws,
+                "keyword_ai_ranks": keyword_ai_ranks,
+                "keyword_urls": kw_urls_raw,
+                "cited_pages_list": cited_list,
+                "domain_rank": domain_rank_val,
+                "others_count": others_count_val,
+                "total_keywords": total_kws,
+                "domain": domain_clean,
+                "status": "ok"
+            }
         except Exception as e:
             print(f"[AIOAgent] Error during AI Overview AI Visibility analysis: {e}", file=sys.stderr, flush=True)
 
         total_kws = len(keywords_slice)
-        fallback_mentions = max(1, int(total_kws * 0.25)) if total_kws > 0 else 5
-        fallback_cited = max(1, int(total_kws * 0.30)) if total_kws > 0 else 5
-        sample_kws = keywords_slice[:fallback_mentions] if keywords_slice else []
-        sample_cited = [f"{kw} - https://www.{domain_clean}" for kw in sample_kws]
-
         return {
-            "ai_visibility": round((fallback_mentions / total_kws) * 100) if total_kws > 0 else 25,
-            "mentions": fallback_mentions,
-            "cited_pages": fallback_cited,
-            "mentioned_keywords": sample_kws,
-            "cited_pages_list": sample_cited,
-            "domain_rank": 1,
-            "others_count": 0,
+            "ai_visibility": 0,
+            "mentions": 0,
+            "cited_pages": 0,
+            "mentioned_keywords": [],
+            "keyword_urls": {},
+            "cited_pages_list": [],
+            "domain_rank": 101,
+            "others_count": -1,
             "total_keywords": total_kws,
             "domain": domain_clean,
             "status": "ok"

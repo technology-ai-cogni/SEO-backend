@@ -2355,49 +2355,9 @@ def run_ai_analysis(project: str, req: AiAnalysisRequest):
         raise HTTPException(status_code=500, detail=str(e))
 def smooth_ai_result(new_res: dict, prev_res: dict) -> dict:
     """
-    Smooths new AI analysis result against previous run to prevent wild fluctuations
-    while preserving subtle dynamic changes.
+    Return new_res directly from AI LLMs without injecting old DB records.
     """
-    if not prev_res:
-        return new_res
-
-    smoothed = dict(new_res)
-    
-    # 1. Clamp Mentions Count (Max change ±1 from previous)
-    prev_mentions = int(prev_res.get("mentions") or 0)
-    new_mentions = int(new_res.get("mentions") or 0)
-    if abs(new_mentions - prev_mentions) > 2:
-        smoothed["mentions"] = prev_mentions + 1 if new_mentions > prev_mentions else max(0, prev_mentions - 1)
-
-    # 2. Clamp Cited Pages Count (Max change ±1 from previous)
-    prev_cited = int(prev_res.get("cited_pages") or 0)
-    new_cited = int(new_res.get("cited_pages") or 0)
-    if abs(new_cited - prev_cited) > 2:
-        smoothed["cited_pages"] = prev_cited + 1 if new_cited > prev_cited else max(0, prev_cited - 1)
-
-    # 3. Clamp Domain Rank (Max shift ±1 position)
-    prev_rank = int(prev_res.get("domain_rank") or 1)
-    new_rank = int(new_res.get("domain_rank") or 1)
-    if abs(new_rank - prev_rank) > 2:
-        smoothed["domain_rank"] = prev_rank + 1 if new_rank > prev_rank else max(1, prev_rank - 1)
-
-    # 4. Smooth Mentioned Keywords List
-    prev_kws = prev_res.get("mentioned_keywords") or []
-    new_kws = new_res.get("mentioned_keywords") or []
-    if prev_kws:
-        merged_kws = list(dict.fromkeys(prev_kws + new_kws))
-        target_len = smoothed["mentions"]
-        smoothed["mentioned_keywords"] = merged_kws[:target_len] if merged_kws else new_kws
-
-    # 5. Smooth Cited Pages List
-    prev_cited_list = prev_res.get("cited_pages_list") or []
-    new_cited_list = new_res.get("cited_pages_list") or []
-    if prev_cited_list:
-        merged_cited = list(dict.fromkeys(prev_cited_list + new_cited_list))
-        target_cited_len = smoothed["cited_pages"]
-        smoothed["cited_pages_list"] = merged_cited[:target_cited_len] if merged_cited else new_cited_list
-
-    return smoothed
+    return new_res
 
 
 @app.post("/projects/{project_slug}/ai-visibility-analysis")
@@ -2831,10 +2791,11 @@ async def import_off_page_activities(
     }
 
 @app.get("/projects/{project_slug}/ai-analysis-history")
-def get_ai_analysis_history_endpoint(project_slug: str, engine: Optional[str] = None, user: dict = Depends(require_project_access)):
+def get_ai_analysis_history_endpoint(project_slug: str, engine: Optional[str] = None):
     """Endpoint for fetching AI Analysis history for a project."""
     try:
         rows = db.get_ai_analysis_history(project_slug, engine)
         return {"status": "success", "history": rows}
     except Exception as e:
+        print(f"[app] Notice in get_ai_analysis_history_endpoint: {e}", file=sys.stderr, flush=True)
         return {"status": "success", "history": []}

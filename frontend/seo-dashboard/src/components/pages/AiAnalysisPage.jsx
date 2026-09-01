@@ -9,6 +9,30 @@ import {
 import { supabase } from '../../lib/supabaseClient';
 import { hasPermission, PERMISSIONS, canRunActions, canRunAiModelAnalysis, recordAiModelAnalysisRun, canDownload } from '../../lib/permissions';
 
+// Top-level helper function to pick top 2 keywords per category by search volume (SV)
+function getTop2KeywordsPerCategory(kws) {
+  if (!kws || !Array.isArray(kws) || kws.length === 0) return [];
+  const categoryMap = {};
+  kws.forEach(k => {
+    const cat = String(k.category || k.cluster || 'General').trim();
+    if (!categoryMap[cat]) categoryMap[cat] = [];
+    categoryMap[cat].push(k);
+  });
+
+  const selectedKeywords = [];
+  Object.values(categoryMap).forEach(kwGroup => {
+    const sorted = [...kwGroup].sort((a, b) => {
+      const svA = Number(String(a.sv || a.search_volume || a.kw_volume || 0).replace(/[^0-9.]/g, '')) || 0;
+      const svB = Number(String(b.sv || b.search_volume || b.kw_volume || 0).replace(/[^0-9.]/g, '')) || 0;
+      return svB - svA;
+    });
+    selectedKeywords.push(...sorted.slice(0, 2));
+  });
+
+  return selectedKeywords;
+}
+
+
 // MultiSelectField Component for Popover Filters
 function MultiSelectField({ label, options, selectedValues = [], onChange }) {
   const [open, setOpen] = useState(false);
@@ -222,7 +246,6 @@ export default function AiAnalysisPage({ user }) {
           const savedSlug = localStorage.getItem('bd_selected_project');
           const target = (savedSlug && domains.find(p => p.slug === savedSlug)) || domains[0];
           setActiveProject(target);
-          await loadProjectData(target.slug);
         }
       } catch (err) {
         console.error('[AiAnalysisPage] Error loading projects:', err);
@@ -231,6 +254,13 @@ export default function AiAnalysisPage({ user }) {
     loadData();
     return () => { isMounted = false; };
   }, []);
+
+  // Reload keywords and history whenever activeProject changes
+  useEffect(() => {
+    if (activeProject?.slug) {
+      loadProjectData(activeProject.slug);
+    }
+  }, [activeProject?.slug]);
 
   const loadProjectData = async (slug) => {
     if (!slug) return;
@@ -364,6 +394,8 @@ export default function AiAnalysisPage({ user }) {
     } catch (e) { }
   };
 
+
+
   const handleRunAnalysis = async () => {
     if (!activeProject?.slug || analyzing) return;
 
@@ -374,7 +406,10 @@ export default function AiAnalysisPage({ user }) {
     setAnalyzing(true);
     try {
       const domain = activeProject?.domain || activeProject?.name || '';
-      const kwList = projectKeywords.map(k => (typeof k === 'string' ? k : (k.kw || k.keyword || k.name))).filter(Boolean);
+      const top2KwObjects = getTop2KeywordsPerCategory(projectKeywords);
+      const kwList = (top2KwObjects.length > 0 ? top2KwObjects : projectKeywords)
+        .map(k => (typeof k === 'string' ? k : (k.kw || k.keyword || k.name)))
+        .filter(Boolean);
 
       const engines = ['chatgpt', 'gemini', 'ai overview'];
 
@@ -468,7 +503,7 @@ export default function AiAnalysisPage({ user }) {
     return null;
   };
 
-  // Get Mentions Data for selected engine: EXACT 1-to-1 match with Brand Discovery
+    // Get Mentions Data for selected engine: Top 2 keywords per category mapped with Project Setup
   const getEngineMentions = () => {
     const activeRes = getActiveEngineResult();
     if (!activeRes || !Array.isArray(activeRes.mentioned_keywords) || activeRes.mentioned_keywords.length === 0) {
@@ -476,12 +511,12 @@ export default function AiAnalysisPage({ user }) {
     }
 
     const kws = projectKeywords || [];
+    const aiRanks = activeRes.keyword_ai_ranks || {};
 
     return activeRes.mentioned_keywords.map((kwStr, idx) => {
       const cleanKwStr = String(kwStr).trim();
       const kwLower = cleanKwStr.toLowerCase();
 
-      // Smart Real Page URL Resolution for Mentions ONLY
       let matchInKws = kws.find(k => String(k.kw || k.keyword || '').toLowerCase().trim() === kwLower);
       if (!matchInKws) {
         matchInKws = kws.find(k => {
@@ -497,22 +532,25 @@ export default function AiAnalysisPage({ user }) {
         displaySv = !isNaN(parsed) && parsed > 0 ? parsed.toLocaleString() : String(rawSv);
       }
 
-      const rankNum = matchInKws?.rank !== undefined && matchInKws?.rank !== null && String(matchInKws?.rank).trim() !== ''
-        ? parseInt(String(matchInKws.rank).replace(/[^0-9]/g, ''), 10)
-        : (idx % 10) + 1;
+      // Tentative rank fetched directly from AI LLM output
+      const aiRankVal = aiRanks[cleanKwStr] || aiRanks[kwLower] || matchInKws?.rank || (idx % 5) + 1;
+
+      // Real landing page URL from Project Setup
+      const cleanDomain = activeProject?.domain ? `https://www.${activeProject.domain.replace(/^https?:\/\//i, '').replace(/^www\./i, '')}` : '';
+      const mappedLandingUrl = matchInKws?.landingPage || matchInKws?.landing_page_url || matchInKws?.url || (cleanDomain ? `${cleanDomain}/` : '#');
 
       return {
         id: matchInKws?.id || idx,
         keyword: cleanKwStr,
         sv: displaySv,
-        rank: rankNum ? `#${rankNum}` : '—',
-        rankNum: rankNum,
+        rank: aiRankVal ? `#${aiRankVal}` : '—',
+        rankNum: aiRankVal,
         cluster: matchInKws?.cluster || 'General',
         category: matchInKws?.category || 'General',
         type: matchInKws?.type || 'Informational',
         intent: matchInKws?.targetSubtype || matchInKws?.subtype || (idx % 2 === 0 ? 'Commercial' : 'Informational'),
         targetSubtype: matchInKws?.targetSubtype || matchInKws?.subtype || 'Informational',
-        url: matchInKws?.landingPage || matchInKws?.page_url || matchInKws?.url || (activeProject?.domain ? `https://www.${activeProject.domain.replace(/^https?:\/\//i, '').replace(/^www\./i, '')}/` : '—'),
+        url: mappedLandingUrl,
         targetType: matchInKws?.targetType || (idx % 3 === 0 ? 'Blogs' : 'Landing Page'),
         targetGeo: matchInKws?.targetGeo || 'India',
         priority: matchInKws?.priority || 'Medium'
@@ -520,51 +558,57 @@ export default function AiAnalysisPage({ user }) {
     });
   };
 
-  // Get Citations Data for selected engine: EXACT 1-to-1 match with Brand Discovery
+    // Get Citations Data for selected engine: Top 2 keywords per category mapped with Project Setup
   const getEngineCitations = () => {
     const activeRes = getActiveEngineResult();
-    if (!activeRes || !Array.isArray(activeRes.cited_pages_list) || activeRes.cited_pages_list.length === 0) {
+    if (!activeRes || (!Array.isArray(activeRes.cited_pages_list) && !Array.isArray(activeRes.mentioned_keywords))) {
       return [];
     }
 
     const kws = projectKeywords || [];
-    const citedList = activeRes.cited_pages_list;
+    const citedList = activeRes.cited_pages_list || [];
+    const mentionsList = activeRes.mentioned_keywords || [];
+    const itemsToProcess = citedList.length > 0 ? citedList : mentionsList;
+    if (itemsToProcess.length === 0) return [];
 
-    // Group unique URLs and count citations
-    const uniqueCitedUrlsMap = new Map();
-    citedList.forEach(item => {
-      let urlStr = String(item).trim();
-      if (urlStr.includes(' - ')) {
-        urlStr = urlStr.split(' - ')[1].trim();
+    const uniqueCitedMap = new Map();
+    itemsToProcess.forEach(item => {
+      let rawStr = String(item).trim();
+      let kwName = rawStr;
+      if (rawStr.includes(' - ')) {
+        kwName = rawStr.split(' - ')[0].trim();
       }
-      const match = urlStr.match(/https?:\/\/[^\s]+/i);
-      const url = match ? match[0].trim() : urlStr;
-      if (url) {
-        uniqueCitedUrlsMap.set(url, (uniqueCitedUrlsMap.get(url) || 0) + 1);
+      if (kwName) {
+        if (!uniqueCitedMap.has(kwName)) {
+          uniqueCitedMap.set(kwName, { kwName, count: 1 });
+        } else {
+          uniqueCitedMap.get(kwName).count += 1;
+        }
       }
     });
 
-    return Array.from(uniqueCitedUrlsMap.entries()).map(([url, count], idx) => {
-      let rawKwStr = (activeRes.mentioned_keywords && activeRes.mentioned_keywords[idx % activeRes.mentioned_keywords.length]) || '—';
-      const cleanKwVal = String(rawKwStr).trim().toLowerCase();
+    const cleanDomain = activeProject?.domain ? `https://www.${activeProject.domain.replace(/^https?:\/\//i, '').replace(/^www\./i, '')}` : '';
 
-      // Look up real landing page URL from projectKeywords for keyword
-      const matchingKw = kws.find(k => {
-        const kText = String(k.kw || k.keyword || '').trim().toLowerCase();
-        return kText === cleanKwVal || (k.landingPage && k.landingPage.toLowerCase().includes(url.toLowerCase())) || (k.page_url && k.page_url.toLowerCase().includes(url.toLowerCase()));
-      }) || {};
+    return Array.from(uniqueCitedMap.values()).map(({ kwName, count }, idx) => {
+      const cleanKwVal = kwName.toLowerCase().trim();
 
-      const realDomain = activeProject?.domain ? `https://www.${activeProject.domain.replace(/^https?:\/\//i, '').replace(/^www\./i, '')}` : '';
-      const realUrl = matchingKw.landingPage || matchingKw.page_url || matchingKw.url || (realDomain ? (url.startsWith('http') ? url : `${realDomain}/`) : url);
+      let matchingKw = kws.find(k => String(k.kw || k.keyword || '').trim().toLowerCase() === cleanKwVal);
+      if (!matchingKw) {
+        matchingKw = kws.find(k => {
+          const kText = String(k.kw || k.keyword || '').trim().toLowerCase();
+          return kText && (kText.includes(cleanKwVal) || cleanKwVal.includes(kText));
+        }) || {};
+      }
 
-      const rawSlug = realUrl.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || 'HOME PAGE';
+      const mappedLandingUrl = matchingKw.landingPage || matchingKw.landing_page_url || matchingKw.url || (cleanDomain ? `${cleanDomain}/` : '—');
+      const rawSlug = mappedLandingUrl.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || 'HOME PAGE';
       const pageName = rawSlug.toUpperCase();
 
       return {
-        id: realUrl,
-        keyword: matchingKw.kw || matchingKw.keyword || rawKwStr,
+        id: mappedLandingUrl + '_' + idx,
+        keyword: matchingKw.kw || matchingKw.keyword || kwName,
         pageName: pageName,
-        url: realUrl,
+        url: mappedLandingUrl,
         citationsCount: count,
         cluster: matchingKw.cluster || 'General',
         category: matchingKw.category || 'General',

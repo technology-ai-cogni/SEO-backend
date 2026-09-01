@@ -463,13 +463,16 @@ def _init_db_inner():
                 checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
-        conn.execute(text("ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank INTEGER"))
-        conn.execute(text("ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank_checked_at TIMESTAMPTZ"))
-        conn.execute(text("ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank_meta JSONB"))
-        # Informational/Commercial classification from scripts/intent_classifier.py,
-        # written by scripts/run_pipeline.py. target_type (Landing/Blog Page,
-        # from scripts/landing_blog_classifier.py) already has a column above.
-        conn.execute(text("ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS subtype TEXT"))
+        for alter_cmd in [
+            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank INTEGER",
+            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank_checked_at TIMESTAMPTZ",
+            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank_meta JSONB",
+            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS subtype TEXT"
+        ]:
+            try:
+                conn.execute(text(alter_cmd))
+            except Exception as alter_err:
+                print(f"[DB Init] Notice skipping table alter: {alter_err}")
         try:
             conn.execute(text("UPDATE keyword_categories SET type = 'Google' WHERE type IS NULL OR TRIM(type) = ''"))
             conn.execute(text("ALTER TABLE keyword_categories ALTER COLUMN type SET DEFAULT 'Google'"))
@@ -3304,3 +3307,60 @@ if __name__ == "__main__":
     else:
         init_db()
         print("Tables created (or already existed).")
+
+
+def get_ai_analysis_history(project_slug: str, engine_name: str = None, limit: int = 50):
+    """Retrieve historical AI Analysis runs for a project from Supabase PostgreSQL database."""
+    with engine.begin() as conn:
+        slug_like = f"%{project_slug}%"
+        if engine_name and engine_name.strip():
+            res = conn.execute(text("""
+                SELECT id, project_slug, project_name, domain, country, engine,
+                       ai_visibility, mentions, cited_pages, total_keywords,
+                       mentioned_keywords, cited_pages_list, created_at
+                FROM ai_analysis
+                WHERE (project_slug = :slug OR project_name ILIKE :slug_like)
+                  AND LOWER(engine) LIKE :eng_like
+                ORDER BY created_at DESC
+                LIMIT :limit
+            """), {
+                "slug": project_slug,
+                "slug_like": slug_like,
+                "eng_like": f"%{engine_name.lower().strip()}%",
+                "limit": limit
+            }).fetchall()
+        else:
+            res = conn.execute(text("""
+                SELECT id, project_slug, project_name, domain, country, engine,
+                       ai_visibility, mentions, cited_pages, total_keywords,
+                       mentioned_keywords, cited_pages_list, created_at
+                FROM ai_analysis
+                WHERE project_slug = :slug OR project_name ILIKE :slug_like
+                ORDER BY created_at DESC
+                LIMIT :limit
+            """), {
+                "slug": project_slug,
+                "slug_like": slug_like,
+                "limit": limit
+            }).fetchall()
+
+        history = []
+        for r in res:
+            m_kws = r.mentioned_keywords if isinstance(r.mentioned_keywords, list) else (json.loads(r.mentioned_keywords) if r.mentioned_keywords else [])
+            c_list = r.cited_pages_list if isinstance(r.cited_pages_list, list) else (json.loads(r.cited_pages_list) if r.cited_pages_list else [])
+            history.append({
+                "id": r.id,
+                "project_slug": r.project_slug,
+                "project_name": r.project_name,
+                "domain": r.domain,
+                "country": r.country,
+                "engine": r.engine,
+                "ai_visibility": r.ai_visibility,
+                "mentions": r.mentions,
+                "cited_pages": r.cited_pages,
+                "total_keywords": r.total_keywords,
+                "mentioned_keywords": m_kws,
+                "cited_pages_list": c_list,
+                "created_at": r.created_at.isoformat() if hasattr(r.created_at, 'isoformat') else str(r.created_at)
+            })
+        return history

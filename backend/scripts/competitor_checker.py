@@ -30,7 +30,7 @@ load_dotenv()
 
 DEFAULT_CONNECT_TIMEOUT = 5.0
 DEFAULT_READ_TIMEOUT = 20.0
-DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 GEMINI_REST_URL_TEMPLATE = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 REALISTIC_HEADERS = {
@@ -294,7 +294,7 @@ Respond ONLY in valid raw JSON:
     print("-" * 60, flush=True)
     print(prompt, flush=True)
 
-    candidate_models = [model, "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash"]
+    candidate_models = [model, "gemini-3.6-flash", "gemini-flash-latest", "gemini-2.0-flash"]
     seen_models = []
     for m in candidate_models:
         if m and m not in seen_models:

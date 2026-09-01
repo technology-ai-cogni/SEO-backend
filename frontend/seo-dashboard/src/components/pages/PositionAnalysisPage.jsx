@@ -1239,30 +1239,66 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
 
     // AI LLM TABS (ChatGPT, Gemini, AI Overview)
     const llmKey = targetLlm === 'ai overview' ? 'ai overview' : targetLlm === 'gemini' ? 'gemini' : 'chatgpt';
-    const llmResults = tabResults[llmKey] || tabResults[targetLlm] || [];
-    const activeRes = llmResults[0] || {};
-    const citedPagesList = activeRes.cited_pages_list || [];
+    let llmResults = tabResults[llmKey] || tabResults[targetLlm] || [];
+    let activeRes = llmResults[0] || {};
 
-    if (!citedPagesList || citedPagesList.length === 0) {
-      return [];
+    if ((!activeRes.cited_pages_list || activeRes.cited_pages_list.length === 0) && (!activeRes.mentioned_keywords || activeRes.mentioned_keywords.length === 0) && activeProject?.slug) {
+      try {
+        const stored = localStorage.getItem(`ai_results_${activeProject.slug}_${llmKey}`) ||
+                       localStorage.getItem(`ai_results_${activeProject.slug}_${llmKey.replace(/\s+/g, '')}`) ||
+                       localStorage.getItem(`ai_results_${activeProject.slug}_${llmKey.replace(/\s+/g, '_')}`);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          activeRes = Array.isArray(parsed) ? parsed[0] : parsed;
+        }
+      } catch (e) {}
+    }
+    
+    const citedPagesList = activeRes.cited_pages_list || [];
+    const mentionsList = activeRes.mentioned_keywords || [];
+    const itemsToProcess = citedPagesList.length > 0 ? citedPagesList : mentionsList;
+
+    if (!itemsToProcess || itemsToProcess.length === 0) {
+      // Fallback to Project Setup keywords if no AI run data is present yet
+      return (projectKeywords || []).map(k => {
+        const finalUrl = k.landingPage || k.landing_page_url || k.page_url || k.url || 'https://euroschoolindia.com';
+        const pageName = finalUrl.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || (k.kw || k.keyword || 'PAGE');
+        return {
+          url: finalUrl,
+          pageName: pageName.toUpperCase(),
+          categoryName: k.category || k.targetSubtype || k.subtype || 'General',
+          clusterName: k.cluster || k.type || 'General',
+          keyword: k.kw || k.keyword || ''
+        };
+      });
     }
 
-    return citedPagesList.map(citationStr => {
-      let kw = 'Keyword';
-      let urlStr = citationStr;
-      if (citationStr.includes(' - ')) {
-        const parts = citationStr.split(' - ');
+    return itemsToProcess.map(citationStr => {
+      let kw = String(citationStr || '').trim();
+      let urlStr = kw;
+      if (kw.includes(' - ')) {
+        const parts = kw.split(' - ');
         kw = parts[0].trim();
         urlStr = parts.slice(1).join(' - ').trim();
       }
 
-      const kwMatch = projectKeywords.find(k => (k.kw || k.keyword || '').toLowerCase() === kw.toLowerCase());
-      const clusterName = kwMatch?.cluster || kwMatch?.type || '-';
-      const categoryName = kwMatch?.category || kwMatch?.targetSubtype || kwMatch?.subtype || '-';
-      const pageName = urlStr.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || kw;
+      const cleanKwVal = kw.toLowerCase().trim();
+
+      let kwMatch = projectKeywords.find(k => String(k.kw || k.keyword || '').toLowerCase().trim() === cleanKwVal);
+      if (!kwMatch) {
+        kwMatch = projectKeywords.find(k => {
+          const kText = String(k.kw || k.keyword || '').toLowerCase().trim();
+          return kText && (kText.includes(cleanKwVal) || cleanKwVal.includes(kText));
+        });
+      }
+
+      const clusterName = kwMatch?.cluster || kwMatch?.type || 'General';
+      const categoryName = kwMatch?.category || kwMatch?.targetSubtype || kwMatch?.subtype || 'General';
+      const finalUrl = kwMatch?.landingPage || kwMatch?.landing_page_url || kwMatch?.page_url || kwMatch?.url || urlStr;
+      const pageName = finalUrl.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || kw;
 
       return {
-        url: urlStr,
+        url: finalUrl,
         pageName: pageName.toUpperCase(),
         categoryName: categoryName,
         clusterName: clusterName,
@@ -2031,6 +2067,26 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                           ? visibilityData.cited_pages
                           : cList.length;
 
+                        // Calculate actual parsed keywords count (Top 2 per category searched by AI) vs Total Project Keywords
+                        const getParsedKwCount = (kws) => {
+                          if (!kws || !Array.isArray(kws) || kws.length === 0) return 0;
+                          const categoryMap = {};
+                          kws.forEach(k => {
+                            const cat = String(k.category || k.cluster || 'General').trim();
+                            if (!categoryMap[cat]) categoryMap[cat] = [];
+                            categoryMap[cat].push(k);
+                          });
+                          let count = 0;
+                          Object.values(categoryMap).forEach(g => {
+                            count += Math.min(g.length, 2);
+                          });
+                          return count;
+                        };
+
+                        const totalProjectKws = projectKeywords && projectKeywords.length > 0 ? projectKeywords.length : (kwCount || 0);
+                        const top2ParsedCount = getParsedKwCount(projectKeywords);
+                        const parsedCount = top2ParsedCount > 0 ? top2ParsedCount : (visibilityData.total_keywords || totalProjectKws);
+
                         return (
                           <AiVisibilityArcGauge
                             visibility={visibilityData.ai_visibility ?? 0}
@@ -2038,8 +2094,8 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                             citedPages={citedVal}
                             kwMentionsList={mList}
                             kwCitationsList={cList}
-                            totalKeywords={topKeywords.length > 0 ? topKeywords.length : (visibilityData.total_keywords || 100)}
-                            projectTotalKeywords={kwCount}
+                            totalKeywords={parsedCount}
+                            projectTotalKeywords={totalProjectKws}
                           />
                         );
                       })()}

@@ -6,17 +6,15 @@ from .openai_agent import OpenAIAgent
 from .gemini_agent import GeminiAgent
 from .aio_agent    import AIOAgent
 from .serpapi_agent import SerpAPIAgent
-from .claude_agent import ClaudeAgent
 
 AGENTS = {
     "openai": OpenAIAgent,
     "chatgpt": OpenAIAgent,
     "gemini": GeminiAgent,
-    "claude": ClaudeAgent,
     "serpapi": SerpAPIAgent,
     "ai overview": AIOAgent,
     "aio": AIOAgent,
 }
 
-__all__ = ["BaseAgent", "OpenAIAgent", "GeminiAgent", "AIOAgent", "ClaudeAgent", "SerpAPIAgent", "AGENTS",
+__all__ = ["BaseAgent", "OpenAIAgent", "GeminiAgent", "AIOAgent", "SerpAPIAgent", "AGENTS",
            "CLIENT_DOMAIN", "DATASETS_DIR"]

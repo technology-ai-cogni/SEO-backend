@@ -224,22 +224,20 @@ class OpenAIAgent(BaseAgent):
         try:
             kw_list_str = "\n".join([f"{i+1}. {k}" for i, k in enumerate(keywords_slice[:100])])
             system_msg = "You are an SEO AI Search Auditor. You must respond strictly in JSON format."
-            user_prompt = (
-                f"Perform organic AI search visibility and domain rank analysis for target domain '{domain_clean}' (URL: https://www.{domain_clean}) in region '{country}'.\n\n"
-                f"AUDIT TASK 1 - DOMAIN COMPETITOR RANK:\n"
-                f"Evaluate where '{domain_clean}' ranks overall among top industry competitors in organic AI search recommendations for its niche.\n"
-                f"- Return 'domain_rank': Integer rank position (e.g., 1 if top recommended brand, 2, 3, or 101 if not ranked in top 100).\n"
-                f"- Return 'others_count': Integer count of competitors ahead of '{domain_clean}' (e.g., 0 if rank #1, 2 if rank #3, -1 if rank 101).\n\n"
-                f"AUDIT TASK 2 - TOP KEYWORD VISIBILITY ({len(keywords_slice)} target keywords):\n"
-                f"Keywords:\n{kw_list_str}\n\n"
-                f"Return JSON with:\n"
-                f"- 'mentions': Total count of keywords out of {len(keywords_slice)} where '{domain_clean}' appears in search recommendations.\n"
-                f"- 'cited_pages': Total count of cited web page URLs for '{domain_clean}'.\n"
-                f"- 'mentioned_keywords': Array of the specific keyword strings where '{domain_clean}' appeared.\n"
-                f"- 'keyword_ai_ranks': Object mapping each target keyword string to its AI recommendation rank position for '{domain_clean}' (e.g. 1 if top recommended, 2, 3, or 101 if not ranked/mentioned).\n"
-                f"- 'cited_pages_list': Array of strings formatted as '[Keyword] - [Page Title/URL]' for cited pages.\n\n"
-                f"JSON schema:\n"
-               )
+            user_prompt = f"""You are OpenAI ChatGPT performing an organic AI search visibility and domain rank audit for target domain '{domain_clean}' in region '{country}'.
+
+Target Keywords ({len(keywords_slice)} keywords):
+{kw_list_str}
+
+Evaluate the target keywords above and return ONLY valid JSON with these fields (DO NOT return URLs):
+- 'mentions': Total count of mentioned keywords where '{domain_clean}' appears in ChatGPT recommendations.
+- 'cited_pages': Total count of cited keywords for '{domain_clean}'.
+- 'mentioned_keywords': Array of specific keyword strings from the list where '{domain_clean}' is mentioned.
+- 'cited_pages_list': Array of specific keyword strings from the list where '{domain_clean}' is cited as a source.
+- 'keyword_ai_ranks': Object mapping each mentioned keyword string to its AI recommendation rank position for '{domain_clean}' (e.g. 1 if top recommended, 2, 3...).
+- 'domain_rank': Integer overall rank position for '{domain_clean}'.
+- 'others_count': Integer count of competitors ahead of '{domain_clean}'.
+"""
 
             try:
                 response = _client.chat.completions.create(
@@ -272,6 +270,7 @@ class OpenAIAgent(BaseAgent):
             mentions_raw = parsed.get("mentioned_keywords") or []
             cited_raw = parsed.get("cited_pages_list") or []
             kw_ranks_raw = parsed.get("keyword_ai_ranks") or {}
+            kw_urls_raw = parsed.get("keyword_urls") or {}
 
             # Deduplicate mentioned keywords preserving order
             mentions_kws = []
@@ -323,6 +322,7 @@ class OpenAIAgent(BaseAgent):
                 "cited_pages": cited_count,
                 "mentioned_keywords": mentions_kws,
                 "keyword_ai_ranks": keyword_ai_ranks,
+                "keyword_urls": kw_urls_raw,
                 "cited_pages_list": cited_list,
                 "domain_rank": domain_rank_val,
                 "others_count": others_count_val,

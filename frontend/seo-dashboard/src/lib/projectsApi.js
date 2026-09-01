@@ -1085,15 +1085,11 @@ export function getApiBaseUrl() {
   if (typeof window !== 'undefined' && window.location && window.location.hostname) {
     const host = window.location.hostname;
     if (host === 'localhost' || host === '127.0.0.1') {
-      const envBase = import.meta.env.VITE_API_BASE;
-      return envBase ? envBase.replace('0.0.0.0', '127.0.0.1') : 'http://127.0.0.1:5000';
+      return 'http://127.0.0.1:8000';
     }
-    // On production server / EC2 / custom domain:
-    // Return empty string so all requests go to same origin (HTTPS) and Nginx routes them to backend
-    return '';
+    return `${window.location.protocol}//${host}:8000`;
   }
-  const envBase = import.meta.env.VITE_API_BASE;
-  return envBase || 'http://127.0.0.1:5000';
+  return 'http://127.0.0.1:8000';
 }
 
 const CATEGORY_API_BASE = getApiBaseUrl();
