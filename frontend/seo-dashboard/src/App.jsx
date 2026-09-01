@@ -127,7 +127,7 @@ function AccountUpdateModal({ open, onClose, data }) {
             <p style={{ fontSize: 13.5, color: '#64748b', margin: '0 0 20px 0', lineHeight: 1.5 }}>
               An administrator has updated your account profile permissions:
             </p>
-            
+
             <div
               style={{
                 width: '100%',
@@ -271,12 +271,7 @@ function GlobalCustomAlertModal({ open, onClose, data }) {
   );
 }
 
-const mockProject = {
-  domain: "owis.org",
-  name: "OWIS",
-  location: "Singapore",
-  slug: "owis"
-};
+
 
 const PAGE_TITLES = {
   'landing': { title: 'Welcome', subtitle: 'Access your SEO workspace' },
@@ -296,7 +291,7 @@ const PAGE_TITLES = {
   'project-setup/competitors': { title: 'Project Setup · Competitors', subtitle: 'Track competitor domains' },
   'project-setup/outreach': { title: 'Project Setup · Outreach', subtitle: 'Manage link outreach' },
   'project-setup/connectors': { title: 'Project Setup · Connectors', subtitle: 'Connect data sources' },
-  'search-visibility/position-analysis': { title: 'Brand Discovery', subtitle: `${totalKeywordCount.toLocaleString()} keywords` },
+  'search-visibility/position-analysis': { title: 'Brand Discovery', subtitle: `` },
   'search-visibility/ai-analysis': { title: 'Top Pages (AI)', subtitle: 'Mentions and Citations analytics across AI Search Engines' },
   'search-visibility/keywords': { title: 'Keywords', subtitle: `${totalKeywordCount.toLocaleString()} tracked keywords` },
   'search-visibility/top-pages': { title: 'Top Pages (Organic)', subtitle: 'Best performing pages by organic traffic' },
@@ -382,10 +377,10 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
   }
 
   switch (path) {
-    case 'home': return <HomePage 
-      onNavigate={onNavigate} 
-      projects={[mockProject]}
-      activeProject={mockProject}
+    case 'home': return <HomePage
+      onNavigate={onNavigate}
+      projects={[]}
+      activeProject={null}
       onStartAudit={(domain) => onNavigate('dashboard')}
     />;
     case 'login': return <LoginPage onNavigate={onNavigate} initialAdminMode={false} user={user} onLoginSuccess={onLoginSuccess} onLogout={onLogout} />;
@@ -405,8 +400,8 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
     case 'profile': return <GeneralSettingsPage initialTab="settings" user={user} onNavigate={onNavigate} onUserUpdate={onLoginSuccess} />;
     case 'settings/help':
     case 'help': return <GeneralSettingsPage initialTab="help" user={user} onNavigate={onNavigate} onUserUpdate={onLoginSuccess} />;
-    case 'dashboard': return <DashboardPage 
-      activeProject={mockProject}
+    case 'dashboard': return <DashboardPage
+      activeProject={null}
       keywords={topKeywords}
       user={user}
     />;
@@ -557,7 +552,7 @@ export default function App() {
             sessionStorage.setItem('seo_dashboard_user', JSON.stringify(updatedUser));
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     };
 
     checkUserStatus();
@@ -598,7 +593,7 @@ export default function App() {
     setUser(userData);
     try {
       sessionStorage.setItem('seo_dashboard_user', JSON.stringify(userData));
-    } catch (e) {}
+    } catch (e) { }
 
     const role = userData?.role?.toUpperCase();
     const secAccess = userData?.section_access;
@@ -624,7 +619,7 @@ export default function App() {
     setUser(null);
     try {
       sessionStorage.removeItem('seo_dashboard_user');
-    } catch (e) {}
+    } catch (e) { }
     setActivePath('landing');
   };
 

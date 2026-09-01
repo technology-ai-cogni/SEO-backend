@@ -2725,12 +2725,15 @@ def save_ai_analysis_run(
 def get_project_summary(project_slug: str):
     """Fast aggregated SQL summary query for instant dashboard metrics load."""
     with engine.begin() as conn:
+        slug_like = f"%{project_slug}%"
         # 1. Total Keywords count & SUM of search volume
         kw_res = conn.execute(text("""
-            SELECT COUNT(*) AS total_kws, COALESCE(SUM(sv), 0) AS total_sv, COUNT(DISTINCT cluster) AS total_clusters
+            SELECT COUNT(*) AS total_kws, 
+                   COALESCE(SUM(NULLIF(regexp_replace(CAST(sv AS TEXT), '[^0-9.]', '', 'g'), '')::numeric), 0) AS total_sv, 
+                   COUNT(DISTINCT cluster) AS total_clusters
             FROM keyword_categories
-            WHERE project_slug = :slug
-        """), {"slug": project_slug}).fetchone()
+            WHERE project_name = :slug OR project_name ILIKE :slug_like
+        """), {"slug": project_slug, "slug_like": slug_like}).fetchone()
 
         total_kws = kw_res.total_kws if kw_res else 0
         total_sv = float(kw_res.total_sv) if kw_res else 0
@@ -2739,10 +2742,10 @@ def get_project_summary(project_slug: str):
         # 2. Total pages & blogs count
         page_res = conn.execute(text("""
             SELECT COUNT(*) AS total_pgs,
-                   COUNT(CASE WHEN LOWER(target_type) LIKE '%blog%' OR LOWER(landing_page_url) LIKE '%blog%' THEN 1 END) AS total_blogs
+                   COUNT(CASE WHEN LOWER(target_type) LIKE '%blog%' OR LOWER(url) LIKE '%blog%' THEN 1 END) AS total_blogs
             FROM pages
-            WHERE project_slug = :slug
-        """), {"slug": project_slug}).fetchone()
+            WHERE project_name = :slug OR project_name ILIKE :slug_like
+        """), {"slug": project_slug, "slug_like": slug_like}).fetchone()
 
         total_pgs = page_res.total_pgs if page_res else 0
         total_blogs = page_res.total_blogs if page_res else 0
@@ -2751,10 +2754,10 @@ def get_project_summary(project_slug: str):
         ai_res = conn.execute(text("""
             SELECT engine, ai_visibility, mentions, cited_pages, created_at
             FROM ai_analysis
-            WHERE project_slug = :slug
+            WHERE project_slug = :slug OR project_name ILIKE :slug_like
             ORDER BY created_at DESC
             LIMIT 5
-        """), {"slug": project_slug}).fetchall()
+        """), {"slug": project_slug, "slug_like": slug_like}).fetchall()
 
         ai_history = [{
             "engine": r.engine,

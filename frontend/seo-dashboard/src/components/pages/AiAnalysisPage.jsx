@@ -246,7 +246,7 @@ export default function AiAnalysisPage({ user }) {
     }
   };
 
-  
+
   const handleDownloadCsv = () => {
     const isMentions = activeSubTab === 'mentions';
     const rows = isMentions ? filteredMentions : filteredCitations;
@@ -375,7 +375,7 @@ export default function AiAnalysisPage({ user }) {
     try {
       const domain = activeProject?.domain || activeProject?.name || '';
       const kwList = projectKeywords.map(k => (typeof k === 'string' ? k : (k.kw || k.keyword || k.name))).filter(Boolean);
-      
+
       const engines = ['chatgpt', 'gemini', 'ai overview'];
 
       await Promise.all(
@@ -383,11 +383,11 @@ export default function AiAnalysisPage({ user }) {
           try {
             const res = await runAiVisibilityAnalysis(activeProject.slug, domain, 'India', kwList, engKey);
             const resObj = res?.result || {};
-            
+
             // Update shared localStorage key used by Brand Discovery & Top Pages AI
             localStorage.setItem(`ai_results_${activeProject.slug}_${engKey}`, JSON.stringify([resObj]));
             saveHitToPeriodHistory(activeProject.slug, engKey, resObj);
-            
+
             // Auto-persist directly to Supabase table `ai_analysis`
             if (supabase && res?.result) {
               try {
@@ -556,7 +556,7 @@ export default function AiAnalysisPage({ user }) {
 
       const realDomain = activeProject?.domain ? `https://www.${activeProject.domain.replace(/^https?:\/\//i, '').replace(/^www\./i, '')}` : '';
       const realUrl = matchingKw.landingPage || matchingKw.page_url || matchingKw.url || (realDomain ? (url.startsWith('http') ? url : `${realDomain}/`) : url);
-      
+
       const rawSlug = realUrl.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || 'HOME PAGE';
       const pageName = rawSlug.toUpperCase();
 
@@ -645,7 +645,7 @@ export default function AiAnalysisPage({ user }) {
 
   return (
     <div style={{ position: 'relative', padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: '#f8fafc', minHeight: '100vh' }}>
-      
+
       {/* ─── HEADER BAR: Dashboard: domain.com v [Link] 🇮🇳 India v 📅 Date ───── */}
       {(() => {
         const activeCountry = COUNTRY_OPTIONS.find(c => c.code === selectedRegion) || COUNTRY_OPTIONS[0];
@@ -922,7 +922,7 @@ export default function AiAnalysisPage({ user }) {
       }}>
         {/* Row 1: Engine Tabs & Mentions vs Citations Toggle directly UNDER engine tabs */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-          
+
           {/* Left Column: Engine Tabs & Mentions vs Citations Sub-tabs */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
             {/* Segmented Engine Button Group: ChatGPT, Gemini, AI Overview */}
@@ -1407,7 +1407,7 @@ export default function AiAnalysisPage({ user }) {
         )}
       </div>
 
-    
+
       {/* TOP PAGES AI PAGE BLUR OVERLAY */}
       {analyzing && (
         <div style={{
@@ -1509,13 +1509,13 @@ export default function AiAnalysisPage({ user }) {
                 Analyzing AI Search Visibility...
               </h3>
               <p style={{ fontSize: 13, color: '#64748b', margin: 0, lineHeight: 1.5 }}>
-                Gathering Mentions, Citations, and AI Visibility Ranks for <strong style={{ color: '#7c3aed' }}>{activeProject?.name || activeProject?.domain}</strong>. Please wait a moment.
+                Gathering Mentions and Citations for <strong style={{ color: '#7c3aed' }}>{activeProject?.name || activeProject?.domain}</strong>. Please wait a moment.
               </p>
             </div>
           </div>
         </div>
       )}
 
-      </div>
+    </div>
   );
 }

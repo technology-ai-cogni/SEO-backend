@@ -16,3 +16,5 @@ backend/scripts/da_check.py
 backend/scripts/moz_domain_checker.py
 backend/scripts/quora.py
 backend/scripts/reddit.py
+# Ignored documentation
+README.md

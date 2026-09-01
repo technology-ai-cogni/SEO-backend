@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ExternalLink, Search, ChevronDown, CheckCircle, Lock, ShieldAlert, Calendar, Sparkles, RefreshCw } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi, fetchDomainMetricsApi, runOrganicRankCheckApi } from '../../lib/projectsApi';
+import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi, fetchDomainMetricsApi, runOrganicRankCheckApi, fetchAiAnalysisHistory } from '../../lib/projectsApi';
 import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions, canRunBrandDiscovery, isAssociateUser, canRunAiModelAnalysis, recordAiModelAnalysisRun } from '../../lib/permissions';
 
 function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 0, projectTotalKeywords = 0 }) {
@@ -245,7 +245,7 @@ function extractTop2PerCategory(kws) {
   if (!kws || kws.length === 0) return [];
   const groups = {};
   kws.forEach(k => {
-    const cat = k.category || k.category_name || k.targetSubtype || k.subtype || k.cluster || 'General';
+    const cat = k.category || k.category_name || k.targetSubtype || k.subtype || k.cluster || '-';
     if (!groups[cat]) groups[cat] = [];
     groups[cat].push(k);
   });
@@ -753,6 +753,8 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
 
     const tabs = ['overview', 'chatgpt', 'gemini', 'ai overview'];
     const newResults = {};
+
+    // 1. Try local cache first for instant UI response
     tabs.forEach(tabKey => {
       const cacheKey = `ai_results_${activeProject.slug}_${tabKey}`;
       try {
@@ -763,11 +765,89 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
             newResults[tabKey] = parsed;
           }
         }
-      } catch (err) {
-        console.error(`Error loading cached AI analysis for ${tabKey}:`, err);
-      }
+      } catch (err) { }
     });
-    setTabResults(prev => ({ ...prev, ...newResults }));
+    if (Object.keys(newResults).length > 0) {
+      setTabResults(prev => ({ ...prev, ...newResults }));
+    }
+
+    // 2. Fetch latest AI Analysis runs directly from Supabase DB for cross-system syncing
+    fetchAiAnalysisHistory(activeProject.slug)
+      .then(history => {
+        if (history && history.length > 0) {
+          const dbTabResults = {};
+          const engines = ['chatgpt', 'gemini', 'ai overview'];
+
+          engines.forEach(eng => {
+            const match = history.find(h => (h.engine || '').toLowerCase().trim() === eng || (h.engine || '').toLowerCase().includes(eng));
+            if (match) {
+              const resObj = {
+                ai_visibility: match.ai_visibility || 0,
+                mentions: match.mentions || 0,
+                cited_pages: match.cited_pages || 0,
+                mentioned_keywords: match.mentioned_keywords || [],
+                cited_pages_list: match.cited_pages_list || [],
+                total_keywords: match.total_keywords || 0
+              };
+              dbTabResults[eng] = [resObj];
+              // Update local cache so next tab switch is instant
+              try {
+                localStorage.setItem(`ai_results_${activeProject.slug}_${eng}`, JSON.stringify([resObj]));
+              } catch (e) { }
+            }
+          });
+
+          // Overview aggregation from DB
+          const validDb = engines.map(eng => dbTabResults[eng] ? dbTabResults[eng][0] : null).filter(Boolean);
+          if (validDb.length > 0) {
+            const totalMentions = validDb.reduce((sum, r) => sum + (r.mentions || 0), 0);
+            const totalCited = validDb.reduce((sum, r) => sum + (r.cited_pages || 0), 0);
+            dbTabResults['overview'] = [{
+              ...validDb[0],
+              mentions: totalMentions,
+              cited_pages: totalCited
+            }];
+          }
+
+          setTabResults(prev => ({ ...dbTabResults, ...prev }));
+
+          // Reconstruct multi-period trend history (P1..P15) across all devices from Supabase history
+          try {
+            engines.forEach(eng => {
+              const engHistory = history
+                .filter(h => (h.engine || '').toLowerCase().trim() === eng || (h.engine || '').toLowerCase().includes(eng))
+                .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+
+              if (engHistory.length > 0) {
+                const reconstructedHits = engHistory.slice(0, 15).map((run, idx) => {
+                  const cCounts = {};
+                  const cited = run.cited_pages_list || [];
+                  cited.forEach(item => {
+                    const pageUrl = typeof item === 'string' ? item : (item.url || item.cited_url || item.page || '');
+                    if (!pageUrl) return;
+                    const normUrl = pageUrl.trim().toLowerCase();
+                    const matchedKw = (projectKeywords || []).find(k => {
+                      const kUrl = (k.landingPage || k.url || k.page_url || '').trim().toLowerCase();
+                      return kUrl && (kUrl === normUrl || kUrl.includes(normUrl) || normUrl.includes(kUrl));
+                    });
+                    const cName = matchedKw?.cluster || matchedKw?.type || '-';
+                    cCounts[cName] = (cCounts[cName] || 0) + 1;
+                  });
+                  return {
+                    dateStr: `Hit ${idx + 1}`,
+                    clusterCounts: cCounts
+                  };
+                });
+                localStorage.setItem(`ai_period_hits_${activeProject.slug}_${eng}`, JSON.stringify(reconstructedHits));
+              }
+            });
+          } catch (histErr) {
+            console.warn('[PositionAnalysisPage] Failed to reconstruct period history from DB:', histErr);
+          }
+        }
+      })
+      .catch(err => console.warn('[PositionAnalysisPage] Supabase history sync notice:', err));
+
   }, [activeProject?.slug]);
 
   const saveHitToPeriodHistory = (projectSlug, engineKey, visibilityResult, optionalKws = null) => {
@@ -787,7 +867,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       kwsSource.forEach(k => {
         const pUrl = (k.landingPage || k.url || k.page_url || k.landing_page_url || '').trim().toLowerCase();
         if (pUrl) {
-          const cName = k.cluster || k.type || 'Schools';
+          const cName = k.cluster || k.type || '-';
           if (!uniquePagesByCluster[cName]) {
             uniquePagesByCluster[cName] = new Set();
           }
@@ -802,7 +882,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         const uniqueUrls = new Set();
         (projectPages || []).forEach(p => {
           const pUrl = (p.url || p.page_url || '').trim().toLowerCase();
-          const cName = p.cluster || p.type || 'Schools';
+          const cName = p.cluster || p.type || '-';
           if (pUrl && !uniqueUrls.has(pUrl)) {
             uniqueUrls.add(pUrl);
             clusterCounts[cName] = (clusterCounts[cName] || 0) + 1;
@@ -821,13 +901,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
           return kUrl && (kUrl === normUrl || kUrl.includes(normUrl) || normUrl.includes(kUrl));
         });
 
-        const clusterName = matchedKw?.cluster || matchedKw?.type || 'Schools';
+        const clusterName = matchedKw?.cluster || matchedKw?.type || '-';
         clusterCounts[clusterName] = (clusterCounts[clusterName] || 0) + 1;
       });
 
       if (Object.keys(clusterCounts).length === 0) {
         kwsSource.forEach(k => {
-          const cName = k.cluster || k.type || 'General';
+          const cName = k.cluster || k.type || '-';
           clusterCounts[cName] = (clusterCounts[cName] || 0) + 1;
         });
       }
@@ -1104,8 +1184,8 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         const pageUrl = String(k.landingPage || k.url || k.page_url || k.landing_page || '').trim();
         if (!pageUrl) return;
 
-        const cluster = String(k.cluster || k.type || 'General').trim();
-        const category = String(k.category || k.targetSubtype || k.subtype || 'General').trim();
+        const cluster = String(k.cluster || k.type || '-').trim();
+        const category = String(k.category || k.targetSubtype || k.subtype || '-').trim();
         const kwText = k.kw || k.keyword || '';
 
         const rawRank = k.rank ?? k.position ?? k.rankVal ?? k.rank_meta?.rank ?? k.intentRank;
@@ -1134,8 +1214,8 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       (projectPages || []).forEach(p => {
         const pageUrl = String(p.url || '').trim();
         if (!pageUrl || pageMap[pageUrl]) return;
-        const cluster = String(p.cluster || p.targetCluster || 'General').trim();
-        const category = String(p.category || p.targetCategory || 'General').trim();
+        const cluster = String(p.cluster || p.targetCluster || '-').trim();
+        const category = String(p.category || p.targetCategory || '-').trim();
         const rawName = p.pageName || p.name || pageUrl.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || 'PAGE';
 
         pageMap[pageUrl] = {
@@ -1163,89 +1243,30 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     const activeRes = llmResults[0] || {};
     const citedPagesList = activeRes.cited_pages_list || [];
 
-    if (citedPagesList.length > 0) {
-      return citedPagesList.map(citationStr => {
-        let kw = 'Keyword';
-        let urlStr = citationStr;
-        if (citationStr.includes(' - ')) {
-          const parts = citationStr.split(' - ');
-          kw = parts[0].trim();
-          urlStr = parts.slice(1).join(' - ').trim();
-        }
-
-        const kwMatch = projectKeywords.find(k => (k.kw || k.keyword || '').toLowerCase() === kw.toLowerCase());
-        const clusterName = kwMatch?.cluster || kwMatch?.type || 'General';
-        const categoryName = kwMatch?.category || kwMatch?.targetSubtype || kwMatch?.subtype || 'General';
-        const pageName = urlStr.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || kw;
-
-        return {
-          url: urlStr,
-          pageName: pageName.toUpperCase(),
-          categoryName: categoryName,
-          clusterName: clusterName,
-          keyword: kw
-        };
-      });
+    if (!citedPagesList || citedPagesList.length === 0) {
+      return [];
     }
 
-    // Default Fallback
-    const clusterMap = {};
-
-    const registerItem = (clusterName, catName, pageUrl, pageName = '') => {
-      const cleanCluster = String(clusterName || 'General').trim() || 'General';
-      if (!clusterMap[cleanCluster]) {
-        clusterMap[cleanCluster] = {
-          clusterName: cleanCluster,
-          categories: new Set(),
-          pages: new Set(),
-          pageDetails: []
-        };
+    return citedPagesList.map(citationStr => {
+      let kw = 'Keyword';
+      let urlStr = citationStr;
+      if (citationStr.includes(' - ')) {
+        const parts = citationStr.split(' - ');
+        kw = parts[0].trim();
+        urlStr = parts.slice(1).join(' - ').trim();
       }
 
-      const record = clusterMap[cleanCluster];
+      const kwMatch = projectKeywords.find(k => (k.kw || k.keyword || '').toLowerCase() === kw.toLowerCase());
+      const clusterName = kwMatch?.cluster || kwMatch?.type || '-';
+      const categoryName = kwMatch?.category || kwMatch?.targetSubtype || kwMatch?.subtype || '-';
+      const pageName = urlStr.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || kw;
 
-      if (catName && String(catName).trim()) {
-        record.categories.add(String(catName).trim());
-      }
-
-      if (pageUrl && String(pageUrl).trim()) {
-        const cleanUrlStr = String(pageUrl).trim();
-        if (!record.pages.has(cleanUrlStr)) {
-          record.pages.add(cleanUrlStr);
-          const rawName = pageName || cleanUrlStr.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || 'Page';
-          record.pageDetails.push({
-            url: cleanUrlStr,
-            name: rawName
-          });
-        }
-      }
-    };
-
-    (projectKeywords || []).forEach(k => {
-      const cluster = k.cluster || k.type || '';
-      const category = k.category || '';
-      const pageUrl = k.landingPage || k.url || k.page_url || k.landing_page || '';
-      registerItem(cluster, category, pageUrl);
-    });
-
-    (projectPages || []).forEach(p => {
-      const cluster = p.cluster || p.targetCluster || '';
-      const category = p.category || p.targetCategory || '';
-      const pageUrl = p.url || '';
-      const pageName = p.pageName || p.name || '';
-      registerItem(cluster, category, pageUrl, pageName);
-    });
-
-    return Object.values(clusterMap).map(item => {
-      const catList = Array.from(item.categories);
-      const pageList = Array.from(item.pages);
       return {
-        url: item.pageDetails[0]?.url || item.clusterName,
-        pageName: item.clusterName,
-        categoryName: catList[0] || 'General',
-        clusterName: item.clusterName,
-        categoryCount: catList.length,
-        pageCount: pageList.length
+        url: urlStr,
+        pageName: pageName.toUpperCase(),
+        categoryName: categoryName,
+        clusterName: clusterName,
+        keyword: kw
       };
     });
   };
@@ -1306,7 +1327,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     multiResults.forEach(res => {
       const kwName = res.keyword || '';
       const kwObj = projectKeywords.find(k => k.kw?.toLowerCase() === kwName.toLowerCase());
-      const cluster = kwObj?.cluster || 'General';
+      const cluster = kwObj?.cluster || '-';
 
       const ranksInResults = res.results && res.results.some(urlItem => (urlItem.url || '').toLowerCase().includes(domainLower));
       const mentionedInText = res.ai_answer && (
@@ -1956,11 +1977,21 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       {/* AI Visibility Arc Gauge Graph */}
                       {(() => {
                         const visibilityData = (() => {
-                          if (!currentTabResults || currentTabResults.length === 0) {
+                          if (!currentTabResults || !Array.isArray(currentTabResults) || currentTabResults.length === 0) {
+                            const first = currentTabResults && typeof currentTabResults === 'object' && !Array.isArray(currentTabResults) ? currentTabResults : null;
+                            if (first && (first.mentions !== undefined || first.mentioned_keywords !== undefined)) {
+                              return {
+                                ai_visibility: first.ai_visibility || 0,
+                                mentions: first.mentions || (first.mentioned_keywords ? first.mentioned_keywords.length : 0),
+                                cited_pages: first.cited_pages || (first.cited_pages_list ? first.cited_pages_list.length : 0),
+                                mentioned_keywords: first.mentioned_keywords || [],
+                                cited_pages_list: first.cited_pages_list || []
+                              };
+                            }
                             return { ai_visibility: 0, mentions: 0, cited_pages: 0, mentioned_keywords: [], cited_pages_list: [] };
                           }
-                          const first = currentTabResults[0];
-                          if (first && typeof first.ai_visibility !== 'undefined') {
+                          const first = Array.isArray(currentTabResults) ? currentTabResults[0] : currentTabResults;
+                          if (first && (typeof first.ai_visibility !== 'undefined' || typeof first.mentions !== 'undefined')) {
                             return first;
                           }
                           // Fallback calculation for old single-keyword format array [{ keyword, results: [...] }]
@@ -1969,7 +2000,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                           let citedCount = 0;
                           const mentionedKws = [];
                           const citedList = [];
-                          currentTabResults.forEach(res => {
+                          (Array.isArray(currentTabResults) ? currentTabResults : []).forEach(res => {
                             const urls = res.results || [];
                             const domainMatches = urls.filter(u => cleanDomain && u.url?.toLowerCase().includes(cleanDomain));
                             if (domainMatches.length > 0) {
@@ -2054,8 +2085,9 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 { key: 'gemini', name: 'Gemini' }
               ].map(({ key, name }) => {
                 const modelResults = tabResults[key];
-                const hasData = modelResults && modelResults.length > 0 && modelResults[0] && typeof modelResults[0].mentions !== 'undefined';
-                const first = hasData ? modelResults[0] : null;
+                const resArray = Array.isArray(modelResults) ? modelResults : (modelResults ? [modelResults] : []);
+                const hasData = resArray.length > 0 && resArray[0] && typeof resArray[0].mentions !== 'undefined';
+                const first = hasData ? resArray[0] : null;
 
                 return {
                   name,
@@ -2069,19 +2101,18 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
 
               const analyzedPlatforms = overviewPlatforms.filter(p => p.hasData);
               const totalMentionsSum = analyzedPlatforms.length > 0
-                ? analyzedPlatforms.reduce((sum, p) => sum + p.mentions, 0)
+                ? analyzedPlatforms.reduce((sum, p) => sum + (typeof p.mentions === 'number' ? p.mentions : 0), 0)
                 : 'N/A';
               const totalCitedSum = analyzedPlatforms.length > 0
-                ? analyzedPlatforms.reduce((sum, p) => sum + p.citedPages, 0)
+                ? analyzedPlatforms.reduce((sum, p) => sum + (typeof p.citedPages === 'number' ? p.citedPages : 0), 0)
                 : 'N/A';
 
               const overviewRunCount = analyzedPlatforms.length > 0
                 ? (topKeywords.length > 0 ? topKeywords.length : (analyzedPlatforms[0].totalKeywords || 0))
                 : 0;
-              const overviewProjectTotal = kwCount || activeProject?.keywords || 514;
-              const overviewProgressPercent = overviewProjectTotal > 0
-                ? Math.min(100, (overviewRunCount / overviewProjectTotal) * 100)
-                : 0;
+              const overviewProjectTotal = kwCount || activeProject?.keywords || 0;
+              const safeTotal = Math.max(1, overviewProjectTotal || 1);
+              const overviewProgressPercent = Math.min(100, Math.max(0, (overviewRunCount / safeTotal) * 100));
               const overviewRatioText = `${overviewRunCount} / ${overviewProjectTotal}`;
 
               return (
@@ -2730,7 +2761,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                             title={item.url}
                           >
                             <a
-                              href={item.url.startsWith('http') ? item.url : `https://${item.url}`}
+                              href={String(item.url || '').startsWith('http') ? item.url : `https://${item.url}`}
                               target="_blank"
                               rel="noreferrer"
                               style={{
@@ -2785,7 +2816,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                             title={item.categoryName}
                           >
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%', display: 'block', fontWeight: 700, color: '#334155' }}>
-                              {item.categoryName || 'General'}
+                              {item.categoryName || '-'}
                             </span>
                           </div>
                         ))
@@ -2826,7 +2857,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                             title={item.clusterName}
                           >
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%', display: 'block', fontWeight: 700, color: '#2563eb' }}>
-                              {item.clusterName || 'General'}
+                              {item.clusterName || '-'}
                             </span>
                           </div>
                         ))
@@ -2873,7 +2904,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               // Calculate total page counts per cluster from left-side table data
               const clusterCounts = {};
               pageAnalysisData.forEach((item) => {
-                const cName = item.clusterName || 'General';
+                const cName = item.clusterName || '-';
                 clusterCounts[cName] = (clusterCounts[cName] || 0) + 1;
               });
 

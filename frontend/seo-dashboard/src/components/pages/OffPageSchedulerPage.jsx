@@ -483,15 +483,10 @@ export default function OffPageSchedulerPage({ user }) {
     return () => { isMounted = false; };
   }, []);
 
-  // Default mock projects fallback
-  const mockProjects = [
-    { slug: 'owis', name: 'One World International School', domain: 'owis.org', status: 'Active' },
-    { slug: 'sais', name: 'Stamford American', domain: 'sais.edu.sg', status: 'Active' },
-    { slug: 'testing308', name: 'testing308', domain: 'testing308.com', status: 'Active' }
-  ];
+  const mockProjects = [];
 
   const projectList = useMemo(() => {
-    const rawList = (dbProjects.length > 0 ? dbProjects : mockProjects).filter(p => p.status !== 'Inactive' && p.isActive !== false);
+    const rawList = dbProjects.filter(p => p.status !== 'Inactive' && p.isActive !== false);
     if (!isAdmin) {
       if (!vendorProject) return [];
       const vProjLower = vendorProject.toLowerCase().trim();
@@ -651,7 +646,7 @@ export default function OffPageSchedulerPage({ user }) {
     } catch (e) { }
     return initialImports;
   });
-  const [selectedImportProject, setSelectedImportProject] = useState(mockProjects[0].name);
+  const [selectedImportProject, setSelectedImportProject] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [importFile, setImportFile] = useState(null);
   const [importMsg, setImportMsg] = useState({ type: '', text: '' });
@@ -668,7 +663,7 @@ export default function OffPageSchedulerPage({ user }) {
     ];
   });
   const [scheduleAction, setScheduleAction] = useState('Run Backlink Audit');
-  const [selectedSchedProject, setSelectedSchedProject] = useState(mockProjects[0].name);
+  const [selectedSchedProject, setSelectedSchedProject] = useState('');
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleFreq, setScheduleFreq] = useState('One-Time');
   const [schedMsg, setSchedMsg] = useState({ type: '', text: '' });
@@ -1430,30 +1425,7 @@ export default function OffPageSchedulerPage({ user }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {!isVendor && userCanUpdate && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button
-                  onClick={handleRunAudit}
-                  disabled={auditAllocating}
-                  style={{
-                    background: '#ffffff',
-                    color: '#0f172a',
-                    border: '1.5px solid #cbd5e1',
-                    borderRadius: 10,
-                    padding: '9px 18px',
-                    fontSize: 13.5,
-                    fontWeight: 700,
-                    cursor: auditAllocating ? 'wait' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                    transition: 'all 0.15s ease'
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-                  onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
-                >
-                  <ShieldCheck size={16} color="var(--accent)" />
-                  {auditAllocating ? 'Allocating Associates...' : 'Run Audit Allocation'}
-                </button>
+
 
                 {/* People Icon Button with Associate Breakdown Popover */}
                 {(() => {
@@ -3560,7 +3532,7 @@ export default function OffPageSchedulerPage({ user }) {
         <div style={{ padding: '8px 0 16px 0' }}>
           <p style={{ fontSize: 14.5, color: '#64748b', margin: 0, lineHeight: 1.6 }}>
             Are you sure you want to delete <strong>this project's Off-Page data (records, scheduled activities)</strong> for <strong>{deleteConfirmImport?.project}</strong>? This action cannot be undone.
-            f          </p>
+            </p>
         </div>
       </Modal>
       {/* Unsaved Changes Confirmation Modal */}

@@ -1,14 +1,3 @@
-import sys
-import os
-from pathlib import Path
-
-# Ensure backend and exp-1 directories are in sys.path for AI agents
-_curr_dir = Path(__file__).resolve().parent
-_exp1_dir = _curr_dir / "exp-1"
-if str(_exp1_dir) not in sys.path:
-    sys.path.insert(0, str(_exp1_dir))
-if str(_curr_dir) not in sys.path:
-    sys.path.insert(0, str(_curr_dir))
 """
 Backend API -- category checking, scoped by PROJECT.
 
@@ -146,7 +135,6 @@ from pydantic import BaseModel
 from core import db
 from services import category_checker, competitor_classifier
 from scripts.hosted_categorize import run_categorize_job_in_background
-from scripts.cluster_assigner import cluster_project as cluster_assigner_project
 from scripts.hosted_rank_check import run_rank_check_job_in_background
 from scripts.comp_analysis import find_competitors_for_rows
 from auth.router import router as auth_router
@@ -192,18 +180,12 @@ def start_expired_projects_cleanup_loop():
 
 @app.on_event("startup")
 def _startup_event():
-    """Run init_db in a background thread to prevent blocking server startup."""
-    import threading
-    def _async_init():
-        try:
-            db.init_db()
-        except Exception as e:
-            print(f"[db] Background init_db notice: {e}")
-    threading.Thread(target=_async_init, daemon=True).start()
-    try:
-        start_expired_projects_cleanup_loop()
-    except Exception as e:
-        print(f"[cleanup] Cleanup loop notice: {e}")
+    """CREATE TABLE/COLUMN IF NOT EXISTS only (see db.init_db()) -- safe to
+    run on every boot, so a fresh table/column added here shows up in
+    production on the next deploy without a manual `python -m core.db`
+    step."""
+    db.init_db()
+    start_expired_projects_cleanup_loop()
 
 
 class DomainUser(BaseModel):
@@ -216,8 +198,6 @@ class CreateDomainRequest(BaseModel):
     project_name: Optional[str] = None  # auto-generated from `domain` if left blank
     target_regions: Optional[List[str]] = None
     platforms: Optional[List[str]] = None
-    industry: Optional[str] = None
-    industry_type: Optional[str] = None
     domain_authority: Optional[str] = None
     nap_business_centre: Optional[str] = None
     nap_phone: Optional[str] = None
@@ -439,8 +419,6 @@ def create_domain(payload: CreateDomainRequest):
         project_slug = db.create_domain(
             payload.domain, payload.project_name, payload.target_regions,
             payload.platforms, payload.domain_authority, users_payload,
-            industry=payload.industry or payload.industry_type,
-            industry_type=payload.industry_type or payload.industry,
             nap_business_centre=payload.nap_business_centre,
             nap_phone=payload.nap_phone,
             nap_website=payload.nap_website,
@@ -472,17 +450,6 @@ def create_domain(payload: CreateDomainRequest):
 def list_domains_endpoint():
     """Every domain that's been registered -- the project listing view."""
     return {"domains": db.list_domain_records()}
-
-
-@app.patch("/domains/{project_slug}")
-@app.put("/domains/{project_slug}")
-def update_domain_endpoint(project_slug: str, payload: Dict[str, Any]):
-    """Update domain fields including industry_type, industry, regions, etc."""
-    try:
-        db.update_domain_record(project_slug, payload)
-        return {"status": "success", "project_slug": project_slug}
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
 # --- Monthly Operations API endpoints -----------------------------------
@@ -1048,9 +1015,10 @@ async def _do_status_check_stream_gen(dataset_id: Optional[int], rows_payload: O
                 await asyncio.sleep(0.01)
 
     finally:
-        if 'scraper' in locals() and scraper:
+        scraper_obj = locals().get('scraper')
+        if scraper_obj:
             try:
-                await scraper.close()
+                await scraper_obj.close()
             except Exception:
                 pass
 
@@ -1310,17 +1278,13 @@ def get_project_clusters(project: str):
 
 @app.post("/projects/{project}/recluster")
 def recluster_project(project: str):
-    """Manually re-run clustering over this project's entire category list.
-    Runs the full cluster_project() pipeline which first consolidates any
-    categories with fewer than 5 keywords (merging them into the nearest
-    major category), then re-clusters from scratch. Normally this also
-    happens automatically once a categorization job finishes -- this
-    endpoint is for re-running it on demand."""
+    """Manually re-run the deterministic clustering pass over this
+    project's entire category list. Normally this happens automatically
+    once a job's categorization finishes -- this endpoint is for
+    re-running it on demand."""
     proj = _resolve_project_or_404(project)
-    # Use cluster_assigner.cluster_project() -- NOT the old cluster_all_categories().
-    # cluster_project() runs consolidate_small_categories() (min-5 check) FIRST,
-    # then re-clusters, ensuring no category ends up with < 5 keywords.
-    assignment = cluster_assigner_project(proj["slug"])
+    assignment = category_checker.cluster_all_categories(proj["slug"])
+    db.replace_domain_clusters(proj["slug"], assignment)
     try:
         db.insert_audit_log(
             user_email="system",
@@ -1690,7 +1654,6 @@ class CompetitorUpdateRequest(BaseModel):
 class CompetitorClassifierRequest(BaseModel):
     keyword: str
     urls: List[str]
-    project_slug: Optional[str] = None
 
 
 class CompetitorResultItem(BaseModel):
@@ -1980,24 +1943,22 @@ def classify_competitors(payload: CompetitorClassifierRequest):
     Classifies top URLs for a given keyword into website types (Official Entity / Platform)
     and determines whether each URL is a competitor (YES / NO) using OpenAI API.
     """
-    p_slug = payload.project_slug or 'All Projects'
-    print(f"\n[CLASSIFICATION API REQUEST] Project: '{p_slug}' | Received request to classify {len(payload.urls or [])} competitor URLs: {payload.urls}", flush=True)
     if not payload.urls:
         raise HTTPException(400, "urls array cannot be empty.")
     try:
         results = competitor_classifier.classify_urls(payload.keyword, payload.urls)
-        classified_items = results.get("results", [])
-        print(f"[CLASSIFICATION API SUCCESS] Project: '{p_slug}' | Processed {len(classified_items)} URLs. Batch saving to DB in chunks of 5...", flush=True)
-
-        # Batch save to Database in chunks of 5 with project_slug filter
-        try:
-            db.batch_update_competitor_website_type(classified_items, project_slug=payload.project_slug, batch_size=5)
-        except Exception as db_batch_err:
-            print(f"[DB BATCH SAVE WARNING] Project: '{p_slug}' | Error: {db_batch_err}", flush=True)
-
-        for item in classified_items:
-            print(f"  -> Project: '{p_slug}' | URL: {item.get('url')} | Type: {item.get('website_type')} | IsCompetitor: {item.get('is_competitor')}", flush=True)
-
+        for item in results.get("results", []):
+            url = item.get("url")
+            wtype = item.get("website_type")
+            if url and wtype:
+                try:
+                    db.save_url_classification(url=url, website_type=wtype, is_competitor=item.get("is_competitor"))
+                except Exception:
+                    pass
+                try:
+                    db.update_competitor_website_type(url, wtype)
+                except Exception:
+                    pass
         return results
     except ValueError as ve:
         raise HTTPException(400, str(ve))
@@ -2362,8 +2323,8 @@ def smooth_ai_result(new_res: dict, prev_res: dict) -> dict:
 
 @app.post("/projects/{project_slug}/ai-visibility-analysis")
 def run_ai_visibility_analysis_endpoint(project_slug: str, req: AiVisibilityRequest):
-    client_domain = req.domain or "dogseechew.in"
-    kws = req.keywords or ["dog dental chews", "dental chews for dogs", "best dog chews", "organic dog chews", "dog treats"]
+    client_domain = req.domain or ""
+    kws = req.keywords or []
     engine = (req.engine or "chatgpt").lower().strip()
 
     try:
@@ -2464,16 +2425,6 @@ class AddOutreachSiteRequest(BaseModel):
     type: Optional[str] = None
     site_type: Optional[str] = None
     regions: Optional[List[str]] = None
-    sourced_by: Optional[str] = None
-    agency_name: Optional[str] = None
-    calculate_sp: Optional[bool] = False
-    sp_percentage: Optional[str] = None
-    landing_price: Optional[str] = None
-    selling_price: Optional[str] = None
-    country: Optional[str] = None
-    domain_industry: Optional[str] = None
-    status: Optional[str] = 'New site'
-    rejected_reason: Optional[str] = None
 
 
 @app.get("/outreach")
@@ -2521,16 +2472,6 @@ def add_outreach_site_endpoint(project_slug: str, req: AddOutreachSiteRequest):
             "region1_traffic": metrics["region1Traffic"],
             "region2_traffic": metrics["region2Traffic"],
             "region3_traffic": metrics["region3Traffic"],
-            "sourced_by": req.sourced_by,
-            "agency_name": req.agency_name,
-            "calculate_sp": req.calculate_sp,
-            "sp_percentage": req.sp_percentage,
-            "landing_price": req.landing_price,
-            "selling_price": req.selling_price,
-            "country": req.country,
-            "domain_industry": req.domain_industry,
-            "status": req.status or "New site",
-            "rejected_reason": req.rejected_reason,
             "metrics_json": metrics
         }
 
@@ -2786,13 +2727,3 @@ async def import_off_page_activities(
         "imported_count": len(parsed_records),
         "activities": imported_list
     }
-
-
-@app.get("/projects/{project_slug}/ai-analysis-history")
-def get_ai_analysis_history_endpoint(project_slug: str, engine: Optional[str] = None):
-    """Endpoint for fetching AI Analysis history for a project."""
-    try:
-        rows = db.get_ai_analysis_history(project_slug, engine)
-        return {"status": "success", "history": rows}
-    except Exception as e:
-        return {"status": "success", "history": []}
