@@ -1082,18 +1082,18 @@ export async function bulkDeleteKeywordRows(ids) {
 }
 
 export function getApiBaseUrl() {
-  // Respect .env VITE_API_BASE first (covers local dev on any port)
-  const envBase = import.meta.env.VITE_API_BASE;
-  if (envBase) return envBase.replace('0.0.0.0', '127.0.0.1');
-
   if (typeof window !== 'undefined' && window.location && window.location.hostname) {
     const host = window.location.hostname;
     if (host === 'localhost' || host === '127.0.0.1') {
-      return 'http://127.0.0.1:5000';
+      const envBase = import.meta.env.VITE_API_BASE;
+      return envBase ? envBase.replace('0.0.0.0', '127.0.0.1') : 'http://127.0.0.1:5000';
     }
-    return `${window.location.protocol}//${host}`;
+    // On production server / EC2 / custom domain:
+    // Return empty string so all requests go to same origin (HTTPS) and Nginx routes them to backend
+    return '';
   }
-  return 'http://127.0.0.1:5000';
+  const envBase = import.meta.env.VITE_API_BASE;
+  return envBase || 'http://127.0.0.1:5000';
 }
 
 const CATEGORY_API_BASE = getApiBaseUrl();

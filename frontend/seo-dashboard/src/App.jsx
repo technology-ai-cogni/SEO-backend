@@ -324,6 +324,137 @@ const PAGE_TITLES = {
   'content-engine/brand-setup': { title: 'Brand Setup', subtitle: 'Set brand voice and guidelines' },
 };
 
+const PATH_TO_URL_MAP = {
+  'landing': '/',
+  'home': '/home',
+  'login': '/login',
+  'admin-login': '/admin-login',
+  'signup': '/signup',
+  'profile': '/profile',
+  'users': '/users',
+  'recycle-bin': '/recycle-bin',
+  'logs': '/logs',
+  'notifications': '/notifications',
+  'help': '/help',
+  'dashboard': '/dashboard',
+  'project-setup': '/project-setup',
+  'project-setup/domain': '/project-setup/domain',
+  'project-setup/pages': '/project-setup/pages',
+  'project-setup/competitors': '/project-setup/competitors',
+  'project-setup/outreach': '/outreach',
+  'project-setup/connectors': '/project-setup/connectors',
+  'settings': '/settings',
+  'settings/general': '/settings/general',
+  'settings/notifications': '/notifications',
+  'settings/users': '/users',
+  'settings/recycle-bin': '/recycle-bin',
+  'settings/logs': '/logs',
+  'settings/profile': '/profile',
+  'settings/help': '/help',
+  'search-visibility/position-analysis': '/position-analysis',
+  'search-visibility/ai-analysis': '/ai-analysis',
+  'search-visibility/keywords': '/keywords',
+  'search-visibility/top-pages': '/top-pages',
+  'search-visibility/competitors': '/competitors',
+  'search-visibility/outreach': '/outreach',
+  'search-visibility/off-page-scheduler': '/off-page',
+  'search-visibility/calendar': '/calendar',
+  'search-visibility/activity-table': '/agency',
+  'ai-visibility': '/ai-visibility',
+  'ai-visibility/overview': '/ai-visibility/overview',
+  'ai-visibility/brand-performance': '/ai-visibility/brand-performance',
+  'ai-visibility/prompt-research': '/ai-visibility/prompt-research',
+  'ai-visibility/content-builder': '/ai-visibility/content-builder',
+  'ai-visibility/competitor-insights': '/ai-visibility/competitor-insights',
+  'content-engine': '/content-engine',
+  'content-engine/top-blogs': '/content-engine/top-blogs',
+  'content-engine/search/trend-spotting': '/content-engine/trend-spotting',
+  'content-engine/search/calendar-builder': '/content-engine/calendar-builder',
+  'content-engine/search/calendar': '/content-engine/calendar',
+  'content-engine/social/trend-spotting': '/content-engine/social-trend-spotting',
+  'content-engine/social/calendar-builder': '/content-engine/social-calendar-builder',
+  'content-engine/social/calendar': '/content-engine/social-calendar',
+  'content-engine/workflow-setup': '/content-engine/workflow-setup',
+  'content-engine/brand-setup': '/content-engine/brand-setup',
+};
+
+const URL_TO_PATH_MAP = {
+  '/': 'landing',
+  '/landing': 'landing',
+  '/home': 'home',
+  '/login': 'login',
+  '/admin-login': 'admin-login',
+  '/signup': 'signup',
+  '/profile': 'profile',
+  '/users': 'users',
+  '/recycle-bin': 'recycle-bin',
+  '/logs': 'logs',
+  '/notifications': 'notifications',
+  '/help': 'help',
+  '/dashboard': 'dashboard',
+  '/project-setup': 'project-setup',
+  '/project-setup/domain': 'project-setup',
+  '/project-setup/pages': 'project-setup',
+  '/project-setup/competitors': 'project-setup',
+  '/project-setup/outreach': 'search-visibility/outreach',
+  '/project-setup/connectors': 'project-setup',
+  '/settings': 'settings/general',
+  '/settings/general': 'settings/general',
+  '/position-analysis': 'search-visibility/position-analysis',
+  '/brand-discovery': 'search-visibility/position-analysis',
+  '/search-visibility/position-analysis': 'search-visibility/position-analysis',
+  '/ai-analysis': 'search-visibility/ai-analysis',
+  '/top-pages-ai': 'search-visibility/ai-analysis',
+  '/search-visibility/ai-analysis': 'search-visibility/ai-analysis',
+  '/keywords': 'search-visibility/keywords',
+  '/search-visibility/keywords': 'search-visibility/keywords',
+  '/top-pages': 'search-visibility/top-pages',
+  '/top-pages-organic': 'search-visibility/top-pages',
+  '/search-visibility/top-pages': 'search-visibility/top-pages',
+  '/competitors': 'search-visibility/competitors',
+  '/search-visibility/competitors': 'search-visibility/competitors',
+  '/outreach': 'search-visibility/outreach',
+  '/search-visibility/outreach': 'search-visibility/outreach',
+  '/off-page': 'search-visibility/off-page-scheduler',
+  '/off-page-scheduler': 'search-visibility/off-page-scheduler',
+  '/search-visibility/off-page-scheduler': 'search-visibility/off-page-scheduler',
+  '/calendar': 'search-visibility/calendar',
+  '/search-visibility/calendar': 'search-visibility/calendar',
+  '/agency': 'search-visibility/activity-table',
+  '/search-visibility/activity-table': 'search-visibility/activity-table',
+  '/ai-visibility': 'ai-visibility',
+  '/ai-visibility/overview': 'ai-visibility/overview',
+  '/ai-visibility/brand-performance': 'ai-visibility/brand-performance',
+  '/ai-visibility/prompt-research': 'ai-visibility/prompt-research',
+  '/ai-visibility/content-builder': 'ai-visibility/content-builder',
+  '/ai-visibility/competitor-insights': 'ai-visibility/competitor-insights',
+  '/content-engine': 'content-engine',
+  '/content-engine/top-blogs': 'content-engine/top-blogs',
+  '/content-engine/trend-spotting': 'content-engine/search/trend-spotting',
+  '/content-engine/calendar-builder': 'content-engine/search/calendar-builder',
+  '/content-engine/calendar': 'content-engine/search/calendar',
+  '/content-engine/social-trend-spotting': 'content-engine/social/trend-spotting',
+  '/content-engine/social-calendar-builder': 'content-engine/social/calendar-builder',
+  '/content-engine/social-calendar': 'content-engine/social/calendar',
+  '/content-engine/workflow-setup': 'content-engine/workflow-setup',
+  '/content-engine/brand-setup': 'content-engine/brand-setup',
+};
+
+function getUrlFromPath(path) {
+  if (!path) return '/';
+  if (PATH_TO_URL_MAP[path]) return PATH_TO_URL_MAP[path];
+  return `/${path.replace(/^\//, '')}`;
+}
+
+function getPathFromUrl(pathname) {
+  if (!pathname || pathname === '/' || pathname === '') return 'landing';
+  const clean = pathname.replace(/\/+$/, '') || '/';
+  if (URL_TO_PATH_MAP[clean]) return URL_TO_PATH_MAP[clean];
+  const withoutSlash = clean.replace(/^\//, '');
+  if (PAGE_TITLES[withoutSlash]) return withoutSlash;
+  return 'landing';
+}
+
 function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
   if (path === 'landing' || path === 'login' || path === 'signup' || path === 'admin-login') {
     return (
@@ -349,23 +480,23 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
           border: '1px solid #e2e8f0',
           boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
         }}>
-          <div style={{ width: 52, height: 52, borderRadius: 14, background: '#fef2f2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto', border: '1px solid #fca5a5' }}>
+          <div style={{ width: 52, height: 52, borderRadius: 14, background: '#f1f5f9', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto', border: '1px solid #cbd5e1' }}>
             <Lock size={26} />
           </div>
-          <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>Section Access Restricted</h2>
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>Access Restricted</h2>
           <p style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.5, margin: '0 0 20px 0' }}>
-            Your account profile ({user?.role || 'User'}) does not have permission to view or change this section. Access is restricted by default unless explicitly granted by your system Administrator.
+            You do not have permission to view this section ({path}). Please switch to an authorized module or contact your administrator.
           </p>
           <button
             onClick={() => onNavigate(isVendor && canAccessRoute(user, 'search-visibility/off-page-scheduler') ? 'search-visibility/off-page-scheduler' : 'home')}
             style={{
-              padding: '9px 20px',
-              fontSize: 13,
-              fontWeight: 600,
+              padding: '10px 22px',
+              fontSize: 13.5,
+              fontWeight: 700,
               color: '#ffffff',
-              background: 'var(--accent)',
+              background: '#0f172a',
               border: 'none',
-              borderRadius: 8,
+              borderRadius: 10,
               cursor: 'pointer'
             }}
           >
@@ -464,16 +595,25 @@ export default function App() {
   const [activePath, setActivePath] = useState(() => {
     try {
       const saved = sessionStorage.getItem('seo_dashboard_user');
-      if (saved) {
-        const uData = JSON.parse(saved);
+      const uData = saved ? JSON.parse(saved) : null;
+      const initialFromUrl = getPathFromUrl(window.location.pathname);
+
+      if (uData) {
         if (uData?.role?.toUpperCase() === 'VENDOR') {
+          if (canAccessRoute(uData, initialFromUrl) && initialFromUrl !== 'landing') {
+            return initialFromUrl;
+          }
           return canAccessRoute(uData, 'search-visibility/off-page-scheduler')
             ? 'search-visibility/off-page-scheduler'
             : 'home';
         }
+        if (initialFromUrl && initialFromUrl !== 'landing' && initialFromUrl !== 'login' && initialFromUrl !== 'signup') {
+          return initialFromUrl;
+        }
         return 'search-visibility/position-analysis';
       }
-      return 'landing';
+
+      return initialFromUrl || 'landing';
     } catch (e) {
       return 'landing';
     }
@@ -481,6 +621,33 @@ export default function App() {
 
   const [accountUpdateModal, setAccountUpdateModal] = useState(null);
   const [customAlertModal, setCustomAlertModal] = useState({ open: false, title: 'Notification', message: '' });
+
+  // Sync browser URL bar with activePath
+  useEffect(() => {
+    const targetUrl = getUrlFromPath(activePath);
+    if (window.location.pathname !== targetUrl) {
+      window.history.pushState({ path: activePath }, '', targetUrl);
+    }
+  }, [activePath]);
+
+  // Handle browser back and forward button navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      const pathFromLocation = getPathFromUrl(window.location.pathname);
+      const currentUser = userRef.current;
+      if (currentUser && (pathFromLocation === 'landing' || pathFromLocation === 'login' || pathFromLocation === 'signup')) {
+        const defaultPath = currentUser?.role?.toUpperCase() === 'VENDOR' ? 'search-visibility/off-page-scheduler' : 'search-visibility/position-analysis';
+        setActivePath(defaultPath);
+      } else if (!currentUser && pathFromLocation !== 'landing' && pathFromLocation !== 'login' && pathFromLocation !== 'signup' && pathFromLocation !== 'admin-login') {
+        setActivePath('landing');
+      } else {
+        setActivePath(pathFromLocation);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   useEffect(() => {
     window.alert = (msg) => {
@@ -627,6 +794,7 @@ export default function App() {
       sessionStorage.removeItem('seo_token');
     } catch (e) {}
     setActivePath('landing');
+    window.history.pushState(null, '', '/');
   };
 
   const isAuthPage = activePath === 'landing' || activePath === 'login' || activePath === 'signup' || activePath === 'admin-login';
