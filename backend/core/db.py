@@ -198,10 +198,24 @@ def init_db():
             raise  # non-lock error — propagate
 
 
+def _add_column_if_not_exists(conn, table: str, column: str, col_type: str):
+    """Check if a column exists in information_schema before running ALTER TABLE.
+    This avoids acquiring an ACCESS EXCLUSIVE lock on active tables during startup."""
+    try:
+        exists = conn.execute(text("""
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = :t AND column_name = :c
+        """), {"t": table, "c": column}).scalar()
+        if not exists:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}"))
+    except Exception as e:
+        print(f"[DB Init] Note: column check/add for {table}.{column}: {e}")
+
+
 def _init_db_inner():
     """Actual init_db logic, separated so the outer function can retry."""
     with engine.begin() as conn:
-        # Set a lock timeout so ALTER TABLE fails fast instead of deadlocking
+        # Set a lock timeout so DDL fails fast instead of deadlocking
         conn.execute(text("SET lock_timeout = '5s'"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS jobs (
@@ -221,10 +235,10 @@ def _init_db_inner():
                 completed_at TIMESTAMPTZ
             )
         """))
-        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS clustering_triggered_at TIMESTAMPTZ"))
-        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS country_name TEXT"))
-        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS country_code TEXT"))
-        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS project_name TEXT"))
+        _add_column_if_not_exists(conn, "jobs", "clustering_triggered_at", "TIMESTAMPTZ")
+        _add_column_if_not_exists(conn, "jobs", "country_name", "TEXT")
+        _add_column_if_not_exists(conn, "jobs", "country_code", "TEXT")
+        _add_column_if_not_exists(conn, "jobs", "project_name", "TEXT")
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_jobs_domain ON jobs (domain)"))
 
         conn.execute(text("""
@@ -238,10 +252,10 @@ def _init_db_inner():
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'USER'"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'Active'"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS attendance TEXT NOT NULL DEFAULT 'Not Present'"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_project TEXT NOT NULL DEFAULT 'All Projects'"))
+        _add_column_if_not_exists(conn, "users", "role", "TEXT NOT NULL DEFAULT 'USER'")
+        _add_column_if_not_exists(conn, "users", "status", "TEXT NOT NULL DEFAULT 'Active'")
+        _add_column_if_not_exists(conn, "users", "attendance", "TEXT NOT NULL DEFAULT 'Not Present'")
+        _add_column_if_not_exists(conn, "users", "assigned_project", "TEXT NOT NULL DEFAULT 'All Projects'")
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_users_email ON users (LOWER(email))"))
 
         conn.execute(text("""
@@ -254,8 +268,8 @@ def _init_db_inner():
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
-        conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS project_name TEXT"))
-        conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS module TEXT"))
+        _add_column_if_not_exists(conn, "audit_logs", "project_name", "TEXT")
+        _add_column_if_not_exists(conn, "audit_logs", "module", "TEXT")
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS recycle_bin (
@@ -269,9 +283,9 @@ def _init_db_inner():
                 data JSONB NOT NULL
             )
         """))
-        conn.execute(text("ALTER TABLE recycle_bin ADD COLUMN IF NOT EXISTS item_type TEXT NOT NULL DEFAULT 'project'"))
-        conn.execute(text("ALTER TABLE recycle_bin ADD COLUMN IF NOT EXISTS item_id TEXT"))
-        conn.execute(text("ALTER TABLE recycle_bin ADD COLUMN IF NOT EXISTS item_name TEXT NOT NULL DEFAULT ''"))
+        _add_column_if_not_exists(conn, "recycle_bin", "item_type", "TEXT NOT NULL DEFAULT 'project'")
+        _add_column_if_not_exists(conn, "recycle_bin", "item_id", "TEXT")
+        _add_column_if_not_exists(conn, "recycle_bin", "item_name", "TEXT NOT NULL DEFAULT ''")
         conn.execute(text("ALTER TABLE recycle_bin DROP CONSTRAINT IF EXISTS recycle_bin_project_slug_key"))
 
         conn.execute(text("""

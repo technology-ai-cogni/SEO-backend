@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Users, UserPlus, Shield, CheckCircle, AlertCircle, RefreshCw, X, Search,
-  Trash2, Eye, EyeOff, UserCheck, UserX, Key, Mail, User, Save, Layers, Lock, ChevronDown, Calendar, Info
+  Trash2, Eye, EyeOff, UserCheck, UserX, Key, Mail, User, Save, Layers, Lock, ChevronDown, Calendar, Info,
+  Building2, MapPin, Hash, Phone, ArrowRight
 } from 'lucide-react';
 import {
   hasPermission, PERMISSIONS, CATEGORIES, ROLES, ROLE_DISPLAY_NAMES, CATEGORY_ROLES_MAP
@@ -518,6 +519,17 @@ export default function UsersPage({ user, onNavigate }) {
   });
   const [showPassword, setShowPassword] = useState(false);
 
+  // Client Detail State & Modal Tab
+  const [modalTab, setModalTab] = useState('client_detail'); // 'client_detail' | 'user_credential'
+  const [clientData, setClientData] = useState({
+    name: '',
+    address: '',
+    gst: '',
+    poc_name: '',
+    poc_number: '',
+    poc_address: ''
+  });
+
   const isAdmin = user?.role?.toUpperCase() === 'ADMIN';
   const canManageUsers = hasPermission(user, PERMISSIONS.MANAGE_USERS) || isAdmin;
 
@@ -565,6 +577,9 @@ export default function UsersPage({ user, onNavigate }) {
 
   const handleFormCategoryChange = (newCategory) => {
     const rolesForCategory = CATEGORY_ROLES_MAP[newCategory] || [ROLES.INTERNAL_ASSOCIATE];
+    if (newCategory === CATEGORIES.CLIENT_ACCESS) {
+      setClientDetailEnabled(true);
+    }
     setFormData(prev => ({
       ...prev,
       category: newCategory,
@@ -862,12 +877,45 @@ export default function UsersPage({ user, onNavigate }) {
     setActionLoading(true);
     setAlertMsg({ type: '', text: '' });
     try {
-      await createUserApi(formData);
+      const payload = {
+        ...formData,
+        client_detail_enabled: clientDetailEnabled,
+        client_name: clientDetailEnabled ? clientData.name : null,
+        client_address: clientDetailEnabled ? clientData.address : null,
+        client_gst: clientDetailEnabled ? clientData.gst : null,
+        poc_name: clientDetailEnabled ? clientData.poc_name : null,
+        poc_number: clientDetailEnabled ? clientData.poc_number : null,
+        poc_address: clientDetailEnabled ? clientData.poc_address : null
+      };
+
+      if (clientDetailEnabled && clientData.name.trim()) {
+        try {
+          const clientRecords = JSON.parse(localStorage.getItem('seo_client_records') || '[]');
+          clientRecords.push({
+            id: Date.now(),
+            user_email: formData.email,
+            ...clientData,
+            createdAt: new Date().toISOString()
+          });
+          localStorage.setItem('seo_client_records', JSON.stringify(clientRecords));
+        } catch (_) {}
+      }
+
+      await createUserApi(payload);
       setAlertMsg({
         type: 'success',
         text: `Created user login credentials for "${formData.email}".`
       });
       setShowCreateModal(false);
+      setClientDetailEnabled(false);
+      setClientData({
+        name: '',
+        address: '',
+        gst: '',
+        poc_name: '',
+        poc_number: '',
+        poc_address: ''
+      });
       setFormData({
         name: '',
         email: '',
@@ -1562,9 +1610,11 @@ export default function UsersPage({ user, onNavigate }) {
           <div style={{
             background: '#ffffff',
             borderRadius: 16,
-            maxWidth: 500,
+            maxWidth: 520,
             width: '100%',
-            padding: 28,
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            padding: '24px 28px',
             boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)',
             position: 'relative',
             border: '1px solid var(--border)'
@@ -1604,262 +1654,476 @@ export default function UsersPage({ user, onNavigate }) {
                   Create User Login Credential
                 </h3>
                 <p style={{ fontSize: 12.5, color: '#64748b', margin: '2px 0 0 0' }}>
-                  Set username, email, category, role, section access, and permissions.
+                  Set client details, username, email, role, and permissions.
                 </p>
               </div>
             </div>
 
+            {/* Segmented Pill Toggle Bar */}
+            <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 10, padding: 4, gap: 4, marginBottom: 16 }}>
+              <button
+                type="button"
+                onClick={() => setModalTab('client_detail')}
+                style={{
+                  flex: 1,
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  border: 'none',
+                  background: modalTab === 'client_detail' ? '#ffffff' : 'transparent',
+                  color: modalTab === 'client_detail' ? '#5c4af2' : '#6b7280',
+                  boxShadow: modalTab === 'client_detail' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  fontFamily: 'var(--font-body)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6
+                }}
+              >
+                <span>Client Detail</span>
+                {(clientData.name || clientData.address || clientData.gst || clientData.poc_name || clientData.poc_number || clientData.poc_address) && (
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#5c4af2' }} />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setModalTab('user_credential')}
+                style={{
+                  flex: 1,
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  border: 'none',
+                  background: modalTab === 'user_credential' ? '#ffffff' : 'transparent',
+                  color: modalTab === 'user_credential' ? '#5c4af2' : '#6b7280',
+                  boxShadow: modalTab === 'user_credential' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  fontFamily: 'var(--font-body)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6
+                }}
+              >
+                <span>User Credential</span>
+                {(formData.name || formData.email || formData.password) && (
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#5c4af2' }} />
+                )}
+              </button>
+            </div>
+
             <form onSubmit={handleCreateUserSubmit} autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {/* Full Name */}
-              <div>
-                <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
-                  Username / Full Name <span style={{ color: '#dc2626' }}>*</span>
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <User size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
-                  <input
-                    type="text"
-                    autoComplete="off"
-                    placeholder="e.g. Name"
-                    value={formData.name}
-                    onChange={e => setFormData({ ...formData, name: e.target.value })}
-                    required
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px 8px 32px',
-                      fontSize: 13,
-                      borderRadius: 8,
-                      border: '1px solid #cbd5e1',
-                      outline: 'none'
-                    }}
-                  />
-                </div>
-              </div>
+              {/* Tab 1: Client Detail (Toggle on the left) */}
+              {modalTab === 'client_detail' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {/* Name */}
+                  <div>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                      Name
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <Building2 size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
+                      <input
+                        type="text"
+                        placeholder="e.g. Acme Corporation / Client Name"
+                        value={clientData.name}
+                        onChange={e => setClientData({ ...clientData, name: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px 8px 32px',
+                          fontSize: 13,
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+                  </div>
 
-              {/* Email Address */}
-              <div>
-                <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
-                  Email Address <span style={{ color: '#dc2626' }}>*</span>
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <Mail size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
-                  <input
-                    type="email"
-                    autoComplete="off"
-                    placeholder="Email@company.com"
-                    value={formData.email}
-                    onChange={e => setFormData({ ...formData, email: e.target.value })}
-                    required
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px 8px 32px',
-                      fontSize: 13,
-                      borderRadius: 8,
-                      border: '1px solid #cbd5e1',
-                      outline: 'none'
-                    }}
-                  />
-                </div>
-              </div>
+                  {/* Address */}
+                  <div>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                      Address
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <MapPin size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
+                      <input
+                        type="text"
+                        placeholder="e.g. Office 402, Business Bay, City"
+                        value={clientData.address}
+                        onChange={e => setClientData({ ...clientData, address: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px 8px 32px',
+                          fontSize: 13,
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+                  </div>
 
-              {/* Password */}
-              <div>
-                <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
-                  Login Password <span style={{ color: '#dc2626' }}>*</span>
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <Key size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    autoComplete="new-password"
-                    placeholder="Minimum 6 characters"
-                    value={formData.password}
-                    onChange={e => setFormData({ ...formData, password: e.target.value })}
-                    required
-                    minLength={6}
-                    style={{
-                      width: '100%',
-                      padding: '8px 36px 8px 32px',
-                      fontSize: 13,
-                      borderRadius: 8,
-                      border: '1px solid #cbd5e1',
-                      outline: 'none'
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    style={{
-                      position: 'absolute',
-                      right: 10,
-                      top: 8,
-                      background: 'transparent',
-                      border: 'none',
-                      color: '#94a3b8',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
-                  </button>
-                </div>
-              </div>
+                  {/* GST */}
+                  <div>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                      GST
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <Hash size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
+                      <input
+                        type="text"
+                        placeholder="e.g. 29AAAAA0000A1Z5"
+                        value={clientData.gst}
+                        onChange={e => setClientData({ ...clientData, gst: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px 8px 32px',
+                          fontSize: 13,
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+                  </div>
 
-              {/* Category & Role Controls */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
-                    User Category
-                  </label>
-                  <select
-                    value={formData.category}
-                    onChange={e => handleFormCategoryChange(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      fontSize: 13,
-                      fontWeight: 600,
-                      borderRadius: 8,
-                      border: '1px solid #cbd5e1',
-                      background: '#ffffff'
-                    }}
-                  >
-                    <option value={CATEGORIES.INTERNAL}>Internal</option>
-                    <option value={CATEGORIES.CLIENT_ACCESS}>Client Access</option>
-                    <option value={CATEGORIES.VENDOR}>Vendor</option>
-                    <option value={CATEGORIES.ADMIN}>Admin</option>
-                  </select>
-                </div>
+                  {/* POC Name */}
+                  <div>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                      POC Name
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <User size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
+                      <input
+                        type="text"
+                        placeholder="e.g. Point of Contact Name"
+                        value={clientData.poc_name}
+                        onChange={e => setClientData({ ...clientData, poc_name: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px 8px 32px',
+                          fontSize: 13,
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+                  </div>
 
-                <div>
-                  <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
-                    Assigned Role
-                  </label>
-                  <select
-                    value={formData.role}
-                    onChange={e => setFormData({ ...formData, role: e.target.value })}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      fontSize: 13,
-                      fontWeight: 600,
-                      borderRadius: 8,
-                      border: '1px solid #cbd5e1',
-                      background: '#ffffff'
-                    }}
-                  >
-                    {availableFormRoles.map(rKey => (
-                      <option key={rKey} value={rKey}>
-                        {ROLE_DISPLAY_NAMES[rKey] || rKey}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+                  {/* POC Number */}
+                  <div>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                      POC Number
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <Phone size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
+                      <input
+                        type="text"
+                        placeholder="e.g. +91 98765 43210"
+                        value={clientData.poc_number}
+                        onChange={e => setClientData({ ...clientData, poc_number: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px 8px 32px',
+                          fontSize: 13,
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+                  </div>
 
-              {/* Section Access & Permissions */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
-                    <span>Module Access</span>
-                    <span
-                      style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}
-                      onMouseEnter={() => setShowModuleInfo(true)}
-                      onMouseLeave={() => setShowModuleInfo(false)}
-                      title="You can choose multiple modules"
-                    >
-                      <Info size={13} style={{ color: '#64748b' }} />
-                      {showModuleInfo && (
-                        <div style={{
-                          position: 'absolute',
-                          bottom: '100%',
-                          left: '50%',
-                          transform: 'translateX(-50%)',
-                          marginBottom: 6,
-                          background: '#0f172a',
-                          color: '#ffffff',
-                          fontSize: 11.5,
-                          fontWeight: 500,
-                          padding: '5px 10px',
-                          borderRadius: 6,
-                          whiteSpace: 'nowrap',
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
-                          zIndex: 100,
-                          pointerEvents: 'none'
-                        }}>
-                          You can choose multiple modules
-                          <div style={{
-                            position: 'absolute',
-                            top: '100%',
-                            left: '50%',
-                            transform: 'translateX(-50%)',
-                            borderWidth: 4,
-                            borderStyle: 'solid',
-                            borderColor: '#0f172a transparent transparent transparent'
-                          }} />
-                        </div>
-                      )}
-                    </span>
-                  </label>
-                  <ModuleAccessMultiSelect
-                    value={formData.section_access}
-                    onChange={val => setFormData({ ...formData, section_access: val })}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
-                    Action Permissions
-                  </label>
-                  <select
-                    value={formData.permissions}
-                    onChange={e => setFormData({ ...formData, permissions: e.target.value })}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      fontSize: 13,
-                      fontWeight: 600,
-                      borderRadius: 8,
-                      border: '1px solid #cbd5e1',
-                      background: '#ffffff'
-                    }}
-                  >
-                    {PERMISSION_OPTIONS.map(opt => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Assigned Project selector for non-admin roles */}
-              {(formData.role || '').toUpperCase() !== 'ADMIN' && (
-                <div style={{ marginTop: 12 }}>
-                  <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
-                    Assigned Project Scope
-                  </label>
-                  <select
-                    value={formData.assigned_project && formData.assigned_project !== 'All Projects' ? formData.assigned_project : 'None'}
-                    onChange={e => setFormData({ ...formData, assigned_project: e.target.value })}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      fontSize: 13,
-                      fontWeight: 600,
-                      borderRadius: 8,
-                      border: '1px solid #cbd5e1',
-                      background: '#ffffff',
-                      color: (!formData.assigned_project || formData.assigned_project === 'None' || formData.assigned_project === 'All Projects') ? '#64748b' : '#0f172a',
-                      outline: 'none'
-                    }}
-                  >
-                    <option value="None">None</option>
-                    {projectOptions.filter(p => p !== 'All Projects' && p !== 'None').map(pName => (
-                      <option key={pName} value={pName}>{pName}</option>
-                    ))}
-                  </select>
+                  {/* POC Address */}
+                  <div>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                      POC Address
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <MapPin size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
+                      <input
+                        type="text"
+                        placeholder="e.g. POC Branch / City"
+                        value={clientData.poc_address}
+                        onChange={e => setClientData({ ...clientData, poc_address: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px 8px 32px',
+                          fontSize: 13,
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
               )}
 
-              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 12 }}>
+              {/* Tab 2: User Credential */}
+              {modalTab === 'user_credential' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {/* Full Name */}
+                  <div>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                      Username / Full Name <span style={{ color: '#dc2626' }}>*</span>
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <User size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
+                      <input
+                        type="text"
+                        autoComplete="off"
+                        placeholder="e.g. Name"
+                        value={formData.name}
+                        onChange={e => setFormData({ ...formData, name: e.target.value })}
+                        required
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px 8px 32px',
+                          fontSize: 13,
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Email Address */}
+                  <div>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                      Email Address <span style={{ color: '#dc2626' }}>*</span>
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <Mail size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
+                      <input
+                        type="email"
+                        autoComplete="off"
+                        placeholder="Email@company.com"
+                        value={formData.email}
+                        onChange={e => setFormData({ ...formData, email: e.target.value })}
+                        required
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px 8px 32px',
+                          fontSize: 13,
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Password */}
+                  <div>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                      Login Password <span style={{ color: '#dc2626' }}>*</span>
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <Key size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#94a3b8' }} />
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        autoComplete="new-password"
+                        placeholder="Minimum 6 characters"
+                        value={formData.password}
+                        onChange={e => setFormData({ ...formData, password: e.target.value })}
+                        required
+                        minLength={6}
+                        style={{
+                          width: '100%',
+                          padding: '8px 36px 8px 32px',
+                          fontSize: 13,
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          outline: 'none'
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        style={{
+                          position: 'absolute',
+                          right: 10,
+                          top: 8,
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#94a3b8',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Category & Role Controls */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                        User Category
+                      </label>
+                      <select
+                        value={formData.category}
+                        onChange={e => handleFormCategoryChange(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          background: '#ffffff'
+                        }}
+                      >
+                        <option value={CATEGORIES.INTERNAL}>Internal</option>
+                        <option value={CATEGORIES.CLIENT_ACCESS}>Client Access</option>
+                        <option value={CATEGORIES.VENDOR}>Vendor</option>
+                        <option value={CATEGORIES.ADMIN}>Admin</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                        Assigned Role
+                      </label>
+                      <select
+                        value={formData.role}
+                        onChange={e => setFormData({ ...formData, role: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          background: '#ffffff'
+                        }}
+                      >
+                        {availableFormRoles.map(rKey => (
+                          <option key={rKey} value={rKey}>
+                            {ROLE_DISPLAY_NAMES[rKey] || rKey}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Section Access & Permissions */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
+                        <span>Module Access</span>
+                        <span
+                          style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}
+                          onMouseEnter={() => setShowModuleInfo(true)}
+                          onMouseLeave={() => setShowModuleInfo(false)}
+                          title="You can choose multiple modules"
+                        >
+                          <Info size={13} style={{ color: '#64748b' }} />
+                          {showModuleInfo && (
+                            <div style={{
+                              position: 'absolute',
+                              bottom: '100%',
+                              left: '50%',
+                              transform: 'translateX(-50%)',
+                              marginBottom: 6,
+                              background: '#0f172a',
+                              color: '#ffffff',
+                              fontSize: 11.5,
+                              fontWeight: 500,
+                              padding: '5px 10px',
+                              borderRadius: 6,
+                              whiteSpace: 'nowrap',
+                              boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
+                              zIndex: 100,
+                              pointerEvents: 'none'
+                            }}>
+                              You can choose multiple modules
+                              <div style={{
+                                position: 'absolute',
+                                top: '100%',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                borderWidth: 4,
+                                borderStyle: 'solid',
+                                borderColor: '#0f172a transparent transparent transparent'
+                              }} />
+                            </div>
+                          )}
+                        </span>
+                      </label>
+                      <ModuleAccessMultiSelect
+                        value={formData.section_access}
+                        onChange={val => setFormData({ ...formData, section_access: val })}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                        Action Permissions
+                      </label>
+                      <select
+                        value={formData.permissions}
+                        onChange={e => setFormData({ ...formData, permissions: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          background: '#ffffff'
+                        }}
+                      >
+                        {PERMISSION_OPTIONS.map(opt => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Assigned Project selector for non-admin roles */}
+                  {(formData.role || '').toUpperCase() !== 'ADMIN' && (
+                    <div>
+                      <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
+                        Assigned Project Scope
+                      </label>
+                      <select
+                        value={formData.assigned_project && formData.assigned_project !== 'All Projects' ? formData.assigned_project : 'None'}
+                        onChange={e => setFormData({ ...formData, assigned_project: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          background: '#ffffff',
+                          color: (!formData.assigned_project || formData.assigned_project === 'None' || formData.assigned_project === 'All Projects') ? '#64748b' : '#0f172a',
+                          outline: 'none'
+                        }}
+                      >
+                        <option value="None">None</option>
+                        {projectOptions.filter(p => p !== 'All Projects' && p !== 'None').map(pName => (
+                          <option key={pName} value={pName}>{pName}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Actions Footer */}
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 14 }}>
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
@@ -1876,22 +2140,45 @@ export default function UsersPage({ user, onNavigate }) {
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={actionLoading}
-                  style={{
-                    padding: '8px 18px',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: '#ffffff',
-                    background: 'var(--accent)',
-                    border: 'none',
-                    borderRadius: 8,
-                    cursor: actionLoading ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  {actionLoading ? 'Creating Credential...' : 'Create Credential'}
-                </button>
+                {modalTab === 'client_detail' ? (
+                  <button
+                    type="button"
+                    onClick={() => setModalTab('user_credential')}
+                    style={{
+                      padding: '8px 18px',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: '#ffffff',
+                      background: 'var(--accent, #5c4af2)',
+                      border: 'none',
+                      borderRadius: 8,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6
+                    }}
+                  >
+                    <span>Next: User Credential</span>
+                    <ArrowRight size={14} />
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={actionLoading}
+                    style={{
+                      padding: '8px 18px',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: '#ffffff',
+                      background: 'var(--accent, #5c4af2)',
+                      border: 'none',
+                      borderRadius: 8,
+                      cursor: actionLoading ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {actionLoading ? 'Creating Credential...' : 'Create Credential'}
+                  </button>
+                )}
               </div>
             </form>
           </div>

@@ -19,6 +19,13 @@ class CreateUserRequest(BaseModel):
     section_access: Optional[str] = Field("Default", description="Section access level: Default, All Sections, Project Setup, etc.")
     permissions: Optional[str] = Field("Default", description="Action permissions: Default, View Only, View + Edit, etc.")
     assigned_project: Optional[str] = Field("All Projects", description="Assigned project for vendor access")
+    client_detail_enabled: Optional[bool] = Field(False, description="Whether client detail is enabled")
+    client_name: Optional[str] = Field(None, description="Client entity name")
+    client_address: Optional[str] = Field(None, description="Client address")
+    client_gst: Optional[str] = Field(None, description="Client GST number")
+    poc_name: Optional[str] = Field(None, description="Point of contact name")
+    poc_number: Optional[str] = Field(None, description="Point of contact phone number")
+    poc_address: Optional[str] = Field(None, description="Point of contact address")
 
 
 class UpdateUserStatusRequest(BaseModel):
