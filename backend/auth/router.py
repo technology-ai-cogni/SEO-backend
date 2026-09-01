@@ -1,11 +1,17 @@
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends, BackgroundTasks
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import jwt
+
 from auth.schemas import (
     SignupRequest, LoginRequest, UpdateProfileRequest, ChangePasswordRequest, 
     AuthResponse, UserResponse, CreateUserRequest, UpdateUserStatusRequest, UpdateUserRoleRequest,
     UpdateAttendanceRequest, MarkAllAttendanceRequest
 )
-from auth.security import hash_password, verify_password
+from auth.security import (
+    hash_password, verify_password, create_access_token, decode_access_token
+)
+from auth.dependencies import require_authenticated_user, require_admin
 from auth.db import (
     get_user_by_email, create_user, update_user_name, update_user_password,
     list_all_users, update_user_status, update_user_role, delete_user_by_id,
@@ -14,15 +20,18 @@ from auth.db import (
 from core.db import insert_audit_log
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+get_current_user = require_authenticated_user
 
+
+# ─── PUBLIC AUTH ENDPOINTS ───────────────────────────────────────────────────
 
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-def signup(payload: SignupRequest):
+def signup(payload: SignupRequest, background_tasks: BackgroundTasks):
     clean_email = payload.email.strip().lower()
 
     existing_user = get_user_by_email(clean_email)
     if existing_user:
-        insert_audit_log(user_email=clean_email, action="User Registration Failed (Email Exists)", status="Warning")
+        background_tasks.add_task(insert_audit_log, user_email=clean_email, action="User Registration Failed (Email Exists)", status="Warning")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User with this email already exists."
@@ -35,11 +44,15 @@ def signup(payload: SignupRequest):
         password_hash=pwd_hash
     )
 
-    insert_audit_log(user_email=clean_email, action="User Registered", status="Success")
+    background_tasks.add_task(insert_audit_log, user_email=clean_email, action="User Registered", status="Success")
+
+    token = create_access_token(new_user)
 
     return AuthResponse(
         status="success",
         message="User registered successfully.",
+        access_token=token,
+        token_type="bearer",
         user=UserResponse(
             id=new_user["id"],
             name=new_user["name"],
@@ -53,36 +66,40 @@ def signup(payload: SignupRequest):
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(payload: LoginRequest):
+def login(payload: LoginRequest, background_tasks: BackgroundTasks):
     clean_email = payload.email.strip().lower()
 
     user = get_user_by_email(clean_email)
     if not user:
-        insert_audit_log(user_email=clean_email, action="Failed Login Attempt (User Not Found)", status="Warning")
+        background_tasks.add_task(insert_audit_log, user_email=clean_email, action="Failed Login Attempt (User Not Found)", status="Warning")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credentials are wrong. Please try again."
         )
 
     if user.get("status") == "Disabled":
-        insert_audit_log(user_email=clean_email, action="Failed Login Attempt (Account Disabled)", status="Warning")
+        background_tasks.add_task(insert_audit_log, user_email=clean_email, action="Failed Login Attempt (Account Disabled)", status="Warning")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your profile has been disabled by administrator. Please contact your admin."
         )
 
     if not verify_password(payload.password, user["password_hash"]):
-        insert_audit_log(user_email=clean_email, action="Failed Login Attempt (Incorrect Password)", status="Warning")
+        background_tasks.add_task(insert_audit_log, user_email=clean_email, action="Failed Login Attempt (Incorrect Password)", status="Warning")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credentials are wrong. Please try again."
         )
 
-    insert_audit_log(user_email=clean_email, action="User Login", status="Success")
+    background_tasks.add_task(insert_audit_log, user_email=clean_email, action="User Login", status="Success")
+
+    token = create_access_token(user)
 
     return AuthResponse(
         status="success",
         message="Login successful.",
+        access_token=token,
+        token_type="bearer",
         user=UserResponse(
             id=user["id"],
             name=user["name"],
@@ -98,11 +115,31 @@ def login(payload: LoginRequest):
     )
 
 
+# ─── CURRENT USER PROFILE ─────────────────────────────────────────────────────
+
+@router.get("/me", response_model=UserResponse)
+def get_current_user_profile(current_user: dict = Depends(get_current_user)):
+    """Fetch live profile of currently authenticated user via session token."""
+    return UserResponse(
+        id=current_user["id"],
+        name=current_user["name"],
+        email=current_user["email"],
+        role=current_user["role"],
+        category=current_user.get("category", "Internal"),
+        status=current_user.get("status", "Active"),
+        section_access=current_user.get("section_access", "Default"),
+        permissions=current_user.get("permissions", "Default"),
+        attendance=current_user.get("attendance", "Not Present"),
+        assigned_project=current_user.get("assigned_project", "All Projects"),
+        created_at=current_user.get("created_at")
+    )
+
+
 # ─── USER MANAGEMENT ENDPOINTS (ADMIN ONLY) ───────────────────────────────────
 
 @router.get("/users", response_model=List[UserResponse])
-def get_users():
-    """List all registered users for management."""
+def get_users(admin: dict = Depends(require_admin)):
+    """List all registered users for management (Admin only)."""
     users = list_all_users()
     return [
         UserResponse(
@@ -123,7 +160,7 @@ def get_users():
 
 
 @router.post("/users", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-def admin_create_user(payload: CreateUserRequest):
+def admin_create_user(payload: CreateUserRequest, admin: dict = Depends(require_admin)):
     """Admin endpoint to create a user login credential."""
     clean_email = payload.email.strip().lower()
 
@@ -147,16 +184,21 @@ def admin_create_user(payload: CreateUserRequest):
         assigned_project=payload.assigned_project or "All Projects"
     )
 
+    admin_email = admin.get("email", "admin")
     insert_audit_log(
-        user_email="admin", 
+        user_email=admin_email, 
         action=f"Created User Account ({clean_email}): Role='{payload.role or 'INTERNAL_ASSOCIATE'}', Category='{payload.category or 'Internal'}', Section Access='{payload.section_access or 'Default'}', Action Permissions='{payload.permissions or 'Default'}', Assigned Project='{payload.assigned_project or 'All Projects'}'", 
         status="Success",
         module="RBAC / User Management"
     )
 
+    token = create_access_token(new_user)
+
     return AuthResponse(
         status="success",
         message=f"Created user credential for {clean_email}.",
+        access_token=token,
+        token_type="bearer",
         user=UserResponse(
             id=new_user["id"],
             name=new_user["name"],
@@ -173,14 +215,15 @@ def admin_create_user(payload: CreateUserRequest):
 
 
 @router.put("/users/{user_id}/status", response_model=UserResponse)
-def update_status_endpoint(user_id: int, payload: UpdateUserStatusRequest):
-    """Toggle user status ('Active' or 'Disabled')."""
+def update_status_endpoint(user_id: int, payload: UpdateUserStatusRequest, admin: dict = Depends(require_admin)):
+    """Toggle user status ('Active' or 'Disabled') (Admin only)."""
     updated = update_user_status(user_id, payload.status)
     if not updated:
         raise HTTPException(status_code=404, detail="User not found.")
     
+    admin_email = admin.get("email", "admin")
     insert_audit_log(
-        user_email="admin", 
+        user_email=admin_email, 
         action=f"Changed Account Status ({updated['email']}) to '{payload.status}'", 
         status="Warning" if payload.status == "Disabled" else "Success",
         module="RBAC / User Management"
@@ -200,8 +243,8 @@ def update_status_endpoint(user_id: int, payload: UpdateUserStatusRequest):
 
 
 @router.put("/users/{user_id}/role", response_model=UserResponse)
-def update_role_endpoint(user_id: int, payload: UpdateUserRoleRequest):
-    """Change user role, category, section_access, permissions, and assigned_project."""
+def update_role_endpoint(user_id: int, payload: UpdateUserRoleRequest, admin: dict = Depends(require_admin)):
+    """Change user role, category, section_access, permissions, and assigned_project (Admin only)."""
     updated = update_user_role(
         user_id, 
         payload.role, 
@@ -213,8 +256,9 @@ def update_role_endpoint(user_id: int, payload: UpdateUserRoleRequest):
     if not updated:
         raise HTTPException(status_code=404, detail="User not found.")
     
+    admin_email = admin.get("email", "admin")
     insert_audit_log(
-        user_email="admin", 
+        user_email=admin_email, 
         action=f"Updated User RBAC Profile ({updated['email']}): Role='{payload.role}', Category='{payload.category}', Section Access='{payload.section_access}', Action Permissions='{payload.permissions}', Assigned Project='{payload.assigned_project or updated.get('assigned_project', 'All Projects')}'", 
         status="Success",
         module="RBAC / User Management"
@@ -235,14 +279,15 @@ def update_role_endpoint(user_id: int, payload: UpdateUserRoleRequest):
 
 
 @router.put("/users/{user_id}/attendance", response_model=UserResponse)
-def update_user_attendance_endpoint(user_id: int, payload: UpdateAttendanceRequest):
-    """Update single user attendance status in Supabase DB."""
+def update_user_attendance_endpoint(user_id: int, payload: UpdateAttendanceRequest, admin: dict = Depends(require_admin)):
+    """Update single user attendance status in Supabase DB (Admin only)."""
     updated = update_user_attendance(user_id, payload.attendance)
     if not updated:
         raise HTTPException(status_code=404, detail="User not found.")
     
+    admin_email = admin.get("email", "admin")
     insert_audit_log(
-        user_email="admin", 
+        user_email=admin_email, 
         action=f"Updated User Attendance ({updated['email']}: {payload.attendance})", 
         status="Success",
         module="RBAC / User Management"
@@ -262,11 +307,12 @@ def update_user_attendance_endpoint(user_id: int, payload: UpdateAttendanceReque
 
 
 @router.post("/users/attendance/mark-all")
-def mark_all_attendance_endpoint(payload: MarkAllAttendanceRequest):
-    """Bulk update attendance for all users in Supabase DB."""
+def mark_all_attendance_endpoint(payload: MarkAllAttendanceRequest, admin: dict = Depends(require_admin)):
+    """Bulk update attendance for all users in Supabase DB (Admin only)."""
     update_all_users_attendance(payload.attendance)
+    admin_email = admin.get("email", "admin")
     insert_audit_log(
-        user_email="admin", 
+        user_email=admin_email, 
         action=f"Bulk Updated All Users Attendance: {payload.attendance}", 
         status="Success",
         module="RBAC / User Management"
@@ -275,14 +321,16 @@ def mark_all_attendance_endpoint(payload: MarkAllAttendanceRequest):
 
 
 @router.delete("/users/{user_id}")
-def delete_user_endpoint(user_id: int):
-    """Delete user profile permanently."""
+def delete_user_endpoint(user_id: int, background_tasks: BackgroundTasks, admin: dict = Depends(require_admin)):
+    """Delete user profile permanently (Admin only)."""
     deleted_email = delete_user_by_id(user_id)
     if not deleted_email:
         raise HTTPException(status_code=404, detail="User not found.")
     
-    insert_audit_log(
-        user_email="admin", 
+    admin_email = admin.get("email", "admin")
+    background_tasks.add_task(
+        insert_audit_log,
+        user_email=admin_email, 
         action=f"Deleted User Account ({deleted_email})", 
         status="Warning",
         module="RBAC / User Management"
@@ -291,12 +339,12 @@ def delete_user_endpoint(user_id: int):
 
 
 @router.put("/update-profile", response_model=AuthResponse)
-def update_profile(payload: UpdateProfileRequest):
+def update_profile(payload: UpdateProfileRequest, current_user: dict = Depends(get_current_user)):
+    """Update profile name for currently authenticated user."""
     clean_email = payload.email.strip().lower()
 
-    user = get_user_by_email(clean_email)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    if clean_email != current_user.get("email", "").lower() and str(current_user.get("role", "")).upper() != "ADMIN":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify another user's profile.")
 
     updated_user = update_user_name(clean_email, payload.name)
     if not updated_user:
@@ -304,9 +352,13 @@ def update_profile(payload: UpdateProfileRequest):
 
     insert_audit_log(user_email=clean_email, action="Profile Updated", status="Success")
 
+    token = create_access_token(updated_user)
+
     return AuthResponse(
         status="success",
         message="Profile updated successfully.",
+        access_token=token,
+        token_type="bearer",
         user=UserResponse(
             id=updated_user["id"],
             name=updated_user["name"],
@@ -319,8 +371,12 @@ def update_profile(payload: UpdateProfileRequest):
 
 
 @router.put("/change-password", response_model=AuthResponse)
-def change_password(payload: ChangePasswordRequest):
+def change_password(payload: ChangePasswordRequest, current_user: dict = Depends(get_current_user)):
+    """Change password for currently authenticated user."""
     clean_email = payload.email.strip().lower()
+
+    if clean_email != current_user.get("email", "").lower() and str(current_user.get("role", "")).upper() != "ADMIN":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot change another user's password.")
 
     user = get_user_by_email(clean_email)
     if not user:
@@ -337,9 +393,13 @@ def change_password(payload: ChangePasswordRequest):
 
     insert_audit_log(user_email=clean_email, action="Password Changed", status="Success")
 
+    token = create_access_token(user)
+
     return AuthResponse(
         status="success",
         message="Password changed successfully.",
+        access_token=token,
+        token_type="bearer",
         user=UserResponse(
             id=user["id"],
             name=user["name"],

@@ -127,7 +127,7 @@ import time
 from typing import List, Optional, Dict, Any
 
 import pandas as pd
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -138,6 +138,11 @@ from scripts.hosted_categorize import run_categorize_job_in_background
 from scripts.hosted_rank_check import run_rank_check_job_in_background
 from scripts.comp_analysis import find_competitors_for_rows
 from auth.router import router as auth_router
+from auth.dependencies import (
+    require_authenticated_user,
+    require_admin,
+    require_project_access
+)
 
 MIN_SEARCH_VOLUME = 5
 NEAR_ME_PHRASE = "near me"
@@ -352,18 +357,18 @@ def _resolve_project_or_404(project_param, include_deleted=False):
 
 
 @app.get("/recycle-bin")
-def list_recycle_bin_endpoint(item_type: Optional[str] = None):
-    """Every archived item/project in recycle_bin."""
+def list_recycle_bin_endpoint(item_type: Optional[str] = None, admin: dict = Depends(require_admin)):
+    """Every archived item/project in recycle_bin (Admin only)."""
     return {"items": db.list_recycle_bin_items(item_type=item_type)}
 
 
 @app.post("/recycle-bin/{item_id}/restore")
-def restore_recycle_bin_endpoint(item_id: str, user_email: Optional[str] = None):
+def restore_recycle_bin_endpoint(item_id: str, user_email: Optional[str] = None, admin: dict = Depends(require_admin)):
     """Restores an archived project or item from recycle_bin back into active tables."""
     res = db.restore_recycle_bin_item(item_id)
     if not res:
         raise HTTPException(404, "Item not found in recycle bin.")
-    acting_user = user_email if user_email else "system"
+    acting_user = admin.get("email") or user_email or "admin"
     db.insert_audit_log(
         user_email=acting_user,
         action=f"Restored from Recycle Bin: {res.get('restored')}",
@@ -375,7 +380,7 @@ def restore_recycle_bin_endpoint(item_id: str, user_email: Optional[str] = None)
 
 
 @app.delete("/recycle-bin/{item_id}")
-def hard_delete_recycle_bin_endpoint(item_id: str, user_email: Optional[str] = None):
+def hard_delete_recycle_bin_endpoint(item_id: str, user_email: Optional[str] = None, admin: dict = Depends(require_admin)):
     """Permanently purges an item or project from recycle_bin."""
     with db.engine.begin() as conn:
         item = None
@@ -406,7 +411,7 @@ def health():
 
 
 @app.post("/domains")
-def create_domain(payload: CreateDomainRequest):
+def create_domain(payload: CreateDomainRequest, user: dict = Depends(require_authenticated_user)):
     """Registers a domain <-> project pairing -- the "Create Project"
     form. One domain maps to exactly one project; this also creates (or
     reuses) that project in the `projects` registry, so a subsequent
@@ -433,9 +438,10 @@ def create_domain(payload: CreateDomainRequest):
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
+    acting_user = user.get("email") or "system"
     try:
         db.insert_audit_log(
-            user_email="system",
+            user_email=acting_user,
             action=f"Project Created: {payload.domain}",
             status="Success",
             project_name=project_slug,
@@ -447,11 +453,26 @@ def create_domain(payload: CreateDomainRequest):
 
 
 @app.get("/domains")
-def list_domains_endpoint():
-    """Every domain that's been registered -- the project listing view."""
-    return {"domains": db.list_domain_records()}
+def list_domains_endpoint(user: dict = Depends(require_authenticated_user)):
+    """Every domain that's been registered -- scoped by user assigned_project."""
+    role = str(user.get("role", "")).upper()
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    all_domains = db.list_domain_records()
+    if role == "ADMIN" or assigned_project in ("all projects", "all", "*") or not assigned_project:
+        return {"domains": all_domains}
+    scoped = [d for d in all_domains if str(d.get("project_slug", "")).lower() == assigned_project]
+    return {"domains": scoped}
 
 
+@app.patch("/domains/{project_slug}")
+@app.put("/domains/{project_slug}")
+def update_domain_endpoint(project_slug: str, payload: Dict[str, Any], user: dict = Depends(require_project_access)):
+    """Update domain fields including industry_type, industry, regions, etc."""
+    try:
+        db.update_domain_record(project_slug, payload)
+        return {"status": "success", "project_slug": project_slug}
+    except Exception as e:
+        raise HTTPException(500, str(e))
 # --- Monthly Operations API endpoints -----------------------------------
 
 class MonthlyImportRequest(BaseModel):
@@ -479,8 +500,14 @@ class UpdateScheduleStatusRequest(BaseModel):
     status: str
 
 @app.get("/monthly-operations/imports")
-def get_monthly_imports():
-    return {"imports": db.list_monthly_imports()}
+def get_monthly_imports(user: dict = Depends(require_authenticated_user)):
+    all_imports = db.list_monthly_imports()
+    role = str(user.get("role", "")).upper()
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    if role == "ADMIN" or assigned_project in ("all projects", "all", "*") or not assigned_project:
+        return {"imports": all_imports}
+    scoped = [i for i in all_imports if str(i.get("project_name", "")).lower() == assigned_project]
+    return {"imports": scoped}
 
 class AuditAllocationRequest(BaseModel):
     dataset_id: Optional[int] = None
@@ -1091,8 +1118,14 @@ def delete_monthly_import_endpoint(import_id: int):
     return {"status": "success"}
 
 @app.get("/monthly-operations/schedules")
-def get_scheduled_activities():
-    return {"schedules": db.list_scheduled_activities()}
+def get_scheduled_activities(user: dict = Depends(require_authenticated_user)):
+    all_schedules = db.list_scheduled_activities()
+    role = str(user.get("role", "")).upper()
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    if role == "ADMIN" or assigned_project in ("all projects", "all", "*") or not assigned_project:
+        return {"schedules": all_schedules}
+    scoped = [s for s in all_schedules if str(s.get("project_name", "")).lower() == assigned_project]
+    return {"schedules": scoped}
 
 @app.post("/monthly-operations/schedules")
 def create_scheduled_activity(payload: ScheduledActivityRequest):
@@ -1117,9 +1150,20 @@ def delete_scheduled_activity_endpoint(schedule_id: int):
 
 
 @app.get("/projects")
-def get_projects(only_deleted: bool = False):
+def get_projects(only_deleted: bool = False, user: dict = Depends(require_authenticated_user)):
     """Every project that has ever been created, optionally listing only deleted ones."""
-    return {"projects": db.list_projects(only_deleted=only_deleted)}
+    role = str(user.get("role", "")).upper()
+    if only_deleted and role != "ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrative privileges required to view deleted items."
+        )
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    all_projects = db.list_projects(only_deleted=only_deleted)
+    if role == "ADMIN" or assigned_project in ("all projects", "all", "*") or not assigned_project:
+        return {"projects": all_projects}
+    scoped = [p for p in all_projects if str(p.get("slug", "")).lower() == assigned_project]
+    return {"projects": scoped}
 
 
 class AuditLogRequest(BaseModel):
@@ -1131,17 +1175,18 @@ class AuditLogRequest(BaseModel):
 
 
 @app.get("/audit-logs")
-def get_audit_logs_endpoint(search: Optional[str] = None, status: Optional[str] = None):
-    """Retrieves logs stored in the PostgreSQL audit_logs table."""
+def get_audit_logs_endpoint(search: Optional[str] = None, status: Optional[str] = None, admin: dict = Depends(require_admin)):
+    """Retrieves logs stored in the PostgreSQL audit_logs table (Admin only)."""
     logs = db.get_audit_logs(limit=300, status_filter=status, search_query=search)
     return {"logs": logs}
 
 
 @app.post("/audit-logs")
-def create_audit_log_endpoint(payload: AuditLogRequest):
+def create_audit_log_endpoint(payload: AuditLogRequest, user: dict = Depends(require_authenticated_user)):
     """Inserts a new log entry into the audit_logs PostgreSQL table."""
+    acting_user = user.get("email") or payload.user_email or "system"
     inserted = db.insert_audit_log(
-        user_email=payload.user_email,
+        user_email=acting_user,
         action=payload.action,
         status=payload.status,
         project_name=payload.project_name,
@@ -1151,20 +1196,18 @@ def create_audit_log_endpoint(payload: AuditLogRequest):
 
 
 @app.delete("/audit-logs")
-def clear_audit_logs_endpoint():
-    """Clears all audit logs from PostgreSQL table."""
+def clear_audit_logs_endpoint(admin: dict = Depends(require_admin)):
+    """Clears all audit logs from PostgreSQL table (Admin only)."""
     db.clear_audit_logs()
     return {"cleared": True}
 
 
 @app.delete("/projects/{project}")
-def delete_project_endpoint(project: str, user_email: Optional[str] = None):
-    """Soft-deletes a project by setting deleted_at to the current timestamp.
-    All data remains in the database for 30 days and can be restored. After
-    30 days, a background worker permanently purges it."""
+def delete_project_endpoint(project: str, user_email: Optional[str] = None, admin: dict = Depends(require_admin)):
+    """Soft-deletes a project by setting deleted_at to the current timestamp (Admin only)."""
     proj = _resolve_project_or_404(project)
     db.soft_delete_project(proj["slug"])
-    acting_user = user_email if user_email else "system"
+    acting_user = admin.get("email") or user_email or "admin"
     db.insert_audit_log(
         user_email=acting_user,
         action=f"Project Deleted: {proj['name']}",
@@ -1176,11 +1219,11 @@ def delete_project_endpoint(project: str, user_email: Optional[str] = None):
 
 
 @app.delete("/projects/{project}/hard")
-def hard_delete_project_endpoint(project: str, user_email: Optional[str] = None):
-    """Permanently purges a project and all associated records from the PostgreSQL database."""
+def hard_delete_project_endpoint(project: str, user_email: Optional[str] = None, admin: dict = Depends(require_admin)):
+    """Permanently purges a project and all associated records from the PostgreSQL database (Admin only)."""
     proj = _resolve_project_or_404(project, include_deleted=True)
     db.delete_project(proj["slug"])
-    acting_user = user_email if user_email else "system"
+    acting_user = admin.get("email") or user_email or "admin"
     db.insert_audit_log(
         user_email=acting_user,
         action=f"Project Permanently Deleted: {proj['name']}",
@@ -1192,11 +1235,11 @@ def hard_delete_project_endpoint(project: str, user_email: Optional[str] = None)
 
 
 @app.post("/projects/{project}/restore")
-def restore_project_endpoint(project: str, user_email: Optional[str] = None):
-    """Restores a soft-deleted project, making it active again."""
+def restore_project_endpoint(project: str, user_email: Optional[str] = None, admin: dict = Depends(require_admin)):
+    """Restores a soft-deleted project, making it active again (Admin only)."""
     proj = _resolve_project_or_404(project, include_deleted=True)
     db.restore_project(proj["slug"])
-    acting_user = user_email if user_email else "system"
+    acting_user = admin.get("email") or user_email or "admin"
     db.insert_audit_log(
         user_email=acting_user,
         action=f"Project Restored: {proj['name']}",
@@ -1208,15 +1251,11 @@ def restore_project_endpoint(project: str, user_email: Optional[str] = None):
 
 
 @app.delete("/projects/{project}/kw-data")
-def delete_project_kw_data_endpoint(project: str, user_email: Optional[str] = None):
-    """Removes just this project's KW Cluster data (keyword_categories,
-    categories, clusters, category_cluster_map) -- leaves the project,
-    its domain registration, and its pages intact, so it still shows up
-    on the Domain and Pages tabs afterward. This is what the KW Cluster
-    tab's delete button calls."""
+def delete_project_kw_data_endpoint(project: str, user_email: Optional[str] = None, user: dict = Depends(require_project_access)):
+    """Removes just this project's KW Cluster data (requires project access)."""
     proj = _resolve_project_or_404(project)
     db.delete_project_kw_data(proj["slug"])
-    acting_user = user_email if user_email else "system"
+    acting_user = user.get("email") or user_email or "user"
     try:
         db.insert_audit_log(
             user_email=acting_user,
@@ -1231,7 +1270,7 @@ def delete_project_kw_data_endpoint(project: str, user_email: Optional[str] = No
 
 
 @app.delete("/projects/{project}/pages")
-def delete_project_pages_endpoint(project: str, user_email: Optional[str] = None):
+def delete_project_pages_endpoint(project: str, user_email: Optional[str] = None, user: dict = Depends(require_project_access)):
     """Removes just this project's page rows (Add Pages uploads) -- leaves
     the project, its domain registration, and its KW Cluster data intact,
     so it still shows up on the Domain and KW Cluster tabs afterward. This
@@ -1253,7 +1292,7 @@ def delete_project_pages_endpoint(project: str, user_email: Optional[str] = None
 
 
 @app.get("/projects/{project}/results")
-def get_project_results(project: str):
+def get_project_results(project: str, user: dict = Depends(require_project_access)):
     """ALL keyword results ever processed for this project, across every
     job -- includes the full audit trail per keyword."""
     proj = _resolve_project_or_404(project)
@@ -1261,7 +1300,7 @@ def get_project_results(project: str):
 
 
 @app.get("/projects/{project}/categories")
-def get_project_categories(project: str):
+def get_project_categories(project: str, user: dict = Depends(require_project_access)):
     """Every distinct category in this project, with keyword count and one
     example audit trail."""
     proj = _resolve_project_or_404(project)
@@ -1269,7 +1308,7 @@ def get_project_categories(project: str):
 
 
 @app.get("/projects/{project}/clusters")
-def get_project_clusters(project: str):
+def get_project_clusters(project: str, user: dict = Depends(require_project_access)):
     """Every distinct cluster in this project, with the categories grouped
     inside it."""
     proj = _resolve_project_or_404(project)
@@ -1277,7 +1316,7 @@ def get_project_clusters(project: str):
 
 
 @app.post("/projects/{project}/recluster")
-def recluster_project(project: str):
+def recluster_project(project: str, user: dict = Depends(require_project_access)):
     """Manually re-run the deterministic clustering pass over this
     project's entire category list. Normally this happens automatically
     once a job's categorization finishes -- this endpoint is for
@@ -1285,9 +1324,10 @@ def recluster_project(project: str):
     proj = _resolve_project_or_404(project)
     assignment = category_checker.cluster_all_categories(proj["slug"])
     db.replace_domain_clusters(proj["slug"], assignment)
+    acting_user = user.get("email") or "user"
     try:
         db.insert_audit_log(
-            user_email="system",
+            user_email=acting_user,
             action=f"AI Clustering Re-run Executed: {proj['name']}",
             status="Success",
             project_name=proj["slug"],
@@ -1484,22 +1524,22 @@ def _page_row_to_json(row):
 
 
 @app.get("/pages/counts")
-def get_pages_counts_endpoint():
+def get_pages_counts_endpoint(user: dict = Depends(require_authenticated_user)):
     """{project_slug: page_count} for every project that currently has at
-    least one page row. Lets the Pages tab list show accurate Total Pages
-    and know which projects to display without fetching every project's
-    full page list up front -- and, after a project's pages are all
-    deleted, its count drops off the response entirely so the tab knows
-    to stop showing it. Also returns `stats`: per-project {total,
-    commercial, blog} counts from the pages table's own target_type/
-    target_category columns, so the Pages tab's Commercial vs Others /
-    Blog Pages figures reflect actual page rows instead of KW Cluster's
-    keyword counts."""
-    return {"counts": db.get_pages_counts(), "stats": db.get_pages_stats()}
+    least one page row. Scoped by user assigned_project."""
+    counts = db.get_pages_counts()
+    stats = db.get_pages_stats()
+    role = str(user.get("role", "")).upper()
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    if role == "ADMIN" or assigned_project in ("all projects", "all", "*") or not assigned_project:
+        return {"counts": counts, "stats": stats}
+    scoped_counts = {k: v for k, v in counts.items() if k.lower() == assigned_project}
+    scoped_stats = {k: v for k, v in stats.items() if k.lower() == assigned_project}
+    return {"counts": scoped_counts, "stats": scoped_stats}
 
 
 @app.get("/projects/{project}/pages")
-def list_project_pages(project: str):
+def list_project_pages(project: str, user: dict = Depends(require_project_access)):
     """Every page row uploaded for this project via Add Pages, in upload
     order."""
     proj = _resolve_project_or_404(project)
@@ -1507,7 +1547,7 @@ def list_project_pages(project: str):
 
 
 @app.post("/projects/{project}/pages")
-def create_project_pages(project: str, rows: List[PageRow]):
+def create_project_pages(project: str, rows: List[PageRow], user: dict = Depends(require_project_access)):
     """Bulk-inserts page rows parsed from an Add Pages sheet upload (Page
     Name, URL, Cluster, Category columns) -- mirrors /jobs/category's
     upload flow but for pages, which have no categorization job of their
@@ -1586,14 +1626,14 @@ def bulk_delete_project_pages(payload: BulkDeletePagesRequest):
 
 
 @app.get("/projects/{project}/competitor-pages")
-def list_project_competitor_pages(project: str):
+def list_project_competitor_pages(project: str, user: dict = Depends(require_project_access)):
     """Every page row uploaded for this project under the Competitors tab Add Pages subView."""
     proj = _resolve_project_or_404(project)
     return {"project": proj["name"], "pages": [_page_row_to_json(r) for r in db.get_competitor_page_rows(proj["slug"])]}
 
 
 @app.post("/projects/{project}/competitor-pages")
-def create_project_competitor_pages(project: str, rows: List[PageRow]):
+def create_project_competitor_pages(project: str, rows: List[PageRow], user: dict = Depends(require_project_access)):
     """Bulk-inserts competitor page rows for a project."""
     proj = _resolve_project_or_404(project)
     if not rows:
@@ -1697,14 +1737,23 @@ def _competitor_to_json(row):
 
 
 @app.get("/competitors")
-def list_competitors(project: Optional[str] = None):
+def list_competitors(project: Optional[str] = None, user: dict = Depends(require_authenticated_user)):
     """Every tracked competitor, optionally filtered to one project via
-    ?project=<slug> (each competitor is tracked against one project)."""
+    ?project=<slug> (scoped by user's assigned project)."""
+    role = str(user.get("role", "")).upper()
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    if role != "ADMIN" and assigned_project not in ("all projects", "all", "*") and assigned_project:
+        if project and project.strip().lower() != assigned_project:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied: your account is not allocated to project '{project}'."
+            )
+        project = assigned_project
     return {"competitors": [_competitor_to_json(r) for r in db.get_competitors(project)]}
 
 
 @app.post("/competitors")
-def create_competitor(payload: CompetitorCreateRequest):
+def create_competitor(payload: CompetitorCreateRequest, user: dict = Depends(require_authenticated_user)):
     domain = payload.domain.strip()
     if not domain:
         raise HTTPException(400, "Domain is required.")
@@ -1716,9 +1765,10 @@ def create_competitor(payload: CompetitorCreateRequest):
         category=payload.category, cluster=payload.cluster,
         type=payload.type or payload.websiteType
     )
+    acting_user = user.get("email") or "system"
     try:
         db.insert_audit_log(
-            user_email="system",
+            user_email=acting_user,
             action=f"Competitor Added: {domain}",
             status="Success",
             project_name=project_slug,
@@ -1730,7 +1780,7 @@ def create_competitor(payload: CompetitorCreateRequest):
 
 
 @app.patch("/competitors/{competitor_id}")
-def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequest):
+def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequest, user: dict = Depends(require_authenticated_user)):
     updates = {
         "name": payload.name, "domain": payload.domain, "da": payload.da,
         "target_regions": payload.targetRegions, "project_slug": payload.projectSlug,
@@ -1747,9 +1797,10 @@ def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequ
             comp = conn.execute(db.text("SELECT project_slug, domain FROM competitors WHERE id = :id"), {"id": competitor_id}).mappings().fetchone()
         project_slug = project_slug or (comp.get("project_slug") if comp else None)
         domain = domain or (comp.get("domain") if comp else f"ID #{competitor_id}")
+    acting_user = user.get("email") or "system"
     try:
         db.insert_audit_log(
-            user_email="system",
+            user_email=acting_user,
             action=f"Competitor Updated: {domain}",
             status="Success",
             project_name=project_slug,
@@ -1761,16 +1812,17 @@ def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequ
 
 
 @app.delete("/competitors/{competitor_id}")
-def delete_competitor_endpoint(competitor_id: int):
+def delete_competitor_endpoint(competitor_id: int, user: dict = Depends(require_authenticated_user)):
     with db.engine.begin() as conn:
         comp = conn.execute(db.text("SELECT project_slug, domain FROM competitors WHERE id = :id"), {"id": competitor_id}).mappings().fetchone()
     project_slug = comp.get("project_slug") if comp else None
     domain = comp.get("domain") if comp else f"ID #{competitor_id}"
 
     db.delete_competitor(competitor_id)
+    acting_user = user.get("email") or "system"
     try:
         db.insert_audit_log(
-            user_email="system",
+            user_email=acting_user,
             action=f"Competitor Deleted: {domain}",
             status="Warning",
             project_name=project_slug,
@@ -1782,7 +1834,7 @@ def delete_competitor_endpoint(competitor_id: int):
 
 
 @app.delete("/projects/{project_slug}/competitors")
-def delete_project_competitors_endpoint(project_slug: str, user_email: Optional[str] = None):
+def delete_project_competitors_endpoint(project_slug: str, user_email: Optional[str] = None, user: dict = Depends(require_project_access)):
     db.delete_competitors_by_project(project_slug)
     acting_user = user_email if user_email else "system"
     try:
@@ -1840,16 +1892,17 @@ class BulkDeleteKeywordsRequest(BaseModel):
 
 
 @app.delete("/keywords/{kw_id}")
-def delete_keyword_endpoint(kw_id: int):
+def delete_keyword_endpoint(kw_id: int, user: dict = Depends(require_authenticated_user)):
     with db.engine.begin() as conn:
         kw = conn.execute(db.text("SELECT project_name, keyword FROM keyword_categories WHERE id = :id"), {"id": kw_id}).mappings().fetchone()
     project_slug = kw.get("project_name") if kw else None
     keyword = kw.get("keyword") if kw else f"ID #{kw_id}"
 
     db.archive_and_delete_keyword(kw_id)
+    acting_user = user.get("email") or "user"
     try:
         db.insert_audit_log(
-            user_email="system",
+            user_email=acting_user,
             action=f"Keyword Deleted: {keyword}",
             status="Warning",
             project_name=project_slug,
@@ -1861,7 +1914,7 @@ def delete_keyword_endpoint(kw_id: int):
 
 
 @app.post("/keywords/bulk-delete")
-def bulk_delete_keywords_endpoint(payload: BulkDeleteKeywordsRequest):
+def bulk_delete_keywords_endpoint(payload: BulkDeleteKeywordsRequest, user: dict = Depends(require_authenticated_user)):
     project_slug = None
     if payload.ids:
         with db.engine.begin() as conn:
@@ -1870,9 +1923,10 @@ def bulk_delete_keywords_endpoint(payload: BulkDeleteKeywordsRequest):
 
     for kw_id in payload.ids:
         db.archive_and_delete_keyword(kw_id)
+    acting_user = user.get("email") or "user"
     try:
         db.insert_audit_log(
-            user_email="system",
+            user_email=acting_user,
             action=f"Bulk Keywords Deleted ({len(payload.ids)} items)",
             status="Warning",
             project_name=project_slug,
@@ -1883,7 +1937,7 @@ def bulk_delete_keywords_endpoint(payload: BulkDeleteKeywordsRequest):
     return {"deleted_ids": payload.ids}
 
 @app.post("/pages/bulk-delete")
-def bulk_delete_pages_endpoint(payload: BulkDeletePagesRequest):
+def bulk_delete_pages_endpoint(payload: BulkDeletePagesRequest, user: dict = Depends(require_authenticated_user)):
     project_slug = None
     if payload.ids:
         with db.engine.begin() as conn:
@@ -1891,9 +1945,10 @@ def bulk_delete_pages_endpoint(payload: BulkDeletePagesRequest):
         project_slug = page.get("project_name") if page else None
 
     db.bulk_delete_page_rows(payload.ids)
+    acting_user = user.get("email") or "user"
     try:
         db.insert_audit_log(
-            user_email="system",
+            user_email=acting_user,
             action=f"Bulk Pages Deleted ({len(payload.ids)} pages)",
             status="Warning",
             project_name=project_slug,
@@ -1906,12 +1961,12 @@ def bulk_delete_pages_endpoint(payload: BulkDeletePagesRequest):
 # --- Competitor Pages Endpoints ---
 
 @app.get("/projects/{project_slug}/competitor-pages")
-def get_project_competitor_pages_endpoint(project_slug: str):
+def get_project_competitor_pages_endpoint(project_slug: str, user: dict = Depends(require_project_access)):
     rows = db.get_competitor_page_rows(project_slug)
     return {"pages": [_page_to_json(r) for r in rows]}
 
 @app.post("/projects/{project_slug}/competitor-pages")
-def insert_project_competitor_pages_endpoint(project_slug: str, rows: List[PageItem]):
+def insert_project_competitor_pages_endpoint(project_slug: str, rows: List[PageItem], user: dict = Depends(require_project_access)):
     inserted = db.insert_competitor_page_rows(project_slug, [r.dict() for r in rows])
     return {"pages": [_page_to_json(r) for r in inserted]}
 
@@ -2106,16 +2161,31 @@ def get_competitor_snapshots_endpoint(competitor_id: int):
 
 
 @app.get("/jobs")
-def list_jobs():
-    """All jobs, across every project."""
-    return {"jobs": db.list_jobs()}
+def list_jobs(user: dict = Depends(require_authenticated_user)):
+    """All jobs, across every project (scoped by assigned_project)."""
+    role = str(user.get("role", "")).upper()
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    all_jobs = db.list_jobs()
+    if role == "ADMIN" or assigned_project in ("all projects", "all", "*") or not assigned_project:
+        return {"jobs": all_jobs}
+    scoped = [j for j in all_jobs if str(j.get("domain", "")).lower() == assigned_project or str(j.get("project_name", "")).lower() == assigned_project]
+    return {"jobs": scoped}
 
 
 @app.get("/jobs/{job_id}")
-def get_job(job_id: str):
+def get_job(job_id: str, user: dict = Depends(require_authenticated_user)):
     job = db.get_job(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
+    role = str(user.get("role", "")).upper()
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    job_proj = str(job.get("domain") or job.get("project_name") or "").lower()
+    if role != "ADMIN" and assigned_project not in ("all projects", "all", "*") and assigned_project:
+        if job_proj and job_proj != assigned_project:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied: your account is not allocated to project '{job_proj}'."
+            )
     return job
 
 
@@ -2124,7 +2194,7 @@ class CheckRankRequest(BaseModel):
 
 
 @app.post("/projects/{project}/check-rank")
-def check_rank_for_project(project: str, payload: CheckRankRequest):
+def check_rank_for_project(project: str, payload: CheckRankRequest, user: dict = Depends(require_project_access)):
     """Rank-checks every ALREADY-CATEGORIZED keyword in this project, on a
     background thread (scripts/hosted_rank_check.py) -- scoped by
     PROJECT, not by a specific job's job_id like the older
@@ -2204,10 +2274,19 @@ def check_rank_for_job(job_id: str):
 
 
 @app.get("/jobs/{job_id}/results")
-def get_job_results(job_id: str):
+def get_job_results(job_id: str, user: dict = Depends(require_authenticated_user)):
     job = db.get_job(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
+    role = str(user.get("role", "")).upper()
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    job_proj = str(job.get("domain") or job.get("project_name") or "").lower()
+    if role != "ADMIN" and assigned_project not in ("all projects", "all", "*") and assigned_project:
+        if job_proj and job_proj != assigned_project:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied: your account is not allocated to project '{job_proj}'."
+            )
     results = db.get_job_category_results(job_id)
     return {
         "job_id": job_id, "project": job.get("project_name"), "status": job["status"],
@@ -2381,7 +2460,7 @@ def run_ai_visibility_analysis_endpoint(project_slug: str, req: AiVisibilityRequ
 
 
 @app.get("/projects/{project_slug}/summary")
-def get_project_summary_endpoint(project_slug: str):
+def get_project_summary_endpoint(project_slug: str, user: dict = Depends(require_project_access)):
     """Fast aggregated project summary metrics endpoint for instant UI load (< 50ms)."""
     try:
         return db.get_project_summary(project_slug)
@@ -2428,16 +2507,21 @@ class AddOutreachSiteRequest(BaseModel):
 
 
 @app.get("/outreach")
-def get_all_outreach_sites_endpoint():
-    """List all stored outreach sites across all projects."""
+def get_all_outreach_sites_endpoint(user: dict = Depends(require_authenticated_user)):
+    """List all stored outreach sites across all projects (scoped by project)."""
+    role = str(user.get("role", "")).upper()
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
     try:
-        sites = db.list_outreach_sites(None)
+        project_filter = None
+        if role != "ADMIN" and assigned_project not in ("all projects", "all", "*") and assigned_project:
+            project_filter = assigned_project
+        sites = db.list_outreach_sites(project_filter)
         return {"sites": sites}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/projects/{project_slug}/outreach")
-def get_outreach_sites_endpoint(project_slug: str):
+def get_outreach_sites_endpoint(project_slug: str, user: dict = Depends(require_project_access)):
     """List all stored outreach sites for a given project."""
     try:
         sites = db.list_outreach_sites(project_slug)
@@ -2447,7 +2531,7 @@ def get_outreach_sites_endpoint(project_slug: str):
 
 
 @app.post("/projects/{project_slug}/outreach")
-def add_outreach_site_endpoint(project_slug: str, req: AddOutreachSiteRequest):
+def add_outreach_site_endpoint(project_slug: str, req: AddOutreachSiteRequest, user: dict = Depends(require_project_access)):
     """
     Add a new outreach site for a project. Dynamically fetches DA, PA, SS,
     main traffic, total traffic, and top 3 regions via scripts/domain_checeker.py.
@@ -2588,7 +2672,16 @@ class OffPageActivityUpdatePayload(BaseModel):
 
 
 @app.get("/off-page-activities")
-def get_off_page_activities(project: Optional[str] = None):
+def get_off_page_activities(project: Optional[str] = None, user: dict = Depends(require_authenticated_user)):
+    role = str(user.get("role", "")).upper()
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    if role != "ADMIN" and assigned_project not in ("all projects", "all", "*") and assigned_project:
+        if project and project.strip().lower() != assigned_project:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied: your account is not allocated to project '{project}'."
+            )
+        project = assigned_project
     activities = db.list_off_page_activities(project_name=project)
     return {"activities": activities}
 
@@ -2600,10 +2693,19 @@ def create_off_page_activity(payload: OffPageActivityPayload):
 
 
 @app.get("/off-page-activities/{activity_id}")
-def get_off_page_activity(activity_id: str):
+def get_off_page_activity(activity_id: str, user: dict = Depends(require_authenticated_user)):
     activity = db.get_off_page_activity(activity_id)
     if not activity:
         raise HTTPException(404, "Activity not found")
+    role = str(user.get("role", "")).upper()
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    act_proj = str(activity.get("project_name") or "").lower()
+    if role != "ADMIN" and assigned_project not in ("all projects", "all", "*") and assigned_project:
+        if act_proj and act_proj != assigned_project:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied: your account is not allocated to project '{act_proj}'."
+            )
     return {"activity": activity}
 
 
@@ -2727,3 +2829,12 @@ async def import_off_page_activities(
         "imported_count": len(parsed_records),
         "activities": imported_list
     }
+
+@app.get("/projects/{project_slug}/ai-analysis-history")
+def get_ai_analysis_history_endpoint(project_slug: str, engine: Optional[str] = None, user: dict = Depends(require_project_access)):
+    """Endpoint for fetching AI Analysis history for a project."""
+    try:
+        rows = db.get_ai_analysis_history(project_slug, engine)
+        return {"status": "success", "history": rows}
+    except Exception as e:
+        return {"status": "success", "history": []}

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Search, Eye, EyeOff, Lock, Mail, HelpCircle, Loader2 } from 'lucide-react';
+import { getApiBaseUrl } from '../../lib/projectsApi';
 
 export default function LoginPage({ onNavigate, initialAdminMode = false, user = null, onLoginSuccess = null, onLogout = null, isEmbedded = false }) {
   const [email, setEmail] = useState('');
@@ -31,10 +32,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
     try {
       let res = null;
 
-      const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-      const apiBase = isLocalhost
-        ? 'http://127.0.0.1:8000'
-        : (import.meta.env.VITE_API_BASE || `${window.location.protocol}//${window.location.hostname}`);
+      const apiBase = getApiBaseUrl();
 
       try {
         res = await fetch(`${apiBase}/auth/login`, {
@@ -43,15 +41,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
           body: JSON.stringify({ email: email.trim(), password: password.trim() })
         });
       } catch (e) {
-        if (!apiBase.includes('52.44.80.193')) {
-          try {
-            res = await fetch('http://52.44.80.193:8000/auth/login', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: email.trim(), password: password.trim() })
-            });
-          } catch (e2) { }
-        }
+        console.warn('[LoginPage] Login connection error:', e);
       }
 
       if (res && res.status === 403) {
@@ -63,6 +53,11 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
 
       if (res && res.ok) {
         const data = await res.json();
+        if (data.access_token) {
+          try {
+            sessionStorage.setItem('seo_token', data.access_token);
+          } catch (_) {}
+        }
         let dbUser = data.user;
 
         if (dbUser && dbUser.status === 'Disabled') {

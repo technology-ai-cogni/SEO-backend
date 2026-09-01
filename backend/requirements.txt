@@ -17,3 +17,4 @@ crawl4ai
 selenium_recaptcha_solver
 passlib[bcrypt]
 bcrypt
+pyjwt

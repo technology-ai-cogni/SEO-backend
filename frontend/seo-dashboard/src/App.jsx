@@ -25,7 +25,7 @@ import RecycleBinPage from './components/pages/RecycleBinPage';
 import UsersPage from './components/pages/UsersPage';
 import { Lock, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { totalKeywordCount, topKeywords } from './data/mockData';
-import { fetchUsersApi } from './lib/projectsApi';
+import { fetchUsersApi, fetchCurrentAuthUserApi } from './lib/projectsApi';
 import { canAccessRoute } from './lib/permissions';
 
 function AccountUpdateModal({ open, onClose, data }) {
@@ -509,10 +509,15 @@ export default function App() {
 
     let isMounted = true;
     const checkUserStatus = async () => {
+      let token = null;
       try {
-        const users = await fetchUsersApi();
-        if (!isMounted) return;
-        const currentRecord = users.find(u => u.email?.toLowerCase() === user.email?.toLowerCase());
+        token = sessionStorage.getItem('seo_token');
+      } catch (_) {}
+      if (!token) return;
+
+      try {
+        const currentRecord = await fetchCurrentAuthUserApi();
+        if (!isMounted || !currentRecord) return;
         if (currentRecord) {
           if (currentRecord.status === 'Disabled') {
             handleLogout();
@@ -619,7 +624,8 @@ export default function App() {
     setUser(null);
     try {
       sessionStorage.removeItem('seo_dashboard_user');
-    } catch (e) { }
+      sessionStorage.removeItem('seo_token');
+    } catch (e) {}
     setActivePath('landing');
   };
 

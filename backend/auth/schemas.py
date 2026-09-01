@@ -74,4 +74,6 @@ class UserResponse(BaseModel):
 class AuthResponse(BaseModel):
     status: str
     message: str
+    access_token: Optional[str] = None
+    token_type: Optional[str] = "bearer"
     user: Optional[UserResponse] = None

@@ -1,6 +1,29 @@
 import { supabase } from './supabaseClient';
 import { derivedKeywordClusters, derivedPages } from '../data/mockData';
 
+export async function authFetch(url, options = {}) {
+  let token = null;
+  try {
+    token = typeof window !== 'undefined' ? sessionStorage.getItem('seo_token') : null;
+  } catch (_) {}
+
+  const headers = {
+    ...(options.headers || {}),
+    ...(token && !(options.headers && options.headers.Authorization) ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+
+  const res = await window.fetch(url, { ...options, headers });
+  if (res.status === 401 && !String(url).includes('/auth/login') && !String(url).includes('/auth/signup')) {
+    console.warn('[authFetch] 401 Unauthorized received, clearing invalid session token');
+    try {
+      sessionStorage.removeItem('seo_token');
+    } catch (_) {}
+  }
+  return res;
+}
+
+const fetch = authFetch;
+
 export async function fetchRecycleBinItemsApi(itemType = null) {
   if (isLocalMode) {
     const items = JSON.parse(localStorage.getItem('seo_recycle_bin') || '[]');
@@ -2000,169 +2023,145 @@ export async function clearAuditLogsApi() {
 // ─── USER MANAGEMENT API FUNCTIONS ─────────────────────────────────────────
 
 async function fetchAuthEndpoint(endpoint, options = {}) {
-  const primaryUrl = `${getApiBaseUrl()}${endpoint}`;
+  let token = null;
   try {
-    const res = await fetch(primaryUrl, options);
-    if (res.ok) return res;
-  } catch (e) {
-    console.warn(`[fetchAuthEndpoint] Primary API (${primaryUrl}) failed:`, e);
-  }
+    token = sessionStorage.getItem('seo_token');
+  } catch (_) {}
 
-  // Backup fallback to explicit EC2 IP if domain resolution fails
-  if (!primaryUrl.includes('52.44.80.193')) {
+  const mergedHeaders = {
+    ...(options.headers || {}),
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+  const requestOptions = {
+    ...options,
+    headers: mergedHeaders
+  };
+
+  const primaryUrl = `${getApiBaseUrl()}${endpoint}`;
+  const res = await fetch(primaryUrl, requestOptions);
+
+  if (res.status === 401 && endpoint !== '/auth/login' && endpoint !== '/auth/signup') {
+    console.warn('[fetchAuthEndpoint] 401 Unauthorized, clearing session token');
     try {
-      const fallbackUrl = `http://52.44.80.193:8000${endpoint}`;
-      const res = await fetch(fallbackUrl, options);
-      if (res.ok) return res;
-    } catch (e) {
-      console.warn('[fetchAuthEndpoint] Fallback failed:', e);
-    }
+      sessionStorage.removeItem('seo_token');
+    } catch (_) {}
   }
 
-  const finalRes = await fetch(primaryUrl, options);
-  return finalRes;
+  return res;
+}
+
+export async function fetchCurrentAuthUserApi() {
+  try {
+    const res = await fetchAuthEndpoint('/auth/me');
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    return null;
+  }
 }
 
 export async function fetchUsersApi() {
-  try {
-    const res = await fetchAuthEndpoint('/auth/users');
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.detail || 'Failed to fetch user list.');
-    }
-    const data = await res.json();
-    if (data && Array.isArray(data)) {
-      const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-      const cachedMap = new Map(cached.map(u => [String(u.id), u]));
-
-      const merged = data.map(u => {
-        const local = cachedMap.get(String(u.id)) || cached.find(x => x.email?.toLowerCase() === u.email?.toLowerCase());
-        return {
-          ...u,
-          section_access: (u.section_access !== undefined && u.section_access !== null && u.section_access !== '') ? u.section_access : (local?.section_access || 'Default'),
-          permissions: (u.permissions !== undefined && u.permissions !== null && u.permissions !== '') ? u.permissions : (local?.permissions || 'Default'),
-          category: u.category || local?.category || 'Internal',
-          role: u.role || local?.role || 'INTERNAL_ASSOCIATE'
-        };
-      });
-
-      localStorage.setItem('seo_users_list', JSON.stringify(merged));
-      return merged;
-    }
-    return data || [];
-  } catch (err) {
-    console.warn('[fetchUsersApi] Network fetch failed, returning stored users:', err);
-    const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-    if (cached && cached.length > 0) return cached;
-    return [
-      { id: 1, name: 'Admin User', email: 'admin@company.com', role: 'ADMIN', status: 'Active', created_at: new Date().toISOString() }
-    ];
+  const res = await fetchAuthEndpoint('/auth/users');
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to fetch user list.');
   }
+  const data = await res.json();
+  if (data && Array.isArray(data)) {
+    const cached = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+    const cachedMap = new Map(cached.map(u => [String(u.id), u]));
+
+    const merged = data.map(u => {
+      const local = cachedMap.get(String(u.id)) || cached.find(x => x.email?.toLowerCase() === u.email?.toLowerCase());
+      return {
+        ...u,
+        section_access: (u.section_access !== undefined && u.section_access !== null && u.section_access !== '') ? u.section_access : (local?.section_access || 'Default'),
+        permissions: (u.permissions !== undefined && u.permissions !== null && u.permissions !== '') ? u.permissions : (local?.permissions || 'Default'),
+        category: u.category || local?.category || 'Internal',
+        role: u.role || local?.role || 'INTERNAL_ASSOCIATE'
+      };
+    });
+
+    localStorage.setItem('seo_users_list', JSON.stringify(merged));
+    return merged;
+  }
+  return data || [];
 }
 
 export async function createUserApi(payload) {
-  try {
-    const res = await fetchAuthEndpoint('/auth/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.detail || 'Failed to create user credential.');
-    }
-    return await res.json();
-  } catch (err) {
-    console.warn('[createUserApi] API failed, creating in local cache:', err);
-    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-    const newUser = {
-      id: Date.now(),
-      name: payload.name,
-      email: payload.email,
-      role: payload.role || 'INTERNAL_ASSOCIATE',
-      category: payload.category || 'Internal',
-      section_access: payload.section_access || 'Default',
-      permissions: payload.permissions || 'Default',
-      status: payload.status || 'Active',
-      created_at: new Date().toISOString()
-    };
-    list.unshift(newUser);
-    localStorage.setItem('seo_users_list', JSON.stringify(list));
-    return { user: newUser };
+  const res = await fetchAuthEndpoint('/auth/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to create user credential.');
   }
+  return await res.json();
 }
 
 export async function updateUserStatusApi(userId, status) {
-  try {
-    const res = await fetchAuthEndpoint(`/auth/users/${userId}/status`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status })
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.detail || 'Failed to update user status.');
-    }
-    return await res.json();
-  } catch (err) {
-    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-    const target = list.find(u => u.id === userId);
-    if (target) target.status = status;
-    localStorage.setItem('seo_users_list', JSON.stringify(list));
-    return target;
+  const res = await fetchAuthEndpoint(`/auth/users/${userId}/status`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status })
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to update user status.');
   }
+  const data = await res.json();
+  const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+  const target = list.find(u => u.id === userId);
+  if (target) target.status = status;
+  localStorage.setItem('seo_users_list', JSON.stringify(list));
+  return data;
 }
 
 export async function updateUserRoleApi(userId, role, category = null, section_access = null, permissions = null, assigned_project = null) {
-  try {
-    const payload = {
-      role,
-      category: category ?? null,
-      section_access: section_access ?? null,
-      permissions: permissions ?? null,
-      assigned_project: assigned_project ?? null
-    };
+  const payload = {
+    role,
+    category: category ?? null,
+    section_access: section_access ?? null,
+    permissions: permissions ?? null,
+    assigned_project: assigned_project ?? null
+  };
 
-    const res = await fetchAuthEndpoint(`/auth/users/${userId}/role`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.detail || 'Failed to update user settings.');
-    }
-    return await res.json();
-  } catch (err) {
-    console.error('[updateUserRoleApi] Failed to save to DB, falling back to localStorage:', err);
-    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-    const target = list.find(u => u.id === userId);
-    if (target) {
-      if (role) target.role = role;
-      if (category) target.category = category;
-      if (section_access) target.section_access = section_access;
-      if (permissions) target.permissions = permissions;
-      if (assigned_project) target.assigned_project = assigned_project;
-    }
-    localStorage.setItem('seo_users_list', JSON.stringify(list));
-    return target;
+  const res = await fetchAuthEndpoint(`/auth/users/${userId}/role`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to update user settings.');
   }
+  const data = await res.json();
+  const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+  const target = list.find(u => u.id === userId);
+  if (target) {
+    if (role) target.role = role;
+    if (category) target.category = category;
+    if (section_access) target.section_access = section_access;
+    if (permissions) target.permissions = permissions;
+    if (assigned_project) target.assigned_project = assigned_project;
+  }
+  localStorage.setItem('seo_users_list', JSON.stringify(list));
+  return data;
 }
 
 export async function deleteUserApi(userId) {
-  try {
-    const res = await fetchAuthEndpoint(`/auth/users/${userId}`, {
-      method: 'DELETE'
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.detail || 'Failed to delete user profile.');
-    }
-  } catch (err) {
-    const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-    const updated = list.filter(u => u.id !== userId);
-    localStorage.setItem('seo_users_list', JSON.stringify(updated));
+  const res = await fetchAuthEndpoint(`/auth/users/${userId}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete user profile.');
   }
+  const list = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
+  const updated = list.filter(u => u.id !== userId);
+  localStorage.setItem('seo_users_list', JSON.stringify(updated));
 }
 
 // ─── AI Analysis & Supabase API ─────────────────────────────────────────────

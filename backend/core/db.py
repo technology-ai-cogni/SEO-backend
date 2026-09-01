@@ -91,7 +91,15 @@ if not DATABASE_URL:
     print("[Warning] DATABASE_URL is not set in environment. Database features will require DATABASE_URL.")
     DATABASE_URL = "sqlite:///:memory:"
 
-engine = create_engine(DATABASE_URL)
+engine_kwargs = {"pool_pre_ping": True}
+if not DATABASE_URL.startswith("sqlite"):
+    engine_kwargs.update({
+        "pool_recycle": 300,
+        "pool_size": 10,
+        "max_overflow": 5
+    })
+
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 
 
 def _chunked(items, size=500):

@@ -324,7 +324,6 @@ export function canDelete(user) {
   if (permissions === 'view only' || permissions === 'view') return false;
   if (
     permissions.includes('delete') ||
-    permissions.includes('update') ||
     permissions.includes('full control')
   ) return true;
 

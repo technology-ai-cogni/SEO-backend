@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Search, Eye, EyeOff, Lock, Mail, User } from 'lucide-react';
+import { getApiBaseUrl } from '../../lib/projectsApi';
 
 export default function SignUpPage({ onNavigate, user = null, onLoginSuccess = null }) {
   const [fullName, setFullName] = useState('');
@@ -32,7 +33,7 @@ export default function SignUpPage({ onNavigate, user = null, onLoginSuccess = n
     }
 
     try {
-      const response = await fetch('http://localhost:8000/auth/signup', {
+      const response = await fetch(`${getApiBaseUrl()}/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

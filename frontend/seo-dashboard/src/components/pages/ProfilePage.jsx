@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { User, Lock, Mail, Shield, CheckCircle, AlertCircle, Eye, EyeOff, Save, RotateCcw, Trash2, RefreshCw, FileText, AlertTriangle, X } from 'lucide-react';
 import { hasPermission, PERMISSIONS } from '../../lib/permissions';
-import { fetchAuditLogsApi, createAuditLogApi, clearAuditLogsApi, fetchRecycleBinItemsApi, restoreRecycleBinItemApi, hardDeleteRecycleBinItemApi } from '../../lib/projectsApi';
+import { getApiBaseUrl, fetchAuditLogsApi, createAuditLogApi, clearAuditLogsApi, fetchRecycleBinItemsApi, restoreRecycleBinItemApi, hardDeleteRecycleBinItemApi } from '../../lib/projectsApi';
 
 export default function ProfilePage({ user, onUserUpdate, onNavigate }) {
   const [name, setName] = useState(user?.name || '');
@@ -32,9 +32,13 @@ export default function ProfilePage({ user, onUserUpdate, onNavigate }) {
 
     setSavingProfile(true);
     try {
-      const response = await fetch('http://localhost:8000/auth/update-profile', {
+      const token = sessionStorage.getItem('seo_token');
+      const response = await fetch(`${getApiBaseUrl()}/auth/update-profile`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({
           email: user.email,
           name: name.trim()
@@ -83,9 +87,13 @@ export default function ProfilePage({ user, onUserUpdate, onNavigate }) {
 
     setSavingPassword(true);
     try {
-      const response = await fetch('http://localhost:8000/auth/change-password', {
+      const token = sessionStorage.getItem('seo_token');
+      const response = await fetch(`${getApiBaseUrl()}/auth/change-password`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({
           email: user.email,
           current_password: currentPassword,
