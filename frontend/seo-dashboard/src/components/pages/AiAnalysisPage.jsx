@@ -637,6 +637,9 @@ export default function AiAnalysisPage({ user }) {
   const mentionsData = useMemo(() => getEngineMentions(), [selectedEngine, activeProject?.slug, projectKeywords, history]);
   const citationsData = useMemo(() => getEngineCitations(), [selectedEngine, activeProject?.slug, projectKeywords, history]);
 
+  // Total Search Terms = count of the top-2 keywords per category (same set shown on Top Pages Organic)
+  const totalSearchTerms = useMemo(() => getTop2KeywordsPerCategory(projectKeywords).length, [projectKeywords]);
+
   // Unique filter values memoized
   const { uniqueClusters, uniqueCategories, uniqueTypes, uniqueTargetTypes, uniqueTargetSubtypes, uniqueTargetGeos, uniquePriorities } = useMemo(() => {
     const allItems = [...mentionsData, ...citationsData, ...(projectKeywords || [])];
@@ -966,7 +969,76 @@ export default function AiAnalysisPage({ user }) {
         );
       })()}
 
-      {/* ─── TOP CONTROL BAR: Engine Sub-tabs, Mentions/Citations Toggles, Search & Filters ─── */}
+      {/* ─── SUMMARY CARDS (Traffic · Mentions · Citations for the selected LLM) ─── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+
+        {/* CARD 1: Traffic */}
+        <div style={{
+          background: '#ffffff',
+          border: '1px solid #E4DFEE',
+          borderRadius: 12,
+          padding: '16px 20px',
+          boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center'
+        }}>
+          <div style={{ fontSize: 12, color: '#6B677E', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 6 }}>Traffic</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#00A6DF' }}>0</div>
+        </div>
+
+        {/* CARD 2: Mentions — Total Search Terms + Total Mentions (per selected LLM) */}
+        <div style={{
+          background: '#ffffff',
+          border: '1px solid #E4DFEE',
+          borderRadius: 12,
+          padding: '14px 20px',
+          boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between'
+        }}>
+          <div style={{ fontSize: 12, color: '#6B677E', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 6 }}>Mentions</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1px 1fr', gap: 14, alignItems: 'center' }}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 11, color: '#6B677E', fontWeight: 700 }}>Total Search Terms</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#7B2FBE' }}>{totalSearchTerms}</span>
+            </div>
+            <div style={{ alignSelf: 'stretch', width: 1, background: '#E4DFEE' }} />
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 11, color: '#6B677E', fontWeight: 700 }}>Total Mentions</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#7B2FBE' }}>{mentionsData.length}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* CARD 3: Citations — Total Search Terms + Total Citations (per selected LLM) */}
+        <div style={{
+          background: '#ffffff',
+          border: '1px solid #E4DFEE',
+          borderRadius: 12,
+          padding: '14px 20px',
+          boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between'
+        }}>
+          <div style={{ fontSize: 12, color: '#6B677E', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 6 }}>Citations</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1px 1fr', gap: 14, alignItems: 'center' }}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 11, color: '#6B677E', fontWeight: 700 }}>Total Search Terms</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#C8196B' }}>{totalSearchTerms}</span>
+            </div>
+            <div style={{ alignSelf: 'stretch', width: 1, background: '#E4DFEE' }} />
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 11, color: '#6B677E', fontWeight: 700 }}>Total Citations</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#C8196B' }}>{citationsData.length}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── TOP CONTROL BAR: Engine Sub-tabs, Mentions/Citations Toggles ─── */}
       <div style={{
         background: '#ffffff',
         border: '1px solid #E4DFEE',
@@ -977,7 +1049,7 @@ export default function AiAnalysisPage({ user }) {
         gap: 16,
         boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
       }}>
-        {/* Row 1: Engine Tabs & Mentions vs Citations Toggle directly UNDER engine tabs */}
+        {/* Engine Tabs & Mentions vs Citations Toggle */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
 
           {/* Left Column: Engine Tabs & Mentions vs Citations Sub-tabs */}
@@ -1089,8 +1161,20 @@ export default function AiAnalysisPage({ user }) {
           )}
         </div>
 
-        {/* Row 2: Pill Search Bar with Download & Filter Buttons Beside It */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      </div>
+
+      {/* ─── SEARCH & FILTER BAR (own card, like Top Pages Organic) ─── */}
+      <div style={{
+        background: '#ffffff',
+        border: '1px solid #E4DFEE',
+        borderRadius: 12,
+        padding: '14px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        flexWrap: 'wrap',
+        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
+      }}>
           <div style={{ width: 280, maxWidth: '100%', position: 'relative' }}>
             <Search size={16} color="#94a3b8" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
             <input
@@ -1328,7 +1412,6 @@ export default function AiAnalysisPage({ user }) {
               </div>
             )}
           </div>
-        </div>
       </div>
 
       {/* ─── DATA TABLE: Mentions or Citations ─────────────────────────── */}
