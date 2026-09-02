@@ -20,6 +20,7 @@ ADMIN_USER = {
     "email": "admin@company.com",
     "name": "System Admin",
     "role": "ADMIN",
+    "category": "Admin",
     "status": "Active",
     "assigned_project": "All Projects"
 }
@@ -29,6 +30,17 @@ ASSOCIATE_USER = {
     "email": "associate@company.com",
     "name": "Test Associate",
     "role": "INTERNAL_ASSOCIATE",
+    "category": "Internal",
+    "status": "Active",
+    "assigned_project": "All Projects"
+}
+
+VENDOR_USER = {
+    "id": 4,
+    "email": "vendor@external.com",
+    "name": "Vendor Partner",
+    "role": "VENDOR",
+    "category": "Vendor",
     "status": "Active",
     "assigned_project": "euroschoolindia"
 }
@@ -38,8 +50,9 @@ DISABLED_USER = {
     "email": "disabled@company.com",
     "name": "Disabled Employee",
     "role": "INTERNAL_ASSOCIATE",
+    "category": "Internal",
     "status": "Disabled",
-    "assigned_project": "euroschoolindia"
+    "assigned_project": "All Projects"
 }
 
 
@@ -233,18 +246,30 @@ def test_client_spoofing_role_in_request_body_fails(monkeypatch):
 
 # ─── 4. OBJECT-LEVEL ACCESS CONTROL (IDOR PROTECTION) ─────────────────────────
 
-def test_associate_cannot_access_unassigned_project(monkeypatch):
+def test_vendor_cannot_access_unassigned_project(monkeypatch):
     """
-    Associate assigned only to 'euroschoolindia' receives 403 Forbidden
+    Vendor assigned only to 'euroschoolindia' receives 403 Forbidden
     when attempting to query unassigned project 'other_client_corp'.
     """
-    token = create_access_token(ASSOCIATE_USER)
-    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: ASSOCIATE_USER)
+    token = create_access_token(VENDOR_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: VENDOR_USER)
 
     headers = {"Authorization": f"Bearer {token}"}
     res = client.get("/projects/other_client_corp/results", headers=headers)
     assert res.status_code == 403
     assert "not allocated" in res.json().get("detail", "").lower()
+
+
+def test_associate_can_access_all_projects(monkeypatch):
+    """
+    Associate role has access across all registered projects.
+    """
+    token = create_access_token(ASSOCIATE_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: ASSOCIATE_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.get("/projects", headers=headers)
+    assert res.status_code == 200
 
 
 # ─── 5. DISABLED ACCOUNT REVOCATION ──────────────────────────────────────────
@@ -341,10 +366,10 @@ def test_associate_cannot_list_only_deleted_projects(monkeypatch):
     assert "projects" not in res.json()
 
 
-def test_idor_associate_cannot_read_unassigned_project_pages(monkeypatch):
-    """Associate cannot read pages of an unassigned project (403 + no data)."""
-    token = create_access_token(ASSOCIATE_USER)
-    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: ASSOCIATE_USER)
+def test_idor_vendor_cannot_read_unassigned_project_pages(monkeypatch):
+    """Vendor cannot read pages of an unassigned project (403 + no data)."""
+    token = create_access_token(VENDOR_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: VENDOR_USER)
 
     headers = {"Authorization": f"Bearer {token}"}
     res = client.get("/projects/unassigned_corp/pages", headers=headers)
@@ -352,10 +377,10 @@ def test_idor_associate_cannot_read_unassigned_project_pages(monkeypatch):
     assert "pages" not in res.json()
 
 
-def test_idor_associate_cannot_read_unassigned_project_competitors(monkeypatch):
-    """Associate cannot read competitors of an unassigned project (403 + no data)."""
-    token = create_access_token(ASSOCIATE_USER)
-    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: ASSOCIATE_USER)
+def test_idor_vendor_cannot_read_unassigned_project_competitors(monkeypatch):
+    """Vendor cannot read competitors of an unassigned project (403 + no data)."""
+    token = create_access_token(VENDOR_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: VENDOR_USER)
 
     headers = {"Authorization": f"Bearer {token}"}
     res = client.get("/competitors?project=unassigned_corp", headers=headers)
@@ -363,20 +388,20 @@ def test_idor_associate_cannot_read_unassigned_project_competitors(monkeypatch):
     assert "competitors" not in res.json()
 
 
-def test_idor_associate_cannot_read_unassigned_project_summary(monkeypatch):
-    """Associate cannot read project summary of an unassigned project."""
-    token = create_access_token(ASSOCIATE_USER)
-    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: ASSOCIATE_USER)
+def test_idor_vendor_cannot_read_unassigned_project_summary(monkeypatch):
+    """Vendor cannot read project summary of an unassigned project."""
+    token = create_access_token(VENDOR_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: VENDOR_USER)
 
     headers = {"Authorization": f"Bearer {token}"}
     res = client.get("/projects/unassigned_corp/summary", headers=headers)
     assert res.status_code == 403
 
 
-def test_idor_associate_cannot_read_unassigned_project_outreach(monkeypatch):
-    """Associate cannot read outreach sites of an unassigned project."""
-    token = create_access_token(ASSOCIATE_USER)
-    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: ASSOCIATE_USER)
+def test_idor_vendor_cannot_read_unassigned_project_outreach(monkeypatch):
+    """Vendor cannot read outreach sites of an unassigned project."""
+    token = create_access_token(VENDOR_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: VENDOR_USER)
 
     headers = {"Authorization": f"Bearer {token}"}
     res = client.get("/projects/unassigned_corp/outreach", headers=headers)
@@ -384,20 +409,20 @@ def test_idor_associate_cannot_read_unassigned_project_outreach(monkeypatch):
     assert "sites" not in res.json()
 
 
-def test_idor_associate_cannot_read_unassigned_project_ai_history(monkeypatch):
-    """Associate cannot read AI analysis history of an unassigned project."""
-    token = create_access_token(ASSOCIATE_USER)
-    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: ASSOCIATE_USER)
+def test_idor_vendor_cannot_read_unassigned_project_ai_history(monkeypatch):
+    """Vendor cannot read AI analysis history of an unassigned project."""
+    token = create_access_token(VENDOR_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: VENDOR_USER)
 
     headers = {"Authorization": f"Bearer {token}"}
     res = client.get("/projects/unassigned_corp/ai-analysis-history", headers=headers)
     assert res.status_code == 403
 
 
-def test_associate_project_list_scoped_to_assigned_project(monkeypatch):
-    """Associate calling GET /projects only sees their assigned project."""
-    token = create_access_token(ASSOCIATE_USER)
-    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: ASSOCIATE_USER)
+def test_vendor_project_list_scoped_to_assigned_project(monkeypatch):
+    """Vendor calling GET /projects only sees their assigned project."""
+    token = create_access_token(VENDOR_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: VENDOR_USER)
 
     headers = {"Authorization": f"Bearer {token}"}
     res = client.get("/projects", headers=headers)

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Search, ChevronDown, ExternalLink, Download, KeyRound, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fetchDomainRows, fetchKeywordRows } from '../../lib/projectsApi';
 import { canDownload } from '../../lib/permissions';
@@ -12,6 +12,20 @@ const hasValidLandingPage = (lp) => {
 // MultiSelectField Component for Popover Filters
 function MultiSelectField({ label, options, selectedValues = [], onChange }) {
   const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [open]);
+
   const isAll = !selectedValues || selectedValues.length === 0;
 
   const toggleOption = (val) => {
@@ -31,7 +45,7 @@ function MultiSelectField({ label, options, selectedValues = [], onChange }) {
   };
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div ref={containerRef} style={{ position: 'relative' }}>
       <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>
         {label} {selectedValues.length > 0 && <span style={{ color: '#7c3aed', fontWeight: 800 }}>({selectedValues.length})</span>}
       </label>
@@ -176,6 +190,25 @@ export default function KeywordsPage({ user }) {
 
   // Filter List Popover State & Options
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const filterRef = useRef(null);
+  const projectMenuRef = useRef(null);
+  const countryMenuRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (filterRef.current && !filterRef.current.contains(e.target)) {
+        setFilterMenuOpen(false);
+      }
+      if (projectMenuRef.current && !projectMenuRef.current.contains(e.target)) {
+        setProjectMenuOpen(false);
+      }
+      if (countryMenuRef.current && !countryMenuRef.current.contains(e.target)) {
+        setCountryMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
   const [columnFilters, setColumnFilters] = useState({
     cluster: [],
     category: [],
@@ -228,9 +261,11 @@ export default function KeywordsPage({ user }) {
         if (isMounted && domains && domains.length > 0) {
           setProjects(domains);
           const savedSlug = localStorage.getItem('bd_selected_project');
-          const target = (savedSlug && domains.find(p => p.slug === savedSlug)) || domains[0];
+          const target = savedSlug === 'all'
+            ? { slug: 'all', name: 'All Projects', domain: 'All Projects', isAllProjects: true }
+            : (savedSlug && domains.find(p => p.slug === savedSlug)) || domains[0];
           setActiveProject(target);
-          await loadKeywordDataForProject(target);
+          await loadKeywordDataForProject(target, domains);
         }
       } catch (err) {
         console.error('[KeywordsPage] Error loading projects:', err);
@@ -243,10 +278,44 @@ export default function KeywordsPage({ user }) {
   }, []);
 
   // Fetch keywords for active project
-  const loadKeywordDataForProject = async (proj) => {
+  const loadKeywordDataForProject = async (proj, allProjectsList = projects) => {
     if (!proj?.slug) return;
     try {
       setLoading(true);
+
+      if (proj.slug === 'all' || proj.isAllProjects) {
+        const validProjects = (allProjectsList || []).filter(p => p && p.slug && p.slug !== 'all');
+        const results = await Promise.all(
+          validProjects.map(async p => {
+            const fetchedKws = await fetchKeywordRows(p.slug).catch(() => []);
+            return (fetchedKws || []).map((k, idx) => {
+              const rawSv = Number(String(k.sv || k.search_volume || k.volume || 0).replace(/[^0-9.]/g, '')) || 0;
+              const rawKd = Number(String(k.kd || k.kw_diff || k.difficulty || 0).replace(/[^0-9.]/g, '')) || null;
+              const rawRank = Number(k.rank || k.position || k.rank_pos || k.intentRank || 0) || 0;
+
+              return {
+                id: k.id || `all-kw-${idx}-${Math.random()}`,
+                kw: k.kw || k.keyword || k.name || 'Keyword',
+                sv: rawSv,
+                kd: rawKd,
+                cluster: k.cluster || k.group || 'General',
+                category: k.category || k.cat || 'General',
+                type: k.type || k.intent || k.search_intent || 'Informational',
+                targetType: k.targetType || k.target_type || k.page_type || 'Landing Page',
+                targetSubtype: k.targetSubtype || k.target_category || k.targetCategory || k.subtype || 'Informational',
+                targetGeo: k.targetGeo || k.geo || k.country || p.country || 'India',
+                priority: k.priority || k.prio || 'Medium',
+                landingPage: k.landingPage || k.url || k.landing_page || '',
+                rank: rawRank
+              };
+            });
+          })
+        );
+        setKeywordsData(results.flat());
+        setSelectedRows([]);
+        return;
+      }
+
       const fetchedKws = await fetchKeywordRows(proj.slug).catch(() => []);
       const normalizedKws = (fetchedKws || []).map((k, idx) => {
         const svStr = String(k.sv ?? k.search_volume ?? k.volume ?? '').replace(/[^0-9.]/g, '');
@@ -286,7 +355,7 @@ export default function KeywordsPage({ user }) {
     setActiveProject(proj);
     localStorage.setItem('bd_selected_project', proj.slug);
     setProjectMenuOpen(false);
-    await loadKeywordDataForProject(proj);
+    await loadKeywordDataForProject(proj, projects);
   };
 
   // Unique values for dropdown filters
@@ -388,7 +457,7 @@ export default function KeywordsPage({ user }) {
 
       {/* ─── HEADER BAR: Dashboard: domain.com v [Link] 🇮🇳 India v 📅 Date ───── */}
       {(() => {
-        const currentDomainDisplay = activeProject?.domain || activeProject?.name || 'Select Domain';
+        const currentDomainDisplay = activeProject?.slug === 'all' || activeProject?.isAllProjects ? 'All Projects' : (activeProject?.domain || activeProject?.name || (projects && projects[0] ? projects[0].domain || projects[0].name : 'Select Domain'));
         const activeCountry = COUNTRY_OPTIONS.find(c => c.code === selectedRegion) || COUNTRY_OPTIONS[0];
         const filteredCountries = COUNTRY_OPTIONS.filter(c =>
           c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
@@ -421,7 +490,7 @@ export default function KeywordsPage({ user }) {
                 margin: 0
               }}>
                 <span>Project:</span>
-                <div style={{ position: 'relative', display: 'inline-block' }}>
+                <div ref={projectMenuRef} style={{ position: 'relative', display: 'inline-block' }}>
                   <button
                     onClick={() => setProjectMenuOpen(!projectMenuOpen)}
                     style={{
@@ -457,6 +526,27 @@ export default function KeywordsPage({ user }) {
                       display: 'flex',
                       flexDirection: 'column'
                     }}>
+                      <button
+                        key="all-projects"
+                        onClick={() => handleSelectProject({ slug: 'all', name: 'All Projects', domain: 'All Projects', isAllProjects: true })}
+                        style={{
+                          padding: '8px 14px',
+                          fontSize: 13.5,
+                          fontWeight: (activeProject?.slug === 'all' || activeProject?.isAllProjects) ? 700 : 500,
+                          color: (activeProject?.slug === 'all' || activeProject?.isAllProjects) ? '#7c3aed' : '#1e293b',
+                          backgroundColor: (activeProject?.slug === 'all' || activeProject?.isAllProjects) ? '#f5f3ff' : 'transparent',
+                          border: 'none',
+                          borderBottom: '1px solid #f1f5f9',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          transition: 'background 0.12s'
+                        }}
+                      >
+                        All Projects
+                      </button>
                       {projects.map(p => (
                         <button
                           key={p.slug}
@@ -464,9 +554,9 @@ export default function KeywordsPage({ user }) {
                           style={{
                             padding: '8px 14px',
                             fontSize: 13.5,
-                            fontWeight: activeProject?.slug === p.slug ? 700 : 500,
-                            color: activeProject?.slug === p.slug ? '#7c3aed' : '#1e293b',
-                            backgroundColor: activeProject?.slug === p.slug ? '#f5f3ff' : 'transparent',
+                            fontWeight: (activeProject?.slug === p.slug && !activeProject?.isAllProjects) ? 700 : 500,
+                            color: (activeProject?.slug === p.slug && !activeProject?.isAllProjects) ? '#7c3aed' : '#1e293b',
+                            backgroundColor: (activeProject?.slug === p.slug && !activeProject?.isAllProjects) ? '#f5f3ff' : 'transparent',
                             border: 'none',
                             textAlign: 'left',
                             cursor: 'pointer',
@@ -483,14 +573,16 @@ export default function KeywordsPage({ user }) {
                   )}
                 </div>
 
-                <a
-                  href={`https://${currentDomainDisplay}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: '#7c3aed', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
-                >
-                  <ExternalLink size={16} />
-                </a>
+                {currentDomainDisplay !== 'Select Domain' && currentDomainDisplay !== 'All Projects' && (
+                  <a
+                    href={`https://${currentDomainDisplay}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#7c3aed', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
+                  >
+                    <ExternalLink size={16} />
+                  </a>
+                )}
               </h1>
             </div>
 
@@ -504,7 +596,7 @@ export default function KeywordsPage({ user }) {
               fontWeight: 500
             }}>
               {/* Country Selector */}
-              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+              <div ref={countryMenuRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                 <button
                   onClick={() => {
                     setCountryMenuOpen(!countryMenuOpen);
@@ -799,7 +891,7 @@ export default function KeywordsPage({ user }) {
           )}
 
           {/* Filter List Popover Button */}
-          <div style={{ position: 'relative' }}>
+          <div ref={filterRef} style={{ position: 'relative' }}>
             <button
               onClick={() => setFilterMenuOpen(!filterMenuOpen)}
               title="Filter List"

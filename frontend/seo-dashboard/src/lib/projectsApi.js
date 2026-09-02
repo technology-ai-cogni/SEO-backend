@@ -13,10 +13,14 @@ export async function authFetch(url, options = {}) {
   };
 
   const res = await window.fetch(url, { ...options, headers });
-  if (res.status === 401 && !String(url).includes('/auth/login') && !String(url).includes('/auth/signup')) {
-    console.warn('[authFetch] 401 Unauthorized received, clearing invalid session token');
+  if (res.status === 401 && String(url).includes('/auth/me')) {
+    console.warn('[authFetch] 401 Unauthorized received on /auth/me, clearing expired session');
     try {
       sessionStorage.removeItem('seo_token');
+      sessionStorage.removeItem('seo_dashboard_user');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('auth_session_expired'));
+      }
     } catch (_) {}
   }
   return res;
@@ -2048,10 +2052,14 @@ async function fetchAuthEndpoint(endpoint, options = {}) {
   const primaryUrl = `${getApiBaseUrl()}${endpoint}`;
   const res = await fetch(primaryUrl, requestOptions);
 
-  if (res.status === 401 && endpoint !== '/auth/login' && endpoint !== '/auth/signup') {
-    console.warn('[fetchAuthEndpoint] 401 Unauthorized, clearing session token');
+  if (res.status === 401 && endpoint === '/auth/me') {
+    console.warn('[fetchAuthEndpoint] 401 Unauthorized on /auth/me, clearing session token');
     try {
       sessionStorage.removeItem('seo_token');
+      sessionStorage.removeItem('seo_dashboard_user');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('auth_session_expired'));
+      }
     } catch (_) {}
   }
 
@@ -2275,7 +2283,7 @@ export async function fetchAiAnalysisHistory(projectSlug, engine = '') {
     }
   }
 
-  const apiBase = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000').replace('0.0.0.0', '127.0.0.1');
+  const apiBase = (import.meta.env.VITE_API_BASE || getApiBaseUrl()).replace('0.0.0.0', '127.0.0.1');
   try {
     const url = new URL(`${apiBase}/projects/${encodeURIComponent(projectSlug)}/ai-analysis-history`);
     if (engine) url.searchParams.append('engine', engine);

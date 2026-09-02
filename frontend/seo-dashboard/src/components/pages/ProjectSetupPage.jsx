@@ -14,9 +14,12 @@ import {
   fetchOutreachSitesApi, addOutreachSiteApi, deleteOutreachSiteApi,
   updateOutreachSiteApi, bulkDeleteOutreachSitesApi, bulkUpdateOutreachSitesApi,
   createAuditLogApi, getActiveUserEmail,
-  getApiBaseUrl, authFetch
+  getApiBaseUrl,
+  authFetch
 } from '../../lib/projectsApi';
 import { isReadOnlyUser, canEdit, canDelete, canDownload, canUpdate } from '../../lib/permissions';
+
+const fetch = authFetch;
 
 // ─── shared tiny components ────────────────────────────────────────────────
 
@@ -1407,10 +1410,10 @@ function AddKeywordsModal({ open, onClose, projects, onImportKeywords, lockedPro
   const downloadSampleTemplate = async () => {
     const headers = ['KW', 'SV', 'KW Diff', 'Type', 'Cluster', 'Category', 'Target Type', 'Target Subtype', 'Target Geo', 'Priority', 'Landing Page'];
     const sampleRows = [
-      ['school admission form', 14800, 20, 'Organic', 'ICSE Board', 'Icse vs cbse', 'Landing Page', 'Informational', 'India', 'P1', 'URL'],
-      ['best schools in bangalore', 12100, 28, 'SERP', 'High School', 'Fees Structure', 'Landing Page', 'Commercial', 'India', 'P2', 'URL'],
-      ['best schools in hyderabad', 12100, 24, 'Local', 'CBSE School', 'Best/Top Schools', 'Landing Page', 'Commercial', 'India', 'P3', 'URL'],
-      ['schools in hyderabad', 12100, 33, 'Organic', 'ICSE Board', 'Icse vs cbse', 'Blog Page', 'Informational', 'India', 'P4', 'URL'],
+      ['school admission form', 14800, 20, '', 'ICSE Board', 'Icse vs cbse', 'Landing Page', 'Informational', 'India', 'P1', 'URL'],
+      ['best schools in bangalore', 12100, 28, '', 'High School', 'Fees Structure', 'Landing Page', 'Commercial', 'India', 'P2', 'URL'],
+      ['best schools in hyderabad', 12100, 24, '', 'CBSE School', 'Best/Top Schools', 'Landing Page', 'Commercial', 'India', 'P3', 'URL'],
+      ['schools in hyderabad', 12100, 33, '', 'ICSE Board', 'Icse vs cbse', 'Blog Page', 'Informational', 'India', 'P4', 'URL'],
     ];
 
     const thinGrayBorder = { style: 'thin', color: { argb: 'FF999999' } };
@@ -3353,8 +3356,12 @@ function PageDetailView({ project, onBack, onUpdatePages, search, user }) {
           <ArrowLeft size={16} /> Back
         </button>
         <div style={{ height: 20, width: 1, background: 'var(--border)' }} />
-        <div>
-          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{project.name}</span>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>{project.name}</span>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+            {filteredRows.length} page{filteredRows.length !== 1 ? 's' : ''}
+            {(tableFilters && Object.values(tableFilters).some(v => Array.isArray(v) ? v.length > 0 : Boolean(v))) || search ? ` of ${rows.length}` : ''}
+          </span>
         </div>
         <button
           onClick={handleRefresh}
@@ -3404,7 +3411,6 @@ function PageDetailView({ project, onBack, onUpdatePages, search, user }) {
         {saveError && (
           <span style={{ fontSize: 12, color: 'var(--red, #dc2626)' }}>{saveError}</span>
         )}
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{filteredRows.length} page{filteredRows.length !== 1 ? 's' : ''}</span>
         {(hasPendingChanges || saving) && (
           <button
             onClick={handleSave}
@@ -3485,7 +3491,28 @@ function PageDetailView({ project, onBack, onUpdatePages, search, user }) {
                   </div>
                 </td>
                 <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', maxWidth: 200 }}>{r.pageName}</td>
-                <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--accent)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.url}</td>
+                <td style={{ padding: '10px 16px', fontSize: 13, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {r.url ? (
+                    <a
+                      href={r.url.startsWith('http://') || r.url.startsWith('https://') ? r.url : (r.url.startsWith('/') && project?.domain ? `https://${project.domain.replace(/^https?:\/\//i, '').replace(/\/+$/, '')}${r.url}` : `https://${r.url}`)}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={r.url}
+                      style={{
+                        color: 'var(--accent, #7928ca)',
+                        textDecoration: 'none',
+                        fontWeight: 500,
+                        cursor: 'pointer'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                      onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                    >
+                      {r.url}
+                    </a>
+                  ) : (
+                    <span style={{ color: 'var(--text-muted)' }}>—</span>
+                  )}
+                </td>
                 <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.cluster}</td>
                 <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.category}</td>
                 <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetCategory ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetCategory || '—'}</td>

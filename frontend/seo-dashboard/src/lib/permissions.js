@@ -131,15 +131,13 @@ export function canAccessRoute(user, routePath) {
   const userRole = user.role.toUpperCase();
   if (userRole === 'ADMIN') return true;
 
-  // Off-Page restriction: when a project is not allocated to an associate or to anyone, they should not be able to see the off-page
+  // Off-Page restriction: check if user has access (All Projects, allocated project, or default internal role)
   if (routePath === 'search-visibility/off-page-scheduler' || routePath.startsWith('search-visibility/off-page-scheduler')) {
-    const hasAllocatedProject = Boolean(
-      user?.assigned_project &&
-      user.assigned_project.trim() !== '' &&
-      user.assigned_project.trim() !== 'All Projects' &&
-      user.assigned_project.trim().toLowerCase() !== 'none'
-    );
-    if (!hasAllocatedProject) {
+    const rawProj = (user?.assigned_project || '').trim();
+    const isNone = rawProj.toLowerCase() === 'none';
+    const isVendor = (user?.category || '').toLowerCase() === 'vendor' || userRole === 'VENDOR';
+    // For vendors, a project must be allocated
+    if (isVendor && (!rawProj || isNone)) {
       return false;
     }
   }
@@ -150,6 +148,13 @@ export function canAccessRoute(user, routePath) {
 
   const isDefaultAccess = lowerAccess.startsWith('default') || !sectionAccess;
   const hasFullAccess = lowerAccess.includes('access all') || lowerAccess.includes('all sections');
+
+  const isVendorUser = (user.category || '').toLowerCase() === 'vendor' || userRole === 'VENDOR';
+
+  // For vendors, strictly hide and restrict home and dashboard
+  if (isVendorUser && (routePath === 'home' || routePath === 'dashboard')) {
+    return false;
+  }
 
   // Common authenticated user pages
   if (
@@ -181,8 +186,8 @@ export function canAccessRoute(user, routePath) {
 
   // Role-Based Default Section Access (when sectionAccess === 'Default'):
   if (isDefaultAccess) {
-    if (userRole === 'VENDOR') {
-      return routePath === 'search-visibility/off-page-scheduler' || routePath === 'home';
+    if (userRole === 'VENDOR' || isVendorUser) {
+      return routePath === 'search-visibility/off-page-scheduler';
     }
     if (userRole === 'CLIENT_ASSOCIATE') {
       return routePath.startsWith('search-visibility') || routePath === 'home';
@@ -250,20 +255,25 @@ export function isReadOnlyUser(user) {
   if (role === 'ADMIN') return false;
 
   const permissions = (user.permissions || 'Default').trim().toLowerCase();
+  const isVendorUser = (user.category || '').toLowerCase() === 'vendor' || role === 'VENDOR';
 
   // Explicit Admin Overrides:
   if (permissions === 'view only' || permissions === 'view') return true;
   if (permissions.includes('edit') || permissions.includes('update') || permissions.includes('delete') || permissions.includes('full control')) return false;
 
-  // Role-Based Defaults (when permissions === 'Default'):
+  // Role & Category Based Defaults (when permissions === 'Default'):
   if (
+    isVendorUser ||
     role === 'INTERNAL_ASSOCIATE' ||
+    role === 'INTERNAL_SR_ASSOCIATE' ||
     role === 'CLIENT_SR_ASSOCIATE' ||
     role === 'CLIENT_ASSOCIATE' ||
+    role === 'ASSOCIATE' ||
+    role.includes('ASSOCIATE') ||
     role === 'VENDOR' ||
     role === 'USER'
   ) {
-    return true; // Default is View Only for these roles!
+    return true; // Default is View Only for vendors and associates!
   }
 
   return false;
@@ -288,6 +298,7 @@ export function canEdit(user) {
   if (role === 'ADMIN') return true;
 
   const permissions = (user.permissions || 'Default').trim().toLowerCase();
+  const isVendorUser = (user.category || '').toLowerCase() === 'vendor' || role === 'VENDOR';
 
   // Explicit permission overrides:
   if (permissions === 'view only' || permissions === 'view') return false;
@@ -297,6 +308,9 @@ export function canEdit(user) {
     permissions.includes('delete') ||
     permissions.includes('full control')
   ) return true;
+
+  // For vendors, default permission is strictly View Only (cannot edit)
+  if (isVendorUser) return false;
 
   // Role-Based Defaults (when permissions === 'Default'):
   if (role === 'INTERNAL_TEAM_LEAD' || role === 'CLIENT_TEAM_LEAD') {
@@ -319,6 +333,7 @@ export function canDelete(user) {
   if (role === 'ADMIN') return true;
 
   const permissions = (user.permissions || 'Default').trim().toLowerCase();
+  const isVendorUser = (user.category || '').toLowerCase() === 'vendor' || role === 'VENDOR';
 
   // Explicit permission overrides:
   if (permissions === 'view only' || permissions === 'view') return false;
@@ -326,6 +341,9 @@ export function canDelete(user) {
     permissions.includes('delete') ||
     permissions.includes('full control')
   ) return true;
+
+  // For vendors, default permission is strictly View Only (cannot delete)
+  if (isVendorUser) return false;
 
   // Role-Based Defaults: no role gets delete by default except ADMIN
   return false;
@@ -344,6 +362,7 @@ export function canUpdate(user) {
   if (role === 'ADMIN') return true;
 
   const permissions = (user.permissions || 'Default').trim().toLowerCase();
+  const isVendorUser = (user.category || '').toLowerCase() === 'vendor' || role === 'VENDOR';
 
   // Explicit permission overrides:
   if (permissions === 'view only' || permissions === 'view') return false;
@@ -351,6 +370,9 @@ export function canUpdate(user) {
     permissions.includes('update') ||
     permissions.includes('full control')
   ) return true;
+
+  // For vendors, default permission is strictly View Only (cannot update)
+  if (isVendorUser) return false;
 
   // Role-Based Defaults:
   if (role === 'INTERNAL_TEAM_LEAD' || role === 'CLIENT_TEAM_LEAD') return true;
@@ -383,8 +405,10 @@ export function canDownload(user) {
     return true;
   }
 
+  const isVendorUser = (user.category || '').toLowerCase() === 'vendor' || role === 'VENDOR';
   // Internal Associates, Sr Associates, Client Associates, Vendors default to NO download capability
   if (
+    isVendorUser ||
     role === 'INTERNAL_ASSOCIATE' ||
     role === 'INTERNAL_SR_ASSOCIATE' ||
     role === 'CLIENT_ASSOCIATE' ||
@@ -417,6 +441,9 @@ export function canRunActions(user) {
 
   // Explicit permission overrides:
   if (permissions === 'view only' || permissions === 'view') return false;
+
+  // If user is read-only by default (e.g. Associate or Vendor on Default permissions):
+  if (isReadOnlyUser(user)) return false;
 
   if (
     permissions.includes('full control') ||
@@ -471,6 +498,8 @@ export function canRunBrandDiscovery(user, projectSlug) {
 
   // Explicit permission overrides:
   if (permissions === 'view only' || permissions === 'view') return false;
+  if (isReadOnlyUser(user)) return false;
+
   if (
     permissions.includes('full control') ||
     permissions.includes('edit') ||
@@ -481,14 +510,6 @@ export function canRunBrandDiscovery(user, projectSlug) {
 
   // Team Leads get multi-use access
   if (role === 'INTERNAL_TEAM_LEAD' || role === 'CLIENT_TEAM_LEAD') return true;
-
-  // Associates: Allowed ONCE by default for Brand Discovery
-  if (isAssociateUser(user)) {
-    const userId = user.id || user.username || user.email || 'user';
-    const storageKey = `bd_analyzed_associate_${userId}_${projectSlug || 'default'}`;
-    const hasAnalyzed = localStorage.getItem(storageKey) === 'true';
-    return !hasAnalyzed;
-  }
 
   return false;
 }
@@ -514,27 +535,16 @@ export function canRunAiModelAnalysis(user, projectSlug, engineName = 'all', has
   const permissions = (user.permissions || 'Default').trim().toLowerCase();
   if (permissions.includes('full control')) return true;
   if (permissions === 'view only' || permissions === 'view') return false;
+  if (isReadOnlyUser(user)) return false;
 
-  if (isAssociateUser(user)) {
-    // If data is already present for this model/project, hide the Analyze button for associates
-    if (hasData) return false;
+  if (
+    permissions.includes('edit') ||
+    permissions.includes('update') ||
+    permissions.includes('delete') ||
+    canEdit(user)
+  ) return true;
 
-    const userId = user.id || user.username || user.email || 'user';
-    const slug = projectSlug || 'default';
-    const eng = (engineName || 'all').toLowerCase().trim().replace(/\s+/g, '_');
-    
-    // Check general project run flag or specific engine run flag
-    const genKey = `bd_analyzed_associate_${userId}_${slug}`;
-    const engKey = `ai_analyzed_associate_${userId}_${slug}_${eng}`;
-    
-    const hasGenRun = localStorage.getItem(genKey) === 'true';
-    const hasEngRun = localStorage.getItem(engKey) === 'true';
-
-    if (eng === 'all' && (hasGenRun || hasEngRun)) return false;
-    return !hasEngRun;
-  }
-
-  return true;
+  return false;
 }
 
 export function recordAiModelAnalysisRun(user, projectSlug, engineName = 'all') {

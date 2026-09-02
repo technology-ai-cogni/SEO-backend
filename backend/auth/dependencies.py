@@ -98,17 +98,24 @@ def require_project_access(
         return current_user
 
     role = str(current_user.get("role", "")).upper()
-    if role == "ADMIN":
+    category = str(current_user.get("category", "")).upper()
+    is_vendor = role == "VENDOR" or category == "VENDOR"
+
+    # All non-vendor roles have access to all projects
+    if not is_vendor:
         return current_user
 
     assigned_project = str(current_user.get("assigned_project", "")).strip().lower()
 
-    # Users with 'All Projects' or unassigned admin category can view all projects
+    # Vendors with 'All Projects' or unassigned can view all projects
     if assigned_project in ("all projects", "all", "*") or not assigned_project:
         return current_user
 
+    # Support multiple comma-separated assigned projects (e.g. "owis, stamford american")
+    assigned_list = [p.strip().lower() for p in assigned_project.split(",") if p.strip()]
+
     req_slug = str(project).strip().lower()
-    if assigned_project != req_slug:
+    if req_slug not in assigned_list and assigned_project != req_slug:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Access denied: your account is not allocated to project '{project}'."

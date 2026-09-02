@@ -1,11 +1,25 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, ChevronDown, ExternalLink, FileText, Filter, Download, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
-import { canDownload } from '../../lib/permissions';
+import { canDownload, canRunActions } from '../../lib/permissions';
 import { fetchDomainRows, fetchPageRows, fetchKeywordRows, runOrganicRankCheckApi } from '../../lib/projectsApi';
 
 // MultiSelectField Component for Popover Filters
 function MultiSelectField({ label, options, selectedValues = [], onChange }) {
   const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [open]);
+
   const isAll = !selectedValues || selectedValues.length === 0;
 
   const toggleOption = (val) => {
@@ -25,7 +39,7 @@ function MultiSelectField({ label, options, selectedValues = [], onChange }) {
   };
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div ref={containerRef} style={{ position: 'relative' }}>
       <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>
         {label} {selectedValues.length > 0 && <span style={{ color: '#7c3aed', fontWeight: 800 }}>({selectedValues.length})</span>}
       </label>
@@ -191,6 +205,7 @@ function normalizeAndValidateUrl(itemStr, targetDomain, registeredPages = []) {
 
 export default function TopPagesPage({ user }) {
   const userCanDownload = canDownload(user);
+  const userCanRunActions = canRunActions(user);
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -221,6 +236,25 @@ export default function TopPagesPage({ user }) {
   const PAGE_SIZE = 100; // 'all' | 'landing' | 'blog'
 
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const filterRef = useRef(null);
+  const projectMenuRef = useRef(null);
+  const countryMenuRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (filterRef.current && !filterRef.current.contains(e.target)) {
+        setFilterMenuOpen(false);
+      }
+      if (projectMenuRef.current && !projectMenuRef.current.contains(e.target)) {
+        setProjectMenuOpen(false);
+      }
+      if (countryMenuRef.current && !countryMenuRef.current.contains(e.target)) {
+        setCountryMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
   const handleExportCSV = () => {
     if (!filteredPages || filteredPages.length === 0) {
       alert('No data available to download.');
@@ -315,7 +349,7 @@ export default function TopPagesPage({ user }) {
         if (isMounted && domains && domains.length > 0) {
           setProjects(domains);
           const savedSlug = localStorage.getItem('bd_selected_project');
-          const target = (savedSlug && domains.find(p => p.slug === savedSlug)) || domains[0];
+          const target = (savedSlug && savedSlug !== 'all' && domains.find(p => p.slug === savedSlug)) || domains[0];
           setActiveProject(target);
           await loadPageDataForProject(target);
         }
@@ -344,6 +378,7 @@ export default function TopPagesPage({ user }) {
     if (!proj?.slug) return;
     try {
       setLoading(true);
+
       const [fetchedPages, fetchedKws] = await Promise.all([
         fetchPageRows(proj.slug).catch(() => []),
         fetchKeywordRows(proj.slug).catch(() => [])
@@ -424,7 +459,7 @@ export default function TopPagesPage({ user }) {
     setActiveProject(proj);
     localStorage.setItem('bd_selected_project', proj.slug);
     setProjectMenuOpen(false);
-    await loadPageDataForProject(proj);
+    await loadPageDataForProject(proj, projects);
   };
 
   // Unique filter values
@@ -565,7 +600,7 @@ export default function TopPagesPage({ user }) {
 
       {/* ─── HEADER BAR: Dashboard: domain.com v [Link] 🇮🇳 India v 📅 Date ───── */}
       {(() => {
-        const currentDomainDisplay = activeProject?.domain || activeProject?.name || 'Select Domain';
+        const currentDomainDisplay = activeProject?.slug === 'all' || activeProject?.isAllProjects ? 'All Projects' : (activeProject?.domain || activeProject?.name || 'Select Domain');
         const activeCountry = COUNTRY_OPTIONS.find(c => c.code === selectedRegion) || COUNTRY_OPTIONS[0];
         const filteredCountries = COUNTRY_OPTIONS.filter(c =>
           c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
@@ -598,7 +633,7 @@ export default function TopPagesPage({ user }) {
                 margin: 0
               }}>
                 <span>Project:</span>
-                <div className="tp-project-menu" style={{ position: 'relative', display: 'inline-block' }}>
+                <div className="tp-project-menu" ref={projectMenuRef} style={{ position: 'relative', display: 'inline-block' }}>
                   <button
                     onClick={() => setProjectMenuOpen(!projectMenuOpen)}
                     style={{
@@ -660,14 +695,16 @@ export default function TopPagesPage({ user }) {
                   )}
                 </div>
 
-                <a
-                  href={`https://${currentDomainDisplay}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: '#7c3aed', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
-                >
-                  <ExternalLink size={16} />
-                </a>
+                {currentDomainDisplay !== 'Select Domain' && (
+                  <a
+                    href={`https://${currentDomainDisplay}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#7c3aed', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
+                  >
+                    <ExternalLink size={16} />
+                  </a>
+                )}
               </h1>
             </div>
 
@@ -681,7 +718,7 @@ export default function TopPagesPage({ user }) {
               fontWeight: 500
             }}>
               {/* Country Selector */}
-              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+              <div ref={countryMenuRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                 <button
                   onClick={() => {
                     setCountryMenuOpen(!countryMenuOpen);
@@ -834,45 +871,47 @@ export default function TopPagesPage({ user }) {
               </div>
 
               {/* Organic Re-analyze Button */}
-              <div style={{ marginLeft: 'auto' }}>
-                <button
-                  onClick={handleRunOrganicRankCheck}
-                  disabled={isAnalyzing}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: 8,
-                    padding: '8px 16px',
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: isAnalyzing ? 'not-allowed' : 'pointer',
-                    opacity: isAnalyzing ? 0.75 : 1,
-                    boxShadow: '0 2px 10px rgba(74, 26, 140, 0.3)',
-                    transition: 'all 0.15s ease'
-                  }}
-                  onMouseEnter={e => {
-                    if (!isAnalyzing) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8E3CE0 100%)';
-                      e.currentTarget.style.boxShadow = '0 4px 14px rgba(123, 47, 190, 0.4)';
-                      e.currentTarget.style.transform = 'translateY(-1px)';
-                    }
-                  }}
-                  onMouseLeave={e => {
-                    if (!isAnalyzing) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)';
-                      e.currentTarget.style.boxShadow = '0 2px 10px rgba(74, 26, 140, 0.3)';
-                      e.currentTarget.style.transform = 'translateY(0)';
-                    }
-                  }}
-                >
-                  <Sparkles size={14} className={isAnalyzing ? 'animate-spin' : ''} />
-                  <span>{isAnalyzing ? 'Analyzing...' : 'Re-analyze'}</span>
-                </button>
-              </div>
+              {userCanRunActions && activeProject?.slug !== 'all' && (
+                <div style={{ marginLeft: 'auto' }}>
+                  <button
+                    onClick={handleRunOrganicRankCheck}
+                    disabled={isAnalyzing}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: 8,
+                      padding: '8px 16px',
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: isAnalyzing ? 'not-allowed' : 'pointer',
+                      opacity: isAnalyzing ? 0.75 : 1,
+                      boxShadow: '0 2px 10px rgba(74, 26, 140, 0.3)',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseEnter={e => {
+                      if (!isAnalyzing) {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8E3CE0 100%)';
+                        e.currentTarget.style.boxShadow = '0 4px 14px rgba(123, 47, 190, 0.4)';
+                        e.currentTarget.style.transform = 'translateY(-1px)';
+                      }
+                    }}
+                    onMouseLeave={e => {
+                      if (!isAnalyzing) {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)';
+                        e.currentTarget.style.boxShadow = '0 2px 10px rgba(74, 26, 140, 0.3)';
+                        e.currentTarget.style.transform = 'translateY(0)';
+                      }
+                    }}
+                  >
+                    <Sparkles size={14} className={isAnalyzing ? 'animate-spin' : ''} />
+                    <span>{isAnalyzing ? 'Analyzing...' : 'Re-analyze'}</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         );
@@ -1140,7 +1179,7 @@ export default function TopPagesPage({ user }) {
         )}
 
         {/* Filter Trigger Button & Popover */}
-        <div className="tp-filter-menu" style={{ position: 'relative' }}>
+        <div className="tp-filter-menu" ref={filterRef} style={{ position: 'relative' }}>
           <button
             onClick={() => setFilterMenuOpen(!filterMenuOpen)}
             title="Filter options"

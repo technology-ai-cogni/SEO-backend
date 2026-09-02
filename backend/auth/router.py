@@ -131,6 +131,13 @@ def get_current_user_profile(current_user: dict = Depends(get_current_user)):
         permissions=current_user.get("permissions", "Default"),
         attendance=current_user.get("attendance", "Not Present"),
         assigned_project=current_user.get("assigned_project", "All Projects"),
+        client_detail_enabled=current_user.get("client_detail_enabled", False),
+        client_name=current_user.get("client_name"),
+        client_address=current_user.get("client_address"),
+        client_gst=current_user.get("client_gst"),
+        poc_name=current_user.get("poc_name"),
+        poc_number=current_user.get("poc_number"),
+        poc_address=current_user.get("poc_address"),
         created_at=current_user.get("created_at")
     )
 
@@ -153,6 +160,13 @@ def get_users(admin: dict = Depends(require_admin)):
             permissions=u.get("permissions", "Default"),
             attendance=u.get("attendance", "Not Present"),
             assigned_project=u.get("assigned_project", "All Projects"),
+            client_detail_enabled=u.get("client_detail_enabled", False),
+            client_name=u.get("client_name"),
+            client_address=u.get("client_address"),
+            client_gst=u.get("client_gst"),
+            poc_name=u.get("poc_name"),
+            poc_number=u.get("poc_number"),
+            poc_address=u.get("poc_address"),
             created_at=u.get("created_at")
         )
         for u in users
@@ -181,7 +195,14 @@ def admin_create_user(payload: CreateUserRequest, admin: dict = Depends(require_
         status=payload.status or "Active",
         section_access=payload.section_access or "Default",
         permissions=payload.permissions or "Default",
-        assigned_project=payload.assigned_project or "All Projects"
+        assigned_project=payload.assigned_project or "All Projects",
+        client_detail_enabled=payload.client_detail_enabled or False,
+        client_name=payload.client_name,
+        client_address=payload.client_address,
+        client_gst=payload.client_gst,
+        poc_name=payload.poc_name,
+        poc_number=payload.poc_number,
+        poc_address=payload.poc_address
     )
 
     admin_email = admin.get("email", "admin")
@@ -209,6 +230,13 @@ def admin_create_user(payload: CreateUserRequest, admin: dict = Depends(require_
             section_access=new_user.get("section_access", "Default"),
             permissions=new_user.get("permissions", "Default"),
             assigned_project=new_user.get("assigned_project", "All Projects"),
+            client_detail_enabled=new_user.get("client_detail_enabled", False),
+            client_name=new_user.get("client_name"),
+            client_address=new_user.get("client_address"),
+            client_gst=new_user.get("client_gst"),
+            poc_name=new_user.get("poc_name"),
+            poc_number=new_user.get("poc_number"),
+            poc_address=new_user.get("poc_address"),
             created_at=new_user.get("created_at")
         )
     )
@@ -251,7 +279,14 @@ def update_role_endpoint(user_id: int, payload: UpdateUserRoleRequest, admin: di
         payload.category, 
         payload.section_access, 
         payload.permissions,
-        payload.assigned_project
+        payload.assigned_project,
+        client_detail_enabled=payload.client_detail_enabled,
+        client_name=payload.client_name,
+        client_address=payload.client_address,
+        client_gst=payload.client_gst,
+        poc_name=payload.poc_name,
+        poc_number=payload.poc_number,
+        poc_address=payload.poc_address
     )
     if not updated:
         raise HTTPException(status_code=404, detail="User not found.")
@@ -274,6 +309,13 @@ def update_role_endpoint(user_id: int, payload: UpdateUserRoleRequest, admin: di
         permissions=updated.get("permissions", "Default"),
         attendance=updated.get("attendance", "Not Present"),
         assigned_project=updated.get("assigned_project", "All Projects"),
+        client_detail_enabled=updated.get("client_detail_enabled", False),
+        client_name=updated.get("client_name"),
+        client_address=updated.get("client_address"),
+        client_gst=updated.get("client_gst"),
+        poc_name=updated.get("poc_name"),
+        poc_number=updated.get("poc_number"),
+        poc_address=updated.get("poc_address"),
         created_at=updated.get("created_at")
     )
 

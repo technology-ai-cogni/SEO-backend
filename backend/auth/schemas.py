@@ -38,6 +38,13 @@ class UpdateUserRoleRequest(BaseModel):
     section_access: Optional[str] = Field(None, description="Section access level")
     permissions: Optional[str] = Field(None, description="Action permissions string")
     assigned_project: Optional[str] = Field(None, description="Assigned project for vendor access")
+    client_detail_enabled: Optional[bool] = Field(None, description="Whether client detail is enabled")
+    client_name: Optional[str] = Field(None, description="Client entity name")
+    client_address: Optional[str] = Field(None, description="Client address")
+    client_gst: Optional[str] = Field(None, description="Client GST number")
+    poc_name: Optional[str] = Field(None, description="Point of contact name")
+    poc_number: Optional[str] = Field(None, description="Point of contact phone number")
+    poc_address: Optional[str] = Field(None, description="Point of contact address")
 
 
 class LoginRequest(BaseModel):
@@ -76,6 +83,13 @@ class UserResponse(BaseModel):
     attendance: Optional[str] = "Not Present"
     assigned_project: Optional[str] = "All Projects"
     created_at: Optional[datetime] = None
+    client_detail_enabled: Optional[bool] = False
+    client_name: Optional[str] = None
+    client_address: Optional[str] = None
+    client_gst: Optional[str] = None
+    poc_name: Optional[str] = None
+    poc_number: Optional[str] = None
+    poc_address: Optional[str] = None
 
 
 class AuthResponse(BaseModel):

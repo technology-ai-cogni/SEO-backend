@@ -166,7 +166,21 @@ export default function OffPageSchedulerPage({ user }) {
   const isViewer = isReadOnlyUser(user);
   const isVendor = user?.category === 'Vendor' || user?.role?.toUpperCase() === 'VENDOR';
   const isAdmin = user?.role?.toUpperCase() === 'ADMIN';
-  const vendorProject = !isAdmin && user?.assigned_project && user.assigned_project !== 'All Projects' && user.assigned_project.toLowerCase() !== 'none' ? user.assigned_project : null;
+
+  const userProjects = useMemo(() => {
+    if (isAdmin || user?.assigned_project === 'All Projects') {
+      return ['All Projects'];
+    }
+    const raw = user?.assigned_project || user?.assigned_projects || '';
+    if (Array.isArray(raw)) return raw.filter(Boolean);
+    if (typeof raw === 'string') {
+      return raw.split(',').map(s => s.trim()).filter(s => s && s.toLowerCase() !== 'none');
+    }
+    return [];
+  }, [user, isAdmin]);
+
+  const hasMultipleProjects = isAdmin || userProjects.includes('All Projects') || userProjects.length > 1;
+  const vendorProject = !isAdmin && userProjects.length > 0 && !userProjects.includes('All Projects') ? userProjects[0] : null;
   const userCanEdit = canEdit(user);
   const userCanUpdate = canUpdate(user);
   const userCanDelete = canDelete(user);
@@ -704,28 +718,43 @@ export default function OffPageSchedulerPage({ user }) {
 
   // Scoped datasets & schedules for allocated projects
   const filteredImports = useMemo(() => {
-    if (!isAdmin) {
-      if (!vendorProject) return [];
-      const vProjLower = vendorProject.toLowerCase().trim();
-      return imports.filter(imp => {
-        const pName = String(imp.project || imp.project_name || imp.domain || '').toLowerCase();
-        return pName.includes(vProjLower) || vProjLower.includes(pName);
-      });
+    if (isAdmin || userProjects.includes('All Projects')) {
+      return imports;
     }
-    return imports;
-  }, [imports, vendorProject, isAdmin]);
+    if (userProjects.length === 0) return [];
+    return imports.filter(imp => {
+      const pName = String(imp.project || imp.project_name || imp.domain || '').toLowerCase().trim();
+      return userProjects.some(up => {
+        const upLower = up.toLowerCase().trim();
+        return pName.includes(upLower) || upLower.includes(pName);
+      });
+    });
+  }, [imports, userProjects, isAdmin]);
 
   const filteredSchedules = useMemo(() => {
-    if (!isAdmin) {
-      if (!vendorProject) return [];
-      const vProjLower = vendorProject.toLowerCase().trim();
-      return schedules.filter(sch => {
-        const pName = String(sch.project || sch.project_name || sch.domain || '').toLowerCase();
-        return pName.includes(vProjLower) || vProjLower.includes(pName);
-      });
+    if (isAdmin || userProjects.includes('All Projects')) {
+      return schedules;
     }
-    return schedules;
-  }, [schedules, vendorProject, isAdmin]);
+    if (userProjects.length === 0) return [];
+    return schedules.filter(sch => {
+      const pName = String(sch.project || sch.project_name || sch.domain || '').toLowerCase().trim();
+      return userProjects.some(up => {
+        const upLower = up.toLowerCase().trim();
+        return pName.includes(upLower) || upLower.includes(pName);
+      });
+    });
+  }, [schedules, userProjects, isAdmin]);
+
+  // Active dataset: if vendor has only 1 project, automatically default to their project's dataset
+  const activeDataset = selectedDataset || (isVendor && !hasMultipleProjects && filteredImports.length > 0 ? filteredImports[0] : null);
+
+  useEffect(() => {
+    if (isVendor && !hasMultipleProjects && filteredImports.length > 0) {
+      if (!selectedDataset || !filteredImports.some(imp => imp.id === selectedDataset?.id)) {
+        setSelectedDataset(filteredImports[0]);
+      }
+    }
+  }, [isVendor, hasMultipleProjects, filteredImports, selectedDataset]);
 
   const handleDownloadMonthlyOperations = async () => {
     try {
@@ -879,6 +908,10 @@ export default function OffPageSchedulerPage({ user }) {
 
   // CSV/JSON/Excel File Parser & DB Sync
   const handleUploadSubmit = async () => {
+    if (isVendor) {
+      setImportMsg({ type: 'error', text: 'Vendors are restricted from importing data under any permissions.' });
+      return;
+    }
     if (!importFile) {
       setImportMsg({ type: 'error', text: 'Please choose or drag a file to import.' });
       return;
@@ -1105,12 +1138,13 @@ export default function OffPageSchedulerPage({ user }) {
   };
 
   const handleBulkDelete = () => {
-    if (!selectedDataset || selectedRowIndices.length === 0) return;
+    const targetDs = selectedDataset || activeDataset;
+    if (!targetDs || selectedRowIndices.length === 0) return;
     if (!window.confirm(`Are you sure you want to delete ${selectedRowIndices.length} selected row(s)?`)) return;
 
-    const currentRows = selectedDataset.rowsData || [];
+    const currentRows = targetDs.rowsData || [];
     const remainingRows = currentRows.filter((_, idx) => !selectedRowIndices.includes(idx));
-    const datasetId = selectedDataset.id;
+    const datasetId = targetDs.id;
 
     setImports(prevImports =>
       prevImports.map(imp => {
@@ -1118,17 +1152,18 @@ export default function OffPageSchedulerPage({ user }) {
         return { ...imp, rows: remainingRows.length, rowsData: remainingRows };
       })
     );
-    setSelectedDataset(prev => ({ ...prev, rows: remainingRows.length, rowsData: remainingRows }));
+    setSelectedDataset(prev => ({ ...(prev || targetDs), rows: remainingRows.length, rowsData: remainingRows }));
     setSelectedRowIndices([]);
     setIsDirty(true);
     setSavingState('');
   };
 
   const handleBulkEditField = (field, value) => {
-    if (!selectedDataset || selectedRowIndices.length === 0 || !value) return;
+    const targetDs = selectedDataset || activeDataset;
+    if (!targetDs || selectedRowIndices.length === 0 || !value) return;
     const todayStr = getTodayFormatted();
 
-    const currentRows = selectedDataset.rowsData || [];
+    const currentRows = targetDs.rowsData || [];
     const updatedRows = currentRows.map((r, idx) => {
       if (selectedRowIndices.includes(idx)) {
         return {
@@ -1141,27 +1176,28 @@ export default function OffPageSchedulerPage({ user }) {
       return r;
     });
 
-    const datasetId = selectedDataset.id;
+    const datasetId = targetDs.id;
     setImports(prevImports =>
       prevImports.map(imp => {
         if (imp.id !== datasetId) return imp;
         return { ...imp, rowsData: updatedRows };
       })
     );
-    setSelectedDataset(prev => ({ ...prev, rowsData: updatedRows }));
+    setSelectedDataset(prev => ({ ...(prev || targetDs), rowsData: updatedRows }));
     setIsDirty(true);
     setSavingState('');
   };
 
   const handleSaveChanges = async () => {
-    if (!selectedDataset) return;
+    const targetDs = selectedDataset || activeDataset;
+    if (!targetDs) return;
     setSavingState('saving');
     try {
-      const datasetId = selectedDataset.id;
-      const currentRows = selectedDataset.rowsData || [];
+      const datasetId = targetDs.id;
+      const currentRows = targetDs.rowsData || [];
       await updateMonthlyImportApi(datasetId, {
-        project: selectedDataset.project || selectedDataset.project_name,
-        filename: selectedDataset.filename,
+        project: targetDs.project || targetDs.project_name,
+        filename: targetDs.filename,
         rows: currentRows.length,
         rowsData: currentRows
       });
@@ -1176,6 +1212,7 @@ export default function OffPageSchedulerPage({ user }) {
   };
 
   const handleRunAudit = async () => {
+    if (isVendor) return;
     setAuditAllocating(true);
     try {
       const datasetId = selectedDataset ? selectedDataset.id : null;
@@ -1244,7 +1281,7 @@ export default function OffPageSchedulerPage({ user }) {
   };
 
   const handleRunAiStatusCheck = async () => {
-    if (!selectedDataset) return;
+    if (isVendor || !selectedDataset) return;
     setAiChecking(true);
     try {
       let finalRows = [...(selectedDataset.rowsData || [])];
@@ -1321,9 +1358,8 @@ export default function OffPageSchedulerPage({ user }) {
     return sorted;
   }, [activeDatasetRows]);
 
-  // Restriction: When a project is not allocated to an associate or to anyone (non-admin),
-  // they should not be able to see the off-page
-  if (!isAdmin && !vendorProject) {
+  // Restriction: When no project is allocated to a non-admin, hide off-page
+  if (!isAdmin && userProjects.length === 0) {
     return (
       <div style={{ padding: 40, textAlign: 'center', background: '#f8fafc', minHeight: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{
@@ -1337,18 +1373,39 @@ export default function OffPageSchedulerPage({ user }) {
           <div style={{ width: 52, height: 52, borderRadius: 14, background: '#f1f5f9', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto', border: '1px solid #cbd5e1' }}>
             <Lock size={26} />
           </div>
-          <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>No Project Allocated</h2>
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>Access Restricted</h2>
           <p style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.5, margin: 0 }}>
-            Off-Page is hidden and restricted because no project is allocated to your account. Please contact an administrator to assign a project from the Users page.
+            You do not have permission to view any project. Please contact your administrator.
           </p>
         </div>
       </div>
     );
   }
 
-  // Render Dataset details view when selected
-  if (selectedDataset) {
-    const rows = selectedDataset.rowsData || [];
+  // If vendor has only 1 project and no datasets exist yet, show clean message instead of project list page
+  if (isVendor && !hasMultipleProjects && filteredImports.length === 0) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center', background: '#f8fafc', minHeight: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{
+          maxWidth: 480,
+          background: '#ffffff',
+          padding: 36,
+          borderRadius: 16,
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+        }}>
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>Project: {vendorProject || 'Assigned Project'}</h2>
+          <p style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.5, margin: 0 }}>
+            No dataset or records have been imported yet for this project. Please contact an administrator.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Render Dataset details view when selected OR when vendor has only 1 project
+  if (activeDataset) {
+    const rows = activeDataset.rowsData || [];
 
     const filteredRows = rows.filter(r => {
       const matchSearch = !datasetSearch ||
@@ -1400,8 +1457,8 @@ export default function OffPageSchedulerPage({ user }) {
 
     return (
       <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 0 }}>
-        {/* Back Link */}
-        {!vendorProject && (
+        {/* Back Link: ONLY visible when admin or when user is provided with multiple projects */}
+        {hasMultipleProjects && (
           <div style={{ marginBottom: 16 }}>
             <button
               onClick={() => {
@@ -1429,7 +1486,7 @@ export default function OffPageSchedulerPage({ user }) {
               onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
               onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
             >
-              ← Back
+              ← Back to Projects
             </button>
           </div>
         )}
@@ -1437,9 +1494,42 @@ export default function OffPageSchedulerPage({ user }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
           <div>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 4 }}>
-              {selectedDataset.project || selectedDataset.project_name}
+              {activeDataset.project || activeDataset.project_name}
             </h1>
-
+            {filteredImports.length > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-muted)' }}>Dataset:</span>
+                <select
+                  value={activeDataset.id}
+                  onChange={(e) => {
+                    const match = filteredImports.find(imp => String(imp.id) === String(e.target.value));
+                    if (match) {
+                      handleAttemptLeaveDataset(() => {
+                        setSelectedDataset(match);
+                        setSelectedRowIndices([]);
+                      });
+                    }
+                  }}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    borderRadius: 6,
+                    border: '1px solid var(--border)',
+                    background: '#ffffff',
+                    color: 'var(--text-primary)',
+                    cursor: 'pointer',
+                    outline: 'none'
+                  }}
+                >
+                  {filteredImports.map(imp => (
+                    <option key={imp.id} value={imp.id}>
+                      {imp.filename} ({imp.rows} records)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Save Changes & Run Audit Buttons */}
@@ -1614,7 +1704,7 @@ export default function OffPageSchedulerPage({ user }) {
               </span>
             )}
 
-            {!isVendor && userCanEdit && (hasUnsavedChanges || savingState === 'saving' || savingState === 'saved') && (
+            {userCanEdit && (
               <button
                 onClick={handleSaveChanges}
                 disabled={savingState === 'saving'}
@@ -1862,7 +1952,7 @@ export default function OffPageSchedulerPage({ user }) {
           </div>
 
           {/* Actions Button & Dropdown matching screenshot */}
-          {(!isVendor && selectedRowIndices.length > 0) ? (
+          {((userCanEdit || userCanDelete || userCanUpdate) && selectedRowIndices.length > 0) ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               {/* Actions Dropdown */}
               <div ref={actionsRef} style={{ position: 'relative' }}>
@@ -1934,7 +2024,6 @@ export default function OffPageSchedulerPage({ user }) {
                         Bulk Edit
                       </button>
                     )}
-
                     {/* Bulk Delete Option */}
                     {userCanDelete && (
                       <>
@@ -1972,71 +2061,74 @@ export default function OffPageSchedulerPage({ user }) {
               </div>
 
               {/* Standalone Verify Button on the right of Actions */}
-              <button
-                onClick={async () => {
-                  if (selectedDataset && selectedRowIndices.length > 0) {
-                    const todayStr = getTodayFormatted();
-                    const updatedRows = [...(selectedDataset.rowsData || [])];
-                    selectedRowIndices.forEach(filteredIdx => {
-                      const actualRow = filteredRows[filteredIdx];
-                      if (actualRow) {
-                        const realIdx = updatedRows.indexOf(actualRow);
-                        if (realIdx !== -1) {
-                          updatedRows[realIdx] = {
-                            ...updatedRows[realIdx],
-                            verified: true,
-                            updatedDate: todayStr,
-                            updated_date: todayStr
-                          };
+              {!isVendor && (
+                <button
+                  onClick={async () => {
+                    if (isVendor) return;
+                    if (selectedDataset && selectedRowIndices.length > 0) {
+                      const todayStr = getTodayFormatted();
+                      const updatedRows = [...(selectedDataset.rowsData || [])];
+                      selectedRowIndices.forEach(filteredIdx => {
+                        const actualRow = filteredRows[filteredIdx];
+                        if (actualRow) {
+                          const realIdx = updatedRows.indexOf(actualRow);
+                          if (realIdx !== -1) {
+                            updatedRows[realIdx] = {
+                              ...updatedRows[realIdx],
+                              verified: true,
+                              updatedDate: todayStr,
+                              updated_date: todayStr
+                            };
+                          }
                         }
-                      }
-                    });
-
-                    const datasetId = selectedDataset.id;
-                    setSelectedDataset(prev => ({ ...prev, rowsData: updatedRows }));
-                    setImports(prev => prev.map(imp => imp.id === datasetId ? { ...imp, rowsData: updatedRows } : imp));
-                    setOriginalRowsData(JSON.parse(JSON.stringify(updatedRows)));
-                    setIsDirty(false);
-                    setSelectedRowIndices([]);
-                    setSavingState('saving');
-
-                    try {
-                      await updateMonthlyImportApi(datasetId, {
-                        project: selectedDataset.project || selectedDataset.project_name,
-                        filename: selectedDataset.filename,
-                        rows: updatedRows.length,
-                        rowsData: updatedRows,
-                        rows_data: updatedRows
                       });
-                      setSavingState('saved');
-                      setTimeout(() => setSavingState(''), 3000);
-                    } catch (err) {
-                      console.error('[Verify] Failed to update DB:', err);
-                      setSavingState('error');
+
+                      const datasetId = selectedDataset.id;
+                      setSelectedDataset(prev => ({ ...prev, rowsData: updatedRows }));
+                      setImports(prev => prev.map(imp => imp.id === datasetId ? { ...imp, rowsData: updatedRows } : imp));
+                      setOriginalRowsData(JSON.parse(JSON.stringify(updatedRows)));
+                      setIsDirty(false);
+                      setSelectedRowIndices([]);
+                      setSavingState('saving');
+
+                      try {
+                        await updateMonthlyImportApi(datasetId, {
+                          project: selectedDataset.project || selectedDataset.project_name,
+                          filename: selectedDataset.filename,
+                          rows: updatedRows.length,
+                          rowsData: updatedRows,
+                          rows_data: updatedRows
+                        });
+                        setSavingState('saved');
+                        setTimeout(() => setSavingState(''), 3000);
+                      } catch (err) {
+                        console.error('[Verify] Failed to update DB:', err);
+                        setSavingState('error');
+                      }
                     }
-                  }
-                }}
-                style={{
-                  background: '#059669',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: 8,
-                  padding: '8px 16px',
-                  fontSize: 13.5,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  boxShadow: '0 2px 6px rgba(5, 150, 105, 0.2)',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = '#047857'}
-                onMouseLeave={e => e.currentTarget.style.background = '#059669'}
-              >
-                <CheckCircle size={15} color="#ffffff" />
-                Verify
-              </button>
+                  }}
+                  style={{
+                    background: '#059669',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: 8,
+                    padding: '8px 16px',
+                    fontSize: 13.5,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    boxShadow: '0 2px 6px rgba(5, 150, 105, 0.2)',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#047857'}
+                  onMouseLeave={e => e.currentTarget.style.background = '#059669'}
+                >
+                  <CheckCircle size={15} color="#ffffff" />
+                  Verify
+                </button>
+              )}
             </div>
           ) : (
             <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
@@ -2058,7 +2150,7 @@ export default function OffPageSchedulerPage({ user }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 2800 }}>
               <thead>
                 <tr style={{ background: '#f8f9fb', borderBottom: '1.5px solid var(--border)', position: 'sticky', top: 0, zIndex: 10 }}>
-                  {!isVendor && (userCanEdit || userCanDelete) && (
+                  {(userCanEdit || userCanDelete || userCanUpdate) && (
                     <th style={{ padding: '14px 18px', width: 48, textAlign: 'center' }}>
                       <input
                         type="checkbox"
@@ -2097,7 +2189,7 @@ export default function OffPageSchedulerPage({ user }) {
               <tbody>
                 {filteredRows.length === 0 ? (
                   <tr>
-                    <td colSpan={(!isVendor && (userCanEdit || userCanDelete)) ? 22 : 21} style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+                    <td colSpan={(userCanEdit || userCanDelete || userCanUpdate) ? 22 : 21} style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
                       No matching records found in this dataset.
                     </td>
                   </tr>
@@ -2106,7 +2198,7 @@ export default function OffPageSchedulerPage({ user }) {
                     <tr key={rIdx} style={{ borderBottom: '1px solid var(--border)', background: selectedRowIndices.includes(rIdx) ? '#f0f9ff' : 'transparent' }}
                       onMouseEnter={e => e.currentTarget.style.background = selectedRowIndices.includes(rIdx) ? '#e0f2fe' : '#fafbfc'}
                       onMouseLeave={e => e.currentTarget.style.background = selectedRowIndices.includes(rIdx) ? '#f0f9ff' : 'transparent'}>
-                      {!isVendor && (userCanEdit || userCanDelete) && (
+                      {(userCanEdit || userCanDelete || userCanUpdate) && (
                         <td style={{ padding: '16px 18px', textAlign: 'center' }}>
                           <input
                             type="checkbox"
@@ -2145,14 +2237,14 @@ export default function OffPageSchedulerPage({ user }) {
                       <td style={{ padding: '16px 18px', fontSize: 14, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.cluster || 'N/A'}</td>
                       <td style={{ padding: '16px 18px', fontSize: 14, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.kwCategory || 'N/A'}</td>
                       <td style={{ padding: '12px 18px', whiteSpace: 'nowrap' }}>
-                        {isVendor ? (
+                        {!userCanEdit ? (
                           <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)' }}>
                             {row.activityName || 'N/A'}
                           </span>
                         ) : (
                           <select
                             value={['Forum Quora', 'Forum Reddit', 'Paid Guest Post', 'Business Listing', 'Classified Ads'].includes(row.activityName) ? row.activityName : 'Forum Quora'}
-                            onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'activityName', e.target.value)}
+                            onChange={(e) => handleRowChange(activeDataset.id, rIdx, 'activityName', e.target.value)}
                             style={{
                               padding: '7px 12px',
                               fontSize: 13,
@@ -2217,7 +2309,7 @@ export default function OffPageSchedulerPage({ user }) {
                         ) : 'N/A'}
                       </td>
                       <td style={{ padding: '12px 18px', whiteSpace: 'nowrap' }}>
-                        {isVendor ? (
+                        {!userCanEdit ? (
                           <span style={{
                             padding: '6px 12px',
                             fontSize: 13,
@@ -2231,7 +2323,7 @@ export default function OffPageSchedulerPage({ user }) {
                         ) : (
                           <select
                             value={STATUS_PRESET_OPTIONS.includes(row.status) ? row.status : (row.status || 'Published-Indexed')}
-                            onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'status', e.target.value)}
+                            onChange={(e) => handleRowChange(activeDataset.id, rIdx, 'status', e.target.value)}
                             style={{
                               padding: '7px 12px',
                               fontSize: 13,
@@ -2257,7 +2349,7 @@ export default function OffPageSchedulerPage({ user }) {
                         <select
                           disabled={!userCanEdit}
                           value={REMARKS_PRESET_OPTIONS.includes(row.remarks) ? row.remarks : (row.remarks || 'No Issues')}
-                          onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'remarks', e.target.value)}
+                          onChange={(e) => handleRowChange(activeDataset.id, rIdx, 'remarks', e.target.value)}
                           style={{
                             padding: '7px 12px',
                             fontSize: 13,
@@ -2284,7 +2376,7 @@ export default function OffPageSchedulerPage({ user }) {
                         <select
                           disabled={!userCanEdit}
                           value={SOLUTION_PRESET_OPTIONS.includes(row.solution) ? row.solution : (row.solution || 'fixed')}
-                          onChange={(e) => handleRowChange(selectedDataset.id, rIdx, 'solution', e.target.value)}
+                          onChange={(e) => handleRowChange(activeDataset.id, rIdx, 'solution', e.target.value)}
                           style={{
                             padding: '7px 12px',
                             fontSize: 13,
@@ -2961,7 +3053,7 @@ export default function OffPageSchedulerPage({ user }) {
                       </td>
                       <td style={{ padding: '14px 18px', fontSize: 13.5, color: 'var(--text-muted)' }}>{imp.date}</td>
                       <td style={{ padding: '14px 18px', textAlign: 'right' }}>
-                        {!isVendor && userCanDelete && (
+                        {userCanDelete && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

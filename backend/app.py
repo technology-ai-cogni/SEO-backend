@@ -464,13 +464,22 @@ def create_domain(payload: CreateDomainRequest, user: dict = Depends(require_aut
 
 @app.get("/domains")
 def list_domains_endpoint(user: dict = Depends(require_authenticated_user)):
-    """Every domain that's been registered -- scoped by user assigned_project."""
+    """Every domain that's been registered -- scoped by user assigned_project for Vendors."""
     role = str(user.get("role", "")).upper()
-    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    category = str(user.get("category", "")).upper()
+    is_vendor = role == "VENDOR" or category == "VENDOR"
     all_domains = db.list_domain_records()
-    if role == "ADMIN" or assigned_project in ("all projects", "all", "*") or not assigned_project:
+    if not is_vendor:
         return {"domains": all_domains}
-    scoped = [d for d in all_domains if str(d.get("project_slug", "")).lower() == assigned_project]
+
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    if assigned_project in ("all projects", "all", "*") or not assigned_project:
+        return {"domains": all_domains}
+    assigned_list = [p.strip().lower() for p in assigned_project.split(",") if p.strip()]
+    scoped = [
+        d for d in all_domains
+        if str(d.get("project_slug", "")).lower() in assigned_list or str(d.get("project_name", "")).lower() in assigned_list or str(d.get("domain", "")).lower() in assigned_list
+    ]
     return {"domains": scoped}
 
 
@@ -513,10 +522,15 @@ class UpdateScheduleStatusRequest(BaseModel):
 def get_monthly_imports(user: dict = Depends(require_authenticated_user)):
     all_imports = db.list_monthly_imports()
     role = str(user.get("role", "")).upper()
-    assigned_project = str(user.get("assigned_project", "")).strip().lower()
-    if role == "ADMIN" or assigned_project in ("all projects", "all", "*") or not assigned_project:
+    category = str(user.get("category", "")).upper()
+    is_vendor = role == "VENDOR" or category == "VENDOR"
+    if not is_vendor:
         return {"imports": all_imports}
-    scoped = [i for i in all_imports if str(i.get("project_name", "")).lower() == assigned_project]
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    if assigned_project in ("all projects", "all", "*") or not assigned_project:
+        return {"imports": all_imports}
+    assigned_list = [p.strip().lower() for p in assigned_project.split(",") if p.strip()]
+    scoped = [i for i in all_imports if str(i.get("project_name", "")).lower() in assigned_list]
     return {"imports": scoped}
 
 class AuditAllocationRequest(BaseModel):
@@ -1154,23 +1168,6 @@ def delete_scheduled_activity_endpoint(schedule_id: int):
     return {"status": "success"}
 
 
-@app.get("/projects")
-def get_projects(only_deleted: bool = False, user: dict = Depends(require_authenticated_user)):
-    """Every project that has ever been created, optionally listing only deleted ones."""
-    role = str(user.get("role", "")).upper()
-    if only_deleted and role != "ADMIN":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Administrative privileges required to view deleted items."
-        )
-    assigned_project = str(user.get("assigned_project", "")).strip().lower()
-    all_projects = db.list_projects(only_deleted=only_deleted)
-    if role == "ADMIN" or assigned_project in ("all projects", "all", "*") or not assigned_project:
-        return {"projects": all_projects}
-    scoped = [p for p in all_projects if str(p.get("slug", "")).lower() == assigned_project]
-    return {"projects": scoped}
-
-
 class AuditLogRequest(BaseModel):
     user_email: Optional[str] = "system"
     action: str
@@ -1184,6 +1181,34 @@ def get_audit_logs_endpoint(search: Optional[str] = None, status: Optional[str] 
     """Retrieves logs stored in the PostgreSQL audit_logs table (Admin only)."""
     logs = db.get_audit_logs(limit=300, status_filter=status, search_query=search)
     return {"logs": logs}
+
+
+# ─── Projects & Categories ───────────────────────────────────────────────────
+
+@app.get("/projects")
+def list_projects_endpoint(only_deleted: bool = False, user: dict = Depends(require_authenticated_user)):
+    """List all project setups."""
+    role = str(user.get("role", "")).upper()
+    category = str(user.get("category", "")).upper()
+    is_vendor = role == "VENDOR" or category == "VENDOR"
+    if only_deleted and role != "ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrative privileges required to view deleted items."
+        )
+    all_projects = db.list_projects(only_deleted=only_deleted)
+    if not is_vendor:
+        return {"projects": all_projects}
+
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    if assigned_project in ("all projects", "all", "*") or not assigned_project:
+        return {"projects": all_projects}
+    assigned_list = [p.strip().lower() for p in assigned_project.split(",") if p.strip()]
+    scoped = [
+        p for p in all_projects
+        if str(p.get("slug", "")).lower() in assigned_list or str(p.get("name", "")).lower() in assigned_list
+    ]
+    return {"projects": scoped}
 
 
 @app.post("/audit-logs")
@@ -1531,15 +1556,21 @@ def _page_row_to_json(row):
 @app.get("/pages/counts")
 def get_pages_counts_endpoint(user: dict = Depends(require_authenticated_user)):
     """{project_slug: page_count} for every project that currently has at
-    least one page row. Scoped by user assigned_project."""
+    least one page row. Scoped by user assigned_project for Vendors."""
     counts = db.get_pages_counts()
     stats = db.get_pages_stats()
     role = str(user.get("role", "")).upper()
-    assigned_project = str(user.get("assigned_project", "")).strip().lower()
-    if role == "ADMIN" or assigned_project in ("all projects", "all", "*") or not assigned_project:
+    category = str(user.get("category", "")).upper()
+    is_vendor = role == "VENDOR" or category == "VENDOR"
+    if not is_vendor:
         return {"counts": counts, "stats": stats}
-    scoped_counts = {k: v for k, v in counts.items() if k.lower() == assigned_project}
-    scoped_stats = {k: v for k, v in stats.items() if k.lower() == assigned_project}
+
+    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    if assigned_project in ("all projects", "all", "*") or not assigned_project:
+        return {"counts": counts, "stats": stats}
+    assigned_list = [p.strip().lower() for p in assigned_project.split(",") if p.strip()]
+    scoped_counts = {k: v for k, v in counts.items() if k.lower() in assigned_list}
+    scoped_stats = {k: v for k, v in stats.items() if k.lower() in assigned_list}
     return {"counts": scoped_counts, "stats": scoped_stats}
 
 
@@ -1747,16 +1778,21 @@ def _competitor_to_json(row):
 @app.get("/competitors")
 def list_competitors(project: Optional[str] = None, user: dict = Depends(require_authenticated_user)):
     """Every tracked competitor, optionally filtered to one project via
-    ?project=<slug> (scoped by user's assigned project)."""
+    ?project=<slug> (scoped by user's assigned project for Vendors)."""
     role = str(user.get("role", "")).upper()
-    assigned_project = str(user.get("assigned_project", "")).strip().lower()
-    if role != "ADMIN" and assigned_project not in ("all projects", "all", "*") and assigned_project:
-        if project and project.strip().lower() != assigned_project:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access denied: your account is not allocated to project '{project}'."
-            )
-        project = assigned_project
+    category = str(user.get("category", "")).upper()
+    is_vendor = role == "VENDOR" or category == "VENDOR"
+    if is_vendor:
+        assigned_project = str(user.get("assigned_project", "")).strip().lower()
+        if assigned_project not in ("all projects", "all", "*") and assigned_project:
+            assigned_list = [p.strip().lower() for p in assigned_project.split(",") if p.strip()]
+            if project and project.strip().lower() not in assigned_list and project.strip().lower() != assigned_project:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Access denied: your account is not allocated to project '{project}'."
+                )
+            if not project and assigned_list:
+                project = assigned_list[0]
     return {"competitors": [_competitor_to_json(r) for r in db.get_competitors(project)]}
 
 
@@ -2611,13 +2647,16 @@ class AddOutreachSiteRequest(BaseModel):
 
 @app.get("/outreach")
 def get_all_outreach_sites_endpoint(user: dict = Depends(require_authenticated_user)):
-    """List all stored outreach sites across all projects (scoped by project)."""
+    """List all stored outreach sites across all projects (scoped by project for Vendors)."""
     role = str(user.get("role", "")).upper()
-    assigned_project = str(user.get("assigned_project", "")).strip().lower()
+    category = str(user.get("category", "")).upper()
+    is_vendor = role == "VENDOR" or category == "VENDOR"
     try:
         project_filter = None
-        if role != "ADMIN" and assigned_project not in ("all projects", "all", "*") and assigned_project:
-            project_filter = assigned_project
+        if is_vendor:
+            assigned_project = str(user.get("assigned_project", "")).strip().lower()
+            if assigned_project not in ("all projects", "all", "*") and assigned_project:
+                project_filter = assigned_project
         sites = db.list_outreach_sites(project_filter)
         return {"sites": sites}
     except Exception as e:
@@ -2934,7 +2973,7 @@ async def import_off_page_activities(
     }
 
 @app.get("/projects/{project_slug}/ai-analysis-history")
-def get_ai_analysis_history_endpoint(project_slug: str, engine: Optional[str] = None):
+def get_ai_analysis_history_endpoint(project_slug: str, engine: Optional[str] = None, user: dict = Depends(require_project_access)):
     """Endpoint for fetching AI Analysis history for a project."""
     try:
         rows = db.get_ai_analysis_history(project_slug, engine)

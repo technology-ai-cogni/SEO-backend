@@ -51,6 +51,13 @@ def get_user_by_email(email: str, force_refresh: bool = False) -> Optional[Dict[
                        COALESCE(permissions, 'Default') as permissions,
                        COALESCE(attendance, 'Not Present') as attendance,
                        COALESCE(assigned_project, 'All Projects') as assigned_project,
+                       COALESCE(client_detail_enabled, FALSE) as client_detail_enabled,
+                       client_name,
+                       client_address,
+                       client_gst,
+                       poc_name,
+                       poc_number,
+                       poc_address,
                        created_at 
                 FROM users WHERE LOWER(email) = LOWER(:email)
                 LIMIT 1
@@ -65,16 +72,41 @@ def get_user_by_email(email: str, force_refresh: bool = False) -> Optional[Dict[
         return None
 
 
-def create_user(name: str, email: str, password_hash: str, role: str = "INTERNAL_ASSOCIATE", category: Optional[str] = None, status: str = "Active", section_access: str = "Default", permissions: str = "Default", attendance: str = "Not Present", assigned_project: str = "All Projects") -> Dict[str, Any]:
-    """Create a new user profile with RBAC properties in Supabase PostgreSQL."""
+def create_user(
+    name: str, 
+    email: str, 
+    password_hash: str, 
+    role: str = "INTERNAL_ASSOCIATE", 
+    category: Optional[str] = None, 
+    status: str = "Active", 
+    section_access: str = "Default", 
+    permissions: str = "Default", 
+    attendance: str = "Not Present", 
+    assigned_project: str = "All Projects",
+    client_detail_enabled: bool = False,
+    client_name: Optional[str] = None,
+    client_address: Optional[str] = None,
+    client_gst: Optional[str] = None,
+    poc_name: Optional[str] = None,
+    poc_number: Optional[str] = None,
+    poc_address: Optional[str] = None
+) -> Dict[str, Any]:
+    """Create a new user profile with RBAC properties and client details in Supabase PostgreSQL."""
     resolved_cat = resolve_user_category(role, category)
     invalidate_user_cache(email)
     with engine.begin() as conn:
         result = conn.execute(
             text("""
-                INSERT INTO users (name, email, password_hash, role, category, status, section_access, permissions, attendance, assigned_project, created_at)
-                VALUES (:name, LOWER(:email), :password_hash, UPPER(:role), :category, :status, :section_access, :permissions, :attendance, :assigned_project, NOW())
-                RETURNING id, name, email, role, category, status, section_access, permissions, attendance, assigned_project, created_at
+                INSERT INTO users (
+                    name, email, password_hash, role, category, status, section_access, permissions, attendance, assigned_project,
+                    client_detail_enabled, client_name, client_address, client_gst, poc_name, poc_number, poc_address, created_at
+                )
+                VALUES (
+                    :name, LOWER(:email), :password_hash, UPPER(:role), :category, :status, :section_access, :permissions, :attendance, :assigned_project,
+                    :client_detail_enabled, :client_name, :client_address, :client_gst, :poc_name, :poc_number, :poc_address, NOW()
+                )
+                RETURNING id, name, email, role, category, status, section_access, permissions, attendance, assigned_project,
+                          client_detail_enabled, client_name, client_address, client_gst, poc_name, poc_number, poc_address, created_at
             """),
             {
                 "name": name.strip(),
@@ -86,7 +118,14 @@ def create_user(name: str, email: str, password_hash: str, role: str = "INTERNAL
                 "section_access": section_access,
                 "permissions": permissions,
                 "attendance": attendance,
-                "assigned_project": assigned_project or 'All Projects'
+                "assigned_project": assigned_project or 'All Projects',
+                "client_detail_enabled": client_detail_enabled,
+                "client_name": client_name,
+                "client_address": client_address,
+                "client_gst": client_gst,
+                "poc_name": poc_name,
+                "poc_number": poc_number,
+                "poc_address": poc_address
             }
         ).mappings().first()
         res = dict(result)
@@ -96,7 +135,7 @@ def create_user(name: str, email: str, password_hash: str, role: str = "INTERNAL
 
 
 def list_all_users() -> List[Dict[str, Any]]:
-    """List all registered user accounts for admin management."""
+    """List all registered user accounts for admin management including client details."""
     with engine.connect() as conn:
         rows = conn.execute(
             text("""
@@ -107,6 +146,13 @@ def list_all_users() -> List[Dict[str, Any]]:
                        COALESCE(permissions, 'Default') as permissions,
                        COALESCE(attendance, 'Not Present') as attendance,
                        COALESCE(assigned_project, 'All Projects') as assigned_project,
+                       COALESCE(client_detail_enabled, FALSE) as client_detail_enabled,
+                       client_name,
+                       client_address,
+                       client_gst,
+                       poc_name,
+                       poc_number,
+                       poc_address,
                        created_at
                 FROM users
                 ORDER BY created_at DESC
@@ -133,7 +179,9 @@ def update_user_status(user_id: int, new_status: str) -> Optional[Dict[str, Any]
                           COALESCE(section_access, 'Default') as section_access,
                           COALESCE(permissions, 'Default') as permissions,
                           COALESCE(attendance, 'Not Present') as attendance,
-                          COALESCE(assigned_project, 'All Projects') as assigned_project, created_at
+                          COALESCE(assigned_project, 'All Projects') as assigned_project,
+                          COALESCE(client_detail_enabled, FALSE) as client_detail_enabled,
+                          client_name, client_address, client_gst, poc_name, poc_number, poc_address, created_at
             """),
             {"id": user_id, "status": new_status}
         ).mappings().first()
@@ -153,7 +201,9 @@ def update_user_attendance(user_id: int, attendance: str) -> Optional[Dict[str, 
                           COALESCE(section_access, 'Default') as section_access,
                           COALESCE(permissions, 'Default') as permissions,
                           COALESCE(attendance, 'Not Present') as attendance,
-                          COALESCE(assigned_project, 'All Projects') as assigned_project, created_at
+                          COALESCE(assigned_project, 'All Projects') as assigned_project,
+                          COALESCE(client_detail_enabled, FALSE) as client_detail_enabled,
+                          client_name, client_address, client_gst, poc_name, poc_number, poc_address, created_at
             """),
             {"id": user_id, "attendance": attendance}
         ).mappings().first()
@@ -174,8 +224,22 @@ def update_all_users_attendance(attendance: str = 'Present') -> bool:
         return True
 
 
-def update_user_role(user_id: int, new_role: str, category: Optional[str] = None, section_access: Optional[str] = None, permissions: Optional[str] = None, assigned_project: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """Update user role, category, section_access, permissions, and assigned_project."""
+def update_user_role(
+    user_id: int, 
+    new_role: str, 
+    category: Optional[str] = None, 
+    section_access: Optional[str] = None, 
+    permissions: Optional[str] = None, 
+    assigned_project: Optional[str] = None,
+    client_detail_enabled: Optional[bool] = None,
+    client_name: Optional[str] = None,
+    client_address: Optional[str] = None,
+    client_gst: Optional[str] = None,
+    poc_name: Optional[str] = None,
+    poc_number: Optional[str] = None,
+    poc_address: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Update user role, category, section_access, permissions, assigned_project, and client details."""
     invalidate_user_cache()
     resolved_cat = resolve_user_category(new_role, category)
     with engine.begin() as conn:
@@ -191,6 +255,27 @@ def update_user_role(user_id: int, new_role: str, category: Optional[str] = None
         if assigned_project is not None:
             updates.append("assigned_project = :assigned_project")
             params["assigned_project"] = assigned_project
+        if client_detail_enabled is not None:
+            updates.append("client_detail_enabled = :client_detail_enabled")
+            params["client_detail_enabled"] = client_detail_enabled
+        if client_name is not None:
+            updates.append("client_name = :client_name")
+            params["client_name"] = client_name
+        if client_address is not None:
+            updates.append("client_address = :client_address")
+            params["client_address"] = client_address
+        if client_gst is not None:
+            updates.append("client_gst = :client_gst")
+            params["client_gst"] = client_gst
+        if poc_name is not None:
+            updates.append("poc_name = :poc_name")
+            params["poc_name"] = poc_name
+        if poc_number is not None:
+            updates.append("poc_number = :poc_number")
+            params["poc_number"] = poc_number
+        if poc_address is not None:
+            updates.append("poc_address = :poc_address")
+            params["poc_address"] = poc_address
 
         set_clause = ", ".join(updates)
         row = conn.execute(
@@ -205,6 +290,8 @@ def update_user_role(user_id: int, new_role: str, category: Optional[str] = None
                           COALESCE(permissions, 'Default') as permissions,
                           COALESCE(attendance, 'Not Present') as attendance,
                           COALESCE(assigned_project, 'All Projects') as assigned_project,
+                          COALESCE(client_detail_enabled, FALSE) as client_detail_enabled,
+                          client_name, client_address, client_gst, poc_name, poc_number, poc_address,
                           created_at
             """),
             params

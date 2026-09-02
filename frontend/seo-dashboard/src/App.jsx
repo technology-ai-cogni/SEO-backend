@@ -469,7 +469,7 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
   }
 
   if (!canAccessRoute(user, path)) {
-    const isVendor = user?.role?.toUpperCase() === 'VENDOR';
+    const isVendor = (user?.category || '').toLowerCase() === 'vendor' || user?.role?.toUpperCase() === 'VENDOR';
     return (
       <div style={{ padding: 40, textAlign: 'center', background: '#f8fafc', minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{
@@ -484,24 +484,28 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
             <Lock size={26} />
           </div>
           <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>Access Restricted</h2>
-          <p style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.5, margin: '0 0 20px 0' }}>
-            You do not have permission to view this section ({path}). Please switch to an authorized module or contact your administrator.
+          <p style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.5, margin: isVendor ? '0' : '0 0 20px 0' }}>
+            {isVendor
+              ? 'You do not have permission to view any project. Please contact your administrator.'
+              : `You do not have permission to view this section (${path}). Please switch to an authorized module or contact your administrator.`}
           </p>
-          <button
-            onClick={() => onNavigate(isVendor && canAccessRoute(user, 'search-visibility/off-page-scheduler') ? 'search-visibility/off-page-scheduler' : 'home')}
-            style={{
-              padding: '10px 22px',
-              fontSize: 13.5,
-              fontWeight: 700,
-              color: '#ffffff',
-              background: '#0f172a',
-              border: 'none',
-              borderRadius: 10,
-              cursor: 'pointer'
-            }}
-          >
-            {isVendor ? 'Go to Off-Page' : 'Return to Home'}
-          </button>
+          {!isVendor && (
+            <button
+              onClick={() => onNavigate('home')}
+              style={{
+                padding: '10px 22px',
+                fontSize: 13.5,
+                fontWeight: 700,
+                color: '#ffffff',
+                background: '#0f172a',
+                border: 'none',
+                borderRadius: 10,
+                cursor: 'pointer'
+              }}
+            >
+              Return to Home
+            </button>
+          )}
         </div>
       </div>
     );
@@ -562,9 +566,9 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
               <div style={{ width: 52, height: 52, borderRadius: 14, background: '#f1f5f9', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto', border: '1px solid #cbd5e1' }}>
                 <Lock size={26} />
               </div>
-              <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>No Project Allocated</h2>
+              <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>Access Restricted</h2>
               <p style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.5, margin: 0 }}>
-                Off-Page is hidden and restricted because no project is currently allocated to your account. Please contact an administrator to assign a project from the Users page.
+                You do not have permission to view any project. Please contact your administrator.
               </p>
             </div>
           </div>
@@ -585,8 +589,22 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
 export default function App() {
   const [user, setUser] = useState(() => {
     try {
+      // Clear legacy localStorage keys so sessions never leak across new tabs
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('seo_dashboard_user');
+        localStorage.removeItem('seo_token');
+      }
+
+      const token = sessionStorage.getItem('seo_token');
       const saved = sessionStorage.getItem('seo_dashboard_user');
-      return saved ? JSON.parse(saved) : null;
+      // Only keep user logged in if both token and user profile exist in this specific tab
+      if (token && saved) {
+        return JSON.parse(saved);
+      }
+      // If there is no token in this tab session, force clear user state
+      sessionStorage.removeItem('seo_dashboard_user');
+      sessionStorage.removeItem('seo_token');
+      return null;
     } catch (e) {
       return null;
     }
@@ -594,18 +612,18 @@ export default function App() {
 
   const [activePath, setActivePath] = useState(() => {
     try {
+      const token = sessionStorage.getItem('seo_token');
       const saved = sessionStorage.getItem('seo_dashboard_user');
-      const uData = saved ? JSON.parse(saved) : null;
+      const uData = (token && saved) ? JSON.parse(saved) : null;
       const initialFromUrl = getPathFromUrl(window.location.pathname);
 
       if (uData) {
-        if (uData?.role?.toUpperCase() === 'VENDOR') {
-          if (canAccessRoute(uData, initialFromUrl) && initialFromUrl !== 'landing') {
+        const isVendor = (uData.category || '').toLowerCase() === 'vendor' || uData?.role?.toUpperCase() === 'VENDOR';
+        if (isVendor) {
+          if (canAccessRoute(uData, initialFromUrl) && initialFromUrl !== 'landing' && initialFromUrl !== 'home' && initialFromUrl !== 'dashboard') {
             return initialFromUrl;
           }
-          return canAccessRoute(uData, 'search-visibility/off-page-scheduler')
-            ? 'search-visibility/off-page-scheduler'
-            : 'home';
+          return 'search-visibility/off-page-scheduler';
         }
         if (initialFromUrl && initialFromUrl !== 'landing' && initialFromUrl !== 'login' && initialFromUrl !== 'signup') {
           return initialFromUrl;
@@ -613,7 +631,11 @@ export default function App() {
         return 'search-visibility/position-analysis';
       }
 
-      return initialFromUrl || 'landing';
+      // STRICT ROUTE GUARD: If unauthenticated, only public auth routes are accessible
+      if (initialFromUrl === 'login' || initialFromUrl === 'signup' || initialFromUrl === 'admin-login') {
+        return initialFromUrl;
+      }
+      return 'landing';
     } catch (e) {
       return 'landing';
     }
@@ -622,24 +644,33 @@ export default function App() {
   const [accountUpdateModal, setAccountUpdateModal] = useState(null);
   const [customAlertModal, setCustomAlertModal] = useState({ open: false, title: 'Notification', message: '' });
 
-  // Sync browser URL bar with activePath
+  // Sync browser URL bar with activePath and enforce auth guard
   useEffect(() => {
+    // If not authenticated and trying to access any dashboard page, force to landing
+    const isAuth = activePath === 'landing' || activePath === 'login' || activePath === 'signup' || activePath === 'admin-login';
+    if (!user && !isAuth) {
+      setActivePath('landing');
+      window.history.replaceState({ path: 'landing' }, '', '/');
+      return;
+    }
+
     const targetUrl = getUrlFromPath(activePath);
     if (window.location.pathname !== targetUrl) {
       window.history.pushState({ path: activePath }, '', targetUrl);
     }
-  }, [activePath]);
+  }, [activePath, user]);
 
-  // Handle browser back and forward button navigation
   useEffect(() => {
     const handlePopState = () => {
       const pathFromLocation = getPathFromUrl(window.location.pathname);
       const currentUser = userRef.current;
-      if (currentUser && (pathFromLocation === 'landing' || pathFromLocation === 'login' || pathFromLocation === 'signup')) {
-        const defaultPath = currentUser?.role?.toUpperCase() === 'VENDOR' ? 'search-visibility/off-page-scheduler' : 'search-visibility/position-analysis';
+      const isVendor = (currentUser?.category || '').toLowerCase() === 'vendor' || currentUser?.role?.toUpperCase() === 'VENDOR';
+      if (currentUser && (pathFromLocation === 'landing' || pathFromLocation === 'login' || pathFromLocation === 'signup' || (isVendor && (pathFromLocation === 'home' || pathFromLocation === 'dashboard')))) {
+        const defaultPath = isVendor ? 'search-visibility/off-page-scheduler' : 'search-visibility/position-analysis';
         setActivePath(defaultPath);
       } else if (!currentUser && pathFromLocation !== 'landing' && pathFromLocation !== 'login' && pathFromLocation !== 'signup' && pathFromLocation !== 'admin-login') {
         setActivePath('landing');
+        window.history.replaceState({ path: 'landing' }, '', '/');
       } else {
         setActivePath(pathFromLocation);
       }
@@ -659,18 +690,17 @@ export default function App() {
     };
   }, []);
 
-  // Track user in a ref to avoid stale closures during async redirects (like LoginPage timeout)
   const userRef = useRef(user);
   const justLoggedInRef = useRef(false);
 
   useEffect(() => {
     userRef.current = user;
-    if (user?.role?.toUpperCase() === 'VENDOR' && canAccessRoute(user, 'search-visibility/off-page-scheduler') && activePath !== 'search-visibility/off-page-scheduler' && activePath !== 'profile' && activePath !== 'help' && activePath !== 'notifications') {
+    const isVendor = (user?.category || '').toLowerCase() === 'vendor' || user?.role?.toUpperCase() === 'VENDOR';
+    if (isVendor && canAccessRoute(user, 'search-visibility/off-page-scheduler') && (activePath === 'home' || activePath === 'dashboard' || (activePath !== 'search-visibility/off-page-scheduler' && activePath !== 'profile' && activePath !== 'help' && activePath !== 'notifications'))) {
       setActivePath('search-visibility/off-page-scheduler');
     }
   }, [user, activePath]);
 
-  // Periodically & on page navigation, verify logged-in user account status & sync live permissions
   useEffect(() => {
     if (!user || !user.email) return;
 
@@ -680,76 +710,78 @@ export default function App() {
       try {
         token = sessionStorage.getItem('seo_token');
       } catch (_) {}
+
       if (!token) return;
 
       try {
         const currentRecord = await fetchCurrentAuthUserApi();
         if (!isMounted || !currentRecord) return;
-        if (currentRecord) {
-          if (currentRecord.status === 'Disabled') {
-            handleLogout();
-            setAccountUpdateModal({ isDisabled: true });
-            return;
-          }
-
-          const freshRole = currentRecord.role || user.role;
-          const freshCategory = currentRecord.category || user.category;
-          const freshSec = currentRecord.section_access || user.section_access || 'Default';
-          const freshPerm = currentRecord.permissions || user.permissions || 'Default';
-          const freshProject = currentRecord.assigned_project || user.assigned_project || 'All Projects';
-
-          if (
-            user.role !== freshRole ||
-            user.category !== freshCategory ||
-            user.section_access !== freshSec ||
-            user.permissions !== freshPerm ||
-            user.assigned_project !== freshProject
-          ) {
-            const changes = [];
-            if (user.permissions !== freshPerm) changes.push({ label: 'Action Permissions', value: freshPerm });
-            if (user.section_access !== freshSec) changes.push({ label: 'Section Access', value: freshSec });
-            if (user.role !== freshRole) changes.push({ label: 'Role', value: freshRole });
-            if (user.category !== freshCategory) changes.push({ label: 'Category', value: freshCategory });
-            if (user.assigned_project !== freshProject) changes.push({ label: 'Assigned Project', value: freshProject });
-
-            const updatedUser = {
-              ...user,
-              role: freshRole,
-              category: freshCategory,
-              section_access: freshSec,
-              permissions: freshPerm,
-              assigned_project: freshProject
-            };
-            setUser(updatedUser);
-            sessionStorage.setItem('seo_dashboard_user', JSON.stringify(updatedUser));
-          }
+        if (currentRecord.status === 'Disabled' || currentRecord.status === 'Inactive' || currentRecord.status === 'Suspended') {
+          handleLogout();
+          setAccountUpdateModal({ isDisabled: true });
+          return;
         }
-      } catch (e) { }
+
+        const freshRole = currentRecord.role || user.role;
+        const freshCategory = currentRecord.category || user.category;
+        const freshSec = currentRecord.section_access || user.section_access || 'Default';
+        const freshPerm = currentRecord.permissions || user.permissions || 'Default';
+        const freshProject = currentRecord.assigned_project || user.assigned_project || 'All Projects';
+
+        if (
+          user.role !== freshRole ||
+          user.category !== freshCategory ||
+          user.section_access !== freshSec ||
+          user.permissions !== freshPerm ||
+          user.assigned_project !== freshProject
+        ) {
+          const updatedUser = {
+            ...user,
+            role: freshRole,
+            category: freshCategory,
+            section_access: freshSec,
+            permissions: freshPerm,
+            assigned_project: freshProject
+          };
+          setUser(updatedUser);
+          sessionStorage.setItem('seo_dashboard_user', JSON.stringify(updatedUser));
+        }
+      } catch (err) {
+      }
     };
 
     checkUserStatus();
-    const timer = setInterval(checkUserStatus, 3000);
+    const timer = setInterval(checkUserStatus, 30000);
+
+    const handleSessionExpired = () => {
+      handleLogout();
+    };
+    window.addEventListener('auth_session_expired', handleSessionExpired);
+
     return () => {
       isMounted = false;
       clearInterval(timer);
+      window.removeEventListener('auth_session_expired', handleSessionExpired);
     };
   }, [user, activePath]);
 
   const handleNavigate = (path) => {
     const currentUser = userRef.current;
-    if (currentUser?.role?.toUpperCase() === 'VENDOR' && canAccessRoute(currentUser, 'search-visibility/off-page-scheduler') && path !== 'profile' && path !== 'notifications' && path !== 'help' && path !== 'search-visibility/off-page-scheduler') {
+    const isVendor = (currentUser?.category || '').toLowerCase() === 'vendor' || currentUser?.role?.toUpperCase() === 'VENDOR';
+
+    if (isVendor && (path === 'home' || path === 'dashboard' || (path !== 'profile' && path !== 'notifications' && path !== 'help' && path !== 'search-visibility/off-page-scheduler'))) {
       setActivePath('search-visibility/off-page-scheduler');
       return;
     }
 
     if (currentUser && (path === 'landing' || path === 'login' || path === 'signup' || path === 'admin-login')) {
-      const defaultVendorPath = canAccessRoute(currentUser, 'search-visibility/off-page-scheduler') ? 'search-visibility/off-page-scheduler' : 'home';
-      setActivePath(currentUser?.role?.toUpperCase() === 'VENDOR' ? defaultVendorPath : 'search-visibility/position-analysis');
+      setActivePath(isVendor ? 'search-visibility/off-page-scheduler' : 'search-visibility/position-analysis');
     } else if (currentUser && path === 'home') {
-      if (justLoggedInRef.current) {
+      if (isVendor) {
+        setActivePath('search-visibility/off-page-scheduler');
+      } else if (justLoggedInRef.current) {
         justLoggedInRef.current = false;
-        const defaultVendorPath = canAccessRoute(currentUser, 'search-visibility/off-page-scheduler') ? 'search-visibility/off-page-scheduler' : 'home';
-        setActivePath(currentUser?.role?.toUpperCase() === 'VENDOR' ? defaultVendorPath : 'search-visibility/position-analysis');
+        setActivePath('search-visibility/position-analysis');
       } else {
         setActivePath('home');
       }
@@ -768,11 +800,11 @@ export default function App() {
     } catch (e) { }
 
     const role = userData?.role?.toUpperCase();
+    const isVendor = (userData?.category || '').toLowerCase() === 'vendor' || role === 'VENDOR';
     const secAccess = userData?.section_access;
 
-    if (role === 'VENDOR') {
-      const defaultVendorPath = canAccessRoute(userData, 'search-visibility/off-page-scheduler') ? 'search-visibility/off-page-scheduler' : 'home';
-      setActivePath(defaultVendorPath);
+    if (isVendor) {
+      setActivePath('search-visibility/off-page-scheduler');
     } else if (secAccess === 'Project Setup') {
       setActivePath('project-setup');
     } else if (secAccess === 'Search Visibility') {
@@ -800,10 +832,12 @@ export default function App() {
   const isAuthPage = activePath === 'landing' || activePath === 'login' || activePath === 'signup' || activePath === 'admin-login';
   const pageInfo = PAGE_TITLES[activePath] || { title: activePath, subtitle: '' };
 
-  if (isAuthPage) {
+  // STRICT AUTH GUARD: Never render dashboard layout or protected pages if user is not authenticated
+  if (!user || isAuthPage) {
+    const pageToRender = (!user && !isAuthPage) ? 'landing' : activePath;
     return (
       <>
-        {renderPage(activePath, handleNavigate, user, handleLoginSuccess, handleLogout)}
+        {renderPage(pageToRender, handleNavigate, user, handleLoginSuccess, handleLogout)}
         <AccountUpdateModal open={Boolean(accountUpdateModal)} data={accountUpdateModal} onClose={() => setAccountUpdateModal(null)} />
         <GlobalCustomAlertModal open={customAlertModal.open} data={customAlertModal} onClose={() => setCustomAlertModal(prev => ({ ...prev, open: false }))} />
       </>

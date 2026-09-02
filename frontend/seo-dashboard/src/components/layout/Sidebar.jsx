@@ -14,6 +14,7 @@ const MODULE_COLORS = {
 
 export default function Sidebar({ activePath, onNavigate, user }) {
   const [expanded, setExpanded] = useState({ 'settings-menu': true, 'search-visibility': true });
+  const isVendorUser = (user?.category || '').toLowerCase() === 'vendor' || user?.role?.toUpperCase() === 'VENDOR';
 
   const toggle = (id) => setExpanded(p => ({ ...p, [id]: !p[id] }));
 
@@ -22,7 +23,7 @@ export default function Sidebar({ activePath, onNavigate, user }) {
       width: 'var(--sidebar-w)',
       minWidth: 'var(--sidebar-w)',
       height: '100vh',
-      background: 'radial-gradient(circle at 90% 15%, rgba(95, 35, 155, 0.35) 0%, transparent 60%), radial-gradient(circle at 10% 85%, rgba(185, 20, 105, 0.25) 0%, transparent 55%), linear-gradient(180deg, #09060E 0%, #100A1A 38%, #170C24 70%, #1C0B29 100%)',
+      background: 'radial-gradient(circle at 90% 15%, #5f239b59 0%, transparent 60%), radial-gradient(circle at 10% 85%, rgba(185, 20, 105, 0.25) 0%, transparent 55%), linear-gradient(180deg, #09060E 0%, #100A1A 38%, #170C24 70%, #1C0B29 100%)',
       borderRight: '1px solid rgba(255, 255, 255, 0.08)',
       boxShadow: '4px 0 28px rgba(9, 6, 14, 0.5)',
       display: 'flex',
@@ -34,7 +35,7 @@ export default function Sidebar({ activePath, onNavigate, user }) {
     }}>
       {/* Logo */}
       <div
-        onClick={() => onNavigate && onNavigate('home')}
+        onClick={() => onNavigate && onNavigate(isVendorUser ? 'search-visibility/off-page-scheduler' : 'home')}
         style={{
           height: 'var(--topbar-h)',
           padding: '0 30px',
@@ -46,7 +47,7 @@ export default function Sidebar({ activePath, onNavigate, user }) {
           backdropFilter: 'blur(8px)',
           transition: 'background 0.15s ease'
         }}
-        title="hariba.ai - Home"
+        title={isVendorUser ? "hariba.ai - Off-Page" : "hariba.ai - Home"}
       >
         <img
           src="/branding/hariba-logo-white.png"
@@ -65,6 +66,10 @@ export default function Sidebar({ activePath, onNavigate, user }) {
       {/* Nav */}
       <nav style={{ flex: 1, padding: '8px 0 16px' }}>
         {NAV_STRUCTURE.map(item => {
+          if (isVendorUser && (item.id === 'home' || item.id === 'dashboard' || item.path === 'home' || item.path === 'dashboard')) {
+            return null;
+          }
+
           const Icon = ICONS[item.icon];
           const isActive = activePath === item.path || activePath?.startsWith(item.path + '/');
           const isExpanded = expanded[item.id];

@@ -168,6 +168,154 @@ function ModuleAccessMultiSelect({ value = 'Default', onChange, disabled = false
   );
 }
 
+function ProjectAssignmentMultiSelect({ value = 'None', projectOptions = [], onChange, disabled = false }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  // Available options: 'All Projects', 'None', plus specific project names
+  const availableProjects = useMemo(() => {
+    const specificProjects = projectOptions.filter(p => p !== 'All Projects' && p !== 'None');
+    return ['All Projects', 'None', ...specificProjects];
+  }, [projectOptions]);
+
+  const currentList = useMemo(() => {
+    if (!value || value === 'None' || value.trim() === '') return ['None'];
+    if (value === 'All Projects') return ['All Projects'];
+    return value.split(',').map(s => s.trim()).filter(Boolean);
+  }, [value]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    if (open) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  const toggleOption = (opt) => {
+    if (disabled) return;
+    if (opt === 'All Projects') {
+      onChange('All Projects');
+      return;
+    }
+    if (opt === 'None') {
+      onChange('None');
+      return;
+    }
+
+    let nextList = currentList.filter(item => item !== 'All Projects' && item !== 'None');
+
+    if (nextList.includes(opt)) {
+      nextList = nextList.filter(item => item !== opt);
+    } else {
+      nextList.push(opt);
+    }
+
+    if (nextList.length === 0) {
+      onChange('None');
+    } else {
+      onChange(nextList.join(', '));
+    }
+  };
+
+  const displayLabel = useMemo(() => {
+    if (currentList.length === 0 || (currentList.length === 1 && currentList[0] === 'None')) {
+      return 'None';
+    }
+    if (currentList.length === 1 && currentList[0] === 'All Projects') {
+      return 'All Projects';
+    }
+    if (currentList.length === 1) {
+      return currentList[0];
+    }
+    return `${currentList.length} Projects Selected`;
+  }, [currentList]);
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => !disabled && setOpen(!open)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 6,
+          padding: '6px 10px',
+          fontSize: 12,
+          fontWeight: 600,
+          borderRadius: 6,
+          border: '1px solid #cbd5e1',
+          background: disabled ? '#f8fafc' : '#ffffff',
+          color: disabled ? '#94a3b8' : (currentList.includes('None') ? '#64748b' : '#0f172a'),
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          outline: 'none',
+          width: '100%',
+          minWidth: 140
+        }}
+        title={value}
+      >
+        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 130 }}>
+          {displayLabel}
+        </span>
+        <ChevronDown size={13} color="#64748b" />
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute',
+          top: '110%',
+          left: 0,
+          zIndex: 999,
+          background: '#ffffff',
+          border: '1px solid #cbd5e1',
+          borderRadius: 8,
+          boxShadow: '0 10px 25px rgba(0,0,0,0.12)',
+          padding: '6px 0',
+          minWidth: 200,
+          maxHeight: 220,
+          overflowY: 'auto'
+        }}>
+          {availableProjects.map(opt => {
+            const isChecked = currentList.includes(opt);
+            return (
+              <div
+                key={opt}
+                onClick={() => toggleOption(opt)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '7px 12px',
+                  fontSize: 12,
+                  fontWeight: isChecked ? 700 : 500,
+                  color: isChecked ? '#7c3aed' : '#334155',
+                  background: isChecked ? '#f5f3ff' : 'transparent',
+                  cursor: 'pointer',
+                  userSelect: 'none'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={() => { }}
+                  style={{ cursor: 'pointer', accentColor: '#7c3aed' }}
+                />
+                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{opt}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function deriveCategoryFromRole(role, category) {
   if (!role) return category || CATEGORIES.INTERNAL;
   const r = role.toUpperCase();
@@ -545,7 +693,7 @@ export default function UsersPage({ user, onNavigate }) {
       (data || []).forEach(u => {
         const uRole = u.role?.toUpperCase() || ROLES.INTERNAL_ASSOCIATE;
         const uCat = deriveCategoryFromRole(uRole, u.category);
-        const defaultProj = uRole === 'ADMIN' ? 'All Projects' : (u.assigned_project && u.assigned_project !== 'All Projects' ? u.assigned_project : 'None');
+        const defaultProj = uRole === 'ADMIN' ? 'All Projects' : (u.assigned_project || 'None');
         map[u.id] = {
           category: uCat,
           role: uRole,
@@ -877,15 +1025,25 @@ export default function UsersPage({ user, onNavigate }) {
     setActionLoading(true);
     setAlertMsg({ type: '', text: '' });
     try {
+      const hasClientData = Boolean(
+        (clientData.name && clientData.name.trim()) ||
+        (clientData.address && clientData.address.trim()) ||
+        (clientData.gst && clientData.gst.trim()) ||
+        (clientData.poc_name && clientData.poc_name.trim()) ||
+        (clientData.poc_number && clientData.poc_number.trim()) ||
+        (clientData.poc_address && clientData.poc_address.trim())
+      );
+      const isClientEnabled = clientDetailEnabled || hasClientData;
+
       const payload = {
         ...formData,
-        client_detail_enabled: clientDetailEnabled,
-        client_name: clientDetailEnabled ? clientData.name : null,
-        client_address: clientDetailEnabled ? clientData.address : null,
-        client_gst: clientDetailEnabled ? clientData.gst : null,
-        poc_name: clientDetailEnabled ? clientData.poc_name : null,
-        poc_number: clientDetailEnabled ? clientData.poc_number : null,
-        poc_address: clientDetailEnabled ? clientData.poc_address : null
+        client_detail_enabled: isClientEnabled,
+        client_name: isClientEnabled ? clientData.name : null,
+        client_address: isClientEnabled ? clientData.address : null,
+        client_gst: isClientEnabled ? clientData.gst : null,
+        poc_name: isClientEnabled ? clientData.poc_name : null,
+        poc_number: isClientEnabled ? clientData.poc_number : null,
+        poc_address: isClientEnabled ? clientData.poc_address : null
       };
 
       if (clientDetailEnabled && clientData.name.trim()) {
@@ -1403,34 +1561,17 @@ export default function UsersPage({ user, onNavigate }) {
                               </select>
                             </td>
 
-                            {/* ASSIGNED PROJECT (NON-ADMIN SCOPED) */}
+                            {/* ASSIGNED PROJECT (VENDOR SCOPED ONLY) */}
                             <td style={{ padding: '12px 16px', width: 175 }}>
-                              {currentRoleKey !== 'ADMIN' ? (
-                                <select
+                              {isVendor ? (
+                                <ProjectAssignmentMultiSelect
                                   disabled={isSelf}
-                                  value={currentEdit.assigned_project && currentEdit.assigned_project !== 'All Projects' ? currentEdit.assigned_project : 'None'}
-                                  onChange={e => handleInlineFieldChange(u.id, 'assigned_project', e.target.value)}
-                                  style={{
-                                    padding: '6px 8px',
-                                    fontSize: 12,
-                                    fontWeight: 600,
-                                    borderRadius: 6,
-                                    border: '1px solid #cbd5e1',
-                                    background: isSelf ? '#f8fafc' : '#ffffff',
-                                    color: isSelf ? '#94a3b8' : (currentEdit.assigned_project === 'None' || !currentEdit.assigned_project || currentEdit.assigned_project === 'All Projects' ? '#64748b' : '#0f172a'),
-                                    cursor: isSelf ? 'not-allowed' : 'pointer',
-                                    outline: 'none',
-                                    width: '100%'
-                                  }}
-                                  title={isSelf ? "You cannot modify your own assigned project" : "Assigned project scope for this user"}
-                                >
-                                  <option value="None">None</option>
-                                  {projectOptions.filter(p => p !== 'All Projects' && p !== 'None').map(pName => (
-                                    <option key={pName} value={pName}>{pName}</option>
-                                  ))}
-                                </select>
+                                  value={currentEdit.assigned_project}
+                                  projectOptions={projectOptions}
+                                  onChange={val => handleInlineFieldChange(u.id, 'assigned_project', val)}
+                                />
                               ) : (
-                                <span style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic', fontWeight: 500 }}>
+                                <span style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>
                                   All Projects
                                 </span>
                               )}
@@ -2098,32 +2239,17 @@ export default function UsersPage({ user, onNavigate }) {
                     </div>
                   </div>
 
-                  {/* Assigned Project selector for non-admin roles */}
-                  {(formData.role || '').toUpperCase() !== 'ADMIN' && (
+                  {/* Assigned Project selector strictly for Vendor role */}
+                  {((formData.category || '').toLowerCase() === 'vendor' || (formData.role || '').toUpperCase() === 'VENDOR') && (
                     <div>
                       <label style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 5 }}>
                         Assigned Project Scope
                       </label>
-                      <select
-                        value={formData.assigned_project && formData.assigned_project !== 'All Projects' ? formData.assigned_project : 'None'}
-                        onChange={e => setFormData({ ...formData, assigned_project: e.target.value })}
-                        style={{
-                          width: '100%',
-                          padding: '8px 12px',
-                          fontSize: 13,
-                          fontWeight: 600,
-                          borderRadius: 8,
-                          border: '1px solid #cbd5e1',
-                          background: '#ffffff',
-                          color: (!formData.assigned_project || formData.assigned_project === 'None' || formData.assigned_project === 'All Projects') ? '#64748b' : '#0f172a',
-                          outline: 'none'
-                        }}
-                      >
-                        <option value="None">None</option>
-                        {projectOptions.filter(p => p !== 'All Projects' && p !== 'None').map(pName => (
-                          <option key={pName} value={pName}>{pName}</option>
-                        ))}
-                      </select>
+                      <ProjectAssignmentMultiSelect
+                        value={formData.assigned_project}
+                        projectOptions={projectOptions}
+                        onChange={val => setFormData({ ...formData, assigned_project: val })}
+                      />
                     </div>
                   )}
                 </div>

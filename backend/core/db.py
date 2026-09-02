@@ -256,6 +256,16 @@ def _init_db_inner():
         _add_column_if_not_exists(conn, "users", "status", "TEXT NOT NULL DEFAULT 'Active'")
         _add_column_if_not_exists(conn, "users", "attendance", "TEXT NOT NULL DEFAULT 'Not Present'")
         _add_column_if_not_exists(conn, "users", "assigned_project", "TEXT NOT NULL DEFAULT 'All Projects'")
+        _add_column_if_not_exists(conn, "users", "category", "TEXT DEFAULT 'Internal'")
+        _add_column_if_not_exists(conn, "users", "section_access", "TEXT DEFAULT 'Default'")
+        _add_column_if_not_exists(conn, "users", "permissions", "TEXT DEFAULT 'Default'")
+        _add_column_if_not_exists(conn, "users", "client_detail_enabled", "BOOLEAN DEFAULT FALSE")
+        _add_column_if_not_exists(conn, "users", "client_name", "TEXT")
+        _add_column_if_not_exists(conn, "users", "client_address", "TEXT")
+        _add_column_if_not_exists(conn, "users", "client_gst", "TEXT")
+        _add_column_if_not_exists(conn, "users", "poc_name", "TEXT")
+        _add_column_if_not_exists(conn, "users", "poc_number", "TEXT")
+        _add_column_if_not_exists(conn, "users", "poc_address", "TEXT")
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_users_email ON users (LOWER(email))"))
 
         conn.execute(text("""
@@ -654,7 +664,8 @@ def list_outreach_sites(project_slug: str = None):
     if not os.environ.get("DATABASE_URL"):
         return []
     with engine.connect() as conn:
-        if project_slug:
+        if project_slug and str(project_slug).strip().lower() not in ("all projects", "all", "*"):
+            slug_list = [s.strip().lower() for s in str(project_slug).split(",") if s.strip()]
             query = text("""
                 SELECT id, project_slug, url, domain, type, da, pa, ss, traffic,
                        total_traffic, region1_traffic, region2_traffic, region3_traffic,
@@ -662,10 +673,10 @@ def list_outreach_sites(project_slug: str = None):
                        selling_price, country, domain_industry, status, rejected_reason,
                        metrics_json, created_at
                 FROM outreach_sites
-                WHERE project_slug = :slug
+                WHERE LOWER(project_slug) = ANY(:slugs)
                 ORDER BY id DESC
             """)
-            params = {"slug": project_slug}
+            params = {"slugs": slug_list}
         else:
             query = text("""
                 SELECT id, project_slug, url, domain, type, da, pa, ss, traffic,

@@ -722,6 +722,41 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     const isVendor = user?.category === 'Vendor' || user?.role?.toUpperCase() === 'VENDOR';
     const vendorProjectName = isVendor && user?.assigned_project && user.assigned_project !== 'All Projects' ? user.assigned_project : null;
 
+    if (slug === 'all') {
+      const allProjObj = { slug: 'all', name: 'All Projects', domain: 'All Projects', isAllProjects: true };
+      setSelectedSlug('all');
+      localStorage.setItem('bd_selected_project', 'all');
+      setActiveProject(allProjObj);
+      try {
+        const results = await Promise.all(
+          projects.filter(pr => pr.slug !== 'all').map(async pr => {
+            const [kws, pgs] = await Promise.all([
+              fetchKeywordRows(pr.slug).catch(() => []),
+              fetchPageRows(pr.slug).catch(() => [])
+            ]);
+            return { kws: kws || [], pgs: pgs || [] };
+          })
+        );
+        const combinedKws = results.flatMap(r => r.kws);
+        const combinedPgs = results.flatMap(r => r.pgs);
+        setProjectKeywords(combinedKws);
+        setKwCount(combinedKws.length);
+        const clusters = new Set(combinedKws.map(k => k.cluster).filter(Boolean)).size;
+        setClusterCount(clusters);
+        const svSum = combinedKws.reduce((acc, k) => {
+          const val = Number(String(k.sv || 0).replace(/[^0-9.]/g, '')) || 0;
+          return acc + val;
+        }, 0);
+        setNetPotential(svSum);
+        setTopKeywords(extractTop2PerCategory(combinedKws));
+        setProjectPages(combinedPgs);
+        setPageCount(combinedPgs.length);
+      } catch (err) {
+        console.error('[PositionAnalysisPage] Error loading all projects:', err);
+      }
+      return;
+    }
+
     const p = projects.find(item => item.slug === slug);
     if (!p) return;
 
@@ -1256,7 +1291,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     }
   };
 
-  const domainDisplay = activeProject?.domain || activeProject?.name || (projects && projects[0] ? projects[0].domain || projects[0].name : '');
+  const domainDisplay = activeProject?.slug === 'all' || activeProject?.isAllProjects ? 'All Projects' : (activeProject?.domain || activeProject?.name || (projects && projects[0] ? projects[0].domain || projects[0].name : 'Select Domain'));
   const locationDisplay = activeProject?.location || 'India (Google)';
 
   const getDynamicClusters = () => {
@@ -1716,6 +1751,33 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       display: 'flex',
                       flexDirection: 'column'
                     }}>
+                    {(!user?.assigned_project || user.assigned_project === 'All Projects') && (
+                      <button
+                        key="all-projects"
+                        onClick={() => {
+                          handleSelectProject('all');
+                          setProjectMenuOpen(false);
+                        }}
+                        style={{
+                          padding: '8px 14px',
+                          fontSize: 13.5,
+                          fontWeight: selectedSlug === 'all' ? 700 : 500,
+                          color: selectedSlug === 'all' ? '#7c3aed' : '#1e293b',
+                          backgroundColor: selectedSlug === 'all' ? '#f5f3ff' : 'transparent',
+                          border: 'none',
+                          borderBottom: '1px solid #f1f5f9',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          transition: 'background 0.12s'
+                        }}
+                      >
+                        All Projects
+                        {selectedSlug === 'all' && <CheckCircle size={14} style={{ color: '#7c3aed' }} />}
+                      </button>
+                    )}
                     {projects.map(p => (
                       <button
                         key={p.slug}

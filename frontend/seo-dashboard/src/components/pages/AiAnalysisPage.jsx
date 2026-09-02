@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Search, ChevronDown, ExternalLink, Sparkles, RefreshCw, Filter, Download, Calendar, Lock } from 'lucide-react';
 import {
   fetchDomainRows,
@@ -48,6 +48,20 @@ function getTop2KeywordsPerCategory(kws) {
 // MultiSelectField Component for Popover Filters
 function MultiSelectField({ label, options, selectedValues = [], onChange }) {
   const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [open]);
+
   const isAll = !selectedValues || selectedValues.length === 0;
 
   const toggleOption = (val) => {
@@ -67,7 +81,7 @@ function MultiSelectField({ label, options, selectedValues = [], onChange }) {
   };
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div ref={containerRef} style={{ position: 'relative' }}>
       <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>
         {label} {selectedValues.length > 0 && <span style={{ color: '#7c3aed', fontWeight: 800 }}>({selectedValues.length})</span>}
       </label>
@@ -235,6 +249,26 @@ export default function AiAnalysisPage({ user }) {
   const [countrySearch, setCountrySearch] = useState('');
   const [selectedDate, setSelectedDate] = useState('2026-08-13');
 
+  const filterRef = useRef(null);
+  const projectMenuRef = useRef(null);
+  const countryMenuRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (filterRef.current && !filterRef.current.contains(e.target)) {
+        setFilterMenuOpen(false);
+      }
+      if (projectMenuRef.current && !projectMenuRef.current.contains(e.target)) {
+        setProjectMenuOpen(false);
+      }
+      if (countryMenuRef.current && !countryMenuRef.current.contains(e.target)) {
+        setCountryMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const COUNTRY_OPTIONS = [
     { code: 'IN', name: 'India' },
     { code: 'US', name: 'United States' },
@@ -256,7 +290,9 @@ export default function AiAnalysisPage({ user }) {
         if (isMounted && domains && domains.length > 0) {
           setProjects(domains);
           const savedSlug = localStorage.getItem('bd_selected_project');
-          const target = (savedSlug && domains.find(p => p.slug === savedSlug)) || domains[0];
+          const target = savedSlug === 'all'
+            ? { slug: 'all', name: 'All Projects', domain: 'All Projects', isAllProjects: true }
+            : (savedSlug && domains.find(p => p.slug === savedSlug)) || domains[0];
           setActiveProject(target);
         }
       } catch (err) {
@@ -274,9 +310,25 @@ export default function AiAnalysisPage({ user }) {
     }
   }, [activeProject?.slug]);
 
-  const loadProjectData = async (slug) => {
+  const loadProjectData = async (slug, allProjectsList = projects) => {
     if (!slug) return;
     try {
+      if (slug === 'all') {
+        const validProjects = (allProjectsList || []).filter(p => p && p.slug && p.slug !== 'all');
+        const results = await Promise.all(
+          validProjects.map(async p => {
+            const [kws, hist] = await Promise.all([
+              fetchKeywordRows(p.slug).catch(() => []),
+              fetchAiAnalysisHistory(p.slug).catch(() => [])
+            ]);
+            return { kws: kws || [], hist: hist || [] };
+          })
+        );
+        setProjectKeywords(results.flatMap(r => r.kws));
+        setHistory(results.flatMap(r => r.hist));
+        return;
+      }
+
       const [kws, hist] = await Promise.all([
         fetchKeywordRows(slug),
         fetchAiAnalysisHistory(slug)
@@ -700,7 +752,7 @@ export default function AiAnalysisPage({ user }) {
     });
   }, [citationsData, searchQuery, columnFilters, typeFilter, intentFilter]);
 
-  const currentDomainDisplay = activeProject?.domain || activeProject?.name || (projects && projects[0] ? projects[0].domain || projects[0].name : '');
+  const currentDomainDisplay = activeProject?.slug === 'all' || activeProject?.isAllProjects ? 'All Projects' : (activeProject?.domain || activeProject?.name || (projects && projects[0] ? projects[0].domain || projects[0].name : 'Select Domain'));
 
   return (
     <div style={{ position: 'relative', padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: 'var(--bg)', minHeight: '100vh' }}>
@@ -739,7 +791,7 @@ export default function AiAnalysisPage({ user }) {
                 margin: 0
               }}>
                 <span>Project:</span>
-                <div style={{ position: 'relative', display: 'inline-block' }}>
+                <div ref={projectMenuRef} style={{ position: 'relative', display: 'inline-block' }}>
                   <button
                     onClick={() => setProjectMenuOpen(!projectMenuOpen)}
                     style={{
@@ -775,6 +827,27 @@ export default function AiAnalysisPage({ user }) {
                       display: 'flex',
                       flexDirection: 'column'
                     }}>
+                      <button
+                        key="all-projects"
+                        onClick={() => handleSelectProject({ slug: 'all', name: 'All Projects', domain: 'All Projects', isAllProjects: true })}
+                        style={{
+                          padding: '8px 14px',
+                          fontSize: 13.5,
+                          fontWeight: (activeProject?.slug === 'all' || activeProject?.isAllProjects) ? 700 : 500,
+                          color: (activeProject?.slug === 'all' || activeProject?.isAllProjects) ? '#7c3aed' : '#1e293b',
+                          backgroundColor: (activeProject?.slug === 'all' || activeProject?.isAllProjects) ? '#f5f3ff' : 'transparent',
+                          border: 'none',
+                          borderBottom: '1px solid #f1f5f9',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          transition: 'background 0.12s'
+                        }}
+                      >
+                        All Projects
+                      </button>
                       {projects.map(p => (
                         <button
                           key={p.slug}
@@ -782,9 +855,9 @@ export default function AiAnalysisPage({ user }) {
                           style={{
                             padding: '8px 14px',
                             fontSize: 13.5,
-                            fontWeight: activeProject?.slug === p.slug ? 700 : 500,
-                            color: activeProject?.slug === p.slug ? '#7c3aed' : '#1e293b',
-                            backgroundColor: activeProject?.slug === p.slug ? '#f5f3ff' : 'transparent',
+                            fontWeight: (activeProject?.slug === p.slug && !activeProject?.isAllProjects) ? 700 : 500,
+                            color: (activeProject?.slug === p.slug && !activeProject?.isAllProjects) ? '#7c3aed' : '#1e293b',
+                            backgroundColor: (activeProject?.slug === p.slug && !activeProject?.isAllProjects) ? '#f5f3ff' : 'transparent',
                             border: 'none',
                             textAlign: 'left',
                             cursor: 'pointer',
@@ -801,14 +874,16 @@ export default function AiAnalysisPage({ user }) {
                   )}
                 </div>
 
-                <a
-                  href={`https://${currentDomainDisplay}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: '#7c3aed', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
-                >
-                  <ExternalLink size={16} />
-                </a>
+                {currentDomainDisplay !== 'Select Domain' && currentDomainDisplay !== 'All Projects' && (
+                  <a
+                    href={`https://${currentDomainDisplay}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#7c3aed', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
+                  >
+                    <ExternalLink size={16} />
+                  </a>
+                )}
               </h1>
             </div>
 
@@ -822,7 +897,7 @@ export default function AiAnalysisPage({ user }) {
               fontWeight: 500
             }}>
               {/* Country Selector */}
-              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+              <div ref={countryMenuRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                 <button
                   onClick={() => {
                     setCountryMenuOpen(!countryMenuOpen);
@@ -1234,7 +1309,7 @@ export default function AiAnalysisPage({ user }) {
           )}
 
           {/* Filter Trigger Button & Popover */}
-          <div style={{ position: 'relative' }}>
+          <div ref={filterRef} style={{ position: 'relative' }}>
             <button
               onClick={() => setFilterMenuOpen(!filterMenuOpen)}
               title="Filter options"
