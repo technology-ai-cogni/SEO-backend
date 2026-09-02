@@ -722,8 +722,8 @@ function Modal({ open, onClose, title, children, footer, maxWidth = 520, style =
 
 function Btn({ children, variant = 'primary', onClick, style = {} }) {
   const styles = {
-    primary: { background: '#0f1523', color: '#fff', border: 'none' },
-    outline: { background: '#fff', color: '#0f1523', border: '1.5px solid #d1d5db' },
+    primary: { background: '#2D2D44', color: '#fff', border: 'none' },
+    outline: { background: '#fff', color: '#2D2D44', border: '1.5px solid #d1d5db' },
     accent: { background: 'var(--accent)', color: '#fff', border: 'none' },
   };
   return (
@@ -884,11 +884,12 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
           onClick={handleCreate}
           style={{
             background: (submitting || btnActive)
-              ? 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'
-              : (domain.trim() ? 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)' : '#6b7280'),
+              ? '#1F1F30'
+              : (domain.trim() ? '#2D2D44' : '#8A8A9A'),
             color: '#ffffff',
-            border: '1.5px solid #09060E',
-            boxShadow: domain.trim() ? '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)' : 'none',
+            border: '1px solid #ffffffff',
+            borderRadius: 8,
+            boxShadow: domain.trim() ? '0 2px 8px rgba(45, 45, 68, 0.25)' : 'none',
             transition: 'all 0.15s ease',
             ...(submitting ? { opacity: 0.6, pointerEvents: 'none' } : {})
           }}
@@ -2086,7 +2087,35 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
     <Modal open={open} onClose={handleClose} title="Edit Project" maxWidth={680}
       footer={<>
         <Btn variant="primary" onClick={handleSave} style={{ flex: 1, ...(submitting ? { opacity: 0.6, pointerEvents: 'none' } : {}) }}>{submitting ? 'Saving…' : 'Save Project'}</Btn>
-        <Btn variant="outline" onClick={() => setConfirmDelete(true)} style={{ flex: 1, border: '1.5px solid var(--red)', color: 'var(--red)' }}>Delete Project</Btn>
+        <button
+          type="button"
+          onClick={() => setConfirmDelete(true)}
+          style={{
+            flex: 1,
+            padding: '10px 22px',
+            borderRadius: 10,
+            fontSize: 14,
+            fontWeight: 600,
+            fontFamily: 'var(--font-body)',
+            cursor: 'pointer',
+            background: '#ffffff',
+            border: '1.5px solid #ef4444',
+            color: '#dc2626',
+            transition: 'all 0.15s ease'
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = '#dc2626';
+            e.currentTarget.style.borderColor = '#dc2626';
+            e.currentTarget.style.color = '#ffffff';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = '#ffffff';
+            e.currentTarget.style.borderColor = '#ef4444';
+            e.currentTarget.style.color = '#dc2626';
+          }}
+        >
+          Delete Project
+        </button>
       </>}
     >
       {apiError && (
@@ -3090,7 +3119,7 @@ function ActionsDropdown({ selectedCount, onBulkEdit, onBulkDelete }) {
         onClick={toggleOpen}
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
-          background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+          background: '#2D2D44', color: '#fff', border: 'none', borderRadius: 8,
           padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
           fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
         }}
@@ -3382,7 +3411,7 @@ function PageDetailView({ project, onBack, onUpdatePages, search, user }) {
             disabled={!hasPendingChanges || saving}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              background: '#0f1523', color: '#fff',
+              background: '#2D2D44', color: '#fff',
               border: 'none', borderRadius: 8,
               padding: '7px 16px', fontSize: 13, fontWeight: 600,
               cursor: saving ? 'default' : 'pointer',
@@ -4336,7 +4365,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
                   <button
                     onClick={handleExcludeAction}
                     style={{
-                      background: '#0f1523', color: '#fff', border: 'none', borderRadius: 6,
+                      background: '#2D2D44', color: '#fff', border: 'none', borderRadius: 6,
                       padding: '8px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
                       marginTop: 6, textAlign: 'center',
                     }}
@@ -4389,7 +4418,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
             disabled={!hasPendingChanges || saving}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              background: '#0f1523',
+              background: '#2D2D44',
               color: '#fff',
               border: 'none', borderRadius: 8,
               padding: '7px 16px', fontSize: 13, fontWeight: 600,
@@ -5865,7 +5894,7 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
                                   padding: '6px 14px',
                                   borderRadius: 6,
                                   border: 'none',
-                                  background: '#0f1523',
+                                  background: '#2D2D44',
                                   color: '#fff',
                                   fontSize: 12.5,
                                   fontWeight: 600,
@@ -6119,37 +6148,58 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
 
     setClassifyingCompetitors(true);
     try {
-      const results = await classifyCompetitorUrls(urlsToClassify, categoryFilter || '', scopedProject?.slug || '');
-      const newMap = { ...classifiedTypes };
-      (results || []).forEach(res => {
-        const rawType = res.website_type || res.websiteType || res.type;
-        const finalType = rawType === 'Platform' ? 'Listing' : rawType;
-        const key = res.url || res.domain;
-        if (key && finalType) {
-          newMap[key] = finalType;
-        }
-      });
-      setClassifiedTypes(newMap);
+      // Process in smaller progressive chunks so results are saved to DB immediately as each chunk finishes
+      const chunkSize = 8;
+      const totalBatches = Math.ceil(urlsToClassify.length / chunkSize);
+      const totalUnclassified = urlsToClassify.length;
 
-      const allResults = results || [];
-      const autoSaveItems = [];
-      allResults.forEach(res => {
-        const rawType = res.website_type || res.websiteType || res.type;
-        const finalType = rawType === 'Platform' ? 'Listing' : rawType;
-        const targetComp = targets.find(c => (c.domain === res.url || c.name === res.url || c.url === res.url || c.domain === res.domain));
-        if (targetComp && finalType) {
-          autoSaveItems.push({ id: targetComp.id, updates: { device: finalType, type: finalType, websiteType: finalType } });
-        }
-      });
+      for (let i = 0; i < urlsToClassify.length; i += chunkSize) {
+        const chunkUrls = urlsToClassify.slice(i, i + chunkSize);
+        const batchNum = Math.floor(i / chunkSize) + 1;
+        try {
+          const results = await classifyCompetitorUrls(
+            chunkUrls,
+            categoryFilter || '',
+            scopedProject?.slug || '',
+            { batchNum, totalBatches, totalUnclassified }
+          );
+          const allResults = results || [];
 
-      if (autoSaveItems.length > 0) {
-        if (onAutoSaveCompetitors) {
-          onAutoSaveCompetitors(autoSaveItems);
-        } else if (onSaveCompetitor) {
-          autoSaveItems.forEach(item => {
-            const targetComp = targets.find(c => c.id === item.id);
-            if (targetComp) onSaveCompetitor(targetComp, item.updates);
+          const chunkMap = {};
+          const chunkAutoSaveItems = [];
+
+          allResults.forEach(res => {
+            const rawType = res.website_type || res.websiteType || res.type;
+            const finalType = rawType === 'Platform' ? 'Listing' : rawType;
+            const key = res.url || res.domain;
+            if (key && finalType) {
+              chunkMap[key] = finalType;
+            }
+
+            const targetComp = targets.find(c => (c.domain === res.url || c.name === res.url || c.url === res.url || c.domain === res.domain));
+            if (targetComp && finalType) {
+              chunkAutoSaveItems.push({ id: targetComp.id, updates: { device: finalType, type: finalType, websiteType: finalType } });
+            }
           });
+
+          // 1. Immediately update UI state with this chunk
+          if (Object.keys(chunkMap).length > 0) {
+            setClassifiedTypes(prev => ({ ...prev, ...chunkMap }));
+          }
+
+          // 2. Immediately persist this chunk into the database
+          if (chunkAutoSaveItems.length > 0) {
+            if (onAutoSaveCompetitors) {
+              await onAutoSaveCompetitors(chunkAutoSaveItems);
+            } else if (onSaveCompetitor) {
+              chunkAutoSaveItems.forEach(item => {
+                const targetComp = targets.find(c => c.id === item.id);
+                if (targetComp) onSaveCompetitor(targetComp, item.updates);
+              });
+            }
+          }
+        } catch (chunkErr) {
+          console.error(`Error classifying chunk ${i / chunkSize + 1}:`, chunkErr);
         }
       }
     } catch (err) {
@@ -6466,7 +6516,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                 disabled={saving || savingPages}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
-                  background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                  background: '#2D2D44', color: '#fff', border: 'none', borderRadius: 8,
                   padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: (saving || savingPages) ? 'default' : 'pointer',
                   fontFamily: 'var(--font-body)', opacity: (saving || savingPages) ? 0.6 : 1, transition: 'opacity 0.15s',
                 }}
@@ -9158,7 +9208,7 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
                   onClick={() => { setChooseProjectMode('chooseProject'); setShowChooseProject(true); }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 6,
-                    background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                    background: '#2D2D44', color: '#fff', border: 'none', borderRadius: 8,
                     padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
                     fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
                   }}
@@ -9184,7 +9234,7 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
                         disabled={classifyingCompetitors}
                         style={{
                           display: 'flex', alignItems: 'center', gap: 6,
-                          background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                          background: '#2D2D44', color: '#fff', border: 'none', borderRadius: 8,
                           padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: classifyingCompetitors ? 'default' : 'pointer',
                           fontFamily: 'var(--font-body)', opacity: classifyingCompetitors ? 0.7 : 1, transition: 'all 0.15s',
                         }}
@@ -9200,7 +9250,7 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
                       onClick={() => setShowAddPages(true)}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 6,
-                        background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                        background: '#2D2D44', color: '#fff', border: 'none', borderRadius: 8,
                         padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
                         fontFamily: 'var(--font-body)', transition: 'all 0.15s',
                       }}
@@ -9229,13 +9279,27 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
                     title="Validate sites based on DA (<25), Spam Score (>3%), Traffic (<5000), and Country Traffic (<1500)"
                     style={{
                       display: 'flex', alignItems: 'center', gap: 6,
-                      background: '#4f46e5', color: '#fff', border: 'none', borderRadius: 8,
-                      padding: '8px 16px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
-                      fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                      background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)', color: '#fff', border: 'none', borderRadius: 8,
+                      padding: '8px 16px', fontSize: 13.5, fontWeight: 700, cursor: validatingOutreach || outreachLinks.length === 0 ? 'not-allowed' : 'pointer',
+                      fontFamily: 'var(--font-body)',
+                      boxShadow: '0 2px 10px rgba(74, 26, 140, 0.3)',
+                      transition: 'all 0.15s ease',
                       opacity: validatingOutreach || outreachLinks.length === 0 ? 0.6 : 1
                     }}
-                    onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
-                    onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                    onMouseEnter={e => {
+                      if (!validatingOutreach && outreachLinks.length > 0) {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8E3CE0 100%)';
+                        e.currentTarget.style.boxShadow = '0 4px 14px rgba(123, 47, 190, 0.4)';
+                        e.currentTarget.style.transform = 'translateY(-1px)';
+                      }
+                    }}
+                    onMouseLeave={e => {
+                      if (!validatingOutreach && outreachLinks.length > 0) {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)';
+                        e.currentTarget.style.boxShadow = '0 2px 10px rgba(74, 26, 140, 0.3)';
+                        e.currentTarget.style.transform = 'translateY(0)';
+                      }
+                    }}
                   >
                     {validatingOutreach ? 'Validating…' : 'Validate Sites'}
                   </button>
@@ -9246,7 +9310,7 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
                     disabled={!hasOutreachPendingChanges || outreachSaving}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 6,
-                      background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                      background: '#2D2D44', color: '#fff', border: 'none', borderRadius: 8,
                       padding: '8px 18px', fontSize: 13.5, fontWeight: 600,
                       cursor: outreachSaving ? 'default' : 'pointer',
                       fontFamily: 'var(--font-body)', opacity: outreachSaving ? 0.7 : 1,
@@ -9259,7 +9323,7 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
                   onClick={cta.onClick}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 6,
-                    background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8,
+                    background: '#2D2D44', color: '#fff', border: 'none', borderRadius: 8,
                     padding: '8px 18px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer',
                     fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
                   }}
@@ -9714,7 +9778,7 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
 
       {/* Help button */}
       <div style={{ position: 'fixed', bottom: 28, right: 28 }}>
-        <button style={{ width: 44, height: 44, borderRadius: '50%', background: '#0f1523', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 14px rgba(0,0,0,0.25)' }}>
+        <button style={{ width: 44, height: 44, borderRadius: '50%', background: '#2D2D44', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 14px rgba(0,0,0,0.25)' }}>
           <HelpCircle size={20} color="#fff" />
         </button>
       </div>
@@ -10413,18 +10477,18 @@ function AddCompetitorModal({ open, onClose, projects, onAddCompetitor, lockedPr
               disabled={submitting}
               style={{
                 padding: '8px 18px',
-                background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                background: submitting ? '#1F1F30' : '#2D2D44',
                 color: '#fff',
-                border: '1.5px solid #09060E',
+                border: '1px solid #2D2D44',
                 borderRadius: 8,
                 fontSize: 13,
                 fontWeight: 700,
                 cursor: 'pointer',
-                boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35)',
+                boxShadow: '0 2px 6px rgba(45, 45, 68, 0.25)',
                 transition: 'all 0.15s ease'
               }}
-              onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
+              onMouseEnter={e => e.currentTarget.style.background = '#1F1F30'}
+              onMouseLeave={e => e.currentTarget.style.background = submitting ? '#1F1F30' : '#2D2D44'}
             >
               {submitting ? 'Saving to DB…' : 'Save Competitor'}
             </button>

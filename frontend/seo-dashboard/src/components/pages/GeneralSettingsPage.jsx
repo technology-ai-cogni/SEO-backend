@@ -75,16 +75,18 @@ export default function GeneralSettingsPage({ initialTab = 'settings', user, onN
                 gap: 8,
                 padding: '9px 18px',
                 borderRadius: 9,
-                border: isActive ? '1.5px solid #09060E' : '1.5px solid transparent',
-                background: isActive ? 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)' : 'transparent',
+                border: 'none',
+                background: isActive ? '#2D2D44' : 'transparent',
                 color: isActive ? '#ffffff' : '#64748b',
                 fontSize: 13,
                 fontWeight: isActive ? 700 : 600,
                 cursor: 'pointer',
                 transition: 'all 0.15s ease',
                 whiteSpace: 'nowrap',
-                boxShadow: isActive ? '0 4px 14px rgba(121, 40, 202, 0.28)' : 'none'
+                boxShadow: isActive ? '0 2px 8px rgba(45, 45, 68, 0.2)' : 'none'
               }}
+              onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f1f5f9'; }}
+              onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
             >
               <Icon size={16} color={isActive ? '#ffffff' : '#64748b'} />
               <span>{tab.label}</span>

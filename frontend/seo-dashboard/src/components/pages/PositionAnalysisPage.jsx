@@ -45,10 +45,11 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
 
   return (
     <div style={{
-      background: '#7f4747ff',
-      border: '1px solid #46576dff',
-      borderRadius: 12,
-      padding: '14px 20px',
+      background: 'linear-gradient(135deg, #F8F5FF 0%, #FAFBFC 60%, #F0F9FF 100%)',
+      border: '1px solid #E4DFEE',
+      borderRadius: 14,
+      padding: '16px 22px',
+      boxShadow: '0 2px 12px rgba(74, 26, 140, 0.04)',
       display: 'flex',
       flexDirection: 'column',
       gap: 12,
@@ -67,7 +68,7 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
             <path
               d="M 15 75 A 60 60 0 0 1 135 75"
               fill="none"
-              stroke="#e2e8f0"
+              stroke="#EDE9F7"
               strokeWidth={strokeWidth}
               strokeLinecap="round"
             />
@@ -118,12 +119,13 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
               flexDirection: 'column',
               alignItems: 'center',
               cursor: 'pointer',
-              padding: '8px 14px',
+              padding: '10px 16px',
               borderRadius: 10,
-              backgroundColor: hoverType === 'mentions' ? '#eff6ff' : '#f8fafc',
-              border: hoverType === 'mentions' ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
-              transition: 'all 0.15s',
-              minWidth: 90
+              backgroundColor: hoverType === 'mentions' ? '#eff6ff' : '#ffffff',
+              border: hoverType === 'mentions' ? '1.5px solid #93c5fd' : '1px solid #E4DFEE',
+              boxShadow: '0 2px 6px rgba(0, 0, 0, 0.04)',
+              transition: 'all 0.15s ease',
+              minWidth: 96
             }}>
               <span style={{ fontSize: 26, fontWeight: 800, color: '#0f172a' }}>{mentions}</span>
               <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginTop: 2 }}>Mentions</span>
@@ -183,12 +185,13 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
               flexDirection: 'column',
               alignItems: 'center',
               cursor: 'pointer',
-              padding: '8px 14px',
+              padding: '10px 16px',
               borderRadius: 10,
-              backgroundColor: hoverType === 'cited' ? '#f5f3ff' : '#f8fafc',
-              border: hoverType === 'cited' ? '1px solid #ddd6fe' : '1px solid #e2e8f0',
-              transition: 'all 0.15s',
-              minWidth: 90
+              backgroundColor: hoverType === 'cited' ? '#f5f3ff' : '#ffffff',
+              border: hoverType === 'cited' ? '1.5px solid #c4b5fd' : '1px solid #E4DFEE',
+              boxShadow: '0 2px 6px rgba(0, 0, 0, 0.04)',
+              transition: 'all 0.15s ease',
+              minWidth: 96
             }}>
               <span style={{ fontSize: 26, fontWeight: 800, color: '#7c3aed' }}>{citedPages}</span>
               <span style={{ fontSize: 12, fontWeight: 600, color: '#7c3aed', marginTop: 2 }}>Cited pages</span>
@@ -2106,7 +2109,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)',
                 color: '#ffffff',
                 border: 'none',
                 borderRadius: 8,
@@ -2115,11 +2118,23 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 fontWeight: 700,
                 cursor: Object.values(analyzingTabs).some(Boolean) ? 'not-allowed' : 'pointer',
                 opacity: Object.values(analyzingTabs).some(Boolean) ? 0.7 : 1,
-                boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
+                boxShadow: '0 2px 10px rgba(74, 26, 140, 0.3)',
                 transition: 'all 0.15s ease'
               }}
-              onMouseEnter={e => { if (!Object.values(analyzingTabs).some(Boolean)) { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
-              onMouseLeave={e => { if (!Object.values(analyzingTabs).some(Boolean)) { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; } }}
+              onMouseEnter={e => {
+                if (!Object.values(analyzingTabs).some(Boolean)) {
+                  e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8E3CE0 100%)';
+                  e.currentTarget.style.boxShadow = '0 4px 14px rgba(123, 47, 190, 0.4)';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                }
+              }}
+              onMouseLeave={e => {
+                if (!Object.values(analyzingTabs).some(Boolean)) {
+                  e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)';
+                  e.currentTarget.style.boxShadow = '0 2px 10px rgba(74, 26, 140, 0.3)';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }
+              }}
             >
               <Sparkles size={14} className={Object.values(analyzingTabs).some(Boolean) ? 'animate-spin' : ''} />
               <span>
@@ -2291,7 +2306,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                             disabled={isCurrentTabAnalyzing || !topKeywords.length}
                             title="Run AI Analysis"
                             style={{
-                              background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                              background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)',
                               color: '#ffffff',
                               border: 'none',
                               borderRadius: 8,
@@ -2300,14 +2315,26 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                               fontWeight: 700,
                               cursor: (isCurrentTabAnalyzing || !topKeywords.length) ? 'not-allowed' : 'pointer',
                               opacity: (isCurrentTabAnalyzing || !topKeywords.length) ? 0.75 : 1,
-                              boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
+                              boxShadow: '0 2px 10px rgba(74, 26, 140, 0.3)',
                               display: 'flex',
                               alignItems: 'center',
                               gap: 8,
                               transition: 'all 0.15s ease'
                             }}
-                            onMouseEnter={e => { if (!isCurrentTabAnalyzing && topKeywords.length) { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
-                            onMouseLeave={e => { if (!isCurrentTabAnalyzing && topKeywords.length) { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; } }}
+                            onMouseEnter={e => {
+                              if (!isCurrentTabAnalyzing && topKeywords.length) {
+                                e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8E3CE0 100%)';
+                                e.currentTarget.style.boxShadow = '0 4px 14px rgba(123, 47, 190, 0.4)';
+                                e.currentTarget.style.transform = 'translateY(-1px)';
+                              }
+                            }}
+                            onMouseLeave={e => {
+                              if (!isCurrentTabAnalyzing && topKeywords.length) {
+                                e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)';
+                                e.currentTarget.style.boxShadow = '0 2px 10px rgba(74, 26, 140, 0.3)';
+                                e.currentTarget.style.transform = 'translateY(0)';
+                              }
+                            }}
                           >
                             <RefreshCw size={14} className={isCurrentTabAnalyzing ? 'animate-spin' : ''} />
                             <span>{isCurrentTabAnalyzing ? 'Analyzing...' : (currentTabResults.length > 0 ? 'Re-analyze' : 'Analyze')}</span>
@@ -3625,18 +3652,18 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               <button
                 onClick={() => setShowReport(false)}
                 style={{
-                  background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                  background: '#2D2D44',
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: 8,
                   padding: '8px 18px',
                   fontWeight: 700,
                   cursor: 'pointer',
-                  boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
+                  boxShadow: '0 2px 8px rgba(45, 45, 68, 0.25)',
                   transition: 'all 0.15s ease'
                 }}
-                onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
+                onMouseEnter={e => e.currentTarget.style.background = '#1F1F30'}
+                onMouseLeave={e => e.currentTarget.style.background = '#2D2D44'}
               >
                 Close
               </button>

@@ -461,15 +461,15 @@ function CalendarPage({ user }) {
               fontSize: 13,
               fontWeight: 700,
               color: '#ffffff',
-              background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
-              border: '1.5px solid #09060E',
-              borderRadius: 10,
+              background: '#2D2D44',
+              border: 'none',
+              borderRadius: 8,
               cursor: 'pointer',
-              boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
+              boxShadow: '0 2px 8px rgba(45, 45, 68, 0.25)',
               transition: 'all 0.15s ease'
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#1F1F30'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#2D2D44'; e.currentTarget.style.transform = 'translateY(0)'; }}
           >
             <Sparkles size={16} />
             <span>Choose Project</span>
@@ -705,19 +705,19 @@ function CalendarPage({ user }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                background: '#2D2D44',
                 color: '#ffffff',
-                border: '1.5px solid #09060E',
+                border: 'none',
                 borderRadius: 8,
                 padding: '8px 16px',
                 fontSize: 13,
                 fontWeight: 700,
                 cursor: 'pointer',
-                boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
+                boxShadow: '0 2px 8px rgba(45, 45, 68, 0.25)',
                 transition: 'all 0.15s ease'
               }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#1F1F30'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#2D2D44'; e.currentTarget.style.transform = 'translateY(0)'; }}
             >
               <Plus size={15} />
               <span>New Entry</span>
@@ -737,7 +737,7 @@ function CalendarPage({ user }) {
         {loading ? (
           <div style={{ padding: '60px 20px', textAlign: 'center' }}>
             <Sparkles size={32} className="animate-spin" color="var(--accent)" style={{ marginBottom: 12 }} />
-            <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>Fetching off_page_activities from database...</p>
+            <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>Loading data...</p>
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -1340,15 +1340,15 @@ function CalendarPage({ user }) {
                     fontSize: 13,
                     fontWeight: 700,
                     color: '#ffffff',
-                    background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
-                    border: '1.5px solid #09060E',
+                    background: '#2D2D44',
+                    border: 'none',
                     borderRadius: 8,
                     cursor: 'pointer',
-                    boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35)',
+                    boxShadow: '0 2px 8px rgba(45, 45, 68, 0.25)',
                     transition: 'all 0.15s ease'
                   }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
+                  onMouseEnter={e => e.currentTarget.style.background = '#1F1F30'}
+                  onMouseLeave={e => e.currentTarget.style.background = '#2D2D44'}
                 >
                   {editingItem ? 'Update Activity' : 'Create Activity'}
                 </button>

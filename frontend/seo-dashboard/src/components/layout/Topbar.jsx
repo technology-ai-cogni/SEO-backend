@@ -154,20 +154,20 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
             <button
               onClick={() => onNavigate?.('signup')}
               style={{
-                background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
-                border: '1.5px solid #09060E',
+                background: '#2D2D44',
+                border: 'none',
                 borderRadius: 'var(--radius-sm)',
                 padding: '6px 14px',
                 fontSize: 13,
                 fontWeight: 700,
-                color: '#ffffffff',
+                color: '#ffffff',
                 fontFamily: 'var(--font-body)',
                 cursor: 'pointer',
-                boxShadow: '0 4px 14px rgba(123, 47, 190, 0.35)',
+                boxShadow: '0 2px 8px rgba(45, 45, 68, 0.25)',
                 transition: 'all 0.15s'
               }}
-              onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
+              onMouseEnter={e => e.currentTarget.style.background = '#1F1F30'}
+              onMouseLeave={e => e.currentTarget.style.background = '#2D2D44'}
             >
               Sign Up
             </button>

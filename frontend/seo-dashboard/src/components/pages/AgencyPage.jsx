@@ -529,15 +529,15 @@ export default function AgencyPage({ user }) {
             fontSize: 13.5,
             fontWeight: 700,
             color: '#ffffff',
-            background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
-            border: '1.5px solid #09060E',
-            borderRadius: 10,
+            background: '#2D2D44',
+            border: 'none',
+            borderRadius: 8,
             cursor: 'pointer',
-            boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
+            boxShadow: '0 2px 8px rgba(45, 45, 68, 0.25)',
             transition: 'all 0.15s ease'
           }}
-          onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+          onMouseEnter={e => { e.currentTarget.style.background = '#1F1F30'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = '#2D2D44'; e.currentTarget.style.transform = 'translateY(0)'; }}
         >
           <Plus size={16} />
           <span>Add Basic Info</span>
@@ -690,16 +690,16 @@ export default function AgencyPage({ user }) {
                                   padding: '5px 11px',
                                   borderRadius: 6,
                                   border: 'none',
-                                  background: '#1A1A1A',
+                                  background: '#2D2D44',
                                   color: '#ffffff',
                                   fontSize: 11.5,
                                   fontWeight: 700,
                                   cursor: 'pointer',
-                                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
+                                  boxShadow: '0 2px 8px rgba(45, 45, 68, 0.25)',
                                   transition: 'all 0.15s ease'
                                 }}
-                                onMouseEnter={e => e.currentTarget.style.background = '#2E2E38'}
-                                onMouseLeave={e => e.currentTarget.style.background = '#1A1A1A'}
+                                onMouseEnter={e => e.currentTarget.style.background = '#1F1F30'}
+                                onMouseLeave={e => e.currentTarget.style.background = '#2D2D44'}
                               >
                                 <Plus size={13} />
                                 <span>Add Invoice</span>
@@ -1033,16 +1033,16 @@ export default function AgencyPage({ user }) {
                     padding: '9px 24px',
                     borderRadius: 8,
                     border: 'none',
-                    background: '#1A1A1A',
+                    background: '#2D2D44',
                     color: '#ffffff',
                     fontSize: 13.5,
                     fontWeight: 700,
                     cursor: uploadingPdf ? 'not-allowed' : 'pointer',
-                    boxShadow: '0 4px 14px rgba(0, 0, 0, 0.22)',
+                    boxShadow: '0 4px 14px rgba(45, 45, 68, 0.25)',
                     transition: 'all 0.15s ease'
                   }}
-                  onMouseEnter={e => { if (!uploadingPdf) e.currentTarget.style.background = '#2E2E38'; }}
-                  onMouseLeave={e => { if (!uploadingPdf) e.currentTarget.style.background = '#1A1A1A'; }}
+                  onMouseEnter={e => { if (!uploadingPdf) e.currentTarget.style.background = '#1F1F30'; }}
+                  onMouseLeave={e => { if (!uploadingPdf) e.currentTarget.style.background = '#2D2D44'; }}
                 >
                   {uploadingPdf ? 'Uploading PDF...' : 'Done'}
                 </button>
@@ -1161,17 +1161,17 @@ export default function AgencyPage({ user }) {
                   style={{
                     padding: '9px 24px',
                     borderRadius: 8,
-                    border: '1.5px solid #09060E',
-                    background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                    border: 'none',
+                    background: '#2D2D44',
                     color: '#ffffff',
                     fontSize: 13.5,
                     fontWeight: 700,
                     cursor: uploadingPdf ? 'not-allowed' : 'pointer',
-                    boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35)',
+                    boxShadow: '0 2px 8px rgba(45, 45, 68, 0.25)',
                     transition: 'all 0.15s ease'
                   }}
-                  onMouseEnter={e => { if (!uploadingPdf) e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; }}
-                  onMouseLeave={e => { if (!uploadingPdf) e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; }}
+                  onMouseEnter={e => { if (!uploadingPdf) e.currentTarget.style.background = '#1F1F30'; }}
+                  onMouseLeave={e => { if (!uploadingPdf) e.currentTarget.style.background = '#2D2D44'; }}
                 >
                   {uploadingPdf ? 'Uploading PDF...' : 'Done'}
                 </button>

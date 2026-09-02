@@ -955,15 +955,15 @@ export default function KeywordsPage({ user }) {
                     fontSize: 12,
                     fontWeight: 700,
                     color: '#ffffff',
-                    background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
-                    border: '1.5px solid #09060E',
+                    background: '#2D2D44',
+                    border: 'none',
                     borderRadius: 6,
                     cursor: 'pointer',
                     marginTop: 4,
-                    boxShadow: '0 4px 14px rgba(123, 47, 190, 0.35)'
+                    boxShadow: '0 2px 6px rgba(45, 45, 68, 0.25)'
                   }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
+                  onMouseEnter={e => e.currentTarget.style.background = '#1F1F30'}
+                  onMouseLeave={e => e.currentTarget.style.background = '#2D2D44'}
                 >
                   Close
                 </button>

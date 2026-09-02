@@ -281,7 +281,8 @@ def classify_urls(
     keyword: str,
     urls: List[str],
     api_key: Optional[str] = None,
-    model: Optional[str] = None
+    model: Optional[str] = None,
+    batch_info: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Classifies a list of top URLs for a given keyword using parallel threads.
@@ -322,9 +323,28 @@ def classify_urls(
             if clean_u not in uncached_urls:
                 uncached_urls.append(clean_u)
 
+        total_urls = len(urls)
+        cached_count = total_urls - len(uncached_urls)
+        unclassified_count = len(uncached_urls)
+
+        b_num = batch_info.get("batch_num") if batch_info else None
+        t_batches = batch_info.get("total_batches") if batch_info else None
+        t_unclass = batch_info.get("total_unclassified") if batch_info else None
+
+        print(f"\n========================================================", flush=True)
+        if b_num and t_batches:
+            print(f"[COMPETITOR CLASSIFIER] === BATCH {b_num} of {t_batches} ===", flush=True)
+        if t_unclass:
+            print(f"[COMPETITOR CLASSIFIER] Overall Unclassified : {t_unclass}", flush=True)
+        print(f"[COMPETITOR CLASSIFIER] Batch URLs submitted : {total_urls}", flush=True)
+        print(f"[COMPETITOR CLASSIFIER] Already Classified   : {cached_count}", flush=True)
+        print(f"[COMPETITOR CLASSIFIER] NOT Classified (To Do): {unclassified_count}", flush=True)
+        print(f"========================================================\n", flush=True)
+
         # Step 2: Process uncached URLs concurrently in parallel worker threads
         if uncached_urls:
-            print(f"  [PARALLEL AI START] Launching AI classification for {len(uncached_urls)} uncached URLs concurrently...", flush=True)
+            batch_prefix = f"[Batch {b_num}/{t_batches}] " if b_num and t_batches else ""
+            print(f"  [PARALLEL AI START] {batch_prefix}Launching AI classification for {unclassified_count} unclassified URLs...", flush=True)
             def process_single_url(target_u: str):
                 local_sess = create_http_session()
                 try:
@@ -334,17 +354,35 @@ def classify_urls(
                         api_key=api_key,
                         model=model
                     )
-                    print(f"  [AI CLASSIFIED] '{target_u}' -> {res.get('website_type')}", flush=True)
+                    wtype = res.get("website_type", "Platform")
+                    is_comp = res.get("is_competitor", "NO")
+                    if db:
+                        try:
+                            db.save_url_classification(target_u, wtype, is_comp)
+                        except Exception as db_err:
+                            logger.warning(f"DB cache save warning for {target_u}: {db_err}")
+                        try:
+                            db.update_competitor_website_type(target_u, wtype)
+                        except Exception as db_err2:
+                            logger.warning(f"DB competitor update warning for {target_u}: {db_err2}")
+                    print(f"  [AI CLASSIFIED & SAVED TO DB] {batch_prefix}'{target_u}' -> {wtype}", flush=True)
                     return target_u, res
                 except Exception as e:
-                    print(f"  [AI CLASSIFY ERROR] '{target_u}': {e}", flush=True)
+                    print(f"  [AI CLASSIFY ERROR] {batch_prefix}'{target_u}': {e}", flush=True)
                     logger.error(f"Error classifying URL {target_u}: {e}")
                     fallback = {"url": target_u, "website_type": "Platform", "is_competitor": "NO"}
+                    if db:
+                        try:
+                            db.save_url_classification(target_u, "Platform", "NO")
+                            db.update_competitor_website_type(target_u, "Platform")
+                        except Exception:
+                            pass
                     return target_u, fallback
                 finally:
                     local_sess.close()
 
             max_workers = min(15, len(uncached_urls))
+            completed_count = 0
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_url = {executor.submit(process_single_url, u): u for u in uncached_urls}
                 for future in as_completed(future_to_url):
@@ -354,6 +392,9 @@ def classify_urls(
                     except Exception as exc:
                         u_target = future_to_url[future]
                         cache[u_target] = {"url": u_target, "website_type": "Platform", "is_competitor": "NO"}
+                    completed_count += 1
+                    remaining = unclassified_count - completed_count
+                    print(f"  [PROGRESS] {batch_prefix}Finished {completed_count}/{unclassified_count} | Remaining in batch {b_num or 1}: {remaining}", flush=True)
 
         results = [cache[u.strip()] for u in urls if u.strip() in cache]
 

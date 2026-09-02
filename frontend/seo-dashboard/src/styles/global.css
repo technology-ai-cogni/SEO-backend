@@ -133,17 +133,17 @@ body {
 .brand-btn-primary,
 button.btn-primary,
 .btn-primary {
-  background: linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%) !important;
+  background: linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%) !important;
   color: #ffffff !important;
-  box-shadow: 0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2) !important;
-  border: 1.5px solid #09060E !important;
+  box-shadow: 0 2px 10px rgba(74, 26, 140, 0.3) !important;
+  border: none !important;
   transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 .brand-btn-primary:hover,
 button.btn-primary:hover,
 .btn-primary:hover {
-  background: linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%) !important;
+  background: linear-gradient(135deg, #581F9E 0%, #8E3CE0 100%) !important;
   opacity: 0.96 !important;
   transform: translateY(-1px) !important;
-  box-shadow: 0 6px 22px rgba(123, 47, 190, 0.45), 0 3px 8px rgba(212, 0, 122, 0.28) !important;
+  box-shadow: 0 4px 14px rgba(123, 47, 190, 0.4) !important;
 }

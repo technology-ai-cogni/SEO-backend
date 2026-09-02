@@ -49,8 +49,8 @@ function Modal({ open, onClose, title, children, footer }) {
 // Reusable Button Component matching Project Setup style
 function Btn({ children, variant = 'primary', onClick, style = {} }) {
   const styles = {
-    primary: { background: '#0f1523', color: '#fff', border: 'none' },
-    outline: { background: '#000000ff', color: '#040509ff', border: '1.5px solid #d1d5db' },
+    primary: { background: '#2D2D44', color: '#fff', border: 'none' },
+    outline: { background: '#FFFFFF', color: '#2D2D44', border: '1.5px solid #d1d5db' },
     accent: { background: 'var(--accent)', color: '#fff', border: 'none' },
   };
   return (
@@ -1574,7 +1574,7 @@ export default function OffPageSchedulerPage({ user }) {
                 onClick={handleRunAiStatusCheck}
                 disabled={aiChecking}
                 style={{
-                  background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)',
+                  background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)',
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: 10,
@@ -1585,14 +1585,26 @@ export default function OffPageSchedulerPage({ user }) {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
-                  boxShadow: '0 3px 10px rgba(59, 130, 246, 0.25)',
+                  boxShadow: '0 2px 10px rgba(74, 26, 140, 0.3)',
                   transition: 'all 0.15s ease'
                 }}
-                onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
-                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                onMouseEnter={e => {
+                  if (!aiChecking) {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8E3CE0 100%)';
+                    e.currentTarget.style.boxShadow = '0 4px 14px rgba(123, 47, 190, 0.4)';
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (!aiChecking) {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)';
+                    e.currentTarget.style.boxShadow = '0 2px 10px rgba(74, 26, 140, 0.3)';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }
+                }}
               >
                 <Sparkles size={16} color="#ffffff" />
-                {aiChecking ? 'Running AI Audit ...' : 'AI Audit'}
+                <span>{aiChecking ? 'Running AI Audit ...' : 'AI Audit'}</span>
               </button>
             )}
 
@@ -1857,7 +1869,7 @@ export default function OffPageSchedulerPage({ user }) {
                 <button
                   onClick={() => setShowActionsDropdown(!showActionsDropdown)}
                   style={{
-                    background: '#0f172a',
+                    background: '#2D2D44',
                     color: '#ffffff',
                     border: 'none',
                     borderRadius: 8,
@@ -2669,11 +2681,11 @@ export default function OffPageSchedulerPage({ user }) {
                   fontSize: 13.5,
                   fontWeight: 700,
                   color: '#ffffff',
-                  background: '#0f172a',
+                  background: '#2D2D44',
                   border: 'none',
                   borderRadius: 10,
                   cursor: 'pointer',
-                  boxShadow: '0 2px 6px rgba(15,23,42,0.2)'
+                  boxShadow: '0 2px 6px rgba(45, 45, 68, 0.25)'
                 }}
               >
                 Yes, Save Changes
@@ -3546,11 +3558,11 @@ export default function OffPageSchedulerPage({ user }) {
                 fontSize: 13.5,
                 fontWeight: 700,
                 color: '#ffffff',
-                background: '#0f172a',
+                background: '#2D2D44',
                 border: 'none',
                 borderRadius: 10,
                 cursor: 'pointer',
-                boxShadow: '0 2px 6px rgba(15,23,42,0.2)'
+                boxShadow: '0 2px 6px rgba(45, 45, 68, 0.25)'
               }}
             >
               Yes, Save Changes

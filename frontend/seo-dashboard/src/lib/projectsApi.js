@@ -1936,12 +1936,19 @@ export async function runAiAnalysis(projectSlug, keyword, aiMode, domain, countr
 
 
 
-export async function classifyCompetitorUrls(urls, keyword = '', projectSlug = '') {
+export async function classifyCompetitorUrls(urls, keyword = '', projectSlug = '', batchInfo = {}) {
   if (!urls || urls.length === 0) return [];
   const res = await fetch(`${CATEGORY_API_BASE}/competitors/classify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ urls, keyword, project_slug: projectSlug }),
+    body: JSON.stringify({
+      urls,
+      keyword,
+      project_slug: projectSlug,
+      batch_num: batchInfo.batchNum,
+      total_batches: batchInfo.totalBatches,
+      total_unclassified: batchInfo.totalUnclassified
+    }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);

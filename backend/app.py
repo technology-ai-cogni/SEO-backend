@@ -1699,6 +1699,9 @@ class CompetitorUpdateRequest(BaseModel):
 class CompetitorClassifierRequest(BaseModel):
     keyword: str
     urls: List[str]
+    batch_num: Optional[int] = None
+    total_batches: Optional[int] = None
+    total_unclassified: Optional[int] = None
 
 
 class CompetitorResultItem(BaseModel):
@@ -2006,7 +2009,12 @@ def classify_competitors(payload: CompetitorClassifierRequest):
     if not payload.urls:
         raise HTTPException(400, "urls array cannot be empty.")
     try:
-        results = competitor_classifier.classify_urls(payload.keyword, payload.urls)
+        batch_info = {
+            "batch_num": payload.batch_num,
+            "total_batches": payload.total_batches,
+            "total_unclassified": payload.total_unclassified
+        }
+        results = competitor_classifier.classify_urls(payload.keyword, payload.urls, batch_info=batch_info)
         for item in results.get("results", []):
             url = item.get("url")
             wtype = item.get("website_type")

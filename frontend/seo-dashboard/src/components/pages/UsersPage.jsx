@@ -986,14 +986,15 @@ export default function UsersPage({ user, onNavigate }) {
               fontSize: 13,
               fontWeight: 700,
               color: '#ffffff',
-              background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
-              border: '1.5px solid #09060E',
+              background: '#2D2D44',
+              border: 'none',
               borderRadius: 8,
               cursor: 'pointer',
-              boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35)'
+              boxShadow: '0 2px 8px rgba(45, 45, 68, 0.25)',
+              transition: 'all 0.15s ease'
             }}
-            onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
+            onMouseEnter={e => e.currentTarget.style.background = '#1F1F30'}
+            onMouseLeave={e => e.currentTarget.style.background = '#2D2D44'}
           >
             Return to Dashboard
           </button>
@@ -1083,15 +1084,15 @@ export default function UsersPage({ user, onNavigate }) {
                 fontSize: 13.5,
                 fontWeight: 700,
                 color: '#ffffff',
-                background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
-                border: '1.5px solid #09060E',
+                background: '#2D2D44',
+                border: 'none',
                 borderRadius: 8,
                 cursor: 'pointer',
-                boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
+                boxShadow: '0 2px 8px rgba(45, 45, 68, 0.25)',
                 transition: 'all 0.15s ease'
               }}
-              onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
+              onMouseEnter={e => e.currentTarget.style.background = '#1F1F30'}
+              onMouseLeave={e => e.currentTarget.style.background = '#2D2D44'}
             >
               <UserPlus size={16} />
               <span>Create User Credential</span>
@@ -2155,17 +2156,18 @@ export default function UsersPage({ user, onNavigate }) {
                       fontSize: 13,
                       fontWeight: 700,
                       color: '#ffffff',
-                      background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
-                      border: '1.5px solid #09060E',
+                      background: '#2D2D44',
+                      border: 'none',
                       borderRadius: 8,
                       cursor: 'pointer',
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 6,
-                      boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35)'
+                      boxShadow: '0 2px 8px rgba(45, 45, 68, 0.25)',
+                      transition: 'all 0.15s ease'
                     }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
+                    onMouseEnter={e => e.currentTarget.style.background = '#1F1F30'}
+                    onMouseLeave={e => e.currentTarget.style.background = '#2D2D44'}
                   >
                     <span>Next: User Credential</span>
                     <ArrowRight size={14} />
@@ -2179,14 +2181,15 @@ export default function UsersPage({ user, onNavigate }) {
                       fontSize: 13,
                       fontWeight: 700,
                       color: '#ffffff',
-                      background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
-                      border: '1.5px solid #09060E',
+                      background: '#2D2D44',
+                      border: 'none',
                       borderRadius: 8,
                       cursor: actionLoading ? 'not-allowed' : 'pointer',
-                      boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35)'
+                      boxShadow: '0 2px 8px rgba(45, 45, 68, 0.25)',
+                      transition: 'all 0.15s ease'
                     }}
-                    onMouseEnter={e => { if (!actionLoading) e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; }}
-                    onMouseLeave={e => { if (!actionLoading) e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; }}
+                    onMouseEnter={e => { if (!actionLoading) e.currentTarget.style.background = '#1F1F30'; }}
+                    onMouseLeave={e => { if (!actionLoading) e.currentTarget.style.background = '#2D2D44'; }}
                   >
                     {actionLoading ? 'Creating Credential...' : 'Create Credential'}
                   </button>

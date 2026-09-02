@@ -830,20 +830,32 @@ export default function TopPagesPage({ user }) {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 6,
-                    background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                    background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)',
                     color: '#ffffff',
-                    border: '1.5px solid #09060E',
+                    border: 'none',
                     borderRadius: 8,
                     padding: '8px 16px',
                     fontSize: 13,
                     fontWeight: 700,
                     cursor: isAnalyzing ? 'not-allowed' : 'pointer',
                     opacity: isAnalyzing ? 0.75 : 1,
-                    boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
+                    boxShadow: '0 2px 10px rgba(74, 26, 140, 0.3)',
                     transition: 'all 0.15s ease'
                   }}
-                  onMouseEnter={e => { if (!isAnalyzing) { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
-                  onMouseLeave={e => { if (!isAnalyzing) { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; } }}
+                  onMouseEnter={e => {
+                    if (!isAnalyzing) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8E3CE0 100%)';
+                      e.currentTarget.style.boxShadow = '0 4px 14px rgba(123, 47, 190, 0.4)';
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (!isAnalyzing) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)';
+                      e.currentTarget.style.boxShadow = '0 2px 10px rgba(74, 26, 140, 0.3)';
+                      e.currentTarget.style.transform = 'translateY(0)';
+                    }
+                  }}
                 >
                   <Sparkles size={14} className={isAnalyzing ? 'animate-spin' : ''} />
                   <span>{isAnalyzing ? 'Analyzing...' : 'Re-analyze'}</span>
@@ -1226,15 +1238,15 @@ export default function TopPagesPage({ user }) {
                   fontSize: 12.5,
                   fontWeight: 700,
                   color: '#ffffff',
-                  background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
-                  border: '1.5px solid #09060E',
+                  background: '#2D2D44',
+                  border: 'none',
                   borderRadius: 6,
                   cursor: 'pointer',
                   marginTop: 4,
-                  boxShadow: '0 4px 14px rgba(123, 47, 190, 0.35)'
+                  boxShadow: '0 2px 6px rgba(45, 45, 68, 0.25)'
                 }}
-                onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
+                onMouseEnter={e => e.currentTarget.style.background = '#1F1F30'}
+                onMouseLeave={e => e.currentTarget.style.background = '#2D2D44'}
               >
                 Close
               </button>
