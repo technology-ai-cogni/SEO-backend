@@ -249,8 +249,10 @@ export default function KeywordsPage({ user }) {
       setLoading(true);
       const fetchedKws = await fetchKeywordRows(proj.slug).catch(() => []);
       const normalizedKws = (fetchedKws || []).map((k, idx) => {
-        const rawSv = Number(String(k.sv || k.search_volume || k.volume || 0).replace(/[^0-9.]/g, '')) || 0;
-        const rawKd = Number(String(k.kd || k.kw_diff || k.difficulty || 0).replace(/[^0-9.]/g, '')) || null;
+        const svStr = String(k.sv ?? k.search_volume ?? k.volume ?? '').replace(/[^0-9.]/g, '');
+        const rawSv = svStr !== '' ? (Number(svStr) || 0) : null;
+        // keyword rows from fetchKeywordRows expose difficulty as `kwDiff` (db col kw_diff)
+        const rawKd = Number(String(k.kwDiff ?? k.kw_diff ?? k.kd ?? k.difficulty ?? k.keyword_difficulty ?? 0).replace(/[^0-9.]/g, '')) || null;
         const rawRank = Number(k.rank || k.position || k.rank_pos || k.intentRank || 0) || 0;
 
         return {
@@ -330,9 +332,10 @@ export default function KeywordsPage({ user }) {
   // Calculate Unique Landing Pages
   const totalPagesCount = new Set(keywordsData.map(k => k.landingPage).filter(Boolean)).size;
 
-  // Calculate Average Volume
-  const totalVolumeSum = keywordsData.reduce((acc, k) => acc + (k.sv || 0), 0);
-  const avgVolume = keywordsData.length > 0 ? Math.round(totalVolumeSum / keywordsData.length) : 0;
+  // Calculate Average Volume — only over keywords that actually have an SV value
+  const kwsWithSv = keywordsData.filter(k => k.sv != null);
+  const totalVolumeSum = kwsWithSv.reduce((acc, k) => acc + k.sv, 0);
+  const avgVolume = kwsWithSv.length > 0 ? Math.round(totalVolumeSum / kwsWithSv.length) : 0;
 
   // Checkbox handlers
   const handleSelectAll = (e) => {
@@ -357,7 +360,7 @@ export default function KeywordsPage({ user }) {
     const rows = filteredKeywords.map(k => [
       `"${(k.kw || k.keyword || '').replace(/"/g, '""')}"`,
       k.rank || '',
-      k.sv || 0,
+      k.sv ?? 'NA',
       k.kd || '',
       `"${(k.cluster || '').replace(/"/g, '""')}"`,
       `"${(k.category || '').replace(/"/g, '""')}"`,
@@ -1062,8 +1065,8 @@ export default function KeywordsPage({ user }) {
                     </td>
 
                     {/* SV */}
-                    <td style={{ padding: '12px 14px', fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap' }}>
-                      {row.sv.toLocaleString()}
+                    <td style={{ padding: '12px 14px', fontWeight: 800, color: row.sv != null ? '#0f172a' : '#94a3b8', whiteSpace: 'nowrap' }}>
+                      {row.sv != null ? row.sv.toLocaleString() : 'NA'}
                     </td>
 
                     {/* KW DIFF */}

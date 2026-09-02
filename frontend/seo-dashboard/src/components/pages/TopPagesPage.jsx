@@ -231,10 +231,10 @@ export default function TopPagesPage({ user }) {
     filteredPages.forEach(r => {
       const rowData = [
         r.url || '',
-        r.sv || 0,
+        r.sv ?? 'NA',
         r.rank || '',
         r.pageName || '',
-        r.kwDiff || 'n/a',
+        r.kd ?? 'n/a',
         r.cluster || '',
         r.category || '',
         r.type || '',
@@ -329,6 +329,16 @@ export default function TopPagesPage({ user }) {
     return () => { isMounted = false; };
   }, []);
 
+  // Close the project dropdown / filter popover when clicking outside them
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (!e.target.closest('.tp-project-menu')) setProjectMenuOpen(false);
+      if (!e.target.closest('.tp-filter-menu')) setFilterMenuOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   // Fetch page and keyword data for selected project strictly from Project Setup
   const loadPageDataForProject = async (proj) => {
     if (!proj?.slug) return;
@@ -348,8 +358,10 @@ export default function TopPagesPage({ user }) {
 
       if (kws.length > 0) {
         combinedPages = kws.map((k, idx) => {
-          const rawSv = Number(String(k.sv || k.search_volume || k.volume || 0).replace(/[^0-9.]/g, '')) || 0;
-          const rawKd = Number(String(k.kd || k.kw_diff || k.difficulty || 0).replace(/[^0-9.]/g, '')) || null;
+          const svStr = String(k.sv ?? k.search_volume ?? k.volume ?? '').replace(/[^0-9.]/g, '');
+          const rawSv = svStr !== '' ? (Number(svStr) || 0) : null;
+          // keyword rows from fetchKeywordRows expose difficulty as `kwDiff` (db col kw_diff)
+          const rawKd = Number(String(k.kwDiff ?? k.kw_diff ?? k.kd ?? k.difficulty ?? k.keyword_difficulty ?? 0).replace(/[^0-9.]/g, '')) || null;
           const rawRank = Number(k.rank || k.position || k.rank_pos || k.intentRank || 0) || 0;
           const pageUrl = (k.landingPage || k.url || k.landing_page || k.page_url || k.page || proj.domain || '').trim();
           const kwName = k.kw || k.keyword || k.name || 'Keyword';
@@ -382,7 +394,7 @@ export default function TopPagesPage({ user }) {
             kw: p.pageName || p.url,
             pageName: p.pageName || 'PAGE',
             url: p.url,
-            sv: 0,
+            sv: null,
             rank: 0,
             kd: null,
             cluster: p.cluster || 'General',
@@ -586,7 +598,7 @@ export default function TopPagesPage({ user }) {
                 margin: 0
               }}>
                 <span>Project:</span>
-                <div style={{ position: 'relative', display: 'inline-block' }}>
+                <div className="tp-project-menu" style={{ position: 'relative', display: 'inline-block' }}>
                   <button
                     onClick={() => setProjectMenuOpen(!projectMenuOpen)}
                     style={{
@@ -1128,7 +1140,7 @@ export default function TopPagesPage({ user }) {
         )}
 
         {/* Filter Trigger Button & Popover */}
-        <div style={{ position: 'relative' }}>
+        <div className="tp-filter-menu" style={{ position: 'relative' }}>
           <button
             onClick={() => setFilterMenuOpen(!filterMenuOpen)}
             title="Filter options"
@@ -1330,8 +1342,8 @@ export default function TopPagesPage({ user }) {
                     </td>
 
                     {/* SV */}
-                    <td style={{ padding: '12px 16px', fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap' }}>
-                      {row.sv ? row.sv.toLocaleString() : 0}
+                    <td style={{ padding: '12px 16px', fontWeight: 800, color: row.sv != null ? '#0f172a' : '#94a3b8', whiteSpace: 'nowrap' }}>
+                      {row.sv != null ? row.sv.toLocaleString() : 'NA'}
                     </td>
 
                     {/* RANK */}
