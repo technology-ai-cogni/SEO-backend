@@ -419,13 +419,82 @@ function RankHoverCell({ count, kwList, title, color }) {
   );
 }
 
+// Local "today" as YYYY-MM-DD -- matches what <input type="date"> produces and
+// avoids the UTC off-by-one that new Date().toISOString() can cause near midnight.
+function getLocalTodayStr() {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+// A timestamp (ISO string / Date) -> local YYYY-MM-DD. Used to bucket ai_analysis
+// history rows (created_at) by the calendar day they were run on.
+function tsToLocalDateStr(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+const CAL_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const CAL_WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+// Build per-engine (+ overview) tabResults from a list of ai_analysis rows.
+// Latest row wins per engine. Returns {} when `rows` is empty.
+function buildTabResultsFromHistory(rows) {
+  const engines = ['chatgpt', 'gemini', 'ai overview'];
+  const out = {};
+  engines.forEach((eng) => {
+    const match = (rows || [])
+      .filter((h) => {
+        const e = (h.engine || '').toLowerCase().trim();
+        return e === eng || e.includes(eng);
+      })
+      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0];
+    if (match) {
+      out[eng] = [{
+        ai_visibility: match.ai_visibility || 0,
+        mentions: match.mentions || 0,
+        cited_pages: match.cited_pages || 0,
+        mentioned_keywords: match.mentioned_keywords || [],
+        cited_pages_list: match.cited_pages_list || [],
+        total_keywords: match.total_keywords || 0,
+      }];
+    }
+  });
+  const valid = engines.map((e) => out[e] && out[e][0]).filter(Boolean);
+  if (valid.length > 0) {
+    out['overview'] = [{
+      ...valid[0],
+      mentions: valid.reduce((s, r) => s + (r.mentions || 0), 0),
+      cited_pages: valid.reduce((s, r) => s + (r.cited_pages || 0), 0),
+    }];
+  }
+  return out;
+}
+
 export default function PositionAnalysisPage({ onNavigate, user }) {
   const isReadOnly = isReadOnlyUser(user);
   const [associateAnalyzed, setAssociateAnalyzed] = useState(false);
   const [projects, setProjects] = useState([]);
   const [selectedSlug, setSelectedSlug] = useState('');
   const [activeProject, setActiveProject] = useState(null);
-  const userCanRunActions = (canRunActions(user) || canRunBrandDiscovery(user, activeProject?.slug)) && !associateAnalyzed;
+  // Base (historical-date) capability: associates get one Brand Discovery run per project.
+  const userCanRunActionsHistorical = (canRunActions(user) || canRunBrandDiscovery(user, activeProject?.slug)) && !associateAnalyzed;
+  // Capability that ignores the once-per-project cap -- used only when the calendar is on today.
+  const canRunBrandDiscoveryUnlimited = (() => {
+    if (!user || !user.role) return false;
+    const perms = (user.permissions || 'Default').trim().toLowerCase();
+    if (perms === 'view only' || perms === 'view') return false;
+    const role = user.role.toUpperCase();
+    if (role === 'ADMIN') return true;
+    if (canRunActions(user)) return true;
+    if (role === 'INTERNAL_TEAM_LEAD' || role === 'CLIENT_TEAM_LEAD') return true;
+    return isAssociateUser(user);
+  })();
   const [kwCount, setKwCount] = useState(0);
   const [pageCount, setPageCount] = useState(0);
   const [blogCount, setBlogCount] = useState(0);
@@ -447,11 +516,41 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   const [showDateModal, setShowDateModal] = useState(false);
   const [isAnalyzingOverlay, setIsAnalyzingOverlay] = useState(false);
 
+  // Custom calendar popup (replaces the native date picker so we can mark days).
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [calMonth, setCalMonth] = useState(() => {
+    const t = new Date();
+    return new Date(t.getFullYear(), t.getMonth(), 1);
+  });
+  // Raw ai_analysis history rows for this project (drives the day marks + historical view).
+  const [aiHistory, setAiHistory] = useState([]);
+
   // Hidden cards state
   const [closedCards, setClosedCards] = useState({});
   const [selectedRegion, setSelectedRegion] = useState('US');
-  const [selectedDate, setSelectedDate] = useState(() => localStorage.getItem('bd_selected_date') || new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(() => localStorage.getItem('bd_selected_date') || getLocalTodayStr());
   const dateInputRef = useRef(null);
+
+  // Brand Discovery can only be analyzed for the current date. On any other date
+  // the Analyze / Re-analyze button opens a "switch to current date" prompt.
+  const todayStr = getLocalTodayStr();
+  const isCurrentDateSelected = !selectedDate || selectedDate === todayStr;
+
+  // Local YYYY-MM-DD for every day this project has at least one stored analyze hit.
+  const hitDateSet = (() => {
+    const s = new Set();
+    (aiHistory || []).forEach((h) => {
+      const ds = tsToLocalDateStr(h.created_at);
+      if (ds) s.add(ds);
+    });
+    return s;
+  })();
+
+  // On the current date: unlimited runs. On a historical date: one run per project (associates).
+  const userCanRunActions = isCurrentDateSelected ? canRunBrandDiscoveryUnlimited : userCanRunActionsHistorical;
+  // On the current date, skip the once-per-project AI-model cap too.
+  const canRunAiModelNow = (engine, hasData) =>
+    isCurrentDateSelected || canRunAiModelAnalysis(user, activeProject?.slug, engine, hasData);
   const countryListRef = useRef(null);
   const [activeTooltip, setActiveTooltip] = useState(null);
   const [hoveredChartLine, setHoveredChartLine] = useState(null);
@@ -588,6 +687,12 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       const isCountryMenu = event.target.closest('.country-menu-panel');
       if (!isCountryButton && !isCountryMenu) {
         setCountryMenuOpen(false);
+      }
+
+      const isCalButton = event.target.closest('.bd-cal-btn');
+      const isCalPanel = event.target.closest('.bd-cal-panel');
+      if (!isCalButton && !isCalPanel) {
+        setShowCalendar(false);
       }
     }
 
@@ -774,6 +879,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     // 2. Fetch latest AI Analysis runs directly from Supabase DB for cross-system syncing
     fetchAiAnalysisHistory(activeProject.slug)
       .then(history => {
+        setAiHistory(Array.isArray(history) ? history : []);
         if (history && history.length > 0) {
           const dbTabResults = {};
           const engines = ['chatgpt', 'gemini', 'ai overview'];
@@ -849,6 +955,28 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       .catch(err => console.warn('[PositionAnalysisPage] Supabase history sync notice:', err));
 
   }, [activeProject?.slug]);
+
+  // When the calendar is moved to a past day, swap the AI cards / gauge / platform
+  // table over to that day's stored ai_analysis snapshot (latest run that day per
+  // engine). Back on today, restore the newest run per engine.
+  useEffect(() => {
+    if (!activeProject?.slug) return;
+    const today = getLocalTodayStr();
+    const isToday = !selectedDate || selectedDate === today;
+
+    if (isToday) {
+      if (aiHistory && aiHistory.length > 0) {
+        const latest = buildTabResultsFromHistory(aiHistory);
+        if (Object.keys(latest).length > 0) {
+          setTabResults(prev => ({ ...prev, ...latest }));
+        }
+      }
+      return;
+    }
+
+    const dayRows = (aiHistory || []).filter(h => tsToLocalDateStr(h.created_at) === selectedDate);
+    setTabResults(buildTabResultsFromHistory(dayRows));
+  }, [selectedDate, aiHistory, activeProject?.slug]);
 
   const saveHitToPeriodHistory = (projectSlug, engineKey, visibilityResult, optionalKws = null) => {
     if (!projectSlug || !engineKey) return;
@@ -937,6 +1065,14 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     const targetEngine = null;
 
     if (!activeProject?.slug) return;
+
+    // Analyze / Re-analyze is only allowed when the calendar (top of page) is on
+    // today's date. On a past/other date, prompt the user to switch instead.
+    if (!isCurrentDateSelected) {
+      setShowDateModal(true);
+      return;
+    }
+
     const domain = activeProject.domain || activeProject.name || '';
     const kwSource = (topKeywords && topKeywords.length > 0) ? topKeywords : projectKeywords;
     const kwList = kwSource.map(k => (typeof k === 'string' ? k : (k.kw || k.keyword || k.name))).filter(Boolean);
@@ -1035,7 +1171,9 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
 
             setTabResults(prev => ({ ...prev, ...newTabResults }));
 
-            if (isAssociateUser(user)) {
+            // Only consume the associate's one-shot run on a historical date.
+            // On the current date, Brand Discovery is unlimited.
+            if (isAssociateUser(user) && !isCurrentDateSelected) {
               recordAiModelAnalysisRun(user, activeProject?.slug, 'all');
               setAssociateAnalyzed(true);
             }
@@ -1090,7 +1228,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
             localStorage.setItem(`ai_results_${activeProject.slug}_${currentTab}`, JSON.stringify(results));
             saveHitToPeriodHistory(activeProject.slug, engineKey, visibilityResult);
 
-            if (isAssociateUser(user)) {
+            if (isAssociateUser(user) && !isCurrentDateSelected) {
               recordAiModelAnalysisRun(user, activeProject?.slug, engineKey);
               setAssociateAnalyzed(true);
             }
@@ -1103,6 +1241,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       })();
 
       await Promise.allSettled([organicTaskPromise, aiTaskPromise]);
+
+      // Refresh stored history so today's new hit shows a mark on the calendar
+      // (and the bottom trend graph picks it up on next render).
+      try {
+        const freshHistory = await fetchAiAnalysisHistory(activeProject.slug);
+        setAiHistory(Array.isArray(freshHistory) ? freshHistory : []);
+      } catch (_) {}
     } finally {
       setIsAnalyzingOverlay(false);
     }
@@ -1789,12 +1934,21 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                   )}
                 </div>
 
-                {/* Custom Calendar Date Selector Button beside Country */}
+                {/* Custom Calendar Date Selector -- red dot = day had an analyze hit, green dot = today */}
                 <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                   <button
+                    className="bd-cal-btn"
                     onClick={() => {
-                      const hiddenInput = document.getElementById('bd_header_date_picker');
-                      if (hiddenInput) hiddenInput.showPicker ? hiddenInput.showPicker() : hiddenInput.click();
+                      setShowCalendar(v => {
+                        const next = !v;
+                        if (next) {
+                          try {
+                            const p = (selectedDate || getLocalTodayStr()).split('-');
+                            setCalMonth(new Date(Number(p[0]), Number(p[1]) - 1, 1));
+                          } catch (_) {}
+                        }
+                        return next;
+                      });
                     }}
                     title="Select Date"
                     style={{
@@ -1826,18 +1980,111 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       })()}
                     </span>
                   </button>
-                  <input
-                    id="bd_header_date_picker"
-                    type="date"
-                    value={selectedDate}
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        setSelectedDate(e.target.value);
-                        localStorage.setItem('bd_selected_date', e.target.value);
-                      }
-                    }}
-                    style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 0, height: 0 }}
-                  />
+
+                  {showCalendar && (
+                    <div
+                      className="bd-cal-panel"
+                      style={{ position: 'absolute', top: '100%', left: 0, marginTop: 6, background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 12, boxShadow: '0 12px 30px -8px rgba(0,0,0,0.18)', zIndex: 1000, width: 264, padding: 12, color: '#0f172a', fontWeight: 500 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <button onClick={() => setCalMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 16, color: '#475569', lineHeight: 1, padding: '2px 6px' }}>‹</button>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: '#0f172a' }}>
+                          {CAL_MONTH_NAMES[calMonth.getMonth()]} {calMonth.getFullYear()}
+                        </span>
+                        <button
+                          onClick={() => {
+                            const nm = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1);
+                            const cur = new Date();
+                            if (nm <= new Date(cur.getFullYear(), cur.getMonth(), 1)) setCalMonth(nm);
+                          }}
+                          style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 16, color: '#475569', lineHeight: 1, padding: '2px 6px' }}
+                        >›</button>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2, marginBottom: 2 }}>
+                        {CAL_WEEKDAYS.map((w, i) => (
+                          <div key={i} style={{ textAlign: 'center', fontSize: 10.5, fontWeight: 700, color: '#94a3b8', padding: '2px 0' }}>{w}</div>
+                        ))}
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
+                        {(() => {
+                          const y = calMonth.getFullYear();
+                          const m = calMonth.getMonth();
+                          const startDow = new Date(y, m, 1).getDay();
+                          const daysIn = new Date(y, m + 1, 0).getDate();
+                          const cells = [];
+                          for (let i = 0; i < startDow; i++) cells.push(null);
+                          for (let d = 1; d <= daysIn; d++) cells.push(d);
+                          return cells.map((d, idx) => {
+                            if (d === null) return <div key={`e${idx}`} />;
+                            const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                            const isToday = ds === todayStr;
+                            const isHit = hitDateSet.has(ds);
+                            const isSelected = ds === selectedDate;
+                            const isFuture = ds > todayStr;
+                            return (
+                              <button
+                                key={ds}
+                                disabled={isFuture}
+                                onClick={() => {
+                                  setSelectedDate(ds);
+                                  try { localStorage.setItem('bd_selected_date', ds); } catch (_) {}
+                                  setShowCalendar(false);
+                                }}
+                                title={isHit ? 'Analyze was run on this day - click to view that snapshot' : (isToday ? 'Today' : '')}
+                                style={{
+                                  position: 'relative',
+                                  height: 30,
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  fontSize: 12,
+                                  fontWeight: isSelected ? 800 : 500,
+                                  color: isFuture ? '#cbd5e1' : (isSelected ? '#2563eb' : '#0f172a'),
+                                  background: 'transparent',
+                                  border: isSelected ? '2px solid #2563eb' : '2px solid transparent',
+                                  borderRadius: 7,
+                                  cursor: isFuture ? 'default' : 'pointer'
+                                }}
+                              >
+                                {d}
+                                {(isToday || isHit) && (
+                                  <span style={{
+                                    position: 'absolute', bottom: 2, left: '50%', transform: 'translateX(-50%)',
+                                    width: 5, height: 5, borderRadius: '50%',
+                                    background: isToday ? '#16a34a' : '#dc2626'
+                                  }} />
+                                )}
+                              </button>
+                            );
+                          });
+                        })()}
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 10, color: '#64748b', fontWeight: 600 }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#16a34a', display: 'inline-block' }} /> Today
+                          </span>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#dc2626', display: 'inline-block' }} /> Analyzed
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const t = getLocalTodayStr();
+                            setSelectedDate(t);
+                            try { localStorage.setItem('bd_selected_date', t); } catch (_) {}
+                            const tn = new Date();
+                            setCalMonth(new Date(tn.getFullYear(), tn.getMonth(), 1));
+                            setShowCalendar(false);
+                          }}
+                          style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', background: 'transparent', border: 'none', cursor: 'pointer' }}
+                        >
+                          Today
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -1851,7 +2098,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
           justifyContent: 'flex-end',
           gap: 10
         }}>
-          {userCanRunActions && canRunAiModelAnalysis(user, activeProject?.slug, 'all', Object.values(tabResults).some(r => r && r.length > 0)) && (
+          {userCanRunActions && canRunAiModelNow('all', Object.values(tabResults).some(r => r && r.length > 0)) && (
             <button
               onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
               disabled={Object.values(analyzingTabs).some(Boolean)}
@@ -2037,7 +2284,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       padding: '28px 12px',
                       textAlign: 'center'
                     }}>
-                      {userCanRunActions && canRunAiModelAnalysis(user, activeProject?.slug, aiTab, currentTabResults.length > 0) && (
+                      {userCanRunActions && canRunAiModelNow(aiTab, currentTabResults.length > 0) && (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
                           <button
                             onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
@@ -2574,26 +2821,57 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
             const liveMentionedKws = visibilityData.mentioned_keywords || [];
             const liveCitedPagesList = visibilityData.cited_pages_list || [];
 
-            // Group unique URLs and count citations (mapping to real project pages)
-            const uniqueCitedUrlsMap = new Map();
-            liveCitedPagesList.forEach(item => {
-              const match = item.match(/https?:\/\/[^\s]+/i);
-              let url = match ? match[0].trim() : item.trim();
-
-              const itemKwMatch = item.includes(' - ') ? item.split(' - ')[0].trim().toLowerCase() : '';
-              if (itemKwMatch && topKeywords && topKeywords.length > 0) {
-                const foundKwRow = topKeywords.find(k => String(k.kw || k.keyword || '').trim().toLowerCase() === itemKwMatch);
-                if (foundKwRow && (foundKwRow.landingPage || foundKwRow.page_url || foundKwRow.url)) {
-                  url = foundKwRow.landingPage || foundKwRow.page_url || foundKwRow.url;
+            // cited_pages_list entries are the keyword/query strings where the
+            // domain is cited (the AI agent does NOT return URLs -- see
+            // exp-1/agents/openai_agent.py). Resolve each to the real project
+            // landing page so the list item can be a working hyperlink; keep the
+            // readable label but expose the full page URL on hover/click.
+            const kwPools = [topKeywords || [], projectKeywords || []];
+            const resolvePageUrlForKeyword = (kwText) => {
+              const t = String(kwText || '').trim().toLowerCase();
+              if (!t) return '';
+              for (const pool of kwPools) {
+                let row = pool.find(k => String(k.kw || k.keyword || '').trim().toLowerCase() === t);
+                if (!row) {
+                  row = pool.find(k => {
+                    const kt = String(k.kw || k.keyword || '').trim().toLowerCase();
+                    return kt && (kt.includes(t) || t.includes(kt));
+                  });
+                }
+                if (row) {
+                  const u = row.landingPage || row.landing_page_url || row.page_url || row.url || '';
+                  if (u) return u;
                 }
               }
+              return '';
+            };
 
-              if (url) {
-                uniqueCitedUrlsMap.set(url, (uniqueCitedUrlsMap.get(url) || 0) + 1);
+            const uniqueCitedUrlsMap = new Map();
+            liveCitedPagesList.forEach(raw => {
+              const entry = String(raw || '').trim();
+              if (!entry) return;
+
+              // Support "keyword - url" / embedded-url formats too
+              let kwPart = entry;
+              const dashSplit = entry.split(/\s[-–—]\s/);
+              if (dashSplit.length > 1) kwPart = dashSplit[0].trim();
+              const embeddedUrl = entry.match(/https?:\/\/[^\s)]+/i);
+
+              let pageUrl = resolvePageUrlForKeyword(kwPart);
+              if (!pageUrl && embeddedUrl) pageUrl = embeddedUrl[0].trim();
+              if (!pageUrl && dashSplit.length > 1 && /\.[a-z]{2,}/i.test(dashSplit[1])) {
+                pageUrl = dashSplit[1].trim();
               }
+
+              // Label: the actual resolved page URL, otherwise the cited query.
+              const label = pageUrl || kwPart || entry;
+
+              const key = (pageUrl || label).toLowerCase();
+              const existing = uniqueCitedUrlsMap.get(key);
+              if (existing) existing.count += 1;
+              else uniqueCitedUrlsMap.set(key, { label, url: pageUrl, query: kwPart || entry, count: 1 });
             });
-            const uniqueCitedPages = Array.from(uniqueCitedUrlsMap.entries())
-              .map(([url, count]) => ({ url, count }))
+            const uniqueCitedPages = Array.from(uniqueCitedUrlsMap.values())
               .sort((a, b) => b.count - a.count);
 
             return (
@@ -2670,39 +2948,49 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                           N/A
                         </div>
                       ) : uniqueCitedPages.length > 0 ? (
-                        uniqueCitedPages.map((item, idx) => (
-                          <div
-                            key={idx}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              padding: '6px 10px',
-                              borderRadius: 6,
-                              background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
-                              fontSize: 12
-                            }}
-                          >
-                            <a
-                              href={item.url}
-                              target="_blank"
-                              rel="noreferrer"
+                        uniqueCitedPages.map((item, idx) => {
+                          const hasPage = Boolean(item.url);
+                          const href = hasPage
+                            ? (/^https?:\/\//i.test(item.url) ? item.url : `https://${item.url}`)
+                            : `https://www.google.com/search?q=${encodeURIComponent(item.query || item.label)}`;
+                          return (
+                            <div
+                              key={idx}
                               style={{
-                                fontWeight: 600,
-                                color: '#2563eb',
-                                textOverflow: 'ellipsis',
-                                overflow: 'hidden',
-                                whiteSpace: 'nowrap',
-                                maxWidth: 200,
-                                textDecoration: 'none'
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: 8,
+                                padding: '6px 10px',
+                                borderRadius: 6,
+                                background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
+                                fontSize: 12
                               }}
-                              title={item.url}
                             >
-                              {item.url}
-                            </a>
-
-                          </div>
-                        ))
+                              <a
+                                href={href}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 5,
+                                  fontWeight: 600,
+                                  color: '#2563eb',
+                                  textOverflow: 'ellipsis',
+                                  overflow: 'hidden',
+                                  whiteSpace: 'nowrap',
+                                  maxWidth: 200,
+                                  textDecoration: 'none'
+                                }}
+                                title={hasPage ? `${item.query || item.label}\n${href}` : `${item.query || item.label} — no page mapped, opens Google search`}
+                              >
+                                <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{item.label}</span>
+                                <ExternalLink size={11} style={{ flexShrink: 0, opacity: 0.7 }} />
+                              </a>
+                            </div>
+                          );
+                        })
                       ) : (
                         <div style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic', padding: 10, textAlign: 'center' }}>
                           No cited pages yet.
@@ -3419,6 +3707,94 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 }}
               >
                 Acknowledge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Past / non-current date guard for Analyze & Re-analyze */}
+      {showDateModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(15, 23, 42, 0.75)',
+          backdropFilter: 'blur(6px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999,
+          padding: 20
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 20,
+            maxWidth: 460,
+            width: '100%',
+            padding: 32,
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            textAlign: 'center',
+            border: '1px solid #e2e8f0',
+            animation: 'fadeIn 0.2s ease-out'
+          }}>
+            <div style={{
+              width: 64,
+              height: 64,
+              borderRadius: '50%',
+              background: '#eff6ff',
+              color: '#2563eb',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 20px auto',
+              border: '1px solid #bfdbfe'
+            }}>
+              <Calendar size={30} />
+            </div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: '0 0 12px 0', fontFamily: 'var(--font-display, inherit)' }}>
+              Switch to Current Date
+            </h2>
+            <p style={{ fontSize: 14, color: '#475569', margin: '0 0 26px 0', lineHeight: 1.6 }}>
+              The calendar is set to <strong style={{ color: '#0f172a' }}>{selectedDate}</strong>. Brand Discovery can only be analyzed for the current date ({todayStr}). Switch to the current date to run Analyze / Re-analyze.
+            </p>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <button
+                onClick={() => setShowDateModal(false)}
+                style={{
+                  flex: 1,
+                  padding: '11px 20px',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: '#334155',
+                  background: '#f1f5f9',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 10,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const t = getLocalTodayStr();
+                  setSelectedDate(t);
+                  try { localStorage.setItem('bd_selected_date', t); } catch (_) {}
+                  setShowDateModal(false);
+                }}
+                style={{
+                  flex: 1,
+                  padding: '11px 20px',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: '#ffffff',
+                  background: '#2563eb',
+                  border: 'none',
+                  borderRadius: 10,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(37, 99, 235, 0.25)'
+                }}
+              >
+                Go to Current Date
               </button>
             </div>
           </div>

@@ -2441,6 +2441,137 @@ def get_project_summary_endpoint(project_slug: str, user: dict = Depends(require
         }
 
 
+class KeywordPushPotentialRequest(BaseModel):
+    keywords: List[Dict[str, Any]]
+    domain: Optional[str] = None
+    country: Optional[str] = "India"
+
+
+@app.post("/projects/{project}/keyword-push-potential")
+def keyword_push_potential_endpoint(project: str, payload: KeywordPushPotentialRequest):
+    """AI triage of an already-shortlisted keyword list (the caller passes
+    keywords the site ranks 5-20 for) into THREE batches by how confidently
+    each can be pushed UP toward page 1 / top 3 with an off-page campaign
+    (authority guest posts, contextual links, brand mentions) plus light
+    on-page tuning:
+
+      high   -> near-certain movers
+      medium -> real but less certain
+      low    -> unlikely to move meaningfully with reasonable effort
+
+    Each input row is echoed back with 'batch', 'confidence' (0-100) and
+    'reason'. Falls back to a deterministic rank/difficulty/volume heuristic
+    for any keyword the model doesn't classify (or if the model call fails),
+    so the response always covers every input keyword.
+    """
+    rows = payload.keywords or []
+    if not rows:
+        return {"batches": {"high": [], "medium": [], "low": []}, "summary": "No keywords supplied."}
+
+    lines = []
+    for i, r in enumerate(rows):
+        lines.append(
+            f'{i + 1}. keyword="{r.get("keyword", "")}" | rank={r.get("rank", "?")} | '
+            f'search_volume={r.get("sv", "?")} | difficulty={r.get("kd", "?")} | '
+            f'category="{r.get("category", "")}" | cluster="{r.get("cluster", "")}"'
+        )
+    kw_block = "\n".join(lines)
+
+    domain = (payload.domain or "").strip()
+    country = payload.country or "India"
+
+    system_prompt = (
+        "You are a senior SEO strategist. You are given a shortlist of keywords a site "
+        "currently ranks between position 5 and 20 for. Judge how confidently EACH keyword "
+        "can be pushed UP toward page 1 / top 3 over the next 1-3 months using an off-page "
+        "campaign (authority guest posts, contextual backlinks, brand mentions) plus light "
+        "on-page tuning.\n\n"
+        "Weigh, roughly in this order:\n"
+        "1. Current rank -- position 5-10 is far easier to convert than 15-20.\n"
+        "2. Keyword difficulty -- lower is better; very high difficulty caps the ceiling.\n"
+        "3. Search intent fit -- commercial / navigational / local intent aligned to the "
+        "domain moves well; broad informational or off-topic intent is weak.\n"
+        "4. Search volume -- higher volume raises priority, but a high-volume term stuck at "
+        "rank 19 on a brutal SERP is still a weak mover.\n"
+        "5. SERP realism -- if page 1 is dominated by giant brands / aggregators, be conservative.\n\n"
+        "Assign every keyword EXACTLY ONE batch:\n"
+        '- "high": you are close to certain it can be pushed up.\n'
+        '- "medium": real potential but meaningfully less certain.\n'
+        '- "low": unlikely to move meaningfully with reasonable effort.\n\n'
+        'Return ONLY valid JSON: {"results":[{"index":<1-based int>,"batch":"high|medium|low",'
+        '"confidence":<int 0-100>,"reason":"<max 18 words>"}],"summary":"<max 30 words>"}'
+    )
+    user_prompt = f"Target domain: {domain or '(not provided)'}\nRegion: {country}\n\nKeywords:\n{kw_block}"
+
+    by_index = {}
+    summary = ""
+    try:
+        client = category_checker.get_openai_client()
+        resp = client.chat.completions.create(
+            model=category_checker.OPENAI_CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+        parsed = json.loads(resp.choices[0].message.content)
+        for item in parsed.get("results", []):
+            try:
+                by_index[int(item.get("index"))] = item
+            except (TypeError, ValueError):
+                continue
+        summary = str(parsed.get("summary", "")).strip()
+    except Exception as e:
+        print(f"[keyword_push_potential] AI notice: {e}", file=sys.stderr, flush=True)
+
+    def _num(v, default=0.0):
+        try:
+            return float(str(v).replace(",", "").strip() or default)
+        except (TypeError, ValueError):
+            return default
+
+    def _heuristic(r):
+        rank = _num(r.get("rank"), 99)
+        kd = _num(r.get("kd"), 0)
+        sv = _num(r.get("sv"), 0)
+        if rank <= 10 and kd <= 40 and sv > 0:
+            return "high", 80, "Close to page 1 with manageable difficulty."
+        if rank <= 15 and kd <= 60:
+            return "medium", 55, "Moderate distance to page 1 and difficulty."
+        return "low", 30, "Far from page 1 or a hard SERP."
+
+    batches = {"high": [], "medium": [], "low": []}
+    for i, r in enumerate(rows):
+        item = by_index.get(i + 1)
+        if item and str(item.get("batch", "")).lower() in batches:
+            batch = str(item["batch"]).lower()
+            try:
+                conf = max(0, min(100, int(item.get("confidence", 50))))
+            except (TypeError, ValueError):
+                conf = 50
+            reason = str(item.get("reason", "")).strip()
+        else:
+            batch, conf, reason = _heuristic(r)
+        out = dict(r)
+        out["batch"] = batch
+        out["confidence"] = conf
+        out["reason"] = reason
+        batches[batch].append(out)
+
+    for k in batches:
+        batches[k].sort(key=lambda x: x.get("confidence", 0), reverse=True)
+
+    if not summary:
+        summary = (
+            f"{len(batches['high'])} high-confidence, {len(batches['medium'])} moderate, "
+            f"{len(batches['low'])} low-potential keywords."
+        )
+
+    return {"batches": batches, "summary": summary}
+
+
 @app.post("/competitors/classify-urls")
 def classify_competitor_urls_endpoint(req: ClassifyUrlsRequest):
     """

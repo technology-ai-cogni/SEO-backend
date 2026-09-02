@@ -2285,6 +2285,29 @@ export async function fetchAiAnalysisHistory(projectSlug, engine = '') {
 }
 
 
+// AI triage of rank 5-20 keywords into 3 push-potential batches.
+// Returns { high: [...], medium: [...], low: [...] } (each row echoed back
+// with batch / confidence / reason), or null if the backend is unavailable
+// so the caller can fall back to a local heuristic.
+export async function analyzeKeywordPushPotential(projectSlug, keywords, domain = '', country = 'India') {
+  const apiBase = getApiBaseUrl();
+  try {
+    const res = await fetch(`${apiBase}/projects/${encodeURIComponent(projectSlug)}/keyword-push-potential`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keywords: keywords || [], domain, country })
+    });
+    if (res.ok) {
+      const json = await res.json();
+      return json.batches || { high: [], medium: [], low: [] };
+    }
+  } catch (e) {
+    console.warn('[analyzeKeywordPushPotential] backend notice:', e);
+  }
+  return null;
+}
+
+
 // --- Monthly Operations API Calls -------------------------
 const API_BASE = getApiBaseUrl();
 
