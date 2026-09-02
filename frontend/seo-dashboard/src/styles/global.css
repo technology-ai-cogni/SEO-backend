@@ -1,46 +1,75 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg: #f4f6f9;
-  --surface: #ffffff;
-  --surface-2: #f8f9fb;
-  --border: #e5e8ef;
-  --border-hover: #c8cdd8;
-  --text-primary: #0f1523;
-  --text-secondary: #5a6478;
-  --text-muted: #9199ab;
-  --accent: #5c4af2;
-  --accent-light: #ede9ff;
-  --accent-hover: #4936d4;
-  --green: #16a34a;
-  --green-bg: #dcfce7;
-  --red: #dc2626;
-  --red-bg: #fee2e2;
-  --amber: #d97706;
-  --amber-bg: #fef3c7;
-  --blue: #2563eb;
-  --blue-bg: #dbeafe;
+  /* Hariba.ai Luminous Brand Canvas & Neutrals (Vibrant Light Mode) */
+  --bg: #F4F1FA;                     /* Soft Luminous Lavender-Pearl Canvas */
+  --surface: #FFFFFF;                /* Crisp Pure White Floating Surface */
+  --surface-2: #EAE5F5;              /* Soft Violet-Tinted Surface */
+  --border: #E2DBEC;                 /* Refined Soft Lilac Border */
+  --border-hover: #B8A8D4;           /* Active Border on Hover */
+  --text-primary: #1A1A1A;           /* Near Black */
+  --text-secondary: #4E4E61;         /* Deep Slate Gray */
+  --text-muted: #8A8A9A;             /* Neutral Slate */
+
+  /* Primary Colors — Logo Gradient (Exact Spec) */
+  --deep-purple: #4A1A8C;            /* Pantone 266 C */
+  --mid-purple: #7B2FBE;             /* Pantone 267 C */
+  --hot-pink: #C8196B;               /* Pantone 233 C */
+  --magenta: #D4007A;                /* Pantone 234 C */
+  
+  --accent: #7B2FBE;                 /* Mid Purple signature */
+  --accent-dark: #4A1A8C;            /* Deep Purple */
+  --accent-light: #F4ECFB;           /* Luminous soft violet-pink */
+  --accent-light-border: #E4C8F7;
+  --accent-hover: #4A1A8C;
+  --accent-gradient: linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 35%, #C8196B 70%, #D4007A 100%);
+  --accent-magenta: #D4007A;
+  --accent-magenta-light: #FDEBF4;
+  --accent-pink: #C8196B;
+
+  /* Secondary Colors — AI Brand Extension (Exact Spec) */
+  --electric-blue: #00C2FF;          /* Digital accent / CTA highlights */
+  --cyber-teal: #00E5C3;             /* Success states / data viz */
+  --accent-slate: #2D2D44;           /* Card backgrounds / UI surfaces */
+  --btn-primary-bg: #1A1A1A;         /* Dark solid high-contrast button */
+  --btn-primary-hover: #2E2E38;      /* Dark solid button hover */
+
+  /* Status Colors */
+  --green: #00BFA2;                  /* Cyber Teal adapted for light contrast */
+  --green-bg: #E6FAF6;
+  --red: #D4007A;                    /* Brand Magenta for alerts */
+  --red-bg: #FDEBF4;
+  --amber: #E58E00;
+  --amber-bg: #FFF8EB;
+  --blue: #00A6DF;                   /* Electric Blue adapted for light contrast */
+  --blue-bg: #E6F8FF;
+
   --sidebar-w: 240px;
-  --topbar-h: 56px;
+  --topbar-h: 60px;
   --radius: 10px;
   --radius-sm: 6px;
-  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --shadow: 0 1px 3px rgba(45, 45, 68, 0.05), 0 1px 2px rgba(45, 45, 68, 0.03);
+  --shadow-md: 0 4px 20px -2px rgba(74, 26, 140, 0.08), 0 2px 6px -1px rgba(45, 45, 68, 0.04);
+  --shadow-accent: 0 4px 16px rgba(123, 47, 190, 0.28);
   --font-display: 'Plus Jakarta Sans', sans-serif;
   --font-body: 'Inter', sans-serif;
 
-  /* Module accent colors */
-  --search-color: #e74c6f;
-  --search-bg: #fdeef2;
-  --ai-color: #d4a017;
-  --ai-bg: #fef9e4;
-  --content-color: #3b82f6;
-  --content-bg: #dbeafe;
+  /* Module accent colors mapped to palette */
+  --search-color: #D4007A;           /* Magenta */
+  --search-bg: #FDEBF4;
+  --ai-color: #7B2FBE;               /* Mid Purple */
+  --ai-bg: #F6EEFD;
+  --content-color: #00C2FF;          /* Electric Blue */
+  --content-bg: #E6F8FF;
 }
 
 body {
   font-family: var(--font-body);
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image: radial-gradient(at 0% 0%, rgba(123, 47, 190, 0.04) 0px, transparent 50%),
+                    radial-gradient(at 100% 0%, rgba(212, 0, 122, 0.035) 0px, transparent 50%),
+                    radial-gradient(at 50% 100%, rgba(0, 194, 255, 0.03) 0px, transparent 50%);
+  background-attachment: fixed;
   color: var(--text-primary);
   font-size: 14px;
   line-height: 1.5;
@@ -91,3 +120,30 @@ body {
 .font-medium { font-weight: 500; }
 .text-sm { font-size: 12px; }
 .text-xs { font-size: 11px; }
+
+/* Hariba.ai Glass & Gradient Utilities */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.78) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.9) !important;
+  box-shadow: 0 16px 36px -10px rgba(121, 40, 202, 0.08), 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+}
+
+.brand-btn-primary,
+button.btn-primary,
+.btn-primary {
+  background: linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2) !important;
+  border: 1.5px solid #09060E !important;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.brand-btn-primary:hover,
+button.btn-primary:hover,
+.btn-primary:hover {
+  background: linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%) !important;
+  opacity: 0.96 !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 6px 22px rgba(123, 47, 190, 0.45), 0 3px 8px rgba(212, 0, 122, 0.28) !important;
+}

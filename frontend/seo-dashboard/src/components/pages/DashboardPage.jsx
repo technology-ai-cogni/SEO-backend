@@ -168,7 +168,7 @@ export default function DashboardPage({ activeProject, keywords = [], loadingKey
       {/* Metric cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
         <MetricCard label="Visibility (Top 30)" value={`${visibilityPct}%`} change={0} potential="Keywords in top 30">
-          <SparkLine data={sparklineData} color="#5c4af2" />
+          <SparkLine data={sparklineData} color="var(--accent)" />
         </MetricCard>
         <MetricCard label="Estimated Monthly Traffic" value={estTraffic.toLocaleString()} change={0} potential="CTR-weighted search volume">
           <SparkLine data={sparklineData} color="#16a34a" />

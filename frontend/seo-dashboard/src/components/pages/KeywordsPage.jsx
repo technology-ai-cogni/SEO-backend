@@ -372,7 +372,7 @@ export default function KeywordsPage({ user }) {
   };
 
   return (
-    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: '#f8fafc', minHeight: '100vh' }}>
+    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: 'var(--bg)', minHeight: '100vh' }}>
 
       {/* ─── HEADER BAR: Dashboard: domain.com v [Link] 🇮🇳 India v 📅 Date ───── */}
       {(() => {
@@ -393,8 +393,8 @@ export default function KeywordsPage({ user }) {
             background: '#ffffff',
             padding: '16px 20px',
             borderRadius: 12,
-            border: '1px solid #e2e8f0',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+            border: '1px solid #E4DFEE',
+            boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
           }}>
             {/* Left Side: Dashboard: domain.com v */}
             <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
@@ -405,7 +405,7 @@ export default function KeywordsPage({ user }) {
                 gap: 8,
                 fontSize: 20,
                 fontWeight: 800,
-                color: '#0f172a',
+                color: '#1A1A1A',
                 margin: 0
               }}>
                 <span>Project:</span>
@@ -418,7 +418,7 @@ export default function KeywordsPage({ user }) {
                       padding: 0,
                       fontSize: 20,
                       fontWeight: 800,
-                      color: '#7c3aed',
+                      color: 'var(--accent)',
                       cursor: 'pointer',
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -654,44 +654,44 @@ export default function KeywordsPage({ user }) {
         {/* CARD 1: Total Keywords */}
         <div style={{
           background: '#ffffff',
-          border: '1px solid #e2e8f0',
-          borderRadius: 10,
+          border: '1px solid #E4DFEE',
+          borderRadius: 12,
           padding: '16px 20px',
-          boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+          boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center'
         }}>
-          <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>Total Keywords</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>{totalKeywordsCount.toLocaleString()}</div>
+          <div style={{ fontSize: 12, color: '#6B677E', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 6 }}>Total Keywords</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#D4007A' }}>{totalKeywordsCount.toLocaleString()}</div>
         </div>
 
         {/* CARD 2: Ranks (Top 1, Top 3, Top 10) Column/Row-wise Layout */}
         <div style={{
           background: '#ffffff',
-          border: '1px solid #e2e8f0',
-          borderRadius: 10,
+          border: '1px solid #E4DFEE',
+          borderRadius: 12,
           padding: '14px 20px',
-          boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+          boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between'
         }}>
-          <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>
+          <div style={{ fontSize: 12, color: '#6B677E', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 6 }}>
             Top Keywords in Ranks
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, alignItems: 'center' }}>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Top 1</span>
-              <span style={{ fontSize: 18, fontWeight: 800, color: '#16a34a' }}>{top1Count}</span>
+              <span style={{ fontSize: 11, color: '#6B677E', fontWeight: 700 }}>Top 1</span>
+              <span style={{ fontSize: 18, fontWeight: 800, color: '#7B2FBE' }}>{top1Count}</span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #e2e8f0', paddingLeft: 8 }}>
-              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Top 3</span>
-              <span style={{ fontSize: 18, fontWeight: 800, color: '#eab308' }}>{top3Count}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #E4DFEE', paddingLeft: 8 }}>
+              <span style={{ fontSize: 11, color: '#6B677E', fontWeight: 700 }}>Top 3</span>
+              <span style={{ fontSize: 18, fontWeight: 800, color: '#00BFA2' }}>{top3Count}</span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #e2e8f0', paddingLeft: 8 }}>
-              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Top 10</span>
-              <span style={{ fontSize: 18, fontWeight: 800, color: '#7c3aed' }}>{top10Count}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #E4DFEE', paddingLeft: 8 }}>
+              <span style={{ fontSize: 11, color: '#6B677E', fontWeight: 700 }}>Top 10</span>
+              <span style={{ fontSize: 18, fontWeight: 800, color: '#D4007A' }}>{top10Count}</span>
             </div>
           </div>
         </div>
@@ -699,31 +699,31 @@ export default function KeywordsPage({ user }) {
         {/* CARD 3: Total Pages */}
         <div style={{
           background: '#ffffff',
-          border: '1px solid #e2e8f0',
-          borderRadius: 10,
+          border: '1px solid #E4DFEE',
+          borderRadius: 12,
           padding: '16px 20px',
-          boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+          boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center'
         }}>
-          <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>Total Pages</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>{totalPagesCount.toLocaleString()}</div>
+          <div style={{ fontSize: 12, color: '#6B677E', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 6 }}>Total Pages</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#7B2FBE' }}>{totalPagesCount.toLocaleString()}</div>
         </div>
 
         {/* CARD 4: Avg. Volume */}
         <div style={{
           background: '#ffffff',
-          border: '1px solid #e2e8f0',
-          borderRadius: 10,
+          border: '1px solid #E4DFEE',
+          borderRadius: 12,
           padding: '16px 20px',
-          boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+          boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center'
         }}>
-          <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>Avg. Volume</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>{avgVolume.toLocaleString()}</div>
+          <div style={{ fontSize: 12, color: '#6B677E', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 6 }}>Avg. Volume</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#00A6DF' }}>{avgVolume.toLocaleString()}</div>
         </div>
 
       </div>
@@ -731,13 +731,14 @@ export default function KeywordsPage({ user }) {
       {/* ─── SEARCH & ACTION BAR WITH FILTER LIST POPUP ───────────────────── */}
       <div style={{
         background: '#ffffff',
-        border: '1px solid #e2e8f0',
+        border: '1px solid #E4DFEE',
         borderRadius: 12,
         padding: '14px 20px',
         display: 'flex',
         alignItems: 'center',
         gap: 10,
-        flexWrap: 'wrap'
+        flexWrap: 'wrap',
+        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
       }}>
           {/* Search Box */}
           <div style={{ position: 'relative', flex: 1, maxWidth: 280 }}>
@@ -945,12 +946,15 @@ export default function KeywordsPage({ user }) {
                     fontSize: 12,
                     fontWeight: 700,
                     color: '#ffffff',
-                    background: '#7c3aed',
-                    border: 'none',
+                    background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                    border: '1.5px solid #09060E',
                     borderRadius: 6,
                     cursor: 'pointer',
-                    marginTop: 4
+                    marginTop: 4,
+                    boxShadow: '0 4px 14px rgba(123, 47, 190, 0.35)'
                   }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
                 >
                   Close
                 </button>
@@ -962,15 +966,15 @@ export default function KeywordsPage({ user }) {
       {/* ─── KEYWORDS DATA TABLE ───────────────────────────────────────────── */}
       <div style={{
         background: '#ffffff',
-        border: '1px solid #e2e8f0',
+        border: '1px solid #E4DFEE',
         borderRadius: 12,
         overflow: 'hidden',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
       }}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 12.5 }}>
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.03em', whiteSpace: 'nowrap' }}>
+              <tr style={{ background: '#FAF8FD', borderBottom: '1px solid #E4DFEE', color: '#4E4E61', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.03em', whiteSpace: 'nowrap' }}>
 
                 {/* CHECKBOX */}
                 <th style={{ padding: '12px 14px', width: 36, textAlign: 'center' }}>

@@ -15,9 +15,13 @@ export default function LandingPage({ activeTab, onNavigate, user, onLoginSucces
     }}>
       <style>{`
         .left-panel {
-          width: 58%;
+          width: 70%;
           position: relative;
-          background: radial-gradient(circle at 20% 30%, var(--accent) 0%, var(--accent-hover) 60%, #1e1085 100%);
+          background: radial-gradient(circle at 85% 35%, rgba(95, 35, 155, 0.32) 0%, transparent 60%),
+                      radial-gradient(circle at 12% 85%, rgba(185, 20, 105, 0.28) 0%, transparent 55%),
+                      radial-gradient(circle at 45% 95%, rgba(85, 20, 135, 0.35) 0%, transparent 60%),
+                      radial-gradient(circle at 15% 15%, rgba(45, 15, 75, 0.4) 0%, transparent 50%),
+                      linear-gradient(175deg, #09060E 0%, #100A1A 38%, #170C24 68%, #1C0B29 100%);
           display: flex;
           flex-direction: column;
           justify-content: space-between;
@@ -26,19 +30,21 @@ export default function LandingPage({ activeTab, onNavigate, user, onLoginSucces
           overflow: hidden;
         }
         .right-panel {
-          width: 42%;
-          background: radial-gradient(circle at 85% 15%, rgba(124, 58, 237, 0.05) 0%, transparent 65%), #f8fafc;
+          width: 30%;
+          background: #ffffff;
           display: flex;
           flex-direction: column;
-          justify-content: center;
-          align-items: center;
-          padding: 40px;
+          padding: 0;
           overflow-y: auto;
           position: relative;
+          min-height: 100vh;
         }
         .landing-auth-wrapper {
           width: 100%;
-          max-width: 430px;
+          min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+          flex: 1;
         }
         @media (max-width: 968px) {
           .landing-container {
@@ -59,29 +65,16 @@ export default function LandingPage({ activeTab, onNavigate, user, onLoginSucces
 
       {/* Left Column (Information with matching brand indigo gradient and design) */}
       <div className="left-panel">
-        {/* Background Decorative Arcs */}
+        {/* Background Decorative Concentric Arcs - positioned strictly below text */}
         <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1 }} viewBox="0 0 100 100" preserveAspectRatio="none">
-          <path d="M-10,110 C20,60 80,60 110,110" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="0.25" />
-          <path d="M-10,120 C20,65 80,65 110,120" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="0.25" />
-          <path d="M-10,130 C20,70 80,70 110,130" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="0.25" />
-          <path d="M-10,140 C20,75 80,75 110,140" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="0.25" />
+          <circle cx="50" cy="145" r="71" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="0.25" />
+          <circle cx="50" cy="145" r="65" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="0.25" />
+          <circle cx="50" cy="145" r="59" fill="none" stroke="rgba(255,255,255,0.055)" strokeWidth="0.25" />
+          <circle cx="50" cy="145" r="53" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="0.25" />
+          <circle cx="50" cy="145" r="47" fill="none" stroke="rgba(255,255,255,0.065)" strokeWidth="0.25" />
         </svg>
 
-        {/* Top: Search Logo & Brand Name in same line */}
-        <div style={{ position: 'relative', zIndex: 2, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Search size={32} color="#ffffff" strokeWidth={2.5} style={{ marginLeft: -6 }} />
-          <span style={{
-            fontFamily: 'var(--font-display)',
-            fontWeight: 800,
-            fontSize: 24,
-            color: '#ffffff',
-            letterSpacing: '-0.5px'
-          }}>
-            SEO<span style={{ opacity: 0.9 }}>Vision</span>
-          </span>
-        </div>
 
-        {/* Middle: Brand Header and Description */}
         <div style={{ position: 'relative', zIndex: 2, margin: 'auto 0' }}>
           <h1 style={{
             fontFamily: 'var(--font-display)',

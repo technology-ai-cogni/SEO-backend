@@ -12,6 +12,18 @@ export function Card({ children, style = {}, className = '' }) {
   );
 }
 
+export function GlassCard({ children, style = {}, className = '' }) {
+  return (
+    <div className={`glass-panel ${className}`} style={{
+      borderRadius: 'var(--radius)',
+      padding: '24px',
+      ...style,
+    }}>
+      {children}
+    </div>
+  );
+}
+
 export function CardHeader({ title, subtitle, action, style = {} }) {
   return (
     <div style={{ padding: '16px 20px 12px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', ...style }}>

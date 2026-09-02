@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 import jwt
 
-JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "seovision-super-secure-jwt-key-2026-prod")
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "hariba-super-secure-jwt-key-2026-prod")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 

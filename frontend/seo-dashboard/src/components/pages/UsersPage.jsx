@@ -984,13 +984,16 @@ export default function UsersPage({ user, onNavigate }) {
             style={{
               padding: '9px 18px',
               fontSize: 13,
-              fontWeight: 600,
+              fontWeight: 700,
               color: '#ffffff',
-              background: '#7c3aed',
-              border: 'none',
+              background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+              border: '1.5px solid #09060E',
               borderRadius: 8,
-              cursor: 'pointer'
+              cursor: 'pointer',
+              boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35)'
             }}
+            onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
           >
             Return to Dashboard
           </button>
@@ -1000,12 +1003,12 @@ export default function UsersPage({ user, onNavigate }) {
   }
 
   return (
-    <div style={{ padding: 24, background: '#f8fafc', minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ padding: 24, background: 'var(--bg)', minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
       {/* Container */}
       <div style={{
-        background: '#ffffff',
-        border: '1px solid #e2e8f0',
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
         borderRadius: 14,
         padding: 24,
         boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
@@ -1078,14 +1081,17 @@ export default function UsersPage({ user, onNavigate }) {
                 gap: 8,
                 padding: '8px 16px',
                 fontSize: 13.5,
-                fontWeight: 600,
+                fontWeight: 700,
                 color: '#ffffff',
-                background: 'var(--accent)',
-                border: 'none',
+                background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                border: '1.5px solid #09060E',
                 borderRadius: 8,
                 cursor: 'pointer',
-                boxShadow: '0 2px 4px rgba(124, 58, 237, 0.2)'
+                boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
+                transition: 'all 0.15s ease'
               }}
+              onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
             >
               <UserPlus size={16} />
               <span>Create User Credential</span>
@@ -1660,7 +1666,7 @@ export default function UsersPage({ user, onNavigate }) {
             </div>
 
             {/* Segmented Pill Toggle Bar */}
-            <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 10, padding: 4, gap: 4, marginBottom: 16 }}>
+            <div style={{ display: 'flex', background: 'var(--surface-2, #f4f0fa)', borderRadius: 10, padding: 4, gap: 4, marginBottom: 16 }}>
               <button
                 type="button"
                 onClick={() => setModalTab('client_detail')}
@@ -1672,8 +1678,8 @@ export default function UsersPage({ user, onNavigate }) {
                   fontWeight: 600,
                   border: 'none',
                   background: modalTab === 'client_detail' ? '#ffffff' : 'transparent',
-                  color: modalTab === 'client_detail' ? '#5c4af2' : '#6b7280',
-                  boxShadow: modalTab === 'client_detail' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                  color: modalTab === 'client_detail' ? 'var(--accent, #7928ca)' : 'var(--text-secondary, #64748b)',
+                  boxShadow: modalTab === 'client_detail' ? '0 1px 4px rgba(121, 40, 202, 0.12)' : 'none',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                   fontFamily: 'var(--font-body)',
@@ -1685,7 +1691,7 @@ export default function UsersPage({ user, onNavigate }) {
               >
                 <span>Client Detail</span>
                 {(clientData.name || clientData.address || clientData.gst || clientData.poc_name || clientData.poc_number || clientData.poc_address) && (
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#5c4af2' }} />
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent, #7928ca)' }} />
                 )}
               </button>
 
@@ -1700,8 +1706,8 @@ export default function UsersPage({ user, onNavigate }) {
                   fontWeight: 600,
                   border: 'none',
                   background: modalTab === 'user_credential' ? '#ffffff' : 'transparent',
-                  color: modalTab === 'user_credential' ? '#5c4af2' : '#6b7280',
-                  boxShadow: modalTab === 'user_credential' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                  color: modalTab === 'user_credential' ? 'var(--accent, #7928ca)' : 'var(--text-secondary, #64748b)',
+                  boxShadow: modalTab === 'user_credential' ? '0 1px 4px rgba(121, 40, 202, 0.12)' : 'none',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                   fontFamily: 'var(--font-body)',
@@ -1713,7 +1719,7 @@ export default function UsersPage({ user, onNavigate }) {
               >
                 <span>User Credential</span>
                 {(formData.name || formData.email || formData.password) && (
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#5c4af2' }} />
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent, #7928ca)' }} />
                 )}
               </button>
             </div>
@@ -2145,18 +2151,21 @@ export default function UsersPage({ user, onNavigate }) {
                     type="button"
                     onClick={() => setModalTab('user_credential')}
                     style={{
-                      padding: '8px 18px',
+                      padding: '9px 20px',
                       fontSize: 13,
-                      fontWeight: 600,
+                      fontWeight: 700,
                       color: '#ffffff',
-                      background: 'var(--accent, #5c4af2)',
-                      border: 'none',
+                      background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                      border: '1.5px solid #09060E',
                       borderRadius: 8,
                       cursor: 'pointer',
                       display: 'inline-flex',
                       alignItems: 'center',
-                      gap: 6
+                      gap: 6,
+                      boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35)'
                     }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
                   >
                     <span>Next: User Credential</span>
                     <ArrowRight size={14} />
@@ -2166,15 +2175,18 @@ export default function UsersPage({ user, onNavigate }) {
                     type="submit"
                     disabled={actionLoading}
                     style={{
-                      padding: '8px 18px',
+                      padding: '9px 20px',
                       fontSize: 13,
-                      fontWeight: 600,
+                      fontWeight: 700,
                       color: '#ffffff',
-                      background: 'var(--accent, #5c4af2)',
-                      border: 'none',
+                      background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                      border: '1.5px solid #09060E',
                       borderRadius: 8,
-                      cursor: actionLoading ? 'not-allowed' : 'pointer'
+                      cursor: actionLoading ? 'not-allowed' : 'pointer',
+                      boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35)'
                     }}
+                    onMouseEnter={e => { if (!actionLoading) e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; }}
+                    onMouseLeave={e => { if (!actionLoading) e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; }}
                   >
                     {actionLoading ? 'Creating Credential...' : 'Create Credential'}
                   </button>

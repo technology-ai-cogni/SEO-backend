@@ -688,7 +688,7 @@ export default function AiAnalysisPage({ user }) {
   const currentDomainDisplay = activeProject?.domain || activeProject?.name || (projects && projects[0] ? projects[0].domain || projects[0].name : '');
 
   return (
-    <div style={{ position: 'relative', padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: '#f8fafc', minHeight: '100vh' }}>
+    <div style={{ position: 'relative', padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: 'var(--bg)', minHeight: '100vh' }}>
 
       {/* ─── HEADER BAR: Dashboard: domain.com v [Link] 🇮🇳 India v 📅 Date ───── */}
       {(() => {
@@ -708,8 +708,8 @@ export default function AiAnalysisPage({ user }) {
             background: '#ffffff',
             padding: '16px 20px',
             borderRadius: 12,
-            border: '1px solid #e2e8f0',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+            border: '1px solid #E4DFEE',
+            boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
           }}>
             {/* Left Side: Dashboard: domain.com v */}
             <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
@@ -720,7 +720,7 @@ export default function AiAnalysisPage({ user }) {
                 gap: 8,
                 fontSize: 20,
                 fontWeight: 800,
-                color: '#0f172a',
+                color: '#1A1A1A',
                 margin: 0
               }}>
                 <span>Project:</span>
@@ -733,7 +733,7 @@ export default function AiAnalysisPage({ user }) {
                       padding: 0,
                       fontSize: 20,
                       fontWeight: 800,
-                      color: '#7c3aed',
+                      color: 'var(--accent)',
                       cursor: 'pointer',
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -957,12 +957,13 @@ export default function AiAnalysisPage({ user }) {
       {/* ─── TOP CONTROL BAR: Engine Sub-tabs, Mentions/Citations Toggles, Search & Filters ─── */}
       <div style={{
         background: '#ffffff',
-        border: '1px solid #e2e8f0',
+        border: '1px solid #E4DFEE',
         borderRadius: 12,
         padding: '16px 20px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 16
+        gap: 16,
+        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
       }}>
         {/* Row 1: Engine Tabs & Mentions vs Citations Toggle directly UNDER engine tabs */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
@@ -974,7 +975,7 @@ export default function AiAnalysisPage({ user }) {
               display: 'inline-flex',
               alignItems: 'center',
               background: '#ffffff',
-              border: '1.5px solid #cbd5e1',
+              border: '1.5px solid #E4DFEE',
               borderRadius: 10,
               overflow: 'hidden'
             }}>
@@ -987,15 +988,15 @@ export default function AiAnalysisPage({ user }) {
                   key={eng.id}
                   onClick={() => setSelectedEngine(eng.id)}
                   style={{
-                    background: selectedEngine === eng.id ? '#f1f5f9' : '#ffffff',
-                    color: selectedEngine === eng.id ? '#7c3aed' : '#475569',
+                    background: selectedEngine === eng.id ? 'linear-gradient(135deg, #F6EEFD 0%, #FDEBF4 100%)' : '#ffffff',
+                    color: selectedEngine === eng.id ? '#7B2FBE' : '#4E4E61',
+                    fontWeight: selectedEngine === eng.id ? 800 : 600,
                     border: 'none',
-                    borderRight: idx < arr.length - 1 ? '1.5px solid #cbd5e1' : 'none',
+                    borderRight: idx < arr.length - 1 ? '1.5px solid #E4DFEE' : 'none',
                     padding: '9px 18px',
                     fontSize: 13,
-                    fontWeight: selectedEngine === eng.id ? 800 : 600,
                     cursor: 'pointer',
-                    transition: 'all 0.15s'
+                    transition: 'all 0.15s ease'
                   }}
                 >
                   {eng.label}
@@ -1007,7 +1008,7 @@ export default function AiAnalysisPage({ user }) {
             <div style={{
               display: 'inline-flex',
               alignItems: 'center',
-              background: '#f1f5f9',
+              background: '#F4F1FA',
               padding: 3,
               borderRadius: 8
             }}>
@@ -1015,14 +1016,14 @@ export default function AiAnalysisPage({ user }) {
                 onClick={() => setActiveSubTab('mentions')}
                 style={{
                   background: activeSubTab === 'mentions' ? '#ffffff' : 'transparent',
-                  color: activeSubTab === 'mentions' ? '#7c3aed' : '#64748b',
+                  color: activeSubTab === 'mentions' ? '#7B2FBE' : '#64748b',
                   fontWeight: activeSubTab === 'mentions' ? 700 : 500,
-                  border: 'none',
+                  border: activeSubTab === 'mentions' ? '1px solid #E5CCF7' : '1px solid transparent',
                   borderRadius: 6,
                   padding: '6px 14px',
                   fontSize: 12.5,
                   cursor: 'pointer',
-                  boxShadow: activeSubTab === 'mentions' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
+                  boxShadow: activeSubTab === 'mentions' ? '0 1px 3px rgba(74, 26, 140, 0.08)' : 'none'
                 }}
               >
                 Mentions ({mentionsData.length})
@@ -1031,14 +1032,14 @@ export default function AiAnalysisPage({ user }) {
                 onClick={() => setActiveSubTab('citations')}
                 style={{
                   background: activeSubTab === 'citations' ? '#ffffff' : 'transparent',
-                  color: activeSubTab === 'citations' ? '#7c3aed' : '#64748b',
+                  color: activeSubTab === 'citations' ? '#7B2FBE' : '#64748b',
                   fontWeight: activeSubTab === 'citations' ? 700 : 500,
-                  border: 'none',
+                  border: activeSubTab === 'citations' ? '1px solid #E5CCF7' : '1px solid transparent',
                   borderRadius: 6,
                   padding: '6px 14px',
                   fontSize: 12.5,
                   cursor: 'pointer',
-                  boxShadow: activeSubTab === 'citations' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
+                  boxShadow: activeSubTab === 'citations' ? '0 1px 3px rgba(74, 26, 140, 0.08)' : 'none'
                 }}
               >
                 Citations ({citationsData.length})
@@ -1055,17 +1056,20 @@ export default function AiAnalysisPage({ user }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                background: '#7c3aed',
+                background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
                 color: '#ffffff',
-                border: 'none',
+                border: '1.5px solid #09060E',
                 borderRadius: 8,
                 padding: '9px 18px',
                 fontSize: 13,
                 fontWeight: 700,
                 cursor: analyzing ? 'not-allowed' : 'pointer',
                 opacity: analyzing ? 0.75 : 1,
+                boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
                 transition: 'all 0.15s ease'
               }}
+              onMouseEnter={e => { if (!analyzing) { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
+              onMouseLeave={e => { if (!analyzing) { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; } }}
             >
               <Sparkles size={14} className={analyzing ? 'animate-spin' : ''} />
               <span>{analyzing ? 'Analyzing...' : (getActiveEngineResult() ? 'Re-analyze' : 'Analyze')}</span>
@@ -1297,12 +1301,15 @@ export default function AiAnalysisPage({ user }) {
                     fontSize: 12.5,
                     fontWeight: 700,
                     color: '#ffffff',
-                    background: '#7c3aed',
-                    border: 'none',
+                    background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                    border: '1.5px solid #09060E',
                     borderRadius: 6,
                     cursor: 'pointer',
-                    marginTop: 4
+                    marginTop: 4,
+                    boxShadow: '0 4px 14px rgba(123, 47, 190, 0.35)'
                   }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
                 >
                   Close
                 </button>
@@ -1315,17 +1322,17 @@ export default function AiAnalysisPage({ user }) {
       {/* ─── DATA TABLE: Mentions or Citations ─────────────────────────── */}
       <div style={{
         background: '#ffffff',
-        border: '1px solid #e2e8f0',
+        border: '1px solid #E4DFEE',
         borderRadius: 12,
         overflow: 'hidden',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
       }}>
         {activeSubTab === 'mentions' ? (
           /* ── MENTIONS TABLE ── */
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
               <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <tr style={{ background: '#FAF8FD', borderBottom: '1px solid #E4DFEE', color: '#4E4E61', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Mentions (Keyword)</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>SV</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Tentative Rank</th>

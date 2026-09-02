@@ -877,9 +877,13 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
           variant="primary"
           onClick={handleCreate}
           style={{
-            background: (submitting || btnActive) ? '#0f1523' : (domain.trim() ? '#5c4af2' : '#6b7280'),
+            background: (submitting || btnActive)
+              ? 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'
+              : (domain.trim() ? 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)' : '#6b7280'),
             color: '#ffffff',
-            transition: 'background-color 0.15s ease, opacity 0.15s ease',
+            border: '1.5px solid #09060E',
+            boxShadow: domain.trim() ? '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)' : 'none',
+            transition: 'all 0.15s ease',
             ...(submitting ? { opacity: 0.6, pointerEvents: 'none' } : {})
           }}
           onMouseDown={() => setBtnActive(true)}
@@ -896,22 +900,22 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         {/* Top Main Tab Navigation */}
-        <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 10, padding: 4, gap: 4 }}>
+        <div style={{ display: 'flex', background: 'var(--surface-2, #f4f0fa)', borderRadius: 10, padding: 4, gap: 4 }}>
           <button
             type="button"
             onClick={() => setActiveTab('basic_info')}
             style={{
               flex: 1, padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, border: 'none',
               background: activeTab === 'basic_info' ? '#fff' : 'transparent',
-              color: activeTab === 'basic_info' ? '#5c4af2' : '#6b7280',
-              boxShadow: activeTab === 'basic_info' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+              color: activeTab === 'basic_info' ? 'var(--accent, #7928ca)' : '#6b7280',
+              boxShadow: activeTab === 'basic_info' ? '0 1px 4px rgba(121, 40, 202, 0.12)' : 'none',
               cursor: 'pointer', transition: 'all 0.15s ease', fontFamily: 'var(--font-body)',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
             }}
           >
             Basic Information
             {(domain || name || regions.length > 0 || brandedTerms) && (
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#5c4af2' }} />
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent, #7928ca)' }} />
             )}
           </button>
           <button
@@ -920,15 +924,15 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
             style={{
               flex: 1, padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, border: 'none',
               background: activeTab === 'nap_details' ? '#fff' : 'transparent',
-              color: activeTab === 'nap_details' ? '#5c4af2' : '#6b7280',
-              boxShadow: activeTab === 'nap_details' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+              color: activeTab === 'nap_details' ? 'var(--accent, #7928ca)' : '#6b7280',
+              boxShadow: activeTab === 'nap_details' ? '0 1px 4px rgba(121, 40, 202, 0.12)' : 'none',
               cursor: 'pointer', transition: 'all 0.15s ease', fontFamily: 'var(--font-body)',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
             }}
           >
             NAP
             {(napPhone || napWebsite || napAddress || napEmail || napBusinessCentre || napBcPhone || napBcWebsite || napBcAddress || napBcEmail) && (
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#5c4af2' }} />
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent, #7928ca)' }} />
             )}
           </button>
         </div>
@@ -2092,8 +2096,8 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
             style={{
               flex: 1, padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, border: 'none',
               background: activeTab === 'basic_info' ? '#fff' : 'transparent',
-              color: activeTab === 'basic_info' ? '#5c4af2' : '#6b7280',
-              boxShadow: activeTab === 'basic_info' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+              color: activeTab === 'basic_info' ? 'var(--accent, #7928ca)' : '#6b7280',
+              boxShadow: activeTab === 'basic_info' ? '0 1px 4px rgba(121, 40, 202, 0.12)' : 'none',
               cursor: 'pointer', transition: 'all 0.15s ease', fontFamily: 'var(--font-body)',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
             }}
@@ -2106,15 +2110,15 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
             style={{
               flex: 1, padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, border: 'none',
               background: activeTab === 'nap_details' ? '#fff' : 'transparent',
-              color: activeTab === 'nap_details' ? '#5c4af2' : '#6b7280',
-              boxShadow: activeTab === 'nap_details' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+              color: activeTab === 'nap_details' ? 'var(--accent, #7928ca)' : '#6b7280',
+              boxShadow: activeTab === 'nap_details' ? '0 1px 4px rgba(121, 40, 202, 0.12)' : 'none',
               cursor: 'pointer', transition: 'all 0.15s ease', fontFamily: 'var(--font-body)',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
             }}
           >
             NAP
             {(napPhone || napWebsite || napAddress || napEmail || napBusinessCentre || napBcPhone || napBcWebsite || napBcAddress || napBcEmail) && (
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#5c4af2' }} />
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent, #7928ca)' }} />
             )}
           </button>
         </div>
@@ -10342,7 +10346,24 @@ function AddCompetitorModal({ open, onClose, projects, onAddCompetitor, lockedPr
             <button type="button" onClick={onClose} style={{ padding: '8px 16px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>
               Cancel
             </button>
-            <button type="submit" disabled={submitting} style={{ padding: '8px 18px', background: '#0f1523', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+            <button
+              type="submit"
+              disabled={submitting}
+              style={{
+                padding: '8px 18px',
+                background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                color: '#fff',
+                border: '1.5px solid #09060E',
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: 'pointer',
+                boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35)',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
+            >
               {submitting ? 'Saving to DB…' : 'Save Competitor'}
             </button>
           </div>

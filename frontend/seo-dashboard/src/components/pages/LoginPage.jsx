@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, Eye, EyeOff, Lock, Mail, HelpCircle, Loader2 } from 'lucide-react';
+import { Search, Eye, EyeOff, Lock, Mail, HelpCircle, Loader2, User } from 'lucide-react';
 import { getApiBaseUrl } from '../../lib/projectsApi';
 
 export default function LoginPage({ onNavigate, initialAdminMode = false, user = null, onLoginSuccess = null, onLogout = null, isEmbedded = false }) {
@@ -12,8 +12,8 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [focusedField, setFocusedField] = useState(null);
 
-  const accentColor = 'var(--accent, #7c3aed)';
-  const accentGlow = 'rgba(124, 58, 237, 0.15)';
+  const accentColor = 'var(--accent, #7928ca)';
+  const accentGlow = 'rgba(121, 40, 202, 0.2)';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -56,7 +56,7 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
         if (data.access_token) {
           try {
             sessionStorage.setItem('seo_token', data.access_token);
-          } catch (_) {}
+          } catch (_) { }
         }
         let dbUser = data.user;
 
@@ -75,7 +75,10 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
       } else {
         // Fallback: Check local storage users list if backend server is offline
         const localUsers = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-        const matched = localUsers.find(u => u.email?.toLowerCase() === email.trim().toLowerCase());
+        const matched = localUsers.find(u =>
+          u.email?.toLowerCase() === email.trim().toLowerCase() ||
+          u.name?.toLowerCase() === email.trim().toLowerCase()
+        );
         if (matched) {
           if (matched.status === 'Disabled') {
             setErrorMsg('Access Denied: Your account profile has been disabled by an administrator.');
@@ -101,200 +104,281 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
     }
   };
 
-  const loginCard = (
+  const loginView = (
     <div style={{
       width: '100%',
-      maxWidth: 430,
+      minHeight: '100vh',
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'space-between',
       background: '#ffffff',
-      border: '1px solid rgba(226, 232, 240, 0.9)',
-      borderTop: `3.5px solid ${accentColor}`,
-      borderRadius: 20,
-      boxShadow: '0 20px 40px -15px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.04)',
-      padding: '34px 30px',
-      transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-      position: 'relative'
+      boxSizing: 'border-box'
     }}>
-      {/* Header Icon & Brand */}
-      <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <div style={{
-          width: 48,
-          height: 48,
-          background: '#f5f3ff',
-          border: '1.5px solid #ddd6fe',
-          borderRadius: 14,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginBottom: 12,
-        }}>
-          <Search size={24} color="var(--accent)" />
-        </div>
-
-        <h2 style={{
-          fontFamily: 'var(--font-display)',
-          fontSize: 22,
-          fontWeight: 800,
-          color: '#0f172a',
-          lineHeight: 1.3,
-          marginBottom: 6,
-          letterSpacing: '-0.3px',
-        }}>
-          Welcome Back
-        </h2>
-
-        <p style={{
-          fontSize: 13,
-          color: '#64748b',
-          lineHeight: 1.45,
-          margin: 0,
-        }}>
-          Log in to access your SEO workspace
-        </p>
+      {/* Top Left: Hariba.ai Logo */}
+      <div style={{
+        width: '100%',
+        display: 'flex',
+        justifyContent: 'flex-start',
+        padding: '48px 30px 0',
+        boxSizing: 'border-box'
+      }}>
+        <img
+          src="/branding/hariba-logo-dark.png"
+          alt="Hariba.ai"
+          style={{ height: 34, width: 'auto', display: 'block', objectFit: 'contain' }}
+        />
       </div>
 
-      {/* Already logged in Banner */}
-      {user && (
+      {/* Center: Purple User Avatar Icon + Pill Form */}
+      <div style={{
+        width: '100%',
+        maxWidth: 340,
+        margin: 'auto',
+        padding: '24px 16px',
+        boxSizing: 'border-box'
+      }}>
+        {/* Center: Purple User Avatar Icon with Glow */}
         <div style={{
-          background: '#f5f3ff',
-          border: '1px solid #ddd6fe',
-          borderRadius: 10,
-          padding: '14px 16px',
-          marginBottom: 20,
-          textAlign: 'center'
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          marginBottom: 28
         }}>
-          <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)', marginBottom: 8 }}>
-            Currently logged in as {user.name || user.email}
-          </p>
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-            <button
-              type="button"
-              onClick={() => onNavigate('home')}
-              style={{
-                background: 'var(--accent)',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 8,
-                padding: '6px 14px',
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: 'pointer'
-              }}
-            >
-              Go to Workspace
-            </button>
-            <button
-              type="button"
-              onClick={onLogout}
-              style={{
-                background: '#ffffff',
-                color: '#475569',
-                border: '1px solid #cbd5e1',
-                borderRadius: 8,
-                padding: '6px 14px',
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: 'pointer'
-              }}
-            >
-              Log Out
-            </button>
+          <div style={{
+            width: 64,
+            height: 64,
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, #4A1A8C 0%, #6D28D9 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 10px 24px -2px rgba(109, 40, 217, 0.45), 0 0 0 3px #ffffff',
+            transition: 'transform 0.2s ease'
+          }}>
+            <User size={28} color="#ffffff" strokeWidth={2.2} />
           </div>
         </div>
-      )}
 
-      {/* Error Alert */}
-      {errorMsg && (
-        <div style={{
-          background: '#fef2f2',
-          border: '1px solid #f87171',
-          color: '#dc2626',
-          borderRadius: 10,
-          padding: '10px 14px',
-          fontSize: 13,
-          fontWeight: 500,
-          marginBottom: 20,
-          textAlign: 'center',
-          transition: 'all 0.2s ease'
-        }}>
-          {errorMsg}
-        </div>
-      )}
-
-      {/* Feedback Alert */}
-      {submittedMessage && (
-        <div style={{
-          background: '#f0fdf4',
-          border: '1px solid #86efac',
-          color: '#166534',
-          borderRadius: 10,
-          padding: '10px 14px',
-          fontSize: 13,
-          fontWeight: 500,
-          marginBottom: 20,
-          textAlign: 'center',
-          transition: 'all 0.2s ease'
-        }}>
-          {submittedMessage}
-        </div>
-      )}
-
-      {/* Form */}
-      <form onSubmit={handleSubmit} autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        {/* Email input */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <label style={{
-            fontSize: 13,
-            fontWeight: 700,
-            color: '#334155',
-            fontFamily: 'var(--font-body)'
+        {/* Already logged in Banner */}
+        {user && (
+          <div style={{
+            background: '#f5f3ff',
+            border: '1px solid #ddd6fe',
+            borderRadius: 12,
+            padding: '12px 14px',
+            marginBottom: 18,
+            textAlign: 'center'
           }}>
-            Email address
-          </label>
+            <p style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--accent)', marginBottom: 8 }}>
+              Currently logged in as {user.name || user.email}
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+              <button
+                type="button"
+                onClick={() => onNavigate('home')}
+                style={{
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 9999,
+                  padding: '6px 14px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Go to Workspace
+              </button>
+              <button
+                type="button"
+                onClick={onLogout}
+                style={{
+                  background: '#ffffff',
+                  color: '#475569',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 9999,
+                  padding: '6px 14px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Log Out
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Error Alert */}
+        {errorMsg && (
+          <div style={{
+            background: '#fef2f2',
+            border: '1px solid #f87171',
+            color: '#dc2626',
+            borderRadius: 12,
+            padding: '10px 14px',
+            fontSize: 12.5,
+            fontWeight: 500,
+            marginBottom: 16,
+            textAlign: 'center',
+            transition: 'all 0.2s ease'
+          }}>
+            {errorMsg}
+          </div>
+        )}
+
+        {/* Feedback Alert */}
+        {submittedMessage && (
+          <div style={{
+            background: '#f0fdf4',
+            border: '1px solid #86efac',
+            color: '#166534',
+            borderRadius: 12,
+            padding: '10px 14px',
+            fontSize: 12.5,
+            fontWeight: 500,
+            marginBottom: 16,
+            textAlign: 'center',
+            transition: 'all 0.2s ease'
+          }}>
+            {submittedMessage}
+          </div>
+        )}
+
+        {/* Form with Pill Inputs */}
+        <form onSubmit={handleSubmit} autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Username / Email input */}
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
-            background: '#f8fafc',
-            border: `1.5px solid ${focusedField === 'email' ? accentColor : '#e2e8f0'}`,
-            borderRadius: 10,
-            padding: '9px 13px',
-            boxShadow: focusedField === 'email' ? `0 0 0 3.5px ${accentGlow}` : 'none',
+            gap: 12,
+            background: '#ffffff',
+            border: `1.5px solid ${focusedField === 'email' ? '#6D28D9' : '#cbd5e1'}`,
+            borderRadius: 9999,
+            padding: '11px 18px',
+            boxShadow: focusedField === 'email' ? '0 0 0 3.5px rgba(109, 40, 217, 0.15)' : '0 1px 2px rgba(0,0,0,0.02)',
             transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
           }}>
-            <Mail size={16} color={focusedField === 'email' ? accentColor : "#94a3b8"} style={{ transition: 'color 0.2s' }} />
+            <User size={16} color={focusedField === 'email' ? '#6D28D9' : '#64748b'} style={{ flexShrink: 0 }} />
             <input
-              type="email"
+              type="text"
               required
-              autoComplete="off"
+              autoComplete="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               onFocus={() => setFocusedField('email')}
               onBlur={() => setFocusedField(null)}
-              placeholder="Email@company.com"
+              placeholder="USERNAME"
               style={{
                 border: 'none',
                 background: 'transparent',
                 outline: 'none',
-                fontSize: 13.5,
+                fontSize: 12.5,
+                fontWeight: 600,
+                letterSpacing: '0.8px',
                 color: '#0f172a',
                 fontFamily: 'var(--font-body)',
                 width: '100%'
               }}
             />
           </div>
-        </div>
 
-        {/* Password input */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <label style={{
-              fontSize: 13,
-              fontWeight: 700,
-              color: '#334155',
-              fontFamily: 'var(--font-body)'
-            }}>
-              Password
-            </label>
+          {/* Password input */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            background: '#ffffff',
+            border: `1.5px solid ${focusedField === 'password' ? '#6D28D9' : '#cbd5e1'}`,
+            borderRadius: 9999,
+            padding: '11px 18px',
+            boxShadow: focusedField === 'password' ? '0 0 0 3.5px rgba(109, 40, 217, 0.15)' : '0 1px 2px rgba(0,0,0,0.02)',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+          }}>
+            <Lock size={16} color={focusedField === 'password' ? '#6D28D9' : '#64748b'} style={{ flexShrink: 0 }} />
+            <input
+              type={showPassword ? 'text' : 'password'}
+              required
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onFocus={() => setFocusedField('password')}
+              onBlur={() => setFocusedField(null)}
+              placeholder="••••••••••••"
+              style={{
+                border: 'none',
+                background: 'transparent',
+                outline: 'none',
+                fontSize: 14,
+                fontWeight: 600,
+                color: '#0f172a',
+                fontFamily: 'var(--font-body)',
+                width: '100%',
+                letterSpacing: showPassword ? 'normal' : '2px'
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              tabIndex={-1}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                color: '#64748b',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'color 0.15s ease',
+                flexShrink: 0
+              }}
+              onMouseEnter={e => e.currentTarget.style.color = '#6D28D9'}
+              onMouseLeave={e => e.currentTarget.style.color = '#64748b'}
+            >
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+
+          {/* Purple Pill LOGIN Button */}
+          <button
+            type="submit"
+            disabled={isLoading}
+            style={{
+              marginTop: 6,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              background: 'linear-gradient(135deg, #4A1A8C 0%, #6D28D9 100%)',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: 9999,
+              padding: '13px 20px',
+              fontSize: 13.5,
+              fontWeight: 800,
+              letterSpacing: '1.5px',
+              fontFamily: 'var(--font-body)',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              opacity: isLoading ? 0.8 : 1,
+              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+              boxShadow: '0 12px 28px -4px rgba(109, 40, 217, 0.45), 0 4px 12px rgba(91, 33, 182, 0.25)'
+            }}
+            onMouseEnter={e => { if (!isLoading) { e.currentTarget.style.opacity = '0.94'; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
+            onMouseLeave={e => { if (!isLoading) { e.currentTarget.style.opacity = '1'; e.currentTarget.style.transform = 'translateY(0)'; } }}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                <span>AUTHENTICATING...</span>
+              </>
+            ) : (
+              <span>LOGIN</span>
+            )}
+          </button>
+
+          {/* Forgot password link */}
+          <div style={{ textAlign: 'center', marginTop: 4 }}>
             <a
               href="#forgot-password"
               onClick={(e) => {
@@ -302,124 +386,29 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
                 setShowForgotModal(true);
               }}
               style={{
-                fontSize: 12.5,
+                fontSize: 12,
                 fontWeight: 600,
-                color: accentColor,
+                color: '#64748b',
                 textDecoration: 'none',
                 transition: 'color 0.2s'
               }}
-              onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
-              onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+              onMouseEnter={e => { e.currentTarget.style.color = '#6D28D9'; e.currentTarget.style.textDecoration = 'underline'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = '#64748b'; e.currentTarget.style.textDecoration = 'none'; }}
             >
-              Forgot your password?
+              Forgot password?
             </a>
           </div>
+        </form>
+      </div>
 
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            background: '#f8fafc',
-            border: `1.5px solid ${focusedField === 'password' ? accentColor : '#e2e8f0'}`,
-            borderRadius: 10,
-            padding: '9px 13px',
-            boxShadow: focusedField === 'password' ? `0 0 0 3.5px ${accentGlow}` : 'none',
-            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
-          }}>
-            <Lock size={16} color={focusedField === 'password' ? accentColor : "#94a3b8"} style={{ transition: 'color 0.2s' }} />
-            <input
-              type={showPassword ? 'text' : 'password'}
-              required
-              autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onFocus={() => setFocusedField('password')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="••••••••"
-              style={{
-                border: 'none',
-                background: 'transparent',
-                outline: 'none',
-                fontSize: 13.5,
-                color: '#0f172a',
-                fontFamily: 'var(--font-body)',
-                width: '100%'
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                color: '#94a3b8',
-                transition: 'color 0.15s'
-              }}
-            >
-              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          </div>
-        </div>
-
-        {/* Submit Button */}
-        <button
-          type="submit"
-          disabled={isLoading}
-          style={{
-            marginTop: 6,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            background: accentColor,
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: 10,
-            padding: '12px 16px',
-            fontSize: 14,
-            fontWeight: 700,
-            fontFamily: 'var(--font-body)',
-            cursor: isLoading ? 'not-allowed' : 'pointer',
-            opacity: isLoading ? 0.8 : 1,
-            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-            boxShadow: `0 4px 12px ${accentGlow}`
-          }}
-          onMouseEnter={e => { if (!isLoading) e.currentTarget.style.transform = 'translateY(-1px)'; }}
-          onMouseLeave={e => { if (!isLoading) e.currentTarget.style.transform = 'translateY(0)'; }}
-        >
-          {isLoading ? (
-            <>
-              <Loader2 size={16} className="animate-spin" />
-              <span>Authenticating...</span>
-            </>
-          ) : (
-            <span>Log in</span>
-          )}
-        </button>
-      </form>
+      {/* Bottom spacer to perfectly balance the vertical center */}
+      <div style={{ height: 44, width: '100%' }} />
     </div>
   );
 
   return (
     <>
-      {isEmbedded ? (
-        loginCard
-      ) : (
-        <div style={{
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'var(--bg)',
-          padding: 24
-        }}>
-          {loginCard}
-        </div>
-      )}
+      {loginView}
 
       {/* Forgot Password Modal Popup */}
       {showForgotModal && (

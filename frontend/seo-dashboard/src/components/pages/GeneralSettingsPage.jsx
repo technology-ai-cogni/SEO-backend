@@ -75,15 +75,15 @@ export default function GeneralSettingsPage({ initialTab = 'settings', user, onN
                 gap: 8,
                 padding: '9px 18px',
                 borderRadius: 9,
-                border: 'none',
-                background: isActive ? '#6366f1' : 'transparent',
+                border: isActive ? '1.5px solid #09060E' : '1.5px solid transparent',
+                background: isActive ? 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)' : 'transparent',
                 color: isActive ? '#ffffff' : '#64748b',
                 fontSize: 13,
                 fontWeight: isActive ? 700 : 600,
                 cursor: 'pointer',
                 transition: 'all 0.15s ease',
                 whiteSpace: 'nowrap',
-                boxShadow: isActive ? '0 4px 12px rgba(99, 102, 241, 0.25)' : 'none'
+                boxShadow: isActive ? '0 4px 14px rgba(121, 40, 202, 0.28)' : 'none'
               }}
             >
               <Icon size={16} color={isActive ? '#ffffff' : '#64748b'} />
@@ -131,7 +131,7 @@ export default function GeneralSettingsPage({ initialTab = 'settings', user, onN
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16, border: '1px solid #e2e8f0', borderRadius: 12, background: '#f8fafc' }}>
-                <Bell size={20} color="#6366f1" />
+                <Bell size={20} color="var(--accent)" />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 700, color: '#0f172a' }}>Off-Page Activity Calendar Updated</div>
                   <div style={{ fontSize: 12.5, color: '#64748b' }}>New activities created under Saved & Scheduled status.</div>
@@ -154,18 +154,18 @@ export default function GeneralSettingsPage({ initialTab = 'settings', user, onN
         {activeTab === 'help' && (
           <div>
             <h3 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>Help & Documentation</h3>
-            <p style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>Find answers to common questions and guide documentation for SEOVision platform.</p>
+            <p style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>Find answers to common questions and guide documentation for hariba.ai platform.</p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
               <div style={{ padding: 18, border: '1px solid #e2e8f0', borderRadius: 12, background: '#f8fafc' }}>
-                <h4 style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 700, color: '#4338ca' }}>Brand Discovery & AI Visibility</h4>
+                <h4 style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 700, color: 'var(--accent)' }}>Brand Discovery & AI Visibility</h4>
                 <p style={{ margin: 0, fontSize: 12.5, color: '#64748b' }}>Learn how multi-engine AI search rankings (ChatGPT, Gemini, Google AIO) are calculated.</p>
               </div>
               <div style={{ padding: 18, border: '1px solid #e2e8f0', borderRadius: 12, background: '#f8fafc' }}>
-                <h4 style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 700, color: '#4338ca' }}>Off-Page Activity Calendar</h4>
+                <h4 style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 700, color: 'var(--accent)' }}>Off-Page Activity Calendar</h4>
                 <p style={{ margin: 0, fontSize: 12.5, color: '#64748b' }}>Guide on AI vs Manual scheduling for guest posts, niche edits, and press releases.</p>
               </div>
               <div style={{ padding: 18, border: '1px solid #e2e8f0', borderRadius: 12, background: '#f8fafc' }}>
-                <h4 style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 700, color: '#4338ca' }}>Domain & Traffic Metrics</h4>
+                <h4 style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 700, color: 'var(--accent)' }}>Domain & Traffic Metrics</h4>
                 <p style={{ margin: 0, fontSize: 12.5, color: '#64748b' }}>How RapidAPI & SE Ranking fetch Domain Authority (DA) and dynamic Top 3 Country Traffic.</p>
               </div>
             </div>

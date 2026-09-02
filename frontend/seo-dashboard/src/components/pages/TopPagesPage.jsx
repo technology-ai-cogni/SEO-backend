@@ -549,7 +549,7 @@ export default function TopPagesPage({ user }) {
   });
 
   return (
-    <div style={{ position: 'relative', padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: '#f8fafc', minHeight: '100vh' }}>
+    <div style={{ position: 'relative', padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: 'var(--bg)', minHeight: '100vh' }}>
 
       {/* ─── HEADER BAR: Dashboard: domain.com v [Link] 🇮🇳 India v 📅 Date ───── */}
       {(() => {
@@ -570,8 +570,8 @@ export default function TopPagesPage({ user }) {
             background: '#ffffff',
             padding: '16px 20px',
             borderRadius: 12,
-            border: '1px solid #e2e8f0',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+            border: '1px solid #E4DFEE',
+            boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
           }}>
             {/* Left Side: Dashboard: domain.com v */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -582,7 +582,7 @@ export default function TopPagesPage({ user }) {
                 gap: 8,
                 fontSize: 20,
                 fontWeight: 800,
-                color: '#0f172a',
+                color: '#1A1A1A',
                 margin: 0
               }}>
                 <span>Project:</span>
@@ -595,7 +595,7 @@ export default function TopPagesPage({ user }) {
                       padding: 0,
                       fontSize: 20,
                       fontWeight: 800,
-                      color: '#7c3aed',
+                      color: 'var(--accent)',
                       cursor: 'pointer',
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -834,18 +834,20 @@ export default function TopPagesPage({ user }) {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 6,
-                    background: '#7c3aed',
+                    background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
                     color: '#ffffff',
-                    border: 'none',
+                    border: '1.5px solid #09060E',
                     borderRadius: 8,
                     padding: '8px 16px',
                     fontSize: 13,
                     fontWeight: 700,
                     cursor: isAnalyzing ? 'not-allowed' : 'pointer',
                     opacity: isAnalyzing ? 0.75 : 1,
-                    boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
+                    boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
                     transition: 'all 0.15s ease'
                   }}
+                  onMouseEnter={e => { if (!isAnalyzing) { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
+                  onMouseLeave={e => { if (!isAnalyzing) { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; } }}
                 >
                   <Sparkles size={14} className={isAnalyzing ? 'animate-spin' : ''} />
                   <span>{isAnalyzing ? 'Analyzing...' : 'Re-analyze'}</span>
@@ -862,30 +864,16 @@ export default function TopPagesPage({ user }) {
         {/* CARD 1: Traffic */}
         <div style={{
           background: '#ffffff',
-          border: '1px solid #e2e8f0',
-          borderRadius: 10,
+          border: '1px solid #E4DFEE',
+          borderRadius: 12,
           padding: '16px 20px',
-          boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+          boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center'
         }}>
-          <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>Traffic</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>
-            {/* {(() => {
-              const parseTrafficNum = (val) => {
-                if (val === undefined || val === null) return 0;
-                if (typeof val === 'number') return val;
-                const cleaned = String(val).replace(/[^0-9]/g, '');
-                const parsed = parseInt(cleaned, 10);
-                return !isNaN(parsed) ? parsed : 0;
-              };
-
-              const eff = parseTrafficNum(liveDomainTraffic) || parseTrafficNum(liveTraffic) || parseTrafficNum(activeProject?.traffic) || parseTrafficNum(activeProject?.organic_traffic);
-              return eff > 0
-                ? eff.toLocaleString()
-                : (totalOrganicTraffic > 0 ? totalOrganicTraffic.toLocaleString() : '0');
-            })()} */}
+          <div style={{ fontSize: 12, color: '#6B677E', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 6 }}>Traffic</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#00A6DF' }}>
             0
           </div>
         </div>
@@ -893,15 +881,15 @@ export default function TopPagesPage({ user }) {
         {/* CARD 2: Top Pages in Top 1, Top 3, Top 10 with Hover Popovers */}
         <div style={{
           background: '#ffffff',
-          border: '1px solid #e2e8f0',
-          borderRadius: 10,
+          border: '1px solid #E4DFEE',
+          borderRadius: 12,
           padding: '14px 20px',
-          boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+          boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between'
         }}>
-          <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>
+          <div style={{ fontSize: 12, color: '#6B677E', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 6 }}>
             Top Pages
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, alignItems: 'center' }}>
@@ -912,8 +900,8 @@ export default function TopPagesPage({ user }) {
               onMouseLeave={handleMouseLeaveTooltip}
               style={{ display: 'flex', flexDirection: 'column', position: 'relative', cursor: 'pointer' }}
             >
-              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Top 1</span>
-              <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>{top1PagesList.length}</span>
+              <span style={{ fontSize: 11, color: '#6B677E', fontWeight: 700 }}>Top 1</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#7B2FBE' }}>{top1PagesList.length}</span>
 
               {activeTooltip === 'top1' && (
                 <div
@@ -925,13 +913,13 @@ export default function TopPagesPage({ user }) {
                     left: 0,
                     marginTop: 8,
                     background: '#ffffff',
-                    color: '#0f172a',
-                    border: '1px solid #e2e8f0',
+                    color: '#1A1A1A',
+                    border: '1px solid #E4DFEE',
                     padding: '10px 14px',
                     borderRadius: 8,
                     fontSize: 11,
                     fontWeight: 500,
-                    boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+                    boxShadow: '0 10px 25px rgba(74, 26, 140, 0.12)',
                     zIndex: 100,
                     maxHeight: 180,
                     overflowY: 'auto',
@@ -939,15 +927,15 @@ export default function TopPagesPage({ user }) {
                     pointerEvents: 'auto'
                   }}
                 >
-                  <div style={{ fontWeight: 800, color: '#7c3aed', marginBottom: 6, borderBottom: '1px solid #f1f5f9', paddingBottom: 4 }}>
+                  <div style={{ fontWeight: 800, color: '#7B2FBE', marginBottom: 6, borderBottom: '1px solid #F4F1FA', paddingBottom: 4 }}>
                     Top 1 Pages
                   </div>
                   {top1PagesList.length === 0 ? (
-                    <div style={{ color: '#94a3b8' }}>No pages in Top 1</div>
+                    <div style={{ color: '#8A8A9A' }}>No pages in Top 1</div>
                   ) : (
                     top1PagesList.map((item, i) => (
                       <div key={i} style={{ color: '#334155', padding: '3px 0', borderBottom: '1px solid #f8fafc', wordBreak: 'break-all' }}>
-                        • {item.url} <span style={{ color: '#16a34a', fontWeight: 700 }}>(Rank {item.rank})</span>
+                        • {item.url} <span style={{ color: '#00BFA2', fontWeight: 700 }}>(Rank {item.rank})</span>
                       </div>
                     ))
                   )}
@@ -959,10 +947,10 @@ export default function TopPagesPage({ user }) {
             <div
               onMouseEnter={() => handleMouseEnterTooltip('top3')}
               onMouseLeave={handleMouseLeaveTooltip}
-              style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #e2e8f0', paddingLeft: 10, position: 'relative', cursor: 'pointer' }}
+              style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #E4DFEE', paddingLeft: 10, position: 'relative', cursor: 'pointer' }}
             >
-              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Top 3</span>
-              <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>{top3PagesList.length}</span>
+              <span style={{ fontSize: 11, color: '#6B677E', fontWeight: 700 }}>Top 3</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#00BFA2' }}>{top3PagesList.length}</span>
 
               {activeTooltip === 'top3' && (
                 <div
@@ -974,13 +962,13 @@ export default function TopPagesPage({ user }) {
                     left: -40,
                     marginTop: 8,
                     background: '#ffffff',
-                    color: '#0f172a',
-                    border: '1px solid #e2e8f0',
+                    color: '#1A1A1A',
+                    border: '1px solid #E4DFEE',
                     padding: '10px 14px',
                     borderRadius: 8,
                     fontSize: 11,
                     fontWeight: 500,
-                    boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+                    boxShadow: '0 10px 25px rgba(74, 26, 140, 0.12)',
                     zIndex: 100,
                     maxHeight: 180,
                     overflowY: 'auto',
@@ -988,15 +976,15 @@ export default function TopPagesPage({ user }) {
                     pointerEvents: 'auto'
                   }}
                 >
-                  <div style={{ fontWeight: 800, color: '#7c3aed', marginBottom: 6, borderBottom: '1px solid #f1f5f9', paddingBottom: 4 }}>
+                  <div style={{ fontWeight: 800, color: '#7B2FBE', marginBottom: 6, borderBottom: '1px solid #F4F1FA', paddingBottom: 4 }}>
                     Top 3 Pages
                   </div>
                   {top3PagesList.length === 0 ? (
-                    <div style={{ color: '#94a3b8' }}>No pages in Top 3</div>
+                    <div style={{ color: '#8A8A9A' }}>No pages in Top 3</div>
                   ) : (
                     top3PagesList.map((item, i) => (
                       <div key={i} style={{ color: '#334155', padding: '3px 0', borderBottom: '1px solid #f8fafc', wordBreak: 'break-all' }}>
-                        • {item.url} <span style={{ color: '#16a34a', fontWeight: 700 }}>(Rank {item.rank})</span>
+                        • {item.url} <span style={{ color: '#00BFA2', fontWeight: 700 }}>(Rank {item.rank})</span>
                       </div>
                     ))
                   )}
@@ -1008,10 +996,10 @@ export default function TopPagesPage({ user }) {
             <div
               onMouseEnter={() => handleMouseEnterTooltip('top10')}
               onMouseLeave={handleMouseLeaveTooltip}
-              style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #e2e8f0', paddingLeft: 10, position: 'relative', cursor: 'pointer' }}
+              style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #E4DFEE', paddingLeft: 10, position: 'relative', cursor: 'pointer' }}
             >
-              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Top 10</span>
-              <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>{top10PagesList.length}</span>
+              <span style={{ fontSize: 11, color: '#6B677E', fontWeight: 700 }}>Top 10</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#D4007A' }}>{top10PagesList.length}</span>
 
               {activeTooltip === 'top10' && (
                 <div
@@ -1023,13 +1011,13 @@ export default function TopPagesPage({ user }) {
                     right: 0,
                     marginTop: 8,
                     background: '#ffffff',
-                    color: '#0f172a',
-                    border: '1px solid #e2e8f0',
+                    color: '#1A1A1A',
+                    border: '1px solid #E4DFEE',
                     padding: '10px 14px',
                     borderRadius: 8,
                     fontSize: 11,
                     fontWeight: 500,
-                    boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+                    boxShadow: '0 10px 25px rgba(74, 26, 140, 0.12)',
                     zIndex: 100,
                     maxHeight: 180,
                     overflowY: 'auto',
@@ -1037,15 +1025,15 @@ export default function TopPagesPage({ user }) {
                     pointerEvents: 'auto'
                   }}
                 >
-                  <div style={{ fontWeight: 800, color: '#7c3aed', marginBottom: 6, borderBottom: '1px solid #f1f5f9', paddingBottom: 4 }}>
+                  <div style={{ fontWeight: 800, color: '#7B2FBE', marginBottom: 6, borderBottom: '1px solid #F4F1FA', paddingBottom: 4 }}>
                     Top 10 Pages
                   </div>
                   {top10PagesList.length === 0 ? (
-                    <div style={{ color: '#94a3b8' }}>No pages in Top 10</div>
+                    <div style={{ color: '#8A8A9A' }}>No pages in Top 10</div>
                   ) : (
                     top10PagesList.map((item, i) => (
                       <div key={i} style={{ color: '#334155', padding: '3px 0', borderBottom: '1px solid #f8fafc', wordBreak: 'break-all' }}>
-                        • {item.url} <span style={{ color: '#16a34a', fontWeight: 700 }}>(Rank {item.rank})</span>
+                        • {item.url} <span style={{ color: '#00BFA2', fontWeight: 700 }}>(Rank {item.rank})</span>
                       </div>
                     ))
                   )}
@@ -1059,16 +1047,16 @@ export default function TopPagesPage({ user }) {
         {/* CARD 3: Avg. Position */}
         <div style={{
           background: '#ffffff',
-          border: '1px solid #e2e8f0',
-          borderRadius: 10,
+          border: '1px solid #E4DFEE',
+          borderRadius: 12,
           padding: '16px 20px',
-          boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+          boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center'
         }}>
-          <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>Avg. Position</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>{avgPosition || '0'}</div>
+          <div style={{ fontSize: 12, color: '#6B677E', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 6 }}>Avg. Position</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#7B2FBE' }}>{avgPosition || '0'}</div>
         </div>
 
       </div>
@@ -1076,13 +1064,14 @@ export default function TopPagesPage({ user }) {
       {/* ─── SEARCH & FILTERS BAR ───────────────────────────────────────────── */}
       <div style={{
         background: '#ffffff',
-        border: '1px solid #e2e8f0',
+        border: '1px solid #E4DFEE',
         borderRadius: 12,
         padding: '14px 20px',
         display: 'flex',
         alignItems: 'center',
         gap: 12,
-        flexWrap: 'wrap'
+        flexWrap: 'wrap',
+        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
       }}>
         {/* Search Box */}
         <div style={{ position: 'relative', flex: 1, maxWidth: 280 }}>
@@ -1241,12 +1230,15 @@ export default function TopPagesPage({ user }) {
                   fontSize: 12.5,
                   fontWeight: 700,
                   color: '#ffffff',
-                  background: '#7c3aed',
-                  border: 'none',
+                  background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                  border: '1.5px solid #09060E',
                   borderRadius: 6,
                   cursor: 'pointer',
-                  marginTop: 4
+                  marginTop: 4,
+                  boxShadow: '0 4px 14px rgba(123, 47, 190, 0.35)'
                 }}
+                onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
               >
                 Close
               </button>
@@ -1258,15 +1250,15 @@ export default function TopPagesPage({ user }) {
       {/* ─── TOP PAGES DATA TABLE ─────────────────────────────────────────────── */}
       <div style={{
         background: '#ffffff',
-        border: '1px solid #e2e8f0',
+        border: '1px solid #E4DFEE',
         borderRadius: 12,
         overflow: 'hidden',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
       }}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
+              <tr style={{ background: '#FAF8FD', borderBottom: '1px solid #E4DFEE', color: '#4E4E61', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>PAGE URL</th>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>SV</th>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>RANK</th>

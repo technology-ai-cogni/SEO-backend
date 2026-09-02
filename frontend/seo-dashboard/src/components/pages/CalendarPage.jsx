@@ -243,16 +243,16 @@ export default function CalendarPage({ user }) {
   };
 
   return (
-    <div style={{ padding: '24px 32px', minHeight: '100vh', background: '#f8fafc' }}>
+    <div style={{ padding: '24px 32px', minHeight: '100vh', background: 'var(--bg)' }}>
       {/* Top Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-            <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.5px' }}>
+            <h1 style={{ fontSize: 24, fontWeight: 800, color: '#1A1A1A', margin: 0, letterSpacing: '-0.5px' }}>
               Calendar
             </h1>
           </div>
-          <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>          </p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>          </p>
         </div>
 
         {/* Right Header Controls */}
@@ -267,13 +267,15 @@ export default function CalendarPage({ user }) {
               fontSize: 13,
               fontWeight: 700,
               color: '#ffffff',
-              background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-              border: 'none',
+              background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+              border: '1.5px solid #09060E',
               borderRadius: 10,
               cursor: 'pointer',
-              boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)',
+              boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
               transition: 'all 0.15s ease'
             }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; }}
           >
             <Sparkles size={16} />
             <span>Choose Project</span>
@@ -290,10 +292,10 @@ export default function CalendarPage({ user }) {
               fontWeight: 600,
               color: '#334155',
               background: '#ffffff',
-              border: '1px solid #cbd5e1',
+              border: '1px solid #E4DFEE',
               borderRadius: 8,
               cursor: 'pointer',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+              boxShadow: '0 1px 3px rgba(74, 26, 140, 0.04)'
             }}
           >
             <Download size={15} />
@@ -309,17 +311,17 @@ export default function CalendarPage({ user }) {
                 alignItems: 'center',
                 gap: 8,
                 background: '#ffffff',
-                border: '1px solid #e2e8f0',
+                border: '1px solid #E4DFEE',
                 borderRadius: 10,
                 padding: '8px 14px',
                 fontSize: 13,
                 fontWeight: 600,
-                color: '#1e293b',
+                color: '#1A1A1A',
                 cursor: 'pointer',
-                boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                boxShadow: '0 2px 6px rgba(74, 26, 140, 0.04)'
               }}
             >
-              <FolderOpen size={16} color="#6366f1" />
+              <FolderOpen size={16} color="var(--accent)" />
               <span>{activeProject?.name || activeProject?.domain || 'All Projects'}</span>
               <ChevronDown size={14} color="#64748b" />
             </button>
@@ -332,9 +334,9 @@ export default function CalendarPage({ user }) {
                 marginTop: 6,
                 width: 220,
                 background: '#ffffff',
-                border: '1px solid #e2e8f0',
+                border: '1px solid #E4DFEE',
                 borderRadius: 10,
-                boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
+                boxShadow: '0 10px 25px -5px rgba(74, 26, 140, 0.12)',
                 zIndex: 50,
                 overflow: 'hidden'
               }}>
@@ -347,10 +349,10 @@ export default function CalendarPage({ user }) {
                       textAlign: 'left',
                       padding: '10px 14px',
                       border: 'none',
-                      background: activeProject?.slug === p.slug ? '#f1f5f9' : 'transparent',
+                      background: activeProject?.slug === p.slug ? '#F6EEFD' : 'transparent',
                       fontSize: 13,
                       fontWeight: activeProject?.slug === p.slug ? 700 : 500,
-                      color: activeProject?.slug === p.slug ? '#4f46e5' : '#334155',
+                      color: activeProject?.slug === p.slug ? '#7B2FBE' : '#334155',
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
@@ -358,7 +360,7 @@ export default function CalendarPage({ user }) {
                     }}
                   >
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name || p.domain}</span>
-                    {activeProject?.slug === p.slug && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4f46e5' }} />}
+                    {activeProject?.slug === p.slug && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#7B2FBE' }} />}
                   </button>
                 ))}
               </div>
@@ -371,14 +373,14 @@ export default function CalendarPage({ user }) {
       <div style={{
         background: '#ffffff',
         borderRadius: 14,
-        border: '1px solid #e2e8f0',
+        border: '1px solid #E4DFEE',
         padding: '16px 20px',
         marginBottom: 20,
-        boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           {/* Sub-Tabs: Saved | Scheduled | Approved */}
-          <div style={{ display: 'flex', gap: 8, background: '#f1f5f9', padding: 4, borderRadius: 10 }}>
+          <div style={{ display: 'flex', gap: 8, background: '#F4F1FA', padding: 4, borderRadius: 10 }}>
             {/* 1. Saved Tab */}
             <button
               onClick={() => setActiveSubTab('saved')}
@@ -388,23 +390,23 @@ export default function CalendarPage({ user }) {
                 gap: 8,
                 padding: '8px 18px',
                 borderRadius: 8,
-                border: 'none',
-                background: activeSubTab === 'saved' ? '#ffffff' : 'transparent',
-                color: activeSubTab === 'saved' ? '#0f172a' : '#64748b',
+                border: activeSubTab === 'saved' ? '1px solid #E5CCF7' : '1px solid transparent',
+                background: activeSubTab === 'saved' ? 'linear-gradient(135deg, #F6EEFD 0%, #FDEBF4 100%)' : 'transparent',
+                color: activeSubTab === 'saved' ? '#7B2FBE' : '#64748b',
                 fontSize: 13,
-                fontWeight: activeSubTab === 'saved' ? 700 : 600,
+                fontWeight: activeSubTab === 'saved' ? 800 : 600,
                 cursor: 'pointer',
-                boxShadow: activeSubTab === 'saved' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                boxShadow: activeSubTab === 'saved' ? '0 1px 3px rgba(74, 26, 140, 0.08)' : 'none',
                 transition: 'all 0.15s ease'
               }}
             >
-              <Bookmark size={15} color={activeSubTab === 'saved' ? '#6366f1' : '#64748b'} />
+              <Bookmark size={15} color={activeSubTab === 'saved' ? '#7B2FBE' : '#64748b'} />
               <span>Saved</span>
               <span style={{
-                background: activeSubTab === 'saved' ? '#e0e7ff' : '#e2e8f0',
-                color: activeSubTab === 'saved' ? '#4338ca' : '#475569',
+                background: activeSubTab === 'saved' ? '#E5CCF7' : '#E2DBEC',
+                color: activeSubTab === 'saved' ? '#4A1A8C' : '#475569',
                 fontSize: 11,
-                fontWeight: 700,
+                fontWeight: 800,
                 padding: '1px 7px',
                 borderRadius: 10
               }}>
@@ -421,23 +423,23 @@ export default function CalendarPage({ user }) {
                 gap: 8,
                 padding: '8px 18px',
                 borderRadius: 8,
-                border: 'none',
-                background: activeSubTab === 'scheduled' ? '#ffffff' : 'transparent',
-                color: activeSubTab === 'scheduled' ? '#0f172a' : '#64748b',
+                border: activeSubTab === 'scheduled' ? '1px solid #FED7AA' : '1px solid transparent',
+                background: activeSubTab === 'scheduled' ? 'linear-gradient(135deg, #FFF7ED 0%, #FEF3C7 100%)' : 'transparent',
+                color: activeSubTab === 'scheduled' ? '#D97706' : '#64748b',
                 fontSize: 13,
-                fontWeight: activeSubTab === 'scheduled' ? 700 : 600,
+                fontWeight: activeSubTab === 'scheduled' ? 800 : 600,
                 cursor: 'pointer',
                 boxShadow: activeSubTab === 'scheduled' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
                 transition: 'all 0.15s ease'
               }}
             >
-              <Clock size={15} color={activeSubTab === 'scheduled' ? '#f59e0b' : '#64748b'} />
+              <Clock size={15} color={activeSubTab === 'scheduled' ? '#d97706' : '#64748b'} />
               <span>Scheduled</span>
               <span style={{
-                background: activeSubTab === 'scheduled' ? '#fef3c7' : '#e2e8f0',
+                background: activeSubTab === 'scheduled' ? '#fef3c7' : '#E2DBEC',
                 color: activeSubTab === 'scheduled' ? '#b45309' : '#475569',
                 fontSize: 11,
-                fontWeight: 700,
+                fontWeight: 800,
                 padding: '1px 7px',
                 borderRadius: 10
               }}>
@@ -454,23 +456,23 @@ export default function CalendarPage({ user }) {
                 gap: 8,
                 padding: '8px 18px',
                 borderRadius: 8,
-                border: 'none',
-                background: activeSubTab === 'approved' ? '#ffffff' : 'transparent',
-                color: activeSubTab === 'approved' ? '#0f172a' : '#64748b',
+                border: activeSubTab === 'approved' ? '1px solid #A7F3D0' : '1px solid transparent',
+                background: activeSubTab === 'approved' ? 'linear-gradient(135deg, #ECFDF5 0%, #E6FAF6 100%)' : 'transparent',
+                color: activeSubTab === 'approved' ? '#008F7A' : '#64748b',
                 fontSize: 13,
-                fontWeight: activeSubTab === 'approved' ? 700 : 600,
+                fontWeight: activeSubTab === 'approved' ? 800 : 600,
                 cursor: 'pointer',
                 boxShadow: activeSubTab === 'approved' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
                 transition: 'all 0.15s ease'
               }}
             >
-              <CheckCircle2 size={15} color={activeSubTab === 'approved' ? '#10b981' : '#64748b'} />
+              <CheckCircle2 size={15} color={activeSubTab === 'approved' ? '#008F7A' : '#64748b'} />
               <span>Approved</span>
               <span style={{
-                background: activeSubTab === 'approved' ? '#d1fae5' : '#e2e8f0',
+                background: activeSubTab === 'approved' ? '#d1fae5' : '#E2DBEC',
                 color: activeSubTab === 'approved' ? '#047857' : '#475569',
                 fontSize: 11,
-                fontWeight: 700,
+                fontWeight: 800,
                 padding: '1px 7px',
                 borderRadius: 10
               }}>
@@ -494,11 +496,11 @@ export default function CalendarPage({ user }) {
                   paddingTop: 8,
                   paddingBottom: 8,
                   fontSize: 13,
-                  border: '1px solid #cbd5e1',
+                  border: '1px solid #E4DFEE',
                   borderRadius: 8,
                   outline: 'none',
                   width: 240,
-                  background: '#f8fafc'
+                  background: '#ffffff'
                 }}
               />
             </div>
@@ -509,16 +511,19 @@ export default function CalendarPage({ user }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                background: '#6366f1',
+                background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
                 color: '#ffffff',
-                border: 'none',
+                border: '1.5px solid #09060E',
                 borderRadius: 8,
                 padding: '8px 16px',
                 fontSize: 13,
                 fontWeight: 700,
                 cursor: 'pointer',
-                boxShadow: '0 2px 4px rgba(99, 102, 241, 0.2)'
+                boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
+                transition: 'all 0.15s ease'
               }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; }}
             >
               <Plus size={15} />
               <span>New Entry</span>
@@ -531,20 +536,20 @@ export default function CalendarPage({ user }) {
       <div style={{
         background: '#ffffff',
         borderRadius: 14,
-        border: '1px solid #e2e8f0',
+        border: '1px solid #E4DFEE',
         overflow: 'hidden',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
       }}>
         {loading ? (
           <div style={{ padding: '60px 20px', textAlign: 'center' }}>
-            <Sparkles size={32} className="animate-spin" color="#6366f1" style={{ marginBottom: 12 }} />
+            <Sparkles size={32} className="animate-spin" color="var(--accent)" style={{ marginBottom: 12 }} />
             <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>Fetching off_page_activities from database...</p>
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: 1000 }}>
               <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                <tr style={{ background: '#FAF8FD', borderBottom: '1px solid #E4DFEE' }}>
                   <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                     Activity Name
                   </th>
@@ -1008,7 +1013,20 @@ export default function CalendarPage({ user }) {
                 </button>
                 <button
                   type="submit"
-                  style={{ padding: '8px 20px', fontSize: 13, fontWeight: 700, color: '#ffffff', background: '#6366f1', border: 'none', borderRadius: 8, cursor: 'pointer' }}
+                  style={{
+                    padding: '8px 20px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#ffffff',
+                    background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                    border: '1.5px solid #09060E',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35)',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
                 >
                   {editingItem ? 'Update Activity' : 'Create Activity'}
                 </button>

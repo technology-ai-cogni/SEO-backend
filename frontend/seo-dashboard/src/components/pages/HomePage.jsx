@@ -134,18 +134,18 @@ export default function HomePage({ onNavigate, projects = [], activeProject, set
             gap: 8,
             fontSize: 15,
             fontWeight: 700,
-            color: '#000000',
-            background: 'var(--accent)',
-            border: 'none',
+            color: '#ffffff',
+            background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+            border: '1.5px solid #09060E',
             borderRadius: 'var(--radius)',
             padding: '0 28px',
             cursor: 'pointer',
-            transition: 'background 0.2s, transform 0.1s',
+            transition: 'all 0.2s ease',
             fontFamily: 'var(--font-body)',
-            boxShadow: '0 4px 12px rgba(250, 204, 21, 0.2)'
+            boxShadow: '0 6px 20px rgba(123, 47, 190, 0.4), 0 2px 6px rgba(212, 0, 122, 0.25)'
           }}
-          onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-hover)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'var(--accent)'}
+          onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; }}
           onMouseDown={e => e.currentTarget.style.transform = 'scale(0.98)'}
           onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}>
           {loading ? (

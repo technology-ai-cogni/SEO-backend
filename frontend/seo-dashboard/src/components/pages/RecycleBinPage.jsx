@@ -224,13 +224,16 @@ export default function RecycleBinPage({ user, onNavigate }) {
             style={{
               padding: '8px 18px',
               fontSize: 13.5,
-              fontWeight: 600,
+              fontWeight: 700,
               color: '#ffffff',
-              background: 'var(--accent)',
-              border: 'none',
+              background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+              border: '1.5px solid #09060E',
               borderRadius: 8,
-              cursor: 'pointer'
+              cursor: 'pointer',
+              boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35)'
             }}
+            onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
           >
             Return to Home
           </button>
@@ -352,11 +355,12 @@ export default function RecycleBinPage({ user, onNavigate }) {
                 fontSize: 13,
                 fontWeight: 600,
                 borderRadius: 20,
-                background: recycleBinTab === t.id ? 'var(--accent)' : 'var(--surface-2)',
+                background: recycleBinTab === t.id ? 'var(--accent-gradient, linear-gradient(135deg, #7928ca 0%, #db2777 100%))' : 'var(--surface-2)',
                 color: recycleBinTab === t.id ? '#ffffff' : 'var(--text-muted)',
                 border: 'none',
                 cursor: 'pointer',
-                transition: 'all 0.15s ease'
+                transition: 'all 0.15s ease',
+                boxShadow: recycleBinTab === t.id ? '0 2px 8px rgba(121, 40, 202, 0.2)' : 'none'
               }}
             >
               {t.label}

@@ -4,8 +4,9 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
   return (
     <header style={{
       height: 'var(--topbar-h)',
-      background: 'var(--surface)',
-      borderBottom: '1px solid var(--border)',
+      background: '#4b103ef4',
+      borderBottom: '1px solid #E2D9F3',
+      boxShadow: '0 2px 10px rgba(123, 47, 190, 0.04)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -15,8 +16,8 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
       zIndex: 50,
     }}>
       <div>
-        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>{title}</h1>
-        {subtitle && <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>{subtitle}</p>}
+        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 700, color: '#ffffffff', lineHeight: 1.2 }}>{title}</h1>
+        {subtitle && <p style={{ fontSize: 12, color: '#e4e4e4ff', marginTop: 2 }}>{subtitle}</p>}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -29,8 +30,9 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                background: 'var(--surface-2)',
-                border: '1px solid var(--border)',
+                background: '#FAF8FD',
+                border: '1px solid #E2D9F3',
+                boxShadow: '0 2px 6px rgba(123, 47, 190, 0.04)',
                 borderRadius: '9999px',
                 padding: '4px 12px 4px 6px',
                 cursor: 'default',
@@ -41,7 +43,7 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
                 width: 28,
                 height: 28,
                 borderRadius: '50%',
-                background: 'linear-gradient(135deg, var(--accent) 0%, #6366f1 100%)',
+                background: 'linear-gradient(135deg, #7B2FBE 0%, #D4007A 100%)',
                 color: '#ffffff',
                 display: 'flex',
                 alignItems: 'center',
@@ -49,16 +51,16 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
                 fontSize: 13,
                 fontWeight: 700,
                 textTransform: 'uppercase',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                boxShadow: '0 2px 6px rgba(123, 47, 190, 0.3)'
               }}>
                 {user.name ? user.name.charAt(0) : (user.email ? user.email.charAt(0) : 'U')}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.2 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#1A1A1A', lineHeight: 1.2 }}>
                   {user.name || user.email}
                 </span>
                 {user.name && user.email && (
-                  <span style={{ fontSize: 10.5, color: 'var(--text-muted)', lineHeight: 1 }}>
+                  <span style={{ fontSize: 10.5, color: '#64748B', lineHeight: 1 }}>
                     {user.email}
                   </span>
                 )}
@@ -75,17 +77,17 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: 'var(--text-muted)',
+                  color: '#64748B',
                   marginLeft: '4px',
                   transition: 'all 0.15s ease'
                 }}
                 onMouseEnter={e => {
-                  e.currentTarget.style.background = 'var(--border)';
-                  e.currentTarget.style.color = 'var(--accent)';
+                  e.currentTarget.style.background = '#EDE5F8';
+                  e.currentTarget.style.color = '#7B2FBE';
                 }}
                 onMouseLeave={e => {
                   e.currentTarget.style.background = 'transparent';
-                  e.currentTarget.style.color = 'var(--text-muted)';
+                  e.currentTarget.style.color = '#64748B';
                 }}
               >
                 <Settings size={14} />
@@ -99,26 +101,26 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                background: 'transparent',
-                border: '1px solid var(--border)',
+                background: '#FFFFFF',
+                border: '1px solid #E2D9F3',
                 borderRadius: 'var(--radius-sm)',
                 padding: '6px 12px',
                 fontSize: 12.5,
                 fontWeight: 600,
-                color: 'var(--text-secondary)',
+                color: '#475569',
                 fontFamily: 'var(--font-body)',
                 cursor: 'pointer',
                 transition: 'all 0.15s ease'
               }}
               onMouseEnter={e => {
-                e.currentTarget.style.borderColor = 'var(--red, #ef4444)';
-                e.currentTarget.style.color = 'var(--red, #ef4444)';
-                e.currentTarget.style.background = 'var(--red-bg, #fef2f2)';
+                e.currentTarget.style.borderColor = '#EF4444';
+                e.currentTarget.style.color = '#DC2626';
+                e.currentTarget.style.background = '#FEF2F2';
               }}
               onMouseLeave={e => {
-                e.currentTarget.style.borderColor = 'var(--border)';
-                e.currentTarget.style.color = 'var(--text-secondary)';
-                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.borderColor = '#E2D9F3';
+                e.currentTarget.style.color = '#475569';
+                e.currentTarget.style.background = '#FFFFFF';
               }}
             >
               <LogOut size={14} />
@@ -131,19 +133,19 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
             <button
               onClick={() => onNavigate?.('login')}
               style={{
-                background: 'transparent',
-                border: '1px solid var(--border)',
+                background: '#FFFFFF',
+                border: '1px solid #CBD5E1',
                 borderRadius: 'var(--radius-sm)',
                 padding: '6px 14px',
                 fontSize: 13,
                 fontWeight: 600,
-                color: 'var(--text-primary)',
+                color: '#1A1A1A',
                 fontFamily: 'var(--font-body)',
                 cursor: 'pointer',
                 transition: 'all 0.15s'
               }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = '#7B2FBE'; e.currentTarget.style.color = '#7B2FBE'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = '#CBD5E1'; e.currentTarget.style.color = '#1A1A1A'; }}
             >
               Log In
             </button>
@@ -152,19 +154,20 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
             <button
               onClick={() => onNavigate?.('signup')}
               style={{
-                background: 'var(--accent)',
-                border: '1px solid var(--accent)',
+                background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+                border: '1.5px solid #09060E',
                 borderRadius: 'var(--radius-sm)',
                 padding: '6px 14px',
                 fontSize: 13,
-                fontWeight: 600,
+                fontWeight: 700,
                 color: '#fff',
                 fontFamily: 'var(--font-body)',
                 cursor: 'pointer',
-                transition: 'background 0.15s'
+                boxShadow: '0 4px 14px rgba(123, 47, 190, 0.35)',
+                transition: 'all 0.15s'
               }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-hover)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'var(--accent)'}
+              onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
             >
               Sign Up
             </button>

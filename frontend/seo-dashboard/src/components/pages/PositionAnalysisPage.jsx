@@ -1824,20 +1824,20 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                background: '#7c3aed',
+                background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
                 color: '#ffffff',
-                border: 'none',
+                border: '1.5px solid #09060E',
                 borderRadius: 8,
                 padding: '9px 16px',
                 fontSize: 13.5,
                 fontWeight: 700,
                 cursor: Object.values(analyzingTabs).some(Boolean) ? 'not-allowed' : 'pointer',
                 opacity: Object.values(analyzingTabs).some(Boolean) ? 0.7 : 1,
-                boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
-                transition: 'background 0.15s'
+                boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
+                transition: 'all 0.15s ease'
               }}
-              onMouseEnter={e => { if (!Object.values(analyzingTabs).some(Boolean)) e.currentTarget.style.background = '#6d28d9'; }}
-              onMouseLeave={e => { if (!Object.values(analyzingTabs).some(Boolean)) e.currentTarget.style.background = '#7c3aed'; }}
+              onMouseEnter={e => { if (!Object.values(analyzingTabs).some(Boolean)) { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
+              onMouseLeave={e => { if (!Object.values(analyzingTabs).some(Boolean)) { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; } }}
             >
               <Sparkles size={14} className={Object.values(analyzingTabs).some(Boolean) ? 'animate-spin' : ''} />
               <span>
@@ -1854,35 +1854,41 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(8, 1fr)',
+        gap: 12,
         width: '100%',
         alignItems: 'center',
-        justifyItems: 'center',
+        justifyItems: 'stretch',
         marginTop: 24,
-        marginBottom: 16,
-        padding: '0 4px',
+        marginBottom: 20,
         fontFamily: 'var(--font-body, system-ui, sans-serif)'
       }}>
         {[
-          { label: 'Authority Score', value: activeProject?.da ?? 'N/A' },
-          { label: 'Spam Score', value: activeProject?.spam_score || activeProject?.ss || '0%' },
-          { label: 'Organic Traffic', value: '0' },
-          { label: 'Keywords', value: (kwCount || activeProject?.keywords || 0).toLocaleString() },
-          { label: 'Total Pages', value: (pageCount || activeProject?.targetPages || 0).toLocaleString() },
-          { label: 'Total Blogs', value: (blogCount || activeProject?.blogPages || 0).toLocaleString() },
-          { label: 'Total Clusters', value: clusterCount.toLocaleString() },
-          { label: 'Net Potential', value: netPotential ? netPotential.toLocaleString() : '0' }
+          { label: 'Authority Score', value: activeProject?.da ?? 'N/A', color: '#7B2FBE' },
+          { label: 'Spam Score', value: activeProject?.spam_score || activeProject?.ss || '0%', color: '#00BFA2' },
+          { label: 'Organic Traffic', value: '0', color: '#00A6DF' },
+          { label: 'Keywords', value: (kwCount || activeProject?.keywords || 0).toLocaleString(), color: '#D4007A' },
+          { label: 'Total Pages', value: (pageCount || activeProject?.targetPages || 0).toLocaleString(), color: '#7B2FBE' },
+          { label: 'Total Blogs', value: (blogCount || activeProject?.blogPages || 0).toLocaleString(), color: '#C8196B' },
+          { label: 'Total Clusters', value: clusterCount.toLocaleString(), color: '#00C2FF' },
+          { label: 'Net Potential', value: netPotential ? netPotential.toLocaleString() : '0', color: '#4A1A8C' }
         ].map((item) => (
           <div key={item.label} style={{
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '2px',
-            textAlign: 'center'
+            gap: '3px',
+            textAlign: 'center',
+            background: '#ffffff',
+            border: '1px solid #E4DFEE',
+            borderRadius: 10,
+            padding: '10px 6px',
+            boxShadow: '0 2px 8px rgba(74, 26, 140, 0.04)',
+            transition: 'all 0.15s ease'
           }}>
             <span style={{
-              color: '#2828caff',
-              fontWeight: 700,
+              color: item.color,
+              fontWeight: 800,
               fontSize: 16,
               lineHeight: 1.2,
               fontVariantNumeric: 'tabular-nums'
@@ -1890,11 +1896,12 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               {item.value}
             </span>
             <span style={{
-              color: '#64748b',
-              fontWeight: 600,
-              fontSize: 11,
-              letterSpacing: '0.02em',
-              textTransform: 'uppercase'
+              color: '#6B677E',
+              fontWeight: 700,
+              fontSize: 10.5,
+              letterSpacing: '0.03em',
+              textTransform: 'uppercase',
+              whiteSpace: 'nowrap'
             }}>
               {item.label}
             </span>
@@ -1913,10 +1920,10 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         {!closedCards.aiSearch && (
           <div style={{
             background: '#ffffff',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #E4DFEE',
             borderRadius: 14,
             padding: 20,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+            boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)',
             display: 'flex',
             flexDirection: 'column',
             gap: 16
@@ -1924,12 +1931,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
             {/* Card Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{
-                background: '#f3e8ff',
-                color: '#7c3aed',
+                background: 'linear-gradient(135deg, #F6EEFD 0%, #FDEBF4 100%)',
+                color: '#7B2FBE',
                 fontSize: 11,
                 fontWeight: 800,
-                padding: '3px 10px',
+                padding: '4px 12px',
                 borderRadius: 6,
+                border: '1px solid #E5CCF7',
                 letterSpacing: '0.5px'
               }}>
                 AI SEARCH
@@ -1937,17 +1945,17 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
             </div>
 
             {/* Sub-nav tabs */}
-            <div style={{ display: 'flex', gap: 6, borderBottom: '1px solid #f1f5f9', pb: 10 }}>
+            <div style={{ display: 'flex', gap: 6, borderBottom: '1px solid #f1f5f9', paddingBottom: 10 }}>
               {['Overview', 'ChatGPT', 'Gemini', 'AI Overview'].map(tab => (
                 <button
                   key={tab}
                   onClick={() => setAiTab(tab)}
                   style={{
-                    background: aiTab === tab ? '#ede9fe' : 'transparent',
-                    color: aiTab === tab ? '#7c3aed' : '#64748b',
+                    background: aiTab === tab ? 'linear-gradient(135deg, #F6EEFD 0%, #FDEBF4 100%)' : 'transparent',
+                    color: aiTab === tab ? '#7B2FBE' : '#64748b',
                     fontWeight: aiTab === tab ? 700 : 500,
                     fontSize: 13,
-                    border: 'none',
+                    border: aiTab === tab ? '1px solid #E5CCF7' : '1px solid transparent',
                     borderRadius: 6,
                     padding: '5px 12px',
                     cursor: 'pointer',
@@ -1984,20 +1992,23 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                             disabled={isCurrentTabAnalyzing || !topKeywords.length}
                             title="Run AI Analysis"
                             style={{
-                              background: '#7c3aed',
+                              background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
                               color: '#ffffff',
-                              border: 'none',
+                              border: '1.5px solid #09060E',
                               borderRadius: 8,
                               padding: '10px 20px',
                               fontSize: 13.5,
                               fontWeight: 700,
                               cursor: (isCurrentTabAnalyzing || !topKeywords.length) ? 'not-allowed' : 'pointer',
                               opacity: (isCurrentTabAnalyzing || !topKeywords.length) ? 0.75 : 1,
-                              boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
+                              boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: 8
+                              gap: 8,
+                              transition: 'all 0.15s ease'
                             }}
+                            onMouseEnter={e => { if (!isCurrentTabAnalyzing && topKeywords.length) { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
+                            onMouseLeave={e => { if (!isCurrentTabAnalyzing && topKeywords.length) { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; } }}
                           >
                             <RefreshCw size={14} className={isCurrentTabAnalyzing ? 'animate-spin' : ''} />
                             <span>{isCurrentTabAnalyzing ? 'Analyzing...' : (currentTabResults.length > 0 ? 'Re-analyze' : 'Analyze')}</span>
@@ -2180,8 +2191,9 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                         <svg width="120" height="65" viewBox="0 0 120 65">
                           <defs>
                             <linearGradient id="aiVisibilityGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                              <stop offset="0%" stopColor="#7c3aed" />
-                              <stop offset="100%" stopColor="#a855f7" />
+                              <stop offset="0%" stopColor="#4A1A8C" />
+                              <stop offset="50%" stopColor="#7B2FBE" />
+                              <stop offset="100%" stopColor="#D4007A" />
                             </linearGradient>
                           </defs>
                           {/* Background Track */}
@@ -2307,10 +2319,10 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         {!closedCards.seoCard && (
           <div style={{
             background: '#ffffff',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #E4DFEE',
             borderRadius: 14,
             padding: 20,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+            boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)',
             display: 'flex',
             flexDirection: 'column',
             gap: 20
@@ -2318,12 +2330,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
             {/* Card Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{
-                background: '#e0f2fe',
-                color: '#0284c7',
+                background: 'linear-gradient(135deg, #E6FAF6 0%, #E6F8FF 100%)',
+                color: '#008F7A',
                 fontSize: 11,
                 fontWeight: 800,
-                padding: '3px 10px',
+                padding: '4px 12px',
                 borderRadius: 6,
+                border: '1px solid #B8EFE5',
                 letterSpacing: '0.5px'
               }}>
                 SEO
@@ -2473,10 +2486,10 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       <div style={{
         width: '100%',
         background: '#ffffff',
-        border: '1px solid #e2e8f0',
+        border: '1px solid #E4DFEE',
         borderRadius: 14,
         padding: 24,
-        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)',
         marginBottom: 20
       }}>
         <div style={{
@@ -2518,12 +2531,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
             return (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
                 <span style={{
-                  background: '#f3e8ff',
-                  color: '#7c3aed',
+                  background: 'linear-gradient(135deg, #F6EEFD 0%, #FDEBF4 100%)',
+                  color: '#7B2FBE',
                   fontSize: 11,
                   fontWeight: 800,
                   padding: '4px 12px',
                   borderRadius: 6,
+                  border: '1px solid #E5CCF7',
                   letterSpacing: '0.5px',
                   textTransform: 'uppercase'
                 }}>
@@ -2636,17 +2650,18 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
           })()}
 
           {/* Single Vertical Separator Line in between */}
-          <div style={{ width: '1px', background: '#e2e8f0' }} />
+          <div style={{ width: '1px', background: '#E4DFEE' }} />
 
           {/* Right Section: SEO with Cluster & Category sub-columns */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
             <span style={{
-              background: '#e0f2fe',
-              color: '#0284c7',
+              background: 'linear-gradient(135deg, #E6FAF6 0%, #E6F8FF 100%)',
+              color: '#008F7A',
               fontSize: 11,
               fontWeight: 800,
               padding: '4px 12px',
               borderRadius: 6,
+              border: '1px solid #B8EFE5',
               letterSpacing: '0.5px',
               textTransform: 'uppercase'
             }}>
@@ -2670,12 +2685,12 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       justifyContent: 'space-between',
                       padding: '6px 10px',
                       borderRadius: 6,
-                      background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
+                      background: idx % 2 === 0 ? '#FAF8FD' : 'transparent',
                       fontSize: 12
                     }}
                   >
                     <span style={{ fontWeight: 600, color: '#334155' }}>{item.name}</span>
-                    <span style={{ fontWeight: 800, color: '#2563eb', background: '#eff6ff', padding: '2px 7px', borderRadius: 4, fontSize: 11 }}>
+                    <span style={{ fontWeight: 800, color: '#0084B4', background: '#E6F8FF', border: '1px solid #BAE6FD', padding: '2px 8px', borderRadius: 6, fontSize: 11 }}>
                       {item.share}
                     </span>
                   </div>
@@ -2683,7 +2698,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               </div>
 
               {/* Vertical Divider */}
-              <div style={{ width: '1px', background: '#e2e8f0' }} />
+              <div style={{ width: '1px', background: '#E4DFEE' }} />
 
               {/* Category Sub-column */}
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -2701,12 +2716,12 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       justifyContent: 'space-between',
                       padding: '6px 10px',
                       borderRadius: 6,
-                      background: idx % 2 === 0 ? '#f8fafc' : 'transparent',
+                      background: idx % 2 === 0 ? '#FAF8FD' : 'transparent',
                       fontSize: 12
                     }}
                   >
                     <span style={{ fontWeight: 600, color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 130 }} title={item.name}>{item.name}</span>
-                    <span style={{ fontWeight: 800, color: '#d97706', background: '#fffbeb', padding: '2px 7px', borderRadius: 4, fontSize: 11 }}>
+                    <span style={{ fontWeight: 800, color: '#C026D3', background: '#FDF2F8', border: '1px solid #FBCFE8', padding: '2px 8px', borderRadius: 6, fontSize: 11 }}>
                       {item.count}
                     </span>
                   </div>
@@ -3256,14 +3271,18 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               <button
                 onClick={() => setShowReport(false)}
                 style={{
-                  background: '#7c3aed',
+                  background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
                   color: '#ffffff',
-                  border: 'none',
+                  border: '1.5px solid #09060E',
                   borderRadius: 8,
                   padding: '8px 18px',
-                  fontWeight: 600,
-                  cursor: 'pointer'
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
+                  transition: 'all 0.15s ease'
                 }}
+                onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'}
               >
                 Close
               </button>

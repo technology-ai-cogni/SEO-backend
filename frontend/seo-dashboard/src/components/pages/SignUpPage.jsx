@@ -84,21 +84,8 @@ export default function SignUpPage({ onNavigate, user = null, onLoginSuccess = n
         boxShadow: 'var(--shadow-md)',
         padding: '36px 32px'
       }}>
-        {/* Header Icon & Brand */}
+        {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{
-            width: 44,
-            height: 44,
-            background: 'var(--accent-light)',
-            border: '1px solid var(--accent)',
-            borderRadius: 12,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 12
-          }}>
-            <Search size={22} color="var(--accent)" />
-          </div>
 
           <h2 style={{
             fontFamily: 'var(--font-display)',
@@ -116,7 +103,7 @@ export default function SignUpPage({ onNavigate, user = null, onLoginSuccess = n
             color: 'var(--text-muted)',
             lineHeight: 1.4
           }}>
-            Join SEOVision to start optimizing your online presence
+            Join hariba.ai to start optimizing your online presence
           </p>
         </div>
 
@@ -347,20 +334,20 @@ export default function SignUpPage({ onNavigate, user = null, onLoginSuccess = n
             type="submit"
             style={{
               marginTop: 8,
-              background: 'var(--accent)',
+              background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
               color: '#ffffff',
-              border: 'none',
+              border: '1.5px solid #09060E',
               borderRadius: 'var(--radius-sm)',
-              padding: '11px 16px',
+              padding: '12px 16px',
               fontSize: 14,
-              fontWeight: 600,
+              fontWeight: 700,
               fontFamily: 'var(--font-body)',
               cursor: 'pointer',
-              transition: 'background 0.15s ease',
-              boxShadow: '0 2px 6px rgba(0,0,0,0.08)'
+              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+              boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)'
             }}
-            onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-hover)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'var(--accent)'}
+            onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; }}
           >
             Sign Up
           </button>

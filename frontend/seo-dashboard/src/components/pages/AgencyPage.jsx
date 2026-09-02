@@ -507,14 +507,14 @@ export default function AgencyPage({ user }) {
   };
 
   return (
-    <div style={{ padding: '24px 32px', minHeight: '100vh', background: '#f8fafc' }}>
+    <div style={{ padding: '24px 32px', minHeight: '100vh', background: 'var(--bg)' }}>
       {/* Top Header Bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.5px' }}>
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: '#1A1A1A', margin: 0, letterSpacing: '-0.5px' }}>
             Agency
           </h1>
-          <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0' }}>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
             Vendor records, agreements, and invoice tree repository across SEO operations.
           </p>
         </div>
@@ -529,13 +529,15 @@ export default function AgencyPage({ user }) {
             fontSize: 13.5,
             fontWeight: 700,
             color: '#ffffff',
-            background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-            border: 'none',
+            background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
+            border: '1.5px solid #09060E',
             borderRadius: 10,
             cursor: 'pointer',
-            boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)',
+            boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35), 0 2px 6px rgba(212, 0, 122, 0.2)',
             transition: 'all 0.15s ease'
           }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; e.currentTarget.style.transform = 'translateY(0)'; }}
         >
           <Plus size={16} />
           <span>Add Basic Info</span>
@@ -543,7 +545,7 @@ export default function AgencyPage({ user }) {
       </div>
 
       {/* Main Unified Tree Table */}
-      <div style={{ background: '#ffffff', borderRadius: 16, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
+      <div style={{ background: '#ffffff', borderRadius: 16, border: '1px solid #E4DFEE', boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)', overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: '60px 20px', textAlign: 'center', color: '#64748b' }}>
             Loading vendor records and activity tree...
@@ -553,7 +555,7 @@ export default function AgencyPage({ user }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
               {/* CLEAN VENDOR TABLE HEADERS */}
               <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                <tr style={{ background: '#FAF8FD', borderBottom: '1px solid #E4DFEE' }}>
                   <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Vendor Name</th>
                   <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>City</th>
                   <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Country</th>
@@ -590,7 +592,7 @@ export default function AgencyPage({ user }) {
                                 {vendor.vendor_name}
                               </span>
                               {vendorInvoices.length > 0 && (
-                                <span style={{ fontSize: 10.5, fontWeight: 700, background: '#e0e7ff', color: '#4338ca', padding: '2px 7px', borderRadius: 99, marginLeft: 2 }}>
+                                <span style={{ fontSize: 10.5, fontWeight: 700, background: '#F6EEFD', color: '#7B2FBE', border: '1px solid #E5CCF7', padding: '2px 7px', borderRadius: 99, marginLeft: 2 }}>
                                   {vendorInvoices.length}
                                 </span>
                               )}
@@ -621,18 +623,18 @@ export default function AgencyPage({ user }) {
                                   style={{
                                     display: 'inline-flex',
                                     alignItems: 'center',
-                                    gap: 4,
-                                    padding: '3px 8px',
+                                    gap: 5,
+                                    padding: '4px 9px',
                                     borderRadius: 6,
-                                    border: '1px solid #bfdbfe',
-                                    background: '#eff6ff',
-                                    color: '#1d4ed8',
+                                    border: '1px solid #E5CCF7',
+                                    background: '#F6EEFD',
+                                    color: '#7B2FBE',
                                     fontSize: 11,
                                     fontWeight: 700,
                                     cursor: 'pointer'
                                   }}
                                 >
-                                  <FileText size={12} color="#2563eb" />
+                                  <FileText size={12} color="#7B2FBE" />
                                   <span>GST PDF</span>
                                 </button>
                               )}
@@ -642,18 +644,18 @@ export default function AgencyPage({ user }) {
                                   style={{
                                     display: 'inline-flex',
                                     alignItems: 'center',
-                                    gap: 4,
-                                    padding: '3px 8px',
+                                    gap: 5,
+                                    padding: '4px 9px',
                                     borderRadius: 6,
-                                    border: '1px solid #ddd6fe',
-                                    background: '#f5f3ff',
-                                    color: '#6d28d9',
+                                    border: '1px solid #E5CCF7',
+                                    background: '#F6EEFD',
+                                    color: '#7B2FBE',
                                     fontSize: 11,
                                     fontWeight: 700,
                                     cursor: 'pointer'
                                   }}
                                 >
-                                  <FileText size={12} color="#7c3aed" />
+                                  <FileText size={12} color="#7B2FBE" />
                                   <span>Agreement PDF</span>
                                 </button>
                               )}
@@ -688,13 +690,16 @@ export default function AgencyPage({ user }) {
                                   padding: '5px 11px',
                                   borderRadius: 6,
                                   border: 'none',
-                                  background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                                  background: '#1A1A1A',
                                   color: '#ffffff',
                                   fontSize: 11.5,
                                   fontWeight: 700,
                                   cursor: 'pointer',
-                                  boxShadow: '0 2px 6px rgba(99, 102, 241, 0.2)'
+                                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
+                                  transition: 'all 0.15s ease'
                                 }}
+                                onMouseEnter={e => e.currentTarget.style.background = '#2E2E38'}
+                                onMouseLeave={e => e.currentTarget.style.background = '#1A1A1A'}
                               >
                                 <Plus size={13} />
                                 <span>Add Invoice</span>
@@ -703,7 +708,7 @@ export default function AgencyPage({ user }) {
                               <button
                                 onClick={() => handleOpenEditVendorModal(vendor)}
                                 title="Edit Vendor"
-                                style={{ background: 'transparent', border: 'none', color: '#6366f1', cursor: 'pointer', padding: 4 }}
+                                style={{ background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 4 }}
                               >
                                 <Edit3 size={15} />
                               </button>
@@ -1028,13 +1033,16 @@ export default function AgencyPage({ user }) {
                     padding: '9px 24px',
                     borderRadius: 8,
                     border: 'none',
-                    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                    background: '#1A1A1A',
                     color: '#ffffff',
                     fontSize: 13.5,
                     fontWeight: 700,
                     cursor: uploadingPdf ? 'not-allowed' : 'pointer',
-                    boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)'
+                    boxShadow: '0 4px 14px rgba(0, 0, 0, 0.22)',
+                    transition: 'all 0.15s ease'
                   }}
+                  onMouseEnter={e => { if (!uploadingPdf) e.currentTarget.style.background = '#2E2E38'; }}
+                  onMouseLeave={e => { if (!uploadingPdf) e.currentTarget.style.background = '#1A1A1A'; }}
                 >
                   {uploadingPdf ? 'Uploading PDF...' : 'Done'}
                 </button>
@@ -1153,14 +1161,17 @@ export default function AgencyPage({ user }) {
                   style={{
                     padding: '9px 24px',
                     borderRadius: 8,
-                    border: 'none',
-                    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                    border: '1.5px solid #09060E',
+                    background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
                     color: '#ffffff',
                     fontSize: 13.5,
                     fontWeight: 700,
                     cursor: uploadingPdf ? 'not-allowed' : 'pointer',
-                    boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)'
+                    boxShadow: '0 4px 16px rgba(123, 47, 190, 0.35)',
+                    transition: 'all 0.15s ease'
                   }}
+                  onMouseEnter={e => { if (!uploadingPdf) e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8A33D4 45%, #D6237A 80%, #E50C88 100%)'; }}
+                  onMouseLeave={e => { if (!uploadingPdf) e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)'; }}
                 >
                   {uploadingPdf ? 'Uploading PDF...' : 'Done'}
                 </button>
