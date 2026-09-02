@@ -221,6 +221,154 @@ def fetch_reddit_url_details(url: str, rapidapi_host: str = None) -> dict:
         }
 
 
+def audit_reddit_row(topic: str, live_link: str, landing_page: str, spoc: str = None) -> tuple:
+    """
+    Performs AI Status Check / Audit on a Forum Reddit row without browser scraping or cookies,
+    using RapidAPI Reddit JSON API.
+
+    Returns:
+        (status: str, remarks: str, solution: str, fetched_data: dict)
+    """
+    topic_clean = str(topic or "").strip()
+    live_clean = str(live_link or "").strip()
+    target_landing = str(landing_page or "").strip()
+
+    # Determine post URL (topic or live_link)
+    target_post_url = ""
+    if "reddit.com" in topic_clean:
+        target_post_url = topic_clean
+    elif "reddit.com" in live_clean:
+        target_post_url = live_clean
+
+    if not target_post_url:
+        return (
+            "Flagged-Indexation",
+            "Flagged-Indexation (Invalid Topic URL)",
+            "Quora : Reddit- Post New Answer",
+            {"error": "No valid Reddit URL provided"}
+        )
+
+    # Clean target post URL to remove comment specific trailing sub-paths if present
+    post_url_base = target_post_url.split("?")[0].rstrip("/")
+    if "/comments/" in post_url_base:
+        parts = post_url_base.split("/comments/")
+        post_id_part = parts[1].split("/")[0]
+        subreddit_part = parts[0]
+        post_url_base = f"{subreddit_part}/comments/{post_id_part}/"
+
+    # Fetch Reddit data via RapidAPI
+    try:
+        res = fetch_reddit_url_details(post_url_base)
+    except Exception as e:
+        res = {"status": "error", "message": str(e)}
+
+    if res.get("status") != "success" or not res.get("post"):
+        error_msg = res.get("message", "Failed to fetch Reddit post")
+        return (
+            "Audited-LQ",
+            "Post Deleted / Not Found",
+            "Quora : Reddit- Post New Answer",
+            {"error": error_msg, "url": target_post_url}
+        )
+
+    post_info = res.get("post", {})
+    comments = res.get("comments", []) or []
+
+    # Sort comments descending by upvotes to determine rank
+    sorted_comments = sorted(comments, key=lambda c: int(c.get("upvotes") or 0), reverse=True)
+
+    # Extract comment ID if present in live_link
+    live_comment_id = ""
+    if "/comment/" in live_clean:
+        try:
+            live_comment_id = live_clean.split("/comment/")[1].split("/")[0].split("?")[0].lower()
+        except Exception:
+            pass
+    elif "/comments/" in live_clean:
+        path_after_comments = [p.split("?")[0] for p in live_clean.split("/comments/")[1].rstrip("/").split("/") if p]
+        if len(path_after_comments) >= 3 and path_after_comments[1] == "comment":
+            live_comment_id = path_after_comments[2].lower()
+        elif len(path_after_comments) >= 3:
+            live_comment_id = path_after_comments[2].lower()
+        elif len(path_after_comments) >= 2 and len(path_after_comments[1]) > 4:
+            live_comment_id = path_after_comments[1].lower()
+
+    landing_domain = (
+        target_landing.replace("https://", "")
+        .replace("http://", "")
+        .replace("www.", "")
+        .split("/")[0]
+        .lower()
+        if target_landing
+        else ""
+    )
+
+    matched_comment = None
+    matched_rank = None
+
+    for rank_idx, c in enumerate(sorted_comments, start=1):
+        c_id = str(c.get("id") or "").lower()
+        c_body = str(c.get("body") or "").lower()
+        c_author = str(c.get("username") or "").lower()
+        c_permalink = str(c.get("permalink") or "").lower()
+
+        is_match = False
+
+        # Match by comment ID
+        if live_comment_id and (live_comment_id == c_id or live_comment_id in c_permalink):
+            is_match = True
+        # Match by permalink
+        elif live_clean and (live_clean.lower() in c_permalink or c_permalink in live_clean.lower()):
+            is_match = True
+        # Match by landing page or domain in comment text
+        elif target_landing and (target_landing.lower() in c_body or (landing_domain and landing_domain in c_body)):
+            is_match = True
+        # Match by author if SPOC/username given
+        elif spoc and spoc.lower().strip() in c_author:
+            is_match = True
+
+        if is_match:
+            matched_comment = c
+            matched_rank = rank_idx
+            break
+
+    # Structure fetched data for DB persistence
+    audit_data = {
+        "source": "rapidapi",
+        "post": post_info,
+        "total_comments_count": len(sorted_comments),
+        "matched_comment": matched_comment,
+        "matched_rank": matched_rank,
+        "comments": sorted_comments[:10]
+    }
+
+    if not matched_comment:
+        return (
+            "Audited-LQ",
+            "Comment Deleted / Not Found",
+            "Quora : Reddit- Post New Answer",
+            audit_data
+        )
+
+    comment_upvotes = int(matched_comment.get("upvotes") or 0)
+
+    # In Top 3 with upvotes -> Indexed
+    if matched_rank <= 3 and comment_upvotes >= 1:
+        return (
+            "Audited-Indexed",
+            "Indexed",
+            "No issues",
+            audit_data
+        )
+    else:
+        return (
+            "Audited-LQ",
+            "Not in Top3, No upvotes",
+            "Quora : Reddit- Add More Upvotes",
+            audit_data
+        )
+
+
 if __name__ == "__main__":
     import sys
 
@@ -254,11 +402,11 @@ if __name__ == "__main__":
             print(f"    \"{body_preview}\"")
 
         print("\n" + "=" * 70)
-        print("SUMMARY JSON:")
-        print(json.dumps({
-            "post": post,
-            "comments_sample": comments[:3]
-        }, indent=2))
+        print("TEST AUDIT ROW RESULT:")
+        st, rem, sol, fetched = audit_reddit_row(url_to_test, f"{url_to_test}lvh8rdt/", "")
+        print(f"Status:   {st}")
+        print(f"Remarks:  {rem}")
+        print(f"Solution: {sol}")
     else:
         print("\nResult:")
         print(json.dumps(res, indent=2))

@@ -21,6 +21,13 @@ from services import rank_checker, rank_checker_fc
 RANK_CHECK_WORKERS = 3
 
 
+def _is_valid_landing_page(lp):
+    if not lp:
+        return False
+    val = str(lp).strip().lower()
+    return val not in ("", "na", "n/a", "none", "null", "-", "—")
+
+
 def _should_retry(rank, matched_links):
     """Flags a keyword for retry if top_links is empty or if rank is 101 and fewer than 30 links were fetched."""
     if not matched_links or len(matched_links) == 0:
@@ -32,6 +39,9 @@ def _should_retry(rank, matched_links):
 
 def _check_one_brightdata(project_slug, row, country_code, default_domain):
     row_id, keyword, landing_page_url = row["id"], row["keyword"], row["landing_page_url"]
+    if not _is_valid_landing_page(landing_page_url):
+        db.update_keyword_rank(row_id, None, rank_meta={"skipped": "no_valid_landing_page"})
+        return row, None, []
     try:
         rank, matched_links = rank_checker.find_rank(
             keyword, landing_page_url, default_domain=default_domain, country_code=country_code,
@@ -52,6 +62,8 @@ def _check_one_brightdata(project_slug, row, country_code, default_domain):
 
 def _check_one_firecrawl(project_slug, row, country_code, default_domain):
     row_id, keyword, landing_page_url = row["id"], row["keyword"], row["landing_page_url"]
+    if not _is_valid_landing_page(landing_page_url):
+        return row, None, []
     try:
         rank, matched_links = rank_checker_fc.find_rank(
             keyword, landing_page_url, default_domain=default_domain, country_code=country_code,
@@ -77,6 +89,20 @@ def run_rank_check_job(project_slug, rows, country_code):
     db.get_job_keyword_rows_for_rank_check())."""
     domain_record = db.get_domain_by_project_slug(project_slug)
     default_domain = (domain_record or {}).get("domain") or rank_checker.DEFAULT_DOMAIN
+
+    # Filter out keywords without a valid landing page URL
+    valid_rows = []
+    for r in rows:
+        lp = r.get("landing_page_url")
+        if _is_valid_landing_page(lp):
+            valid_rows.append(r)
+        else:
+            db.update_keyword_rank(r["id"], None, rank_meta={"skipped": "no_valid_landing_page"})
+
+    rows = valid_rows
+    if not rows:
+        print(f"[hosted_rank_check] No keywords with valid landing pages found for project '{project_slug}'.")
+        return
 
     # --- PASS 1: Primary check via Bright Data ---
     retry_rows = []

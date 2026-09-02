@@ -4,7 +4,7 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
   return (
     <header style={{
       height: 'var(--topbar-h)',
-      background: '#4b103ef4',
+      background: 'linear-gradient(135deg, #F3EEFF 0%, #FBF8FF 40%, #FFFBFE 100%)',
       borderBottom: '1px solid #E2D9F3',
       boxShadow: '0 2px 10px rgba(123, 47, 190, 0.04)',
       display: 'flex',
@@ -16,8 +16,8 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
       zIndex: 50,
     }}>
       <div>
-        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 700, color: '#ffffffff', lineHeight: 1.2 }}>{title}</h1>
-        {subtitle && <p style={{ fontSize: 12, color: '#e4e4e4ff', marginTop: 2 }}>{subtitle}</p>}
+        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 21, fontWeight: 700, color: '#371035ff', lineHeight: 1.2 }}>{title}</h1>
+        {subtitle && <p style={{ fontSize: 12, color: '#7d2a8ebc', marginTop: 2 }}>{subtitle}</p>}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -160,7 +160,7 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
                 padding: '6px 14px',
                 fontSize: 13,
                 fontWeight: 700,
-                color: '#fff',
+                color: '#ffffffff',
                 fontFamily: 'var(--font-body)',
                 cursor: 'pointer',
                 boxShadow: '0 4px 14px rgba(123, 47, 190, 0.35)',

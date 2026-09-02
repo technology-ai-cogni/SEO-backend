@@ -3,6 +3,12 @@ import { Search, ChevronDown, ExternalLink, Download, KeyRound, Filter, ChevronL
 import { fetchDomainRows, fetchKeywordRows } from '../../lib/projectsApi';
 import { canDownload } from '../../lib/permissions';
 
+const hasValidLandingPage = (lp) => {
+  if (!lp || typeof lp !== 'string') return false;
+  const t = lp.trim().toLowerCase();
+  return t !== '' && t !== 'na' && t !== 'n/a' && t !== '—' && t !== '-' && t !== 'null' && t !== 'undefined' && t !== 'none';
+};
+
 // MultiSelectField Component for Popover Filters
 function MultiSelectField({ label, options, selectedValues = [], onChange }) {
   const [open, setOpen] = useState(false);
@@ -1052,7 +1058,7 @@ export default function KeywordsPage({ user }) {
 
                     {/* RANK */}
                     <td style={{ padding: '12px 14px', fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap' }}>
-                      {row.rank > 0 ? row.rank : <span style={{ color: '#94a3b8', fontWeight: 400 }}>—</span>}
+                      {hasValidLandingPage(row.landingPage) && row.rank > 0 ? row.rank : <span style={{ color: '#94a3b8', fontWeight: 400 }}>—</span>}
                     </td>
 
                     {/* SV */}
@@ -1118,9 +1124,9 @@ export default function KeywordsPage({ user }) {
 
                     {/* LANDING PAGE */}
                     <td style={{ padding: '12px 14px', color: '#2563eb', maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {row.landingPage ? (
+                      {hasValidLandingPage(row.landingPage) ? (
                         <a
-                          href={row.landingPage}
+                          href={row.landingPage.startsWith('http://') || row.landingPage.startsWith('https://') ? row.landingPage : `https://${row.landingPage}`}
                           target="_blank"
                           rel="noreferrer"
                           title={row.landingPage}

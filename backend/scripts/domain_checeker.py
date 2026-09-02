@@ -12,7 +12,7 @@ RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "9d27d2418bmsh49f11b032161487p1fb7c7jsn
 RAPIDAPI_HOST = "bulk-da-pa-checker2.p.rapidapi.com"
 
 # SE Ranking API Key from project .env (used ONLY for regional breakdown)
-SERANKING_API_KEY = os.getenv("SERANKING_API_KEY", "3847ddf8-428d-4849-b0df-8fe5faa3bacb")
+SERANKING_API_KEY = os.getenv("SERANKING_API_KEY", "7fc83a7d-807e-43f9-4789-c0e22bf6c072")
 SERANKING_BASE_URL = "https://api.seranking.com/v1"
 
 COUNTRY_NAMES = {

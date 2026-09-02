@@ -45,8 +45,8 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
 
   return (
     <div style={{
-      background: '#ffffff',
-      border: '1px solid #e2e8f0',
+      background: '#7f4747ff',
+      border: '1px solid #46576dff',
       borderRadius: 12,
       padding: '14px 20px',
       display: 'flex',
@@ -1441,19 +1441,48 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     return (
       <div style={{
         minHeight: '100vh',
-        background: '#f8fafc',
+        background: '#fafafa',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 40
+        gap: 16,
+        fontFamily: 'var(--font-body, system-ui, sans-serif)',
       }}>
-        <Sparkles size={36} color="#6366f1" className="animate-spin" style={{ marginBottom: 16 }} />
-        <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0 }}>Loading Brand Discovery...</h3>
-        <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0' }}>Fetching project metrics, AI search engine positions, and analytics.</p>
+        <style>{`
+          @keyframes bd-spin { to { transform: rotate(360deg); } }
+          @keyframes bd-sweep {
+            0%   { transform: translateX(-100%); }
+            100% { transform: translateX(300%); }
+          }
+        `}</style>
+
+        {/* Thin spinner ring */}
+        <div style={{
+          width: 36, height: 36,
+          borderRadius: '50%',
+          border: '2.5px solid #E9E4F5',
+          borderTopColor: '#7B2FBE',
+          animation: 'bd-spin 0.8s linear infinite',
+        }} />
+
+        {/* Label */}
+        <span style={{ fontSize: 13, color: '#94A3B8', fontWeight: 500, letterSpacing: '0.01em' }}>
+          Loading Brand Discovery…
+        </span>
+
+        {/* Slim shimmer bar */}
+        <div style={{ width: 180, height: 2, background: '#EDE9F7', borderRadius: 99, overflow: 'hidden' }}>
+          <div style={{
+            height: '100%', width: '50%',
+            background: 'linear-gradient(90deg, transparent, #7B2FBE, transparent)',
+            animation: 'bd-sweep 1.4s ease-in-out infinite',
+          }} />
+        </div>
       </div>
     );
   }
+
 
   return (
     <div style={{
@@ -1464,6 +1493,12 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       fontFamily: 'var(--font-body, system-ui, sans-serif)',
       color: '#1e293b'
     }}>
+      <style>{`
+        @keyframes bd-fade-up {
+          0%   { opacity: 0; transform: translateY(6px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
       {/* ─── HEADER BAR ────────────────────────────────────────────────────────── */}
       <div style={{
         display: 'grid',
@@ -1826,7 +1861,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 gap: 8,
                 background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
                 color: '#ffffff',
-                border: '1.5px solid #09060E',
+                border: 'none',
                 borderRadius: 8,
                 padding: '9px 16px',
                 fontSize: 13.5,
@@ -1863,31 +1898,48 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         fontFamily: 'var(--font-body, system-ui, sans-serif)'
       }}>
         {[
-          { label: 'Authority Score', value: activeProject?.da ?? 'N/A', color: '#7B2FBE' },
-          { label: 'Spam Score', value: activeProject?.spam_score || activeProject?.ss || '0%', color: '#00BFA2' },
-          { label: 'Organic Traffic', value: '0', color: '#00A6DF' },
-          { label: 'Keywords', value: (kwCount || activeProject?.keywords || 0).toLocaleString(), color: '#D4007A' },
-          { label: 'Total Pages', value: (pageCount || activeProject?.targetPages || 0).toLocaleString(), color: '#7B2FBE' },
-          { label: 'Total Blogs', value: (blogCount || activeProject?.blogPages || 0).toLocaleString(), color: '#C8196B' },
-          { label: 'Total Clusters', value: clusterCount.toLocaleString(), color: '#00C2FF' },
-          { label: 'Net Potential', value: netPotential ? netPotential.toLocaleString() : '0', color: '#4A1A8C' }
-        ].map((item) => (
-          <div key={item.label} style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '3px',
-            textAlign: 'center',
-            background: '#ffffff',
-            border: '1px solid #E4DFEE',
-            borderRadius: 10,
-            padding: '10px 6px',
-            boxShadow: '0 2px 8px rgba(74, 26, 140, 0.04)',
-            transition: 'all 0.15s ease'
-          }}>
+          { label: 'Authority Score', value: activeProject?.da ?? 'N/A' },
+          { label: 'Spam Score',      value: activeProject?.spam_score || activeProject?.ss || '0%' },
+          { label: 'Organic Traffic', value: '0' },
+          { label: 'Keywords',        value: (kwCount || activeProject?.keywords || 0).toLocaleString() },
+          { label: 'Total Pages',     value: (pageCount || activeProject?.targetPages || 0).toLocaleString() },
+          { label: 'Total Blogs',     value: (blogCount || activeProject?.blogPages || 0).toLocaleString() },
+          { label: 'Total Clusters',  value: clusterCount.toLocaleString() },
+          { label: 'Net Potential',   value: netPotential ? netPotential.toLocaleString() : '0' },
+        ].map((item, idx) => (
+          <div
+            key={item.label}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '3px',
+              textAlign: 'center',
+              background: 'linear-gradient(160deg, rgba(74, 26, 140, 0.10) 0%, #ffffff 65%)',
+              border: '1px solid #E4DFEE',
+              borderTop: '2.5px solid #4A1A8C',
+              borderRadius: 10,
+              padding: '10px 6px',
+              boxShadow: '0 2px 8px rgba(74, 26, 140, 0.08)',
+              transition: 'transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.18s cubic-bezier(0.4, 0, 0.2, 1), border-top-color 0.18s ease',
+              animation: 'bd-fade-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) both',
+              animationDelay: `${idx * 40}ms`,
+              cursor: 'default'
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 6px 14px rgba(74, 26, 140, 0.12)';
+              e.currentTarget.style.borderTopColor = '#7B2FBE';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 2px 8px rgba(74, 26, 140, 0.08)';
+              e.currentTarget.style.borderTopColor = '#4A1A8C';
+            }}
+          >
             <span style={{
-              color: item.color,
+              color: '#4A1A8C',
               fontWeight: 800,
               fontSize: 16,
               lineHeight: 1.2,
@@ -1994,7 +2046,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                             style={{
                               background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
                               color: '#ffffff',
-                              border: '1.5px solid #09060E',
+                              border: 'none',
                               borderRadius: 8,
                               padding: '10px 20px',
                               fontSize: 13.5,
@@ -3287,7 +3339,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 style={{
                   background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 45%, #C8196B 80%, #D4007A 100%)',
                   color: '#ffffff',
-                  border: '1.5px solid #09060E',
+                  border: 'none',
                   borderRadius: 8,
                   padding: '8px 18px',
                   fontWeight: 700,

@@ -302,7 +302,7 @@ def batch_map_small_categories_to_major(small_categories_data: list, major_categ
         return {}
 
 
-def consolidate_small_categories(domain: str, min_threshold: int = 5):
+def consolidate_small_categories(domain: str, min_threshold: int = 3):
     """
     Second pass check after full categorization:
     Finds categories with <= min_threshold (5) keywords and reassigns ALL of their keywords

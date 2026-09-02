@@ -1602,7 +1602,7 @@ export default function OffPageSchedulerPage({ user }) {
               </span>
             )}
 
-            {!isVendor && userCanEdit && (
+            {!isVendor && userCanEdit && (hasUnsavedChanges || savingState === 'saving' || savingState === 'saved') && (
               <button
                 onClick={handleSaveChanges}
                 disabled={savingState === 'saving'}
@@ -1883,7 +1883,7 @@ export default function OffPageSchedulerPage({ user }) {
                   <div style={{
                     position: 'absolute',
                     top: 44,
-                    right: 0,
+                    left: 0,
                     zIndex: 100,
                     width: 175,
                     background: '#ffffff',
@@ -1894,68 +1894,67 @@ export default function OffPageSchedulerPage({ user }) {
                     overflow: 'hidden'
                   }}>
                     {/* Bulk Edit Option */}
-                    <button
-                      onClick={() => {
-                        setShowActionsDropdown(false);
-                        setShowBulkEditModal(true);
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '10px 16px',
-                        background: 'none',
-                        border: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 10,
-                        fontSize: 13.5,
-                        fontWeight: 600,
-                        color: '#1e293b',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        transition: 'background 0.12s ease'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                    >
-                      <Pencil size={15} color="#475569" />
-                      Bulk Edit
-                    </button>
-
-                    <div style={{ height: 1, background: '#f1f5f9', margin: '4px 0' }} />
+                    {userCanEdit && (
+                      <button
+                        onClick={() => {
+                          setShowActionsDropdown(false);
+                          setShowBulkEditModal(true);
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '10px 16px',
+                          background: 'none',
+                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          fontSize: 13.5,
+                          fontWeight: 600,
+                          color: '#1e293b',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          transition: 'background 0.12s ease'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                      >
+                        <Pencil size={15} color="#475569" />
+                        Bulk Edit
+                      </button>
+                    )}
 
                     {/* Bulk Delete Option */}
-                    <button
-                      onClick={() => {
-                        setShowActionsDropdown(false);
-                        if (selectedDataset && selectedRowIndices.length > 0) {
-                          const selectedRowsSet = new Set(selectedRowIndices.map(idx => filteredRows[idx]).filter(Boolean));
-                          const remainingRows = (selectedDataset.rowsData || []).filter(r => !selectedRowsSet.has(r));
-                          setSelectedDataset(prev => ({ ...prev, rowsData: remainingRows }));
-                          setIsDirty(true);
-                          setSelectedRowIndices([]);
-                        }
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '10px 16px',
-                        background: 'none',
-                        border: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 10,
-                        fontSize: 13.5,
-                        fontWeight: 600,
-                        color: '#ef4444',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        transition: 'background 0.12s ease'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                    >
-                      <Trash2 size={15} color="#ef4444" />
-                      Bulk Delete
-                    </button>
+                    {userCanDelete && (
+                      <>
+                        {userCanEdit && <div style={{ height: 1, background: '#f1f5f9', margin: '4px 0' }} />}
+                        <button
+                          onClick={() => {
+                            setShowActionsDropdown(false);
+                            handleBulkDelete();
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '10px 16px',
+                            background: 'none',
+                            border: 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            fontSize: 13.5,
+                            fontWeight: 600,
+                            color: '#ef4444',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            transition: 'background 0.12s ease'
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                        >
+                          <Trash2 size={15} color="#ef4444" />
+                          Bulk Delete
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -2026,86 +2025,6 @@ export default function OffPageSchedulerPage({ user }) {
                 <CheckCircle size={15} color="#ffffff" />
                 Verify
               </button>
-
-              {/* Actions Popover Dropdown Menu */}
-              {showActionsDropdown && (
-                <div style={{
-                  position: 'absolute',
-                  top: 46,
-                  right: 0,
-                  zIndex: 100,
-                  width: 175,
-                  background: '#ffffff',
-                  borderRadius: 12,
-                  border: '1px solid #e2e8f0',
-                  boxShadow: '0 10px 30px -5px rgba(0,0,0,0.12), 0 4px 6px -2px rgba(0,0,0,0.05)',
-                  padding: '6px 0',
-                  overflow: 'hidden'
-                }}>
-                  {/* Bulk Edit Option */}
-                  {userCanEdit && (
-                    <button
-                      onClick={() => {
-                        setShowActionsDropdown(false);
-                        setShowBulkEditModal(true);
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '10px 16px',
-                        background: 'none',
-                        border: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 10,
-                        fontSize: 13.5,
-                        fontWeight: 600,
-                        color: '#1e293b',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        transition: 'background 0.12s ease'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                    >
-                      <Pencil size={15} color="#475569" />
-                      Bulk Edit
-                    </button>
-                  )}
-
-                  {/* Bulk Delete Option */}
-                  {userCanDelete && (
-                    <>
-                      <div style={{ height: 1, background: '#f1f5f9', margin: '4px 0' }} />
-                      <button
-                        onClick={() => {
-                          setShowActionsDropdown(false);
-                          handleBulkDelete();
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '10px 16px',
-                          background: 'none',
-                          border: 'none',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 10,
-                          fontSize: 13.5,
-                          fontWeight: 600,
-                          color: '#ef4444',
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                          transition: 'background 0.12s ease'
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                      >
-                        <Trash2 size={15} color="#ef4444" />
-                        Bulk Delete
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
             </div>
           ) : (
             <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>

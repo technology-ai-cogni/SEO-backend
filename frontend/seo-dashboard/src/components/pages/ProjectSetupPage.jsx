@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Plus, Minus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2, RefreshCw, Filter, Download, Folder, FolderTree, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Search, Plus, Minus, X, ChevronDown, ChevronLeft, ChevronRight, Edit2, HelpCircle, Upload, Check, Monitor, Globe, ArrowLeft, Trash2, RefreshCw, Filter, Download, Folder, FolderTree, AlertCircle, CheckCircle2, ExternalLink } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { Badge } from '../ui/Card';
@@ -14,11 +14,17 @@ import {
   fetchOutreachSitesApi, addOutreachSiteApi, deleteOutreachSiteApi,
   updateOutreachSiteApi, bulkDeleteOutreachSitesApi, bulkUpdateOutreachSitesApi,
   createAuditLogApi, getActiveUserEmail,
-  getApiBaseUrl
+  getApiBaseUrl, authFetch
 } from '../../lib/projectsApi';
 import { isReadOnlyUser, canEdit, canDelete, canDownload, canUpdate } from '../../lib/permissions';
 
 // ─── shared tiny components ────────────────────────────────────────────────
+
+const hasValidLandingPage = (lp) => {
+  if (!lp || typeof lp !== 'string') return false;
+  const t = lp.trim().toLowerCase();
+  return t !== '' && t !== 'na' && t !== 'n/a' && t !== '—' && t !== '-' && t !== 'null' && t !== 'undefined' && t !== 'none';
+};
 
 function downloadCSV(filename, rows) {
   if (!rows || !rows.length) return;
@@ -3702,7 +3708,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
 
     const tick = async (attempt) => {
       try {
-        const res = await fetch(`${CATEGORY_API_BASE}/jobs/${jobId}`);
+        const res = await authFetch(`${CATEGORY_API_BASE}/jobs/${jobId}`);
         const job = res.ok ? await res.json() : null;
 
         if (job?.status === 'completed') {
@@ -3759,7 +3765,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
       // Categorizes keywords ALREADY sitting in this project -- never
       // re-uploads/re-inserts rows (that's what /jobs/category is for,
       // and calling it again here was duplicating every keyword).
-      const res = await fetch(`${CATEGORY_API_BASE}/projects/${project.slug}/categorize`, {
+      const res = await authFetch(`${CATEGORY_API_BASE}/projects/${project.slug}/categorize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ country, recluster }),
@@ -3884,7 +3890,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
       // directly, no job_id lookup needed (see check_rank_for_project in
       // app.py for why the old job-based version silently checked
       // nothing for keywords added via Add Keywords).
-      const res = await fetch(`${CATEGORY_API_BASE}/projects/${project.slug}/check-rank`, {
+      const res = await authFetch(`${CATEGORY_API_BASE}/projects/${project.slug}/check-rank`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ country }),
@@ -4479,7 +4485,9 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.sv ?? '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.kwDiff ?? '—'}</td>
                   {showRankColumn && (
-                    <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.rank ?? '—'}</td>
+                    <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>
+                      {hasValidLandingPage(r.landingPage) ? (r.rank ?? '—') : '—'}
+                    </td>
                   )}
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.cluster || '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.category || '—'}</td>
@@ -4488,7 +4496,34 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
                   <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetSubtype ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetSubtype || '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{project.location || '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: r.priority ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.priority || '—'}</td>
-                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--accent)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.landingPage || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--accent)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {hasValidLandingPage(r.landingPage) ? (
+                      <a
+                        href={r.landingPage.startsWith('http://') || r.landingPage.startsWith('https://') ? r.landingPage : (r.landingPage.startsWith('/') && project?.domain ? `https://${project.domain.replace(/^https?:\/\//i, '').replace(/\/+$/, '')}${r.landingPage}` : `https://${r.landingPage}`)}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={r.landingPage}
+                        style={{
+                          color: 'var(--accent, #7928ca)',
+                          textDecoration: 'none',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          fontWeight: 500,
+                          maxWidth: '100%'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                        onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                      >
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.landingPage}
+                        </span>
+                        <ExternalLink size={12} style={{ flexShrink: 0, opacity: 0.8 }} />
+                      </a>
+                    ) : (
+                      <span style={{ color: 'var(--text-muted)' }}>—</span>
+                    )}
+                  </td>
                   <td style={{ padding: '10px 16px' }}>
                     {userCanDelete && (
                       <button onClick={() => deleteRow(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
@@ -6503,7 +6538,34 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                     </div>
                   </td>
                   <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', maxWidth: 200 }}>{r.pageName || r.name || r.kw || '—'}</td>
-                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--accent)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.url || r.landingPage || '—'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--accent)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {(r.url || r.landingPage) ? (
+                      <a
+                        href={(r.url || r.landingPage).startsWith('http://') || (r.url || r.landingPage).startsWith('https://') ? (r.url || r.landingPage) : ((r.url || r.landingPage).startsWith('/') && project?.domain ? `https://${project.domain.replace(/^https?:\/\//i, '').replace(/\/+$/, '')}${(r.url || r.landingPage)}` : `https://${(r.url || r.landingPage)}`)}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={r.url || r.landingPage}
+                        style={{
+                          color: 'var(--accent, #7928ca)',
+                          textDecoration: 'none',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          fontWeight: 500,
+                          maxWidth: '100%'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                        onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                      >
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.url || r.landingPage}
+                        </span>
+                        <ExternalLink size={12} style={{ flexShrink: 0, opacity: 0.8 }} />
+                      </a>
+                    ) : (
+                      <span style={{ color: 'var(--text-muted)' }}>—</span>
+                    )}
+                  </td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.cluster || '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.category || r.targetCategory || '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetType ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetType || r.type || '—'}</td>

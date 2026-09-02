@@ -1082,14 +1082,19 @@ export async function bulkDeleteKeywordRows(ids) {
 }
 
 export function getApiBaseUrl() {
+  // Honour VITE_API_BASE env-var first (set in .env / build)
+  const envBase = import.meta.env?.VITE_API_BASE;
+  if (envBase && envBase.trim()) {
+    return envBase.trim().replace('0.0.0.0', '127.0.0.1');
+  }
   if (typeof window !== 'undefined' && window.location && window.location.hostname) {
     const host = window.location.hostname;
     if (host === 'localhost' || host === '127.0.0.1') {
-      return 'http://127.0.0.1:8000';
+      return 'http://127.0.0.1:5000';
     }
-    return `${window.location.protocol}//${host}:8000`;
+    return `${window.location.protocol}//${host}:5000`;
   }
-  return 'http://127.0.0.1:8000';
+  return 'http://127.0.0.1:5000';
 }
 
 const CATEGORY_API_BASE = getApiBaseUrl();
@@ -2263,7 +2268,7 @@ export async function fetchAiAnalysisHistory(projectSlug, engine = '') {
     }
   }
 
-  const apiBase = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000').replace('0.0.0.0', '127.0.0.1');
+  const apiBase = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5000').replace('0.0.0.0', '127.0.0.1');
   try {
     const url = new URL(`${apiBase}/projects/${encodeURIComponent(projectSlug)}/ai-analysis-history`);
     if (engine) url.searchParams.append('engine', engine);

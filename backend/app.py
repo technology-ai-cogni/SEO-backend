@@ -773,28 +773,34 @@ async def _do_quora_single_audit_coro(qc_mod, topic, live_link, landing_page):
                 pass
 
 
-async def _do_reddit_single_audit_coro(rc_mod, topic, live_link, landing_page):
-    """Reddit audit using API-based checker (no browser scraping needed)."""
-    audit_fn = getattr(rc_mod, "do_reddit_single_audit", None) if rc_mod else None
-    http_fallback_fn = getattr(rc_mod, "check_reddit_http_fallback", None) if rc_mod else None
-
-    if not audit_fn:
-        if http_fallback_fn:
-            return http_fallback_fn(live_link, topic, landing_page)
-        return "Audited-LQ", "Not in Top3, No upvotes", "Quora : Reddit- Add More Upvotes"
-
+def _do_reddit_single_audit(rc_mod, topic, live_link, landing_page, spoc=None):
+    """Reddit audit using pure RapidAPI JSON fetcher (reddit_fetcher.py) - no browser scraping or cookies needed."""
     try:
-        return await audit_fn(topic, live_link, landing_page)
+        try:
+            from scripts.reddit_fetcher import audit_reddit_row
+        except ImportError:
+            rf_path = os.path.join(os.path.dirname(__file__), "scripts", "reddit_fetcher.py")
+            spec = importlib.util.spec_from_file_location("reddit_fetcher", rf_path)
+            rf_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(rf_mod)
+            audit_reddit_row = rf_mod.audit_reddit_row
+
+        return audit_reddit_row(topic, live_link, landing_page, spoc)
     except Exception as e:
-        print(f"[reddit-checker] API audit error: {e}", flush=True)
-        if http_fallback_fn:
-            return http_fallback_fn(live_link, topic, landing_page)
-        return "Audited-LQ", "Not in Top3, No upvotes", "Quora : Reddit- Add More Upvotes"
+        print(f"[reddit-fetcher] API audit error: {e}", file=sys.stderr, flush=True)
+        return "Audited-LQ", "Not in Top3, No upvotes", "Quora : Reddit- Add More Upvotes", {"error": str(e)}
 
 
 async def _do_status_check_stream_gen(dataset_id: Optional[int], rows_payload: Optional[List[Dict[str, Any]]]):
     imports = db.list_monthly_imports()
-    target_imports = [imp for imp in imports if str(imp.get("id")) == str(dataset_id)] if dataset_id else imports
+    target_imports = []
+
+    if dataset_id is not None:
+        target_imports = [imp for imp in imports if imp.get("id") == dataset_id]
+    elif rows_payload is not None:
+        target_imports = [{"id": dataset_id or 0, "rowsData": rows_payload}]
+    else:
+        target_imports = imports
 
     if not target_imports and rows_payload:
         target_imports = [{"id": dataset_id or 0, "rowsData": rows_payload}]
@@ -816,6 +822,7 @@ async def _do_status_check_stream_gen(dataset_id: Optional[int], rows_payload: O
                 landing_page = str(r.get("landingPage") or r.get("landing_page") or r.get("page") or "").strip()
                 kw1 = str(r.get("keyword1") or r.get("keyword_1") or "").strip()
                 kw2 = str(r.get("keyword2") or r.get("keyword_2") or "").strip()
+                spoc = str(r.get("spoc") or "").strip()
 
                 print(f"[AI Audit Stream] Processing Row {r_idx + 1}/{total_rows} | Activity: '{activity}' | Link/Topic: '{live_link or topic}'", flush=True)
 
@@ -829,49 +836,37 @@ async def _do_status_check_stream_gen(dataset_id: Optional[int], rows_payload: O
                 is_business_listing = not is_forum_quora and not is_forum_reddit and any(term in act_lower for term in ["business listing", "business-listing", "businesslisting", "classified ads", "classified", "classifieds", "classified ad", "classified-ads"])
                 is_paid_guest_post = not is_forum_quora and not is_forum_reddit and not is_business_listing
 
-                # Route 1a: Forum Reddit -> scripts/reddit-checker.py (API-based, no scraping)
+                # Route 1a: Forum Reddit -> scripts/reddit_fetcher.py (API-based, no scraping/cookies)
                 if is_forum_reddit:
                     total_checked += 1
                     if not topic and not live_link:
                         r["status"] = "Flagged-Indexation"
                         r["remarks"] = "Flagged-Indexation (Invalid Topic URL)"
                         r["solution"] = "Quora : Reddit- Post New Answer"
+                        r["fetched_data"] = {"error": "Invalid Topic URL"}
+                        r["fetchedData"] = {"error": "Invalid Topic URL"}
                     else:
-                        # Dynamically import reddit-checker.py
-                        rc_mod = None
-                        rc_candidates = [
-                            os.path.join(os.path.dirname(__file__), "scripts", "reddit-checker.py"),
-                            os.path.join(os.path.dirname(__file__), "scripts", "reddit_checker.py"),
-                            os.path.join(os.path.dirname(__file__), "..", "scripts", "reddit-checker.py"),
-                            os.path.join(os.path.dirname(__file__), "reddit-checker.py")
-                        ]
-                        for rpath in rc_candidates:
-                            if os.path.exists(rpath):
-                                try:
-                                    spec = importlib.util.spec_from_file_location("reddit_checker_dynamic", rpath)
-                                    rc_mod = importlib.util.module_from_spec(spec)
-                                    spec.loader.exec_module(rc_mod)
-                                    break
-                                except Exception as re_err:
-                                    print(f"[app] Error loading {rpath}: {re_err}", file=sys.stderr, flush=True)
-
                         try:
-                            status, remarks, solution = await asyncio.to_thread(
-                                run_in_proactor_loop,
-                                _do_reddit_single_audit_coro,
-                                rc_mod,
+                            status, remarks, solution, fetched_data = await asyncio.to_thread(
+                                _do_reddit_single_audit,
+                                None,
                                 topic,
                                 live_link,
-                                landing_page
+                                landing_page,
+                                spoc
                             )
                             r["status"] = status
                             r["remarks"] = remarks
                             r["solution"] = solution
+                            r["fetched_data"] = fetched_data
+                            r["fetchedData"] = fetched_data
                         except Exception as r_err:
-                            print(f"[app] Reddit audit thread error: {r_err}", file=sys.stderr, flush=True)
+                            print(f"[app] Reddit audit error: {r_err}", file=sys.stderr, flush=True)
                             r["status"] = "Audited-LQ"
                             r["remarks"] = "Not in Top3, No upvotes"
                             r["solution"] = "Quora : Reddit- Add More Upvotes"
+                            r["fetched_data"] = {"error": str(r_err)}
+                            r["fetchedData"] = {"error": str(r_err)}
 
                     now_date = time.strftime("%Y-%m-%d")
                     r["updatedDate"] = now_date
