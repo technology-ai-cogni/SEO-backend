@@ -147,6 +147,16 @@ from auth.dependencies import (
 MIN_SEARCH_VOLUME = 5
 NEAR_ME_PHRASE = "near me"
 
+import importlib
+
+# Pre-import AI Agent classes at module startup to eliminate _ModuleLock deadlocks during concurrent requests
+try:
+    OPENAI_AGENT_CLASS = importlib.import_module("exp-1.agents.openai_agent").OpenAIAgent
+    GEMINI_AGENT_CLASS = importlib.import_module("exp-1.agents.gemini_agent").GeminiAgent
+    AIO_AGENT_CLASS = importlib.import_module("exp-1.agents.aio_agent").AIOAgent
+except Exception as _e:
+    print(f"[app] Agent pre-import notice: {_e}", flush=True)
+
 app = FastAPI(title="Category API")
 
 app.add_middleware(
@@ -2367,13 +2377,12 @@ def run_ai_visibility_analysis_endpoint(project_slug: str, req: AiVisibilityRequ
     engine = (req.engine or "chatgpt").lower().strip()
 
     try:
-        import importlib
         if "gemini" in engine:
-            AgentClass = importlib.import_module("exp-1.agents.gemini_agent").GeminiAgent
+            AgentClass = GEMINI_AGENT_CLASS
         elif "overview" in engine or "aio" in engine:
-            AgentClass = importlib.import_module("exp-1.agents.aio_agent").AIOAgent
+            AgentClass = AIO_AGENT_CLASS
         else:
-            AgentClass = importlib.import_module("exp-1.agents.openai_agent").OpenAIAgent
+            AgentClass = OPENAI_AGENT_CLASS
 
         agent = AgentClass()
         raw_result = agent.analyze_ai_visibility(kws, client_domain=client_domain, country=req.country or "India")

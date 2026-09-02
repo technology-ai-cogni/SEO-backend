@@ -22,7 +22,55 @@ import {
   deleteOffPageActivityApi
 } from '../../lib/projectsApi';
 
-export default function CalendarPage({ user }) {
+// ─── POTENTIAL KEYWORD SCORING ALGORITHM (Ranks 5-20, SV, KD & Deduplicated Intent Mapping) ───
+function getPotentialKeywordsForProject(kws, activityName) {
+  if (!kws || !Array.isArray(kws) || kws.length === 0) return [];
+  
+  // 1. Strict Rank Filter: Keep strictly rank 5 to 20
+  const candidateKws = kws.filter(k => {
+    const r = Number(k.rank || k.position || 0);
+    return r >= 5 && r <= 20;
+  });
+
+  const pool = candidateKws.length > 0 ? candidateKws : [...kws].sort((a, b) => (Number(a.rank || 99) - Number(b.rank || 99))).slice(0, 50);
+
+  // 2. Score and deduplicate (Loosened SV >= 0 & KD 0-100 to capture ALL keywords in Rank 5-20)
+  const seen = new Set();
+  const scored = [];
+
+  pool.forEach(k => {
+    const kwText = String(k.kw || k.keyword || '').trim();
+    const kwLower = kwText.toLowerCase();
+    if (!kwText || seen.has(kwLower)) return;
+    seen.add(kwLower);
+
+    const rank = Number(k.rank || k.position || 10);
+    const sv = Number(String(k.sv || k.search_volume || k.kw_volume || 0).replace(/[^0-9.]/g, '')) || 0;
+    const kd = Number(String(k.kd || k.keyword_difficulty || k.difficulty || 0).replace(/[^0-9.]/g, '')) || 0;
+
+    const rankFactor = 1 + (21 - Math.min(20, Math.max(5, rank))) / 15;
+    const svFactor = Math.log10(sv + 1) + 1;
+    const kdFactor = (100 - Math.min(100, kd)) / 100 + 0.1;
+
+    const potentialScore = Math.round((svFactor * kdFactor * rankFactor) * 20);
+
+    scored.push({
+      id: k.id || kwText,
+      keyword: kwText,
+      category: k.category || k.targetSubtype || k.subtype || 'General',
+      cluster: k.cluster || k.type || 'General',
+      rank: rank,
+      sv: sv,
+      kd: kd,
+      potentialScore: potentialScore,
+      topicLink: ''
+    });
+  });
+
+  return scored.sort((a, b) => b.potentialScore - a.potentialScore);
+}
+
+function CalendarPage({ user }) {
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -39,6 +87,10 @@ export default function CalendarPage({ user }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [schedulingType, setSchedulingType] = useState('ai'); // 'ai' | 'manual'
+    const [modalKeywords, setModalKeywords] = useState([]);
+  const [potentialKws, setPotentialKws] = useState([]);
+  const [selectedKwIds, setSelectedKwIds] = useState(new Set());
+  const [topicLinks, setTopicLinks] = useState({});
   const [formData, setFormData] = useState({
     activity_name: '',
     project_name: '',
@@ -174,14 +226,61 @@ export default function CalendarPage({ user }) {
     setIsModalOpen(true);
   };
 
+  
+  // Load project keywords and compute Potential Keywords for modal
+  useEffect(() => {
+    async function loadModalKws() {
+      if (!formData.project_name) {
+        setPotentialKws([]);
+        return;
+      }
+      const matchedProj = projects.find(p => (p.name || p.domain) === formData.project_name);
+      const slug = matchedProj?.slug || formData.project_name.toLowerCase().replace(/\s+/g, '');
+      try {
+        const kws = await fetchKeywordRows(slug);
+        setModalKeywords(kws || []);
+        const potential = getPotentialKeywordsForProject(kws || [], formData.activity_name);
+        setPotentialKws(potential);
+        // Pre-select top 3 by default
+        const top3Ids = new Set(potential.slice(0, 3).map(k => k.id));
+        setSelectedKwIds(top3Ids);
+      } catch (err) {
+        console.error('[CalendarPage] Error loading modal keywords:', err);
+      }
+    }
+    if (isModalOpen && schedulingType === 'ai') {
+      loadModalKws();
+    }
+  }, [formData.project_name, formData.activity_name, isModalOpen, schedulingType]);
+
   const handleSaveForm = async (e) => {
     e.preventDefault();
     try {
+      let payload = { ...formData };
+      if (schedulingType === 'ai' && !editingItem) {
+        const selectedPotential = potentialKws.filter(k => selectedKwIds.has(k.id)).map(k => ({
+          keyword: k.keyword,
+          category: k.category,
+          cluster: k.cluster,
+          rank: k.rank,
+          sv: k.sv,
+          kd: k.kd,
+          topic_link: topicLinks[k.id] || ''
+        }));
+        payload.potential_keywords = selectedPotential;
+        if (selectedPotential.length > 0) {
+          payload.keyword_name = selectedPotential.map(k => k.keyword).join(', ');
+          payload.category = selectedPotential[0].category;
+          payload.cluster = selectedPotential[0].cluster;
+          payload.topic_link = selectedPotential.map(k => k.topic_link).filter(Boolean).join(' | ');
+        }
+      }
+
       if (editingItem) {
-        await updateOffPageActivityApi(editingItem.id, formData);
-        setActivities(prev => prev.map(a => a.id === editingItem.id ? { ...a, ...formData } : a));
+        await updateOffPageActivityApi(editingItem.id, payload);
+        setActivities(prev => prev.map(a => a.id === editingItem.id ? { ...a, ...payload } : a));
       } else {
-        const created = await createOffPageActivityApi(formData);
+        const created = await createOffPageActivityApi(payload);
         setActivities(prev => [created, ...prev]);
       }
       setIsModalOpen(false);
@@ -840,6 +939,117 @@ export default function CalendarPage({ user }) {
                     </select>
                   </div>
 
+                  {/* Potential Keywords Section (Rank 5-20, SV, KD, Category, Cluster & Topic Link) */}
+                  {formData.project_name && (
+                    <div style={{
+                      background: '#f8fafc',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 10,
+                      padding: 14,
+                      marginTop: 4,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Sparkles size={14} color="#7c3aed" />
+                          <span style={{ fontSize: 12.5, fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                            Potential Keywords (Ranks 5–20)
+                          </span>
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', background: '#ede9fe', padding: '2px 8px', borderRadius: 12 }}>
+                          {potentialKws.length} Opportunities Found
+                        </span>
+                      </div>
+
+                      {potentialKws.length === 0 ? (
+                        <div style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic', padding: 12, textAlign: 'center' }}>
+                          No rank 5-20 potential keywords found for this project yet.
+                        </div>
+                      ) : (
+                        <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
+                            <thead>
+                              <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #cbd5e1', color: '#475569', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                <th style={{ padding: '8px 10px', width: 30 }}>Select</th>
+                                <th style={{ padding: '8px 10px' }}>Keyword</th>
+                                <th style={{ padding: '8px 10px' }}>Category</th>
+                                <th style={{ padding: '8px 10px' }}>Cluster</th>
+                                <th style={{ padding: '8px 10px' }}>Rank</th>
+                                <th style={{ padding: '8px 10px' }}>SV</th>
+                                <th style={{ padding: '8px 10px' }}>KD</th>
+                                <th style={{ padding: '8px 10px', width: 140 }}>Topic Link</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {potentialKws.map((item) => {
+                                const isChecked = selectedKwIds.has(item.id);
+                                return (
+                                  <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9', background: isChecked ? '#f5f3ff' : 'transparent' }}>
+                                    <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={(e) => {
+                                          const next = new Set(selectedKwIds);
+                                          if (e.target.checked) next.add(item.id);
+                                          else next.delete(item.id);
+                                          setSelectedKwIds(next);
+                                        }}
+                                        style={{ cursor: 'pointer' }}
+                                      />
+                                    </td>
+                                    <td style={{ padding: '8px 10px', fontWeight: 700, color: '#0f172a' }}>
+                                      {item.keyword}
+                                    </td>
+                                    <td style={{ padding: '8px 10px' }}>
+                                      <span style={{ background: '#fef3c7', color: '#d97706', padding: '2px 6px', borderRadius: 4, fontSize: 10.5, fontWeight: 700 }}>
+                                        {item.category}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: '8px 10px' }}>
+                                      <span style={{ background: '#eff6ff', color: '#2563eb', padding: '2px 6px', borderRadius: 4, fontSize: 10.5, fontWeight: 700 }}>
+                                        {item.cluster}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: '8px 10px' }}>
+                                      <span style={{ background: item.rank <= 10 ? '#dcfce7' : '#e0f2fe', color: item.rank <= 10 ? '#15803d' : '#0369a1', padding: '2px 6px', borderRadius: 4, fontSize: 10.5, fontWeight: 800 }}>
+                                        #{item.rank}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: '8px 10px', fontWeight: 600, color: '#334155' }}>
+                                      {item.sv.toLocaleString()}
+                                    </td>
+                                    <td style={{ padding: '8px 10px', fontWeight: 600, color: item.kd > 50 ? '#ef4444' : '#16a34a' }}>
+                                      {item.kd}
+                                    </td>
+                                    <td style={{ padding: '6px 10px' }}>
+                                      <input
+                                        type="url"
+                                        placeholder="Paste Topic Link..."
+                                        value={topicLinks[item.id] || ''}
+                                        onChange={(e) => setTopicLinks({ ...topicLinks, [item.id]: e.target.value })}
+                                        style={{
+                                          width: '100%',
+                                          padding: '4px 8px',
+                                          fontSize: 11,
+                                          border: '1px solid #cbd5e1',
+                                          borderRadius: 4,
+                                          outline: 'none'
+                                        }}
+                                      />
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
@@ -1038,3 +1248,6 @@ export default function CalendarPage({ user }) {
     </div>
   );
 }
+
+
+export default CalendarPage;

@@ -20,13 +20,25 @@ function getTop2KeywordsPerCategory(kws) {
   });
 
   const selectedKeywords = [];
+  const seenKwText = new Set();
+
   Object.values(categoryMap).forEach(kwGroup => {
     const sorted = [...kwGroup].sort((a, b) => {
       const svA = Number(String(a.sv || a.search_volume || a.kw_volume || 0).replace(/[^0-9.]/g, '')) || 0;
       const svB = Number(String(b.sv || b.search_volume || b.kw_volume || 0).replace(/[^0-9.]/g, '')) || 0;
       return svB - svA;
     });
-    selectedKeywords.push(...sorted.slice(0, 2));
+
+    let addedInCat = 0;
+    for (const kObj of sorted) {
+      const kwText = String(kObj.kw || kObj.keyword || kObj.name || '').trim().toLowerCase();
+      if (kwText && !seenKwText.has(kwText)) {
+        seenKwText.add(kwText);
+        selectedKeywords.push(kObj);
+        addedInCat++;
+        if (addedInCat >= 2) break;
+      }
+    }
   });
 
   return selectedKeywords;

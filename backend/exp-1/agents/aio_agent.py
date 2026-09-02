@@ -73,8 +73,8 @@ class GeminiClientPool:
 
 _client_pool = GeminiClientPool()
 
-SEARCH_MODEL  = os.environ.get("GEMINI_MODEL", "models/gemini-3.5-flash")   # AI Overview model
-SUMMARY_MODEL = os.environ.get("GEMINI_MODEL", "models/gemini-3.5-flash")   # SEO analysis
+SEARCH_MODEL  = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")   # AI Overview model
+SUMMARY_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")   # SEO analysis
 
 
 def generate_content_with_retry(model: str, contents, config, max_attempts=2):
@@ -302,7 +302,7 @@ Return ONLY valid JSON with these fields (DO NOT return URLs):
 - 'others_count': Integer count of competitors ahead.
 """
             response = None
-            for gmodel in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]:
+            for gmodel in ["gemini-3.6-flash", "gemini-1.5-pro", "gemini-3.6-flash"]:
                 try:
                     response = generate_content_with_retry(
                         model=gmodel,

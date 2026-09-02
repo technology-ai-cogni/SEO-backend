@@ -344,31 +344,34 @@ export default function KeywordsPage({ user }) {
   };
 
   // Export CSV Handler
+  // Robust Blob-based Export CSV Handler
   const handleExportCSV = () => {
     if (!filteredKeywords || filteredKeywords.length === 0) return;
     const headers = ['Keyword', 'Rank', 'Search Volume', 'KW Diff', 'Cluster', 'Category', 'Type', 'Target Type', 'Target Subtype', 'Target Geo', 'Priority', 'Landing Page'];
     const rows = filteredKeywords.map(k => [
-      `"${k.kw || ''}"`,
+      `"${(k.kw || k.keyword || '').replace(/"/g, '""')}"`,
       k.rank || '',
       k.sv || 0,
       k.kd || '',
-      `"${k.cluster || ''}"`,
-      `"${k.category || ''}"`,
-      `"${k.type || ''}"`,
-      `"${k.targetType || ''}"`,
-      `"${k.targetSubtype || ''}"`,
-      `"${k.targetGeo || ''}"`,
-      `"${k.priority || ''}"`,
-      `"${k.landingPage || ''}"`
+      `"${(k.cluster || '').replace(/"/g, '""')}"`,
+      `"${(k.category || '').replace(/"/g, '""')}"`,
+      `"${(k.type || '').replace(/"/g, '""')}"`,
+      `"${(k.targetType || '').replace(/"/g, '""')}"`,
+      `"${(k.targetSubtype || '').replace(/"/g, '""')}"`,
+      `"${(k.targetGeo || '').replace(/"/g, '""')}"`,
+      `"${(k.priority || '').replace(/"/g, '""')}"`,
+      `"${(k.landingPage || k.landing_page_url || '').replace(/"/g, '""')}"`
     ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csvString = [headers.join(','), ...rows.map(e => e.join(','))].join('\r\n');
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `keywords_${activeProject?.slug || 'export'}.csv`);
+    link.href = url;
+    link.setAttribute('download', `${activeProject?.slug || 'keywords'}_tracked_keywords.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (

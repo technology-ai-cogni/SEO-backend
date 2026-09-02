@@ -22,8 +22,8 @@ try:
 except Exception:
     OpenAI = None
     _client = None
-SEARCH_MODEL  = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini")
-SUMMARY_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+SEARCH_MODEL  = os.environ.get("OPENAI_CHAT_MODEL", "o3-mini")
+SUMMARY_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "o3-mini")
 
 
 class OpenAIAgent(BaseAgent):
@@ -239,27 +239,32 @@ Evaluate the target keywords above and return ONLY valid JSON with these fields 
 - 'others_count': Integer count of competitors ahead of '{domain_clean}'.
 """
 
-            try:
-                response = _client.chat.completions.create(
-                    model=SEARCH_MODEL,
-                    messages=[
-                        {"role": "system", "content": system_msg},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.0,
-                    seed=42,
-                    response_format={"type":"json_object"}
-                )
-            except Exception as model_err:
-                print(f"[OpenAIAgent] Primary model failed ({model_err}), falling back to gpt-4o", file=sys.stderr, flush=True)
-                response = _client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "system", "content": system_msg},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    response_format={"type": "json_object"}
-                )
+            response = None
+            heavy_models = ["o3-mini", "gpt-4o", "gpt-4-turbo"]
+            for hmodel in heavy_models:
+                try:
+                    kwargs = {
+                        "model": hmodel,
+                        "messages": [
+                            {"role": "system", "content": system_msg},
+                            {"role": "user", "content": user_prompt}
+                        ]
+                    }
+                    if hmodel.startswith("o3") or hmodel.startswith("o1"):
+                        kwargs["response_format"] = {"type": "json_object"}
+                    else:
+                        kwargs["temperature"] = 0.0
+                        kwargs["response_format"] = {"type": "json_object"}
+
+                    response = _client.chat.completions.create(**kwargs)
+                    if response:
+                        print(f"[OpenAIAgent] Success with heavy model: {hmodel}", flush=True)
+                        break
+                except Exception as model_err:
+                    print(f"[OpenAIAgent] Model {hmodel} failed: {model_err}, trying next heavy model...", file=sys.stderr, flush=True)
+            
+            if not response:
+                raise RuntimeError("All heavy OpenAI models failed.")
 
             ai_text = response.choices[0].message.content or ""
             json_match = re.search(r"\{.*\}", ai_text, re.DOTALL)

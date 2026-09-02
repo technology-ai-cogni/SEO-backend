@@ -2078,7 +2078,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                           ? visibilityData.cited_pages
                           : cList.length;
 
-                        // Calculate actual parsed keywords count (Top 2 per category searched by AI) vs Total Project Keywords
+                        // Calculate actual deduplicated parsed keywords count (Top 2 per category searched by AI) vs Total Project Keywords
                         const getParsedKwCount = (kws) => {
                           if (!kws || !Array.isArray(kws) || kws.length === 0) return 0;
                           const categoryMap = {};
@@ -2087,11 +2087,27 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                             if (!categoryMap[cat]) categoryMap[cat] = [];
                             categoryMap[cat].push(k);
                           });
-                          let count = 0;
-                          Object.values(categoryMap).forEach(g => {
-                            count += Math.min(g.length, 2);
+
+                          const seen = new Set();
+                          Object.values(categoryMap).forEach(kwGroup => {
+                            const sorted = [...kwGroup].sort((a, b) => {
+                              const svA = Number(String(a.sv || a.search_volume || a.kw_volume || 0).replace(/[^0-9.]/g, '')) || 0;
+                              const svB = Number(String(b.sv || b.search_volume || b.kw_volume || 0).replace(/[^0-9.]/g, '')) || 0;
+                              return svB - svA;
+                            });
+
+                            let addedInCat = 0;
+                            for (const kObj of sorted) {
+                              const kwText = String(kObj.kw || kObj.keyword || kObj.name || '').trim().toLowerCase();
+                              if (kwText && !seen.has(kwText)) {
+                                seen.add(kwText);
+                                addedInCat++;
+                                if (addedInCat >= 2) break;
+                              }
+                            }
                           });
-                          return count;
+
+                          return seen.size;
                         };
 
                         const totalProjectKws = projectKeywords && projectKeywords.length > 0 ? projectKeywords.length : (kwCount || 0);
@@ -2632,9 +2648,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                             >
                               {item.url}
                             </a>
-                            <span style={{ fontWeight: 800, color: '#7c3aed', background: '#f5f3ff', padding: '2px 7px', borderRadius: 4, fontSize: 11 }}>
-                              {item.count}
-                            </span>
+
                           </div>
                         ))
                       ) : (
