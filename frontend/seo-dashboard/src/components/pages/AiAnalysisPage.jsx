@@ -1013,11 +1013,16 @@ export default function AiAnalysisPage({ user }) {
                 )}
               </div>
 
-              {/* Calendar Date Selector Button beside Country */}
+              {/* Calendar Date Selector Button beside Country -- opens a date picker, does NOT run analysis */}
               <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                 <button
-                  onClick={handleRunAnalysis}
-                  title="Select Analysis Target Date Range"
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const inp = document.getElementById('ai_header_date_picker');
+                    if (inp) { inp.showPicker ? inp.showPicker() : inp.click(); }
+                  }}
+                  title="Select date"
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -1038,6 +1043,13 @@ export default function AiAnalysisPage({ user }) {
                     {new Date(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </span>
                 </button>
+                <input
+                  id="ai_header_date_picker"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => { if (e.target.value) setSelectedDate(e.target.value); }}
+                  style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 0, height: 0 }}
+                />
               </div>
             </div>
           </div>
