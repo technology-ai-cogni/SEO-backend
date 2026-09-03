@@ -1086,18 +1086,29 @@ export async function bulkDeleteKeywordRows(ids) {
 }
 
 export function getApiBaseUrl() {
+  // If running in browser under HTTPS, always use same-origin (Nginx reverse proxy) to avoid Mixed Content errors
+  if (typeof window !== 'undefined' && window.location) {
+    if (window.location.protocol === 'https:') {
+      return window.location.origin;
+    }
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+      const envBase = import.meta.env?.VITE_API_BASE;
+      if (envBase && envBase.trim()) {
+        return envBase.trim().replace('0.0.0.0', '127.0.0.1').replace(/\/+$/, '');
+      }
+      return 'http://127.0.0.1:8000';
+    }
+    // Any other host served via Nginx
+    return window.location.origin;
+  }
+
   // Honour VITE_API_BASE env-var first (set in .env / build)
   const envBase = import.meta.env?.VITE_API_BASE;
   if (envBase && envBase.trim()) {
     return envBase.trim().replace('0.0.0.0', '127.0.0.1').replace(/\/+$/, '');
   }
-  if (typeof window !== 'undefined' && window.location && window.location.hostname) {
-    const host = window.location.hostname;
-    if (host === 'localhost' || host === '127.0.0.1') {
-      return 'http://127.0.0.1:8000';
-    }
-    return `${window.location.protocol}//${host}:8000`.replace(/\/+$/, '');
-  }
+
   return 'http://127.0.0.1:8000';
 }
 
