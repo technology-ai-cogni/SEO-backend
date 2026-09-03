@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { FileText, Search, RefreshCw, Trash2, Shield, AlertTriangle, Filter, CheckCircle, Info, AlertCircle } from 'lucide-react';
 import { hasPermission, PERMISSIONS } from '../../lib/permissions';
 import { fetchAuditLogsApi } from '../../lib/projectsApi';
+import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
 export default function LogsPage({ user, onNavigate }) {
   const [logs, setLogs] = useState([]);
@@ -375,8 +376,8 @@ export default function LogsPage({ user, onNavigate }) {
               <tbody>
                 {loadingLogs ? (
                   <tr>
-                    <td colSpan={7} style={{ padding: '48px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13.5 }}>
-                      Loading audit logs...
+                    <td colSpan={7} style={{ padding: '48px 16px', textAlign: 'center' }}>
+                      <BrandInfinityLoader label="Loading audit logs…" size="md" minHeight="180px" />
                     </td>
                   </tr>
                 ) : filteredLogs.length === 0 ? (

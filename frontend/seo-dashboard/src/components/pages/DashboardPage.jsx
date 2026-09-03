@@ -3,6 +3,8 @@ import { SparkLine } from '../ui/MiniChart';
 import { TrendingUp, TrendingDown, Info, AlertTriangle, CheckCircle, Zap, FolderOpen } from 'lucide-react';
 import { ROLES } from '../../lib/permissions';
 
+import BrandInfinityLoader from '../common/BrandInfinityLoader';
+
 const alertIcons = { info: Info, success: CheckCircle, warning: AlertTriangle, tip: Zap };
 const alertColors = { info: 'var(--blue)', success: 'var(--green)', warning: 'var(--amber)', tip: 'var(--accent)' };
 const alertBgs = { info: 'var(--blue-bg)', success: 'var(--green-bg)', warning: 'var(--amber-bg)', tip: 'var(--accent-light)' };
@@ -18,11 +20,7 @@ function getIntentVariant(intent) {
 
 export default function DashboardPage({ activeProject, keywords = [], loadingKeywords = false, user = null }) {
   if (loadingKeywords) {
-    return (
-      <div style={{ padding: 32, display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh', color: 'var(--text-muted)' }}>
-        Loading project dashboard...
-      </div>
-    );
+    return <BrandInfinityLoader label="Loading project dashboard…" minHeight="60vh" />;
   }
 
   if (!activeProject) {

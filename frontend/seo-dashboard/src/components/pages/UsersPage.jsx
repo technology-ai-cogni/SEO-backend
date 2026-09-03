@@ -8,6 +8,7 @@ import {
   hasPermission, PERMISSIONS, CATEGORIES, ROLES, ROLE_DISPLAY_NAMES, CATEGORY_ROLES_MAP
 } from '../../lib/permissions';
 import { fetchUsersApi, createUserApi, updateUserStatusApi, updateUserRoleApi, deleteUserApi, updateUserAttendanceApi, markAllAttendanceApi, fetchDomainRows } from '../../lib/projectsApi';
+import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
 const SECTION_ACCESS_OPTIONS = [
   'Default',
@@ -1423,9 +1424,8 @@ export default function UsersPage({ user, onNavigate }) {
 
             {/* Main Admin User Control Table */}
             {loading ? (
-              <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
-                <RefreshCw size={24} className="spin" style={{ margin: '0 auto 12px auto', color: 'var(--accent)' }} />
-                <div style={{ fontSize: 14, fontWeight: 600 }}>Loading user accounts...</div>
+              <div style={{ padding: '40px 16px', textAlign: 'center' }}>
+                <BrandInfinityLoader label="Loading user accounts…" size="md" minHeight="200px" />
               </div>
             ) : filteredUsers.length === 0 ? (
               <div style={{ padding: 60, textAlign: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}>

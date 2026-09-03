@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, ChevronDown, ExternalLink, FileText, Filter, Download, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
 import { canDownload, canRunActions } from '../../lib/permissions';
 import { fetchDomainRows, fetchPageRows, fetchKeywordRows, runOrganicRankCheckApi } from '../../lib/projectsApi';
+import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
 // MultiSelectField Component for Popover Filters
 function MultiSelectField({ label, options, selectedValues = [], onChange }) {
@@ -1350,8 +1351,12 @@ export default function TopPagesPage({ user }) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={12} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
-                    Loading pages for {activeProject?.domain || activeProject?.name}...
+                  <td colSpan={12} style={{ padding: '48px 16px', textAlign: 'center' }}>
+                    <BrandInfinityLoader
+                      label={`Loading pages for ${activeProject?.domain || activeProject?.name || 'project'}…`}
+                      size="md"
+                      minHeight="180px"
+                    />
                   </td>
                 </tr>
               ) : filteredPages.length === 0 ? (

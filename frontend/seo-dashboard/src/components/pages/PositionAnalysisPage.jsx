@@ -3,6 +3,7 @@ import { ExternalLink, Search, ChevronDown, CheckCircle, Lock, ShieldAlert, Cale
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi, fetchDomainMetricsApi, runOrganicRankCheckApi, fetchAiAnalysisHistory } from '../../lib/projectsApi';
 import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions, canRunBrandDiscovery, isAssociateUser, canRunAiModelAnalysis, recordAiModelAnalysisRun } from '../../lib/permissions';
+import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
 function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 0, projectTotalKeywords = 0 }) {
   const [hoverType, setHoverType] = useState(null); // null | 'mentions' | 'cited'
@@ -1621,49 +1622,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   const badgeInfo = getRegionBadgeInfo(activeProject, selectedDate);
 
   if (loading || !activeProject) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        background: '#fafafa',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 16,
-        fontFamily: 'var(--font-body, system-ui, sans-serif)',
-      }}>
-        <style>{`
-          @keyframes bd-spin { to { transform: rotate(360deg); } }
-          @keyframes bd-sweep {
-            0%   { transform: translateX(-100%); }
-            100% { transform: translateX(300%); }
-          }
-        `}</style>
-
-        {/* Thin spinner ring */}
-        <div style={{
-          width: 36, height: 36,
-          borderRadius: '50%',
-          border: '2.5px solid #E9E4F5',
-          borderTopColor: '#7B2FBE',
-          animation: 'bd-spin 0.8s linear infinite',
-        }} />
-
-        {/* Label */}
-        <span style={{ fontSize: 13, color: '#94A3B8', fontWeight: 500, letterSpacing: '0.01em' }}>
-          Loading Brand Discovery…
-        </span>
-
-        {/* Slim shimmer bar */}
-        <div style={{ width: 180, height: 2, background: '#EDE9F7', borderRadius: 99, overflow: 'hidden' }}>
-          <div style={{
-            height: '100%', width: '50%',
-            background: 'linear-gradient(90deg, transparent, #7B2FBE, transparent)',
-            animation: 'bd-sweep 1.4s ease-in-out infinite',
-          }} />
-        </div>
-      </div>
-    );
+    return <BrandInfinityLoader label="Loading Brand Discovery…" size="xl" showBar fullPage />;
   }
 
 

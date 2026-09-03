@@ -18,6 +18,7 @@ import {
   authFetch
 } from '../../lib/projectsApi';
 import { isReadOnlyUser, canEdit, canDelete, canDownload, canUpdate } from '../../lib/permissions';
+import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
 const fetch = authFetch;
 
@@ -2588,7 +2589,7 @@ function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteP
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading projects…</td></tr>
+              <tr><td colSpan={11} style={{ padding: '48px 16px', textAlign: 'center' }}><BrandInfinityLoader label="Loading projects…" size="md" minHeight="180px" /></td></tr>
             ) : error ? (
               <tr><td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
             ) : visibleProjects.length === 0 ? (
@@ -3465,7 +3466,7 @@ function PageDetailView({ project, onBack, onUpdatePages, search, user }) {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading pages…</td></tr>
+              <tr><td colSpan={8} style={{ padding: '48px 12px', textAlign: 'center' }}><BrandInfinityLoader label="Loading pages…" size="md" minHeight="180px" /></td></tr>
             ) : error ? (
               <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
             ) : rows.length === 0 ? (
@@ -4510,7 +4511,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading keywords…</td></tr>
+              <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '48px 12px', textAlign: 'center' }}><BrandInfinityLoader label="Loading keywords…" size="md" minHeight="180px" /></td></tr>
             ) : error ? (
               <tr><td colSpan={showRankColumn ? 14 : 13} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
             ) : rows.length === 0 ? (
@@ -5261,8 +5262,8 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
 function Top3KeywordsByCategorySection({ top3Map, loading, selectedKw, onSelectKw, scopedProject }) {
   if (loading) {
     return (
-      <div style={{ padding: '14px 20px', background: '#fafbfc', borderBottom: '1px solid var(--border)', fontSize: 13, color: 'var(--text-muted)' }}>
-        Loading top keywords by category…
+      <div style={{ padding: '24px 20px', background: '#fafbfc', borderBottom: '1px solid var(--border)', textAlign: 'center' }}>
+        <BrandInfinityLoader label="Loading top keywords by category…" size="sm" minHeight="120px" />
       </div>
     );
   }
@@ -6591,7 +6592,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
             </thead>
             <tbody>
               {pagesLoading ? (
-                <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading pages…</td></tr>
+                <tr><td colSpan={8} style={{ padding: '48px 12px', textAlign: 'center' }}><BrandInfinityLoader label="Loading pages…" size="md" minHeight="180px" /></td></tr>
               ) : pageRows.length === 0 ? (
                 <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No pages added yet. Click <strong>Add Pages</strong> to import.</td></tr>
               ) : filteredPageRows.length === 0 ? (
@@ -6770,7 +6771,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading competitors…</td></tr>
+                  <tr><td colSpan={8} style={{ padding: '48px 12px', textAlign: 'center' }}><BrandInfinityLoader label="Loading competitors…" size="md" minHeight="180px" /></td></tr>
                 ) : error ? (
                   <tr><td colSpan={8} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
                 ) : paged.length === 0 ? (
@@ -9479,9 +9480,8 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
             )}
             {activeTab === 'Outreach' && (
               outreachLoading ? (
-                <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                  <RefreshCw size={16} className="spin" style={{ animation: 'spin 1s linear infinite' }} />
-                  Loading outreach sites...
+                <div style={{ padding: '60px 20px', textAlign: 'center' }}>
+                  <BrandInfinityLoader label="Loading outreach sites…" size="md" minHeight="200px" />
                 </div>
               ) : (() => {
                 if (outreachLinks.length === 0) {

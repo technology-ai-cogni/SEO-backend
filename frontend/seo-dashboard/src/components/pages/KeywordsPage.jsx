@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, ChevronDown, ExternalLink, Download, KeyRound, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fetchDomainRows, fetchKeywordRows } from '../../lib/projectsApi';
 import { canDownload } from '../../lib/permissions';
+import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
 const hasValidLandingPage = (lp) => {
   if (!lp || typeof lp !== 'string') return false;
@@ -1122,8 +1123,12 @@ export default function KeywordsPage({ user }) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={13} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
-                    Loading keywords for {activeProject?.domain || activeProject?.name}...
+                  <td colSpan={13} style={{ padding: '48px 16px', textAlign: 'center' }}>
+                    <BrandInfinityLoader
+                      label={`Loading keywords for ${activeProject?.domain || activeProject?.name || 'project'}…`}
+                      size="md"
+                      minHeight="180px"
+                    />
                   </td>
                 </tr>
               ) : filteredKeywords.length === 0 ? (

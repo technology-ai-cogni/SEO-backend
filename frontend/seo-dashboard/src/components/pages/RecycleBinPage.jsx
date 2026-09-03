@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Trash2, RotateCcw, Shield, AlertTriangle, CheckCircle, AlertCircle, RefreshCw, X, Folder, FileText, ChevronDown, ChevronUp, Layers, Users, FileCode, Tag } from 'lucide-react';
 import { hasPermission, PERMISSIONS } from '../../lib/permissions';
 import { fetchRecycleBinItemsApi, restoreRecycleBinItemApi, hardDeleteRecycleBinItemApi } from '../../lib/projectsApi';
+import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
 export default function RecycleBinPage({ user, onNavigate }) {
   const [recycleBinItems, setRecycleBinItems] = useState([]);
@@ -371,8 +372,8 @@ export default function RecycleBinPage({ user, onNavigate }) {
 
         {/* Grouped Projects List */}
         {loadingRecycleBin ? (
-          <div style={{ padding: '36px 0', textAlign: 'center', fontSize: 13.5, color: 'var(--text-muted)' }}>
-            Loading recycle bin items...
+          <div style={{ padding: '36px 0', textAlign: 'center' }}>
+            <BrandInfinityLoader label="Loading recycle bin items…" size="md" minHeight="180px" />
           </div>
         ) : projectGroups.length === 0 ? (
           <div style={{ padding: '40px 16px', textAlign: 'center', fontSize: 13.5, color: 'var(--text-muted)', background: 'var(--surface-2)', border: '1.5px dashed var(--border)', borderRadius: 12 }}>
