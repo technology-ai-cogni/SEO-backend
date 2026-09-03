@@ -5,7 +5,7 @@ export async function authFetch(url, options = {}) {
   let token = null;
   try {
     token = typeof window !== 'undefined' ? sessionStorage.getItem('seo_token') : null;
-  } catch (_) {}
+  } catch (_) { }
 
   const headers = {
     ...(options.headers || {}),
@@ -21,7 +21,7 @@ export async function authFetch(url, options = {}) {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('auth_session_expired'));
       }
-    } catch (_) {}
+    } catch (_) { }
   }
   return res;
 }
@@ -718,7 +718,7 @@ export async function updateDomainRow(id, updates) {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(dbUpdates)
-      }).catch(() => {});
+      }).catch(() => { });
     }
   } catch (e) {
     console.warn('[updateDomainRow] FastAPI PATCH /domains sync skipped:', e);
@@ -1094,11 +1094,11 @@ export function getApiBaseUrl() {
   if (typeof window !== 'undefined' && window.location && window.location.hostname) {
     const host = window.location.hostname;
     if (host === 'localhost' || host === '127.0.0.1') {
-      return 'http://127.0.0.1:5000';
+      return 'http://127.0.0.1:8000';
     }
-    return `${window.location.protocol}//${host}:5000`;
+    return `${window.location.protocol}//${host}:8000`;
   }
-  return 'http://127.0.0.1:5000';
+  return 'http://127.0.0.1:8000';
 }
 
 const CATEGORY_API_BASE = getApiBaseUrl();
@@ -2038,7 +2038,7 @@ async function fetchAuthEndpoint(endpoint, options = {}) {
   let token = null;
   try {
     token = sessionStorage.getItem('seo_token');
-  } catch (_) {}
+  } catch (_) { }
 
   const mergedHeaders = {
     ...(options.headers || {}),
@@ -2060,7 +2060,7 @@ async function fetchAuthEndpoint(endpoint, options = {}) {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('auth_session_expired'));
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   return res;
