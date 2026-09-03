@@ -348,26 +348,41 @@ export default function RecycleBinPage({ user, onNavigate }) {
             { id: 'competitor', label: 'Competitor Data' },
             { id: 'page', label: 'Page Data' },
             { id: 'keyword', label: 'Keyword Data' }
-          ].map(t => (
-            <button
-              key={t.id}
-              onClick={() => setRecycleBinTab(t.id)}
-              style={{
-                padding: '6px 14px',
-                fontSize: 13,
-                fontWeight: 600,
-                borderRadius: 20,
-                background: recycleBinTab === t.id ? 'var(--accent-gradient, linear-gradient(135deg, #7928ca 0%, #db2777 100%))' : 'var(--surface-2)',
-                color: recycleBinTab === t.id ? '#ffffff' : 'var(--text-muted)',
-                border: 'none',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                boxShadow: recycleBinTab === t.id ? '0 2px 8px rgba(121, 40, 202, 0.2)' : 'none'
-              }}
-            >
-              {t.label}
-            </button>
-          ))}
+          ].map(t => {
+            const isActive = recycleBinTab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setRecycleBinTab(t.id)}
+                style={{
+                  padding: '6px 14px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  borderRadius: 20,
+                  background: isActive ? '#7c3aed' : '#f1f5f9',
+                  color: isActive ? '#ffffff' : '#475569',
+                  border: isActive ? '1px solid #7c3aed' : '1px solid #e2e8f0',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  boxShadow: isActive ? '0 2px 8px rgba(124, 58, 237, 0.25)' : 'none'
+                }}
+                onMouseEnter={e => {
+                  if (!isActive) {
+                    e.currentTarget.style.background = '#e2e8f0';
+                    e.currentTarget.style.color = '#0f172a';
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (!isActive) {
+                    e.currentTarget.style.background = '#f1f5f9';
+                    e.currentTarget.style.color = '#475569';
+                  }
+                }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Grouped Projects List */}
@@ -547,7 +562,7 @@ export default function RecycleBinPage({ user, onNavigate }) {
                           gap: 6,
                           background: '#fef2f2',
                           color: '#dc2626',
-                          border: '1px solid #fca5a5',
+                          border: '1px solid #f87171',
                           borderRadius: 8,
                           padding: '7px 14px',
                           fontSize: 13,
@@ -641,7 +656,7 @@ export default function RecycleBinPage({ user, onNavigate }) {
                                     gap: 4,
                                     background: '#fef2f2',
                                     color: '#dc2626',
-                                    border: '1px solid #fca5a5',
+                                    border: '1px solid #f87171',
                                     borderRadius: 6,
                                     padding: '4px 8px',
                                     fontSize: 11.5,
@@ -767,6 +782,8 @@ export default function RecycleBinPage({ user, onNavigate }) {
                   cursor: restoring ? 'not-allowed' : 'pointer',
                   opacity: restoring ? 0.7 : 1
                 }}
+                onMouseEnter={e => { if (!restoring) e.currentTarget.style.background = '#b91c1c'; }}
+                onMouseLeave={e => { if (!restoring) e.currentTarget.style.background = '#dc2626'; }}
               >
                 <Trash2 size={15} />
                 <span>{restoring ? 'Deleting All...' : 'Yes, Delete All Permanently'}</span>

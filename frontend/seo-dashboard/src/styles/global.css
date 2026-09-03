@@ -37,8 +37,11 @@
   /* Status Colors */
   --green: #00BFA2;                  /* Cyber Teal adapted for light contrast */
   --green-bg: #E6FAF6;
-  --red: #D4007A;                    /* Brand Magenta for alerts */
-  --red-bg: #FDEBF4;
+  --red: #dc2626;                    /* Light/Clean Red for delete & alerts */
+  --red-hover: #b91c1c;              /* Darker red hover */
+  --red-bg: #fef2f2;
+  --delete-red: #dc2626;
+  --delete-red-hover: #b91c1c;
   --amber: #E58E00;
   --amber-bg: #FFF8EB;
   --blue: #00A6DF;                   /* Electric Blue adapted for light contrast */
@@ -51,8 +54,15 @@
   --shadow: 0 1px 3px rgba(45, 45, 68, 0.05), 0 1px 2px rgba(45, 45, 68, 0.03);
   --shadow-md: 0 4px 20px -2px rgba(74, 26, 140, 0.08), 0 2px 6px -1px rgba(45, 45, 68, 0.04);
   --shadow-accent: 0 4px 16px rgba(123, 47, 190, 0.28);
-  --font-display: 'Plus Jakarta Sans', sans-serif;
-  --font-body: 'Inter', sans-serif;
+
+  /* Typography System — Hariba.ai Specs */
+  --font-primary: 'Outfit', sans-serif;
+  --font-display: 'Outfit', sans-serif;
+  --font-heading: 'Outfit', sans-serif;
+  --font-body: 'Outfit', sans-serif;
+  --font-secondary: 'Space Grotesk', sans-serif;
+  --font-tech: 'Space Grotesk', sans-serif;
+  --font-mono: 'Space Grotesk', monospace;
 
   /* Module accent colors mapped to palette */
   --search-color: #D4007A;           /* Magenta */
@@ -64,16 +74,98 @@
 }
 
 body {
-  font-family: var(--font-body);
+  font-family: var(--font-primary);
+  font-weight: 350;
   background-color: var(--bg);
   background-image: radial-gradient(at 0% 0%, rgba(123, 47, 190, 0.04) 0px, transparent 50%),
                     radial-gradient(at 100% 0%, rgba(212, 0, 122, 0.035) 0px, transparent 50%),
                     radial-gradient(at 50% 100%, rgba(0, 194, 255, 0.03) 0px, transparent 50%);
   background-attachment: fixed;
   color: var(--text-primary);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 15.5px;
+  line-height: 1.55;
+  letter-spacing: 0.01em;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-primary);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+h2, h3 {
+  font-weight: 500;
+}
+
+b, strong, th {
+  font-weight: 500;
+}
+
+table {
+  font-size: 14.5px;
+}
+
+th {
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+}
+
+td {
+  font-size: 14px;
+}
+
+button, input, select, textarea {
+  font-family: inherit;
+  font-weight: inherit;
+}
+
+/* ─── Hariba Typography Scale (Comfortable Sizing) ─── */
+.type-display {
+  font-family: var(--font-primary);
+  font-weight: 600;
+  font-size: 48px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.type-h1 {
+  font-family: var(--font-primary);
+  font-weight: 600;
+  font-size: 32px;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
+
+.type-h2 {
+  font-family: var(--font-primary);
+  font-weight: 500;
+  font-size: 24px;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.type-body {
+  font-family: var(--font-primary);
+  font-weight: 350;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.type-caption {
+  font-family: var(--font-primary);
+  font-weight: 350;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* Secondary Typeface — Space Grotesk: refined medium weight for metrics & AI tags */
+.type-tech, .font-tech, .metric-val, .metric-number {
+  font-family: var(--font-secondary) !important;
+  font-weight: 500 !important;
+  font-size: 15.5px;
+  letter-spacing: -0.01em;
 }
 
 /* Scrollbar */
@@ -147,3 +239,91 @@ button.btn-primary:hover,
   transform: translateY(-1px) !important;
   box-shadow: 0 4px 14px rgba(123, 47, 190, 0.4) !important;
 }
+
+/* ─── Universal URLs & Links Styling (Always Blue) ─── */
+a:not(.competitor-domain),
+a:visited:not(.competitor-domain),
+a[target="_blank"]:not(.competitor-domain),
+.url-link,
+.url-text,
+.url-cell,
+td a:not(.competitor-domain),
+table a:not(.competitor-domain) {
+  color: #2563eb !important;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.15s ease, text-decoration 0.15s ease;
+}
+
+a:hover:not(.competitor-domain),
+a[target="_blank"]:hover:not(.competitor-domain),
+.url-link:hover,
+.url-text:hover,
+.url-cell:hover,
+td a:hover:not(.competitor-domain),
+table a:hover:not(.competitor-domain) {
+  color: #1d4ed8 !important;
+  text-decoration: underline !important;
+}
+
+/* Ensure SVG icons embedded in links/URLs inherit the blue color */
+a:not(.competitor-domain) svg,
+a[target="_blank"]:not(.competitor-domain) svg,
+td a:not(.competitor-domain) svg {
+  color: inherit !important;
+  stroke: currentColor !important;
+}
+
+/* ─── Competitor Domain Header/Title Styling ─── */
+.competitor-domain,
+a.competitor-domain,
+td a.competitor-domain {
+  color: #0F172A !important; /* High-contrast dark charcoal/slate */
+  font-weight: 600 !important;
+  text-decoration: none !important;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+/* ─── Delete & Destructive Actions Styling (Clean Red) ─── */
+.btn-delete,
+.btn-danger,
+.delete-btn,
+button.delete-action,
+[data-action="delete"] {
+  background-color: #dc2626 !important;
+  color: #ffffff !important;
+  border-color: #dc2626 !important;
+}
+
+.btn-delete:hover,
+.btn-danger:hover,
+.delete-btn:hover,
+button.delete-action:hover,
+[data-action="delete"]:hover {
+  background-color: #b91c1c !important;
+  border-color: #b91c1c !important;
+}
+
+.delete-outline {
+  color: #dc2626 !important;
+  border: 1.5px solid #dc2626 !important;
+  background: transparent !important;
+}
+
+.delete-outline:hover {
+  background-color: #fef2f2 !important;
+  color: #b91c1c !important;
+  border-color: #b91c1c !important;
+}
+
+.delete-text,
+.delete-option {
+  color: #dc2626 !important;
+}
+
+.delete-text:hover,
+.delete-option:hover {
+  color: #b91c1c !important;
+}
+

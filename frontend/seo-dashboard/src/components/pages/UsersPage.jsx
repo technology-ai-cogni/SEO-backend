@@ -2401,6 +2401,8 @@ export default function UsersPage({ user, onNavigate }) {
                   borderRadius: 8,
                   cursor: actionLoading ? 'not-allowed' : 'pointer'
                 }}
+                onMouseEnter={e => { if (!actionLoading) e.currentTarget.style.background = '#b91c1c'; }}
+                onMouseLeave={e => { if (!actionLoading) e.currentTarget.style.background = '#dc2626'; }}
               >
                 {actionLoading ? 'Deleting...' : 'Delete Profile'}
               </button>

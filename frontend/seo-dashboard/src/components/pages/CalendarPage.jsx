@@ -933,7 +933,7 @@ function CalendarPage({ user }) {
                           <button
                             onClick={() => handleDeleteItem(item)}
                             title="Delete Activity"
-                            style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 4 }}
+                            style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', padding: 4 }}
                           >
                             <Trash2 size={15} />
                           </button>

@@ -579,7 +579,7 @@ export default function KeywordsPage({ user }) {
                     href={`https://${currentDomainDisplay}`}
                     target="_blank"
                     rel="noreferrer"
-                    style={{ color: '#7c3aed', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
+                    style={{ color: '#2563eb', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
                   >
                     <ExternalLink size={16} />
                   </a>
@@ -866,31 +866,6 @@ export default function KeywordsPage({ user }) {
             />
           </div>
 
-          {/* Download CSV Button */}
-          {userCanDownload && (
-            <button
-              onClick={handleExportCSV}
-              title="Export CSV Data"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: '#f8fafc',
-                color: '#64748b',
-                border: '1.5px solid #e2e8f0',
-                borderRadius: 12,
-                padding: '9px 14px',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }}
-            >
-              <Download size={16} />
-            </button>
-          )}
-
           {/* Filter List Popover Button */}
           <div ref={filterRef} style={{ position: 'relative' }}>
             <button
@@ -900,24 +875,43 @@ export default function KeywordsPage({ user }) {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: 6,
-                background: hasActiveFilters ? '#f5f3ff' : '#f8fafc',
-                color: hasActiveFilters ? '#7c3aed' : '#64748b',
-                border: hasActiveFilters ? '1.5px solid #7c3aed' : '1.5px solid #e2e8f0',
-                borderRadius: 12,
-                padding: '9px 14px',
+                position: 'relative',
+                background: hasActiveFilters ? '#f5f3ff' : '#f1f5f9',
+                color: hasActiveFilters ? '#7c3aed' : '#334155',
+                border: hasActiveFilters ? '1.5px solid #7c3aed' : '1px solid #e2e8f0',
+                borderRadius: 8,
+                padding: '7px 10px',
                 cursor: 'pointer',
                 fontFamily: 'inherit',
                 transition: 'all 0.15s ease'
               }}
               onMouseEnter={e => {
-                if (!hasActiveFilters) { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }
+                if (!hasActiveFilters) { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }
               }}
               onMouseLeave={e => {
-                if (!hasActiveFilters) { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }
+                if (!hasActiveFilters) { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }
               }}
             >
-              <Filter size={16} />
+              <Filter size={14} />
+              {hasActiveFilters && (
+                <span style={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -4,
+                  background: '#7c3aed',
+                  color: '#ffffff',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  borderRadius: '50%',
+                  width: 16,
+                  height: 16,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  {Object.values(columnFilters).reduce((acc, v) => acc + (Array.isArray(v) ? v.length : (v !== 'all' ? 1 : 0)), 0)}
+                </span>
+              )}
             </button>
 
             {/* Filter List Dropdown Panel */}
@@ -1066,6 +1060,31 @@ export default function KeywordsPage({ user }) {
               </div>
             )}
           </div>
+
+          {/* Download CSV Button */}
+          {userCanDownload && (
+            <button
+              onClick={handleExportCSV}
+              title="Export CSV Data"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#f1f5f9',
+                color: '#334155',
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+                padding: '7px 10px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'opacity 0.15s, background 0.15s'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
+            >
+              <Download size={14} />
+            </button>
+          )}
       </div>
 
       {/* ─── KEYWORDS DATA TABLE ───────────────────────────────────────────── */}
@@ -1157,8 +1176,28 @@ export default function KeywordsPage({ user }) {
                     </td>
 
                     {/* RANK */}
-                    <td style={{ padding: '12px 14px', fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap' }}>
-                      {hasValidLandingPage(row.landingPage) && row.rank > 0 ? row.rank : <span style={{ color: '#94a3b8', fontWeight: 400 }}>—</span>}
+                    <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                      {(() => {
+                        const num = Number(row.rank);
+                        if (!hasValidLandingPage(row.landingPage) || !row.rank || isNaN(num) || num <= 0) {
+                          return <span style={{ color: '#94a3b8', fontWeight: 400 }}>—</span>;
+                        }
+                        const isTop3 = num <= 3;
+                        const isTop10 = num <= 10;
+                        return (
+                          <span style={{
+                            background: isTop3 ? '#dcfce7' : isTop10 ? '#fef9c3' : '#f1f5f9',
+                            color: isTop3 ? '#15803d' : isTop10 ? '#854d0e' : '#475569',
+                            fontWeight: 700,
+                            fontSize: 11.5,
+                            padding: '3px 10px',
+                            borderRadius: 12,
+                            display: 'inline-block'
+                          }}>
+                            {num}
+                          </span>
+                        );
+                      })()}
                     </td>
 
                     {/* SV */}

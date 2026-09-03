@@ -777,35 +777,25 @@ def update_outreach_site(site_id: int, updates: dict):
     ]
     for k, v in updates.items():
         db_key = k
-        if db_key not in allowed_keys and k == "site_type":
-            db_key = "type"
-        elif db_key not in allowed_keys and k == "landingPrice":
-            db_key = "landing_price"
-        elif db_key not in allowed_keys and k == "sellingPrice":
-            db_key = "selling_price"
-        elif db_key not in allowed_keys and k == "spPercentage":
-            db_key = "sp_percentage"
-        elif db_key not in allowed_keys and k == "domainIndustry":
-            db_key = "domain_industry"
-        elif db_key not in allowed_keys and (k == "sourcedOption" or k == "sourcedBy"):
-            db_key = "sourced_by"
-        elif db_key not in allowed_keys and k == "agencyName":
-            db_key = "agency_name"
-        elif db_key not in allowed_keys and k == "calculateSp":
-            db_key = "calculate_sp"
-        elif db_key not in allowed_keys and k == "rejectedReason":
-            db_key = "rejected_reason"
-            db_key = "selling_price"
-        elif db_key not in allowed_keys and k == "spPercentage":
-            db_key = "sp_percentage"
-        elif db_key not in allowed_keys and k == "domainIndustry":
-            db_key = "domain_industry"
-        elif db_key not in allowed_keys and (k == "sourcedOption" or k == "sourcedBy"):
-            db_key = "sourced_by"
-        elif db_key not in allowed_keys and k == "agencyName":
-            db_key = "agency_name"
-        elif db_key not in allowed_keys and k == "calculateSp":
-            db_key = "calculate_sp"
+        if db_key not in allowed_keys:
+            if k in ("site_type", "siteType"):
+                db_key = "type"
+            elif k in ("landingPrice", "landing_price"):
+                db_key = "landing_price"
+            elif k in ("sellingPrice", "selling_price"):
+                db_key = "selling_price"
+            elif k in ("spPercentage", "sp_percentage"):
+                db_key = "sp_percentage"
+            elif k in ("domainIndustry", "domain_industry", "industry"):
+                db_key = "domain_industry"
+            elif k in ("sourcedOption", "sourcedBy", "sourced_by"):
+                db_key = "sourced_by"
+            elif k in ("agencyName", "agency_name"):
+                db_key = "agency_name"
+            elif k in ("calculateSp", "calculate_sp"):
+                db_key = "calculate_sp"
+            elif k in ("rejectedReason", "rejected_reason"):
+                db_key = "rejected_reason"
 
         if db_key in allowed_keys:
             set_clauses.append(f"{db_key} = :{db_key}")

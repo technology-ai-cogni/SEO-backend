@@ -28,8 +28,8 @@ export function CardHeader({ title, subtitle, action, style = {} }) {
   return (
     <div style={{ padding: '16px 20px 12px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', ...style }}>
       <div>
-        <div style={{ fontFamily: 'var(--font-display)', fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</div>
-        {subtitle && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{subtitle}</div>}
+        <div style={{ fontFamily: 'var(--font-primary)', fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2, fontWeight: 300 }}>{subtitle}</div>}
       </div>
       {action}
     </div>
@@ -52,17 +52,17 @@ export function MetricCard({ label, value, change, changeLabel, potential, child
       gap: 6,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontWeight: 500 }}>{label}</span>
+        <span style={{ fontSize: 13.5, color: 'var(--text-muted)', fontWeight: 400 }}>{label}</span>
         {potential && (
-          <button style={{ fontSize: 11, fontWeight: 600, color: accentColor || 'var(--accent)', background: 'var(--accent-light)', border: 'none', borderRadius: 99, padding: '3px 10px', cursor: 'pointer', fontFamily: 'var(--font-body)' }}>
+          <button style={{ fontSize: 11.5, fontWeight: 500, color: accentColor || 'var(--accent)', background: 'var(--accent-light)', border: 'none', borderRadius: 99, padding: '3px 10px', cursor: 'pointer', fontFamily: 'var(--font-primary)' }}>
             {potential}
           </button>
         )}
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <span style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>{value}</span>
+        <span style={{ fontFamily: 'var(--font-secondary)', fontSize: 29, fontWeight: 500, color: 'var(--text-primary)', lineHeight: 1, letterSpacing: '-0.01em' }}>{value}</span>
         {change !== undefined && (
-          <span style={{ fontSize: 12, fontWeight: 600, color: neutral ? 'var(--text-muted)' : positive ? 'var(--green)' : 'var(--red)' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: neutral ? 'var(--text-muted)' : positive ? 'var(--green)' : 'var(--red)' }}>
             {!neutral && (positive ? '▲' : '▼')} {Math.abs(change)}{typeof change === 'number' && !String(change).includes('%') ? '' : ''}
           </span>
         )}

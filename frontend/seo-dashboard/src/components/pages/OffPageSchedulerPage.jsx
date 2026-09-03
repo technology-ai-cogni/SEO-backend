@@ -294,6 +294,7 @@ export default function OffPageSchedulerPage({ user }) {
   ], []);
 
   const hasUnsavedChanges = useMemo(() => {
+    if (aiChecking) return false;
     if (!selectedDataset) return false;
     if (isDirty) return true;
     if (!originalRowsData || originalRowsData.length === 0) return false;
@@ -315,7 +316,7 @@ export default function OffPageSchedulerPage({ user }) {
     }
 
     return false;
-  }, [selectedDataset?.rowsData, originalRowsData, FIELDS_TO_COMPARE, isDirty]);
+  }, [selectedDataset?.rowsData, originalRowsData, FIELDS_TO_COMPARE, isDirty, aiChecking]);
 
   const handleAttemptLeaveDataset = (leaveAction) => {
     if (hasUnsavedChanges) {
@@ -1299,6 +1300,12 @@ export default function OffPageSchedulerPage({ user }) {
               finalRows = newRows;
               return { ...prev, rowsData: newRows };
             });
+            setOriginalRowsData(prev => {
+              if (!prev) return prev;
+              const newOrig = [...prev];
+              newOrig[index] = { ...newOrig[index], ...row };
+              return newOrig;
+            });
           }
         }
       );
@@ -1314,8 +1321,6 @@ export default function OffPageSchedulerPage({ user }) {
       // Reset unsaved state so it never prompts to save changes
       setOriginalRowsData(JSON.parse(JSON.stringify(finalRows)));
       setIsDirty(false);
-      setSavingState('saved');
-      setTimeout(() => setSavingState(''), 3500);
 
       const freshImports = await fetchMonthlyImportsApi().catch(() => null);
       if (freshImports && freshImports.length > 0) {
@@ -1493,43 +1498,9 @@ export default function OffPageSchedulerPage({ user }) {
         {/* Header Title info & Save Changes Button */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
           <div>
-            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 4 }}>
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4, letterSpacing: '-0.01em' }}>
               {activeDataset.project || activeDataset.project_name}
             </h1>
-            {filteredImports.length > 1 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-muted)' }}>Dataset:</span>
-                <select
-                  value={activeDataset.id}
-                  onChange={(e) => {
-                    const match = filteredImports.find(imp => String(imp.id) === String(e.target.value));
-                    if (match) {
-                      handleAttemptLeaveDataset(() => {
-                        setSelectedDataset(match);
-                        setSelectedRowIndices([]);
-                      });
-                    }
-                  }}
-                  style={{
-                    padding: '4px 10px',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    borderRadius: 6,
-                    border: '1px solid var(--border)',
-                    background: '#ffffff',
-                    color: 'var(--text-primary)',
-                    cursor: 'pointer',
-                    outline: 'none'
-                  }}
-                >
-                  {filteredImports.map(imp => (
-                    <option key={imp.id} value={imp.id}>
-                      {imp.filename} ({imp.rows} records)
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
           </div>
 
           {/* Save Changes & Run Audit Buttons */}
@@ -1664,31 +1635,31 @@ export default function OffPageSchedulerPage({ user }) {
                 onClick={handleRunAiStatusCheck}
                 disabled={aiChecking}
                 style={{
-                  background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)',
+                  background: 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)',
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: 10,
                   padding: '9px 18px',
                   fontSize: 13.5,
-                  fontWeight: 700,
+                  fontWeight: 600,
                   cursor: aiChecking ? 'wait' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
-                  boxShadow: '0 2px 10px rgba(74, 26, 140, 0.3)',
+                  boxShadow: '0 3px 12px rgba(166, 28, 104, 0.28)',
                   transition: 'all 0.15s ease'
                 }}
                 onMouseEnter={e => {
                   if (!aiChecking) {
-                    e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8E3CE0 100%)';
-                    e.currentTarget.style.boxShadow = '0 4px 14px rgba(123, 47, 190, 0.4)';
+                    e.currentTarget.style.background = 'linear-gradient(135deg, #8032CF 0%, #9E2CA0 35%, #B82276 70%, #CA2265 100%)';
+                    e.currentTarget.style.boxShadow = '0 5px 16px rgba(166, 28, 104, 0.38)';
                     e.currentTarget.style.transform = 'translateY(-1px)';
                   }
                 }}
                 onMouseLeave={e => {
                   if (!aiChecking) {
-                    e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)';
-                    e.currentTarget.style.boxShadow = '0 2px 10px rgba(74, 26, 140, 0.3)';
+                    e.currentTarget.style.background = 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)';
+                    e.currentTarget.style.boxShadow = '0 3px 12px rgba(166, 28, 104, 0.28)';
                     e.currentTarget.style.transform = 'translateY(0)';
                   }
                 }}
@@ -1704,7 +1675,7 @@ export default function OffPageSchedulerPage({ user }) {
               </span>
             )}
 
-            {userCanEdit && (
+            {userCanEdit && (hasUnsavedChanges || savingState === 'saving' || savingState === 'saved') && (
               <button
                 onClick={handleSaveChanges}
                 disabled={savingState === 'saving'}
@@ -1778,33 +1749,47 @@ export default function OffPageSchedulerPage({ user }) {
                 onClick={() => setShowFilterPopover(!showFilterPopover)}
                 title="Filter Records"
                 style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: 6,
-                  cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  borderRadius: 6,
-                  transition: 'opacity 0.15s ease',
                   position: 'relative',
+                  background: activeFieldFilterCount > 0 ? '#f5f3ff' : '#f1f5f9',
+                  color: activeFieldFilterCount > 0 ? '#7c3aed' : '#334155',
+                  border: activeFieldFilterCount > 0 ? '1.5px solid #7c3aed' : '1px solid #e2e8f0',
+                  borderRadius: 8,
+                  padding: '7px 10px',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  transition: 'all 0.15s ease',
                   outline: 'none'
                 }}
-                onMouseEnter={e => e.currentTarget.style.opacity = '0.75'}
-                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                onMouseEnter={e => {
+                  if (activeFieldFilterCount === 0) { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }
+                }}
+                onMouseLeave={e => {
+                  if (activeFieldFilterCount === 0) { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }
+                }}
               >
-                <Filter size={19} color={activeFieldFilterCount > 0 ? 'var(--accent)' : '#64748b'} style={{ strokeWidth: 1.8 }} />
+                <Filter size={14} />
 
                 {activeFieldFilterCount > 0 && (
                   <span style={{
                     position: 'absolute',
-                    top: 2,
-                    right: 2,
-                    width: 7,
-                    height: 7,
+                    top: -4,
+                    right: -4,
+                    background: '#7c3aed',
+                    color: '#ffffff',
+                    fontSize: 10,
+                    fontWeight: 700,
                     borderRadius: '50%',
-                    background: 'var(--accent)'
-                  }} />
+                    width: 16,
+                    height: 16,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    {activeFieldFilterCount}
+                  </span>
                 )}
               </button>
 
@@ -1933,21 +1918,23 @@ export default function OffPageSchedulerPage({ user }) {
               onClick={() => handleDownloadRows(filteredRows, selectedDataset?.project || selectedDataset?.project_name || selectedDataset?.name || 'Off-Page')}
               title="Download Excel Data"
               style={{
-                background: 'none',
-                border: 'none',
-                padding: 6,
-                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                borderRadius: 6,
-                transition: 'opacity 0.15s ease',
+                background: '#f1f5f9',
+                color: '#334155',
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+                padding: '7px 10px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'opacity 0.15s, background 0.15s',
                 outline: 'none'
               }}
-              onMouseEnter={e => e.currentTarget.style.opacity = '0.75'}
-              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+              onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
             >
-              <Download size={19} color="#64748b" style={{ strokeWidth: 1.8 }} />
+              <Download size={14} />
             </button>
           </div>
 
@@ -2043,7 +2030,7 @@ export default function OffPageSchedulerPage({ user }) {
                             gap: 10,
                             fontSize: 13.5,
                             fontWeight: 600,
-                            color: '#ef4444',
+                            color: '#dc2626',
                             cursor: 'pointer',
                             textAlign: 'left',
                             transition: 'background 0.12s ease'
@@ -2051,7 +2038,7 @@ export default function OffPageSchedulerPage({ user }) {
                           onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
                           onMouseLeave={e => e.currentTarget.style.background = 'none'}
                         >
-                          <Trash2 size={15} color="#ef4444" />
+                          <Trash2 size={15} color="#dc2626" />
                           Bulk Delete
                         </button>
                       </>
@@ -3063,7 +3050,7 @@ export default function OffPageSchedulerPage({ user }) {
                             style={{
                               background: 'none',
                               border: 'none',
-                              color: '#ef4444',
+                              color: '#dc2626',
                               cursor: 'pointer',
                               padding: '6px',
                               borderRadius: 6,
@@ -3074,11 +3061,11 @@ export default function OffPageSchedulerPage({ user }) {
                             }}
                             onMouseEnter={e => {
                               e.currentTarget.style.background = '#fef2f2';
-                              e.currentTarget.style.color = '#dc2626';
+                              e.currentTarget.style.color = '#b91c1c';
                             }}
                             onMouseLeave={e => {
                               e.currentTarget.style.background = 'none';
-                              e.currentTarget.style.color = '#ef4444';
+                              e.currentTarget.style.color = '#dc2626';
                             }}
                           >
                             <Trash2 size={16} />

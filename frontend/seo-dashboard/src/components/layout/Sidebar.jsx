@@ -104,8 +104,8 @@ export default function Sidebar({ activePath, onNavigate, user }) {
                   textAlign: 'left',
                   color: isActive ? '#FFFFFF' : '#A5A1B8',
                   fontFamily: 'var(--font-body)',
-                  fontSize: 13.5,
-                  fontWeight: isActive ? 700 : 500,
+                  fontSize: 14,
+                  fontWeight: isActive ? 600 : 400,
                   borderRadius: 0,
                   transition: 'background 0.15s, color 0.15s',
                 }}
@@ -129,7 +129,7 @@ export default function Sidebar({ activePath, onNavigate, user }) {
                     return (
                       <div key={si}>
                         {section.label && section.label !== 'CONFIGURATION' && (
-                          <div style={{ padding: '8px 16px 3px 34px', fontSize: 10.5, fontWeight: 700, color: '#E879F9', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                          <div style={{ padding: '8px 16px 3px 34px', fontSize: 11, fontWeight: 600, color: '#e5dbe7ff', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
                             {section.label}
                           </div>
                         )}
@@ -150,8 +150,8 @@ export default function Sidebar({ activePath, onNavigate, user }) {
                                 textAlign: 'left',
                                 color: childActive ? '#FFFFFF' : '#A5A1B8',
                                 fontFamily: 'var(--font-body)',
-                                fontSize: 13,
-                                fontWeight: childActive ? 700 : 500,
+                                fontSize: 13.5,
+                                fontWeight: childActive ? 600 : 400,
                                 transition: 'all 0.15s ease',
                               }}
                               onMouseEnter={e => { if (!childActive) { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)'; e.currentTarget.style.color = '#FFFFFF'; } }}

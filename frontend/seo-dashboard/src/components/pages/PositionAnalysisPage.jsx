@@ -6,7 +6,64 @@ import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions, canRunBrandD
 import MarkedCalendar, { getLocalTodayStr, tsToLocalDateStr } from '../common/MarkedCalendar';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
-function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 0, projectTotalKeywords = 0 }) {
+const ENGINE_THEMES = {
+  chatgpt: {
+    stroke: '#9333ea', // Mid Purple
+    track: '#f3e8ff',
+    hoverMentions: '#7e22ce',
+    hoverCited: '#a855f7',
+    cardGradient: 'linear-gradient(135deg, #FAF5FF 0%, #FAFBFC 60%, #F5F3FF 100%)',
+    border: '#E9D5FF',
+    centerTextColor: '#6b21a8',
+    btnColor: '#9333ea',
+    btnBorder: '#d8b4fe',
+    btnHoverBg: '#faf5ff',
+    citedColor: '#9333ea',
+    citedHoverBg: '#faf5ff',
+    citedBorder: '#d8b4fe',
+  },
+  gemini: {
+    stroke: '#2563eb', // Royal Blue
+    track: '#dbeafe',
+    hoverMentions: '#1d4ed8',
+    hoverCited: '#3b82f6',
+    cardGradient: 'linear-gradient(135deg, #EFF6FF 0%, #FAFBFC 60%, #F5F3FF 100%)',
+    border: '#BFDBFE',
+    centerTextColor: '#1e40af',
+    btnColor: '#2563eb',
+    btnBorder: '#bfdbfe',
+    btnHoverBg: '#eff6ff',
+    citedColor: '#2563eb',
+    citedHoverBg: '#eff6ff',
+    citedBorder: '#93c5fd',
+  },
+  'ai overview': {
+    stroke: '#7c3aed', // Deep Purple
+    track: '#ede9f7',
+    hoverMentions: '#6d28d9',
+    hoverCited: '#8b5cf6',
+    cardGradient: 'linear-gradient(135deg, #F8F5FF 0%, #FAFBFC 60%, #F0F9FF 100%)',
+    border: '#DDD6FE',
+    centerTextColor: '#5b21b6',
+    btnColor: '#7c3aed',
+    btnBorder: '#ddd6fe',
+    btnHoverBg: '#f5f3ff',
+    citedColor: '#7c3aed',
+    citedHoverBg: '#f5f3ff',
+    citedBorder: '#c4b5fd',
+  }
+};
+
+function AiVisibilityArcGauge({
+  visibility = 0,
+  mentions = 0,
+  citedPages = 0,
+  kwMentionsList = [],
+  kwCitationsList = [],
+  totalKeywords = 0,
+  projectTotalKeywords = 0,
+  engine = 'chatgpt'
+}) {
   const [hoverType, setHoverType] = useState(null); // null | 'mentions' | 'cited'
   const hoverTimeoutRef = useRef(null);
 
@@ -21,6 +78,9 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
       setHoverType(null);
     }, 300);
   };
+
+  const normEngine = (engine || '').toLowerCase().trim();
+  const theme = ENGINE_THEMES[normEngine] || ENGINE_THEMES['chatgpt'];
 
   const runKeywords = totalKeywords || 0;
   const projectTotal = projectTotalKeywords || runKeywords || 0;
@@ -43,19 +103,20 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
   const circumference = Math.PI * radius;
   const progressOffset = circumference - (Math.min(Math.max(currentValue, 0), 100) / 100) * circumference;
 
-  const strokeColor = hoverType === 'mentions' ? '#2563eb' : hoverType === 'cited' ? '#7c3aed' : '#8b5cf6';
+  const strokeColor = hoverType === 'mentions' ? theme.hoverMentions : hoverType === 'cited' ? theme.hoverCited : theme.stroke;
 
   return (
     <div style={{
-      background: 'linear-gradient(135deg, #F8F5FF 0%, #FAFBFC 60%, #F0F9FF 100%)',
-      border: '1px solid #E4DFEE',
+      background: theme.cardGradient,
+      border: `1px solid ${theme.border}`,
       borderRadius: 14,
       padding: '16px 22px',
       boxShadow: '0 2px 12px rgba(74, 26, 140, 0.04)',
       display: 'flex',
       flexDirection: 'column',
       gap: 12,
-      width: '100%'
+      width: '100%',
+      transition: 'background 0.3s ease, border-color 0.3s ease'
     }}>
       <div style={{
         display: 'flex',
@@ -70,7 +131,7 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
             <path
               d="M 15 75 A 60 60 0 0 1 135 75"
               fill="none"
-              stroke="#EDE9F7"
+              stroke={theme.track || '#EDE9F7'}
               strokeWidth={strokeWidth}
               strokeLinecap="round"
             />
@@ -189,14 +250,14 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
               cursor: 'pointer',
               padding: '10px 16px',
               borderRadius: 10,
-              backgroundColor: hoverType === 'cited' ? '#f5f3ff' : '#ffffff',
-              border: hoverType === 'cited' ? '1.5px solid #c4b5fd' : '1px solid #E4DFEE',
+              backgroundColor: hoverType === 'cited' ? (theme.citedHoverBg || '#f5f3ff') : '#ffffff',
+              border: hoverType === 'cited' ? `1.5px solid ${theme.citedBorder || '#c4b5fd'}` : '1px solid #E4DFEE',
               boxShadow: '0 2px 6px rgba(0, 0, 0, 0.04)',
               transition: 'all 0.15s ease',
               minWidth: 96
             }}>
-              <span style={{ fontSize: 26, fontWeight: 800, color: '#7c3aed' }}>{citedPages}</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: '#7c3aed', marginTop: 2 }}>Cited pages</span>
+              <span style={{ fontSize: 26, fontWeight: 800, color: theme.citedColor || '#7c3aed' }}>{citedPages}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: theme.citedColor || '#7c3aed', marginTop: 2 }}>Cited pages</span>
             </div>
 
             {/* Cited Pages Hover Keywords Popover */}
@@ -222,7 +283,7 @@ function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kw
                   maxHeight: 180,
                   overflowY: 'auto'
                 }}>
-                  <div style={{ fontSize: 11.5, fontWeight: 800, color: '#7c3aed', marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid #f1f5f9' }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 800, color: theme.citedColor || '#7c3aed', marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid #f1f5f9' }}>
                     Cited Pages ({citedPages})
                   </div>
                   {kwCitationsList.length > 0 ? (
@@ -687,6 +748,8 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   }, [highlightedCountryIndex]);
 
   const handleSelectProject = async (slug) => {
+    if (slug === selectedSlug) return;
+
     const isVendor = user?.category === 'Vendor' || user?.role?.toUpperCase() === 'VENDOR';
     const vendorProjectName = isVendor && user?.assigned_project && user.assigned_project !== 'All Projects' ? user.assigned_project : null;
 
@@ -695,16 +758,20 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       setSelectedSlug('all');
       localStorage.setItem('bd_selected_project', 'all');
       setActiveProject(allProjObj);
+      setLoading(true);
       try {
-        const results = await Promise.all(
-          projects.filter(pr => pr.slug !== 'all').map(async pr => {
-            const [kws, pgs] = await Promise.all([
-              fetchKeywordRows(pr.slug).catch(() => []),
-              fetchPageRows(pr.slug).catch(() => [])
-            ]);
-            return { kws: kws || [], pgs: pgs || [] };
-          })
-        );
+        const [results] = await Promise.all([
+          Promise.all(
+            projects.filter(pr => pr.slug !== 'all').map(async pr => {
+              const [kws, pgs] = await Promise.all([
+                fetchKeywordRows(pr.slug).catch(() => []),
+                fetchPageRows(pr.slug).catch(() => [])
+              ]);
+              return { kws: kws || [], pgs: pgs || [] };
+            })
+          ),
+          new Promise(r => setTimeout(r, 350))
+        ]);
         const combinedKws = results.flatMap(r => r.kws);
         const combinedPgs = results.flatMap(r => r.pgs);
         setProjectKeywords(combinedKws);
@@ -721,6 +788,8 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
         setPageCount(combinedPgs.length);
       } catch (err) {
         console.error('[PositionAnalysisPage] Error loading all projects:', err);
+      } finally {
+        setLoading(false);
       }
       return;
     }
@@ -739,6 +808,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     setSelectedSlug(slug);
     localStorage.setItem('bd_selected_project', slug);
     if (p) {
+      setLoading(true);
       setActiveProject(p);
       try {
         const isBlogItem = (item) => {
@@ -760,19 +830,33 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
           return val.includes('blog');
         };
 
-        const kws = await fetchKeywordRows(p.slug);
+        const [summary, kws, pgs, history] = await Promise.all([
+          fetchProjectSummaryApi(p.slug).catch(() => null),
+          fetchKeywordRows(p.slug).catch(() => []),
+          fetchPageRows(p.slug).catch(() => []),
+          fetchAiAnalysisHistory(p.slug).catch(() => []),
+          new Promise(r => setTimeout(r, 350))
+        ]);
+
+        if (summary && summary.kw_count > 0) {
+          setKwCount(summary.kw_count);
+          setNetPotential(summary.net_potential || 0);
+          setClusterCount(summary.cluster_count || 0);
+          setPageCount(summary.page_count || 0);
+          setBlogCount(summary.blog_count || 0);
+        }
+
         if (kws && kws.length > 0) {
           setProjectKeywords(kws);
-          setKwCount(kws.length);
-          const clusters = new Set(kws.map(k => k.cluster).filter(Boolean)).size;
-          setClusterCount(clusters);
-
-          const svSum = kws.reduce((acc, k) => {
-            const val = Number(String(k.sv || 0).replace(/[^0-9.]/g, '')) || 0;
-            return acc + val;
-          }, 0);
-          setNetPotential(svSum);
-
+          if (!summary || summary.kw_count === 0) {
+            setKwCount(kws.length);
+            setClusterCount(new Set(kws.map(k => k.cluster).filter(Boolean)).size);
+            const svSum = kws.reduce((acc, k) => {
+              const val = Number(String(k.sv || 0).replace(/[^0-9.]/g, '')) || 0;
+              return acc + val;
+            }, 0);
+            setNetPotential(svSum);
+          }
           setTopKeywords(extractTop2PerCategory(kws));
         } else {
           setKwCount(p.keywords || 0);
@@ -782,18 +866,19 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
           setTopKeywords([]);
         }
 
-        const pgs = await fetchPageRows(p.slug);
         if (pgs && pgs.length > 0) {
           setProjectPages(pgs);
-          setPageCount(pgs.length);
-          const pgsBlogs = pgs.filter(p => isBlogItem(p)).length;
-          if (pgsBlogs > 0) {
-            setBlogCount(pgsBlogs);
-          } else if (kws && kws.length > 0) {
-            const kwsBlogs = new Set(kws.filter(k => isBlogItem(k)).map(k => k.landingPage || k.url || k.kw).filter(Boolean)).size;
-            setBlogCount(kwsBlogs || (p.blogPages || 0));
-          } else {
-            setBlogCount(p.blogPages || 0);
+          if (!summary || summary.page_count === 0) {
+            setPageCount(pgs.length);
+            const pgsBlogs = pgs.filter(item => isBlogItem(item)).length;
+            if (pgsBlogs > 0) {
+              setBlogCount(pgsBlogs);
+            } else if (kws && kws.length > 0) {
+              const kwsBlogs = new Set(kws.filter(k => isBlogItem(k)).map(k => k.landingPage || k.url || k.kw).filter(Boolean)).size;
+              setBlogCount(kwsBlogs || (p.blogPages || 0));
+            } else {
+              setBlogCount(p.blogPages || 0);
+            }
           }
         } else if (kws && kws.length > 0) {
           const uniquePages = new Set(kws.map(k => k.landingPage).filter(Boolean)).size;
@@ -806,8 +891,14 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
           setBlogCount(p.blogPages || 0);
           setProjectPages([]);
         }
+
+        if (history && Array.isArray(history)) {
+          setAiHistory(history);
+        }
       } catch (e) {
-        // fallbacks
+        console.error('[PositionAnalysisPage] Error loading project data:', e);
+      } finally {
+        setLoading(false);
       }
     }
   };
@@ -1416,7 +1507,15 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   const badgeInfo = getRegionBadgeInfo(activeProject, selectedDate);
 
   if (loading || !activeProject) {
-    return <BrandInfinityLoader label="Loading Brand Discovery…" size="xl" showBar fullPage />;
+    const projLabel = activeProject?.name || activeProject?.domain;
+    return (
+      <BrandInfinityLoader
+        label={projLabel ? `Loading Brand Discovery for ${projLabel}…` : 'Loading Brand Discovery…'}
+        size="xl"
+        showBar
+        fullPage
+      />
+    );
   }
 
 
@@ -1573,7 +1672,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               href={`https://${domainDisplay}`}
               target="_blank"
               rel="noreferrer"
-              style={{ color: '#7c3aed', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
+              style={{ color: '#2563eb', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
             >
               <ExternalLink size={16} />
             </a>
@@ -1778,29 +1877,29 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)',
+                background: 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)',
                 color: '#ffffff',
                 border: 'none',
                 borderRadius: 8,
                 padding: '9px 16px',
                 fontSize: 13.5,
-                fontWeight: 700,
+                fontWeight: 600,
                 cursor: Object.values(analyzingTabs).some(Boolean) ? 'not-allowed' : 'pointer',
                 opacity: Object.values(analyzingTabs).some(Boolean) ? 0.7 : 1,
-                boxShadow: '0 2px 10px rgba(74, 26, 140, 0.3)',
+                boxShadow: '0 3px 12px rgba(166, 28, 104, 0.28)',
                 transition: 'all 0.15s ease'
               }}
               onMouseEnter={e => {
                 if (!Object.values(analyzingTabs).some(Boolean)) {
-                  e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8E3CE0 100%)';
-                  e.currentTarget.style.boxShadow = '0 4px 14px rgba(123, 47, 190, 0.4)';
+                  e.currentTarget.style.background = 'linear-gradient(135deg, #8032CF 0%, #9E2CA0 35%, #B82276 70%, #CA2265 100%)';
+                  e.currentTarget.style.boxShadow = '0 5px 16px rgba(166, 28, 104, 0.38)';
                   e.currentTarget.style.transform = 'translateY(-1px)';
                 }
               }}
               onMouseLeave={e => {
                 if (!Object.values(analyzingTabs).some(Boolean)) {
-                  e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)';
-                  e.currentTarget.style.boxShadow = '0 2px 10px rgba(74, 26, 140, 0.3)';
+                  e.currentTarget.style.background = 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)';
+                  e.currentTarget.style.boxShadow = '0 3px 12px rgba(166, 28, 104, 0.28)';
                   e.currentTarget.style.transform = 'translateY(0)';
                 }
               }}
@@ -1975,16 +2074,16 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                             disabled={isCurrentTabAnalyzing || !topKeywords.length}
                             title="Run AI Analysis"
                             style={{
-                              background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)',
+                              background: 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)',
                               color: '#ffffff',
                               border: 'none',
                               borderRadius: 8,
                               padding: '10px 20px',
                               fontSize: 13.5,
-                              fontWeight: 700,
+                              fontWeight: 600,
                               cursor: (isCurrentTabAnalyzing || !topKeywords.length) ? 'not-allowed' : 'pointer',
                               opacity: (isCurrentTabAnalyzing || !topKeywords.length) ? 0.75 : 1,
-                              boxShadow: '0 2px 10px rgba(74, 26, 140, 0.3)',
+                              boxShadow: '0 3px 12px rgba(166, 28, 104, 0.28)',
                               display: 'flex',
                               alignItems: 'center',
                               gap: 8,
@@ -1992,15 +2091,15 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                             }}
                             onMouseEnter={e => {
                               if (!isCurrentTabAnalyzing && topKeywords.length) {
-                                e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8E3CE0 100%)';
-                                e.currentTarget.style.boxShadow = '0 4px 14px rgba(123, 47, 190, 0.4)';
+                                e.currentTarget.style.background = 'linear-gradient(135deg, #8032CF 0%, #9E2CA0 35%, #B82276 70%, #CA2265 100%)';
+                                e.currentTarget.style.boxShadow = '0 5px 16px rgba(166, 28, 104, 0.38)';
                                 e.currentTarget.style.transform = 'translateY(-1px)';
                               }
                             }}
                             onMouseLeave={e => {
                               if (!isCurrentTabAnalyzing && topKeywords.length) {
-                                e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)';
-                                e.currentTarget.style.boxShadow = '0 2px 10px rgba(74, 26, 140, 0.3)';
+                                e.currentTarget.style.background = 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)';
+                                e.currentTarget.style.boxShadow = '0 3px 12px rgba(166, 28, 104, 0.28)';
                                 e.currentTarget.style.transform = 'translateY(0)';
                               }
                             }}
@@ -2111,6 +2210,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
 
                         return (
                           <AiVisibilityArcGauge
+                            engine={aiTab}
                             visibility={visibilityData.ai_visibility ?? 0}
                             mentions={mentionsVal}
                             citedPages={citedVal}
@@ -2123,35 +2223,50 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       })()}
 
                       {/* Re-analyze Action */}
-                      {userCanRunActions && (
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-                          <button
-                            onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
-                            disabled={!!analyzingTabs[aiTab.toLowerCase()]}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 6,
-                              background: 'transparent',
-                              color: '#7c3aed',
-                              border: '1px solid #ddd6fe',
-                              borderRadius: 6,
-                              padding: '4px 12px',
-                              fontSize: 12,
-                              fontWeight: 600,
-                              cursor: !!analyzingTabs[aiTab.toLowerCase()] ? 'not-allowed' : 'pointer',
-                              opacity: !!analyzingTabs[aiTab.toLowerCase()] ? 0.6 : 1
-                            }}
-                          >
-                            <Sparkles size={13} className={!!analyzingTabs[aiTab.toLowerCase()] ? 'animate-spin' : ''} />
-                            <span>
-                              {!!analyzingTabs[aiTab.toLowerCase()]
-                                ? 'Analyzing...'
-                                : ((tabResults[aiTab.toLowerCase()] || []).length > 0 ? 'Re-analyze' : 'Analyze')}
-                            </span>
-                          </button>
-                        </div>
-                      )}
+                      {userCanRunActions && (() => {
+                        const currentTheme = ENGINE_THEMES[aiTab.toLowerCase()] || ENGINE_THEMES.chatgpt;
+                        const isAnalyzing = !!analyzingTabs[aiTab.toLowerCase()];
+                        return (
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+                            <button
+                              onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
+                              disabled={isAnalyzing}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                background: 'transparent',
+                                color: currentTheme.btnColor || '#7c3aed',
+                                border: `1px solid ${currentTheme.btnBorder || '#ddd6fe'}`,
+                                borderRadius: 6,
+                                padding: '4px 12px',
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: isAnalyzing ? 'not-allowed' : 'pointer',
+                                opacity: isAnalyzing ? 0.6 : 1,
+                                transition: 'all 0.15s ease'
+                              }}
+                              onMouseEnter={e => {
+                                if (!isAnalyzing) {
+                                  e.currentTarget.style.background = currentTheme.btnHoverBg || '#f5f3ff';
+                                }
+                              }}
+                              onMouseLeave={e => {
+                                if (!isAnalyzing) {
+                                  e.currentTarget.style.background = 'transparent';
+                                }
+                              }}
+                            >
+                              <Sparkles size={13} className={isAnalyzing ? 'animate-spin' : ''} />
+                              <span>
+                                {isAnalyzing
+                                  ? 'Analyzing...'
+                                  : ((tabResults[aiTab.toLowerCase()] || []).length > 0 ? 'Re-analyze' : 'Analyze')}
+                              </span>
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>

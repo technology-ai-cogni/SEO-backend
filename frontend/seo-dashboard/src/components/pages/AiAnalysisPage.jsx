@@ -318,6 +318,7 @@ export default function AiAnalysisPage({ user }) {
 
   const loadProjectData = async (slug, allProjectsList = projects) => {
     if (!slug) return;
+    setLoading(true);
     try {
       if (slug === 'all') {
         const validProjects = (allProjectsList || []).filter(p => p && p.slug && p.slug !== 'all');
@@ -343,6 +344,8 @@ export default function AiAnalysisPage({ user }) {
       setHistory(hist || []);
     } catch (e) {
       console.error('[AiAnalysisPage] Error loading project data:', e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -877,7 +880,7 @@ export default function AiAnalysisPage({ user }) {
                     href={`https://${currentDomainDisplay}`}
                     target="_blank"
                     rel="noreferrer"
-                    style={{ color: '#7c3aed', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
+                    style={{ color: '#2563eb', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
                   >
                     <ExternalLink size={16} />
                   </a>
@@ -1194,29 +1197,29 @@ export default function AiAnalysisPage({ user }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)',
+                background: 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)',
                 color: '#ffffff',
                 border: 'none',
                 borderRadius: 8,
                 padding: '9px 18px',
                 fontSize: 13,
-                fontWeight: 700,
+                fontWeight: 600,
                 cursor: analyzing ? 'not-allowed' : 'pointer',
                 opacity: analyzing ? 0.75 : 1,
-                boxShadow: '0 2px 10px rgba(74, 26, 140, 0.3)',
+                boxShadow: '0 3px 12px rgba(166, 28, 104, 0.28)',
                 transition: 'all 0.15s ease'
               }}
               onMouseEnter={e => {
                 if (!analyzing) {
-                  e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8E3CE0 100%)';
-                  e.currentTarget.style.boxShadow = '0 4px 14px rgba(123, 47, 190, 0.4)';
+                  e.currentTarget.style.background = 'linear-gradient(135deg, #8032CF 0%, #9E2CA0 35%, #B82276 70%, #CA2265 100%)';
+                  e.currentTarget.style.boxShadow = '0 5px 16px rgba(166, 28, 104, 0.38)';
                   e.currentTarget.style.transform = 'translateY(-1px)';
                 }
               }}
               onMouseLeave={e => {
                 if (!analyzing) {
-                  e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)';
-                  e.currentTarget.style.boxShadow = '0 2px 10px rgba(74, 26, 140, 0.3)';
+                  e.currentTarget.style.background = 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)';
+                  e.currentTarget.style.boxShadow = '0 3px 12px rgba(166, 28, 104, 0.28)';
                   e.currentTarget.style.transform = 'translateY(0)';
                 }
               }}
@@ -1262,31 +1265,6 @@ export default function AiAnalysisPage({ user }) {
             />
           </div>
 
-          {/* Download CSV Button */}
-          {userCanDownload && (
-            <button
-              onClick={handleDownloadCsv}
-              title="Download CSV"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: '#f8fafc',
-                color: '#64748b',
-                border: '1.5px solid #e2e8f0',
-                borderRadius: 12,
-                padding: '9px 14px',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }}
-            >
-              <Download size={16} />
-            </button>
-          )}
-
           {/* Filter Trigger Button & Popover */}
           <div ref={filterRef} style={{ position: 'relative' }}>
             <button
@@ -1296,33 +1274,36 @@ export default function AiAnalysisPage({ user }) {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: 6,
-                background: hasActiveFilters ? '#f5f3ff' : '#f8fafc',
-                color: hasActiveFilters ? '#7c3aed' : '#64748b',
-                border: hasActiveFilters ? '1.5px solid #7c3aed' : '1.5px solid #e2e8f0',
-                borderRadius: 12,
-                padding: '9px 14px',
+                position: 'relative',
+                background: hasActiveFilters ? '#f5f3ff' : '#f1f5f9',
+                color: hasActiveFilters ? '#7c3aed' : '#334155',
+                border: hasActiveFilters ? '1.5px solid #7c3aed' : '1px solid #e2e8f0',
+                borderRadius: 8,
+                padding: '7px 10px',
                 cursor: 'pointer',
                 fontFamily: 'inherit',
                 transition: 'all 0.15s ease'
               }}
               onMouseEnter={e => {
-                if (!hasActiveFilters) { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }
+                if (!hasActiveFilters) { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }
               }}
               onMouseLeave={e => {
-                if (!hasActiveFilters) { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }
+                if (!hasActiveFilters) { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }
               }}
             >
-              <Filter size={16} />
+              <Filter size={14} />
               {hasActiveFilters && (
                 <span style={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -4,
                   background: '#7c3aed',
                   color: '#ffffff',
-                  fontSize: 10.5,
+                  fontSize: 10,
                   fontWeight: 700,
-                  borderRadius: 99,
-                  width: 17,
-                  height: 17,
+                  borderRadius: '50%',
+                  width: 16,
+                  height: 16,
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center'
@@ -1478,6 +1459,31 @@ export default function AiAnalysisPage({ user }) {
               </div>
             )}
           </div>
+
+          {/* Download CSV Button */}
+          {userCanDownload && (
+            <button
+              onClick={handleDownloadCsv}
+              title="Download CSV"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#f1f5f9',
+                color: '#334155',
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+                padding: '7px 10px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'opacity 0.15s, background 0.15s'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
+            >
+              <Download size={14} />
+            </button>
+          )}
       </div>
 
       {/* ─── DATA TABLE: Mentions or Citations ─────────────────────────── */}

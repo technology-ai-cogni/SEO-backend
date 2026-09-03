@@ -717,7 +717,7 @@ export default function AgencyPage({ user }) {
                               <button
                                 onClick={() => handleDeleteVendor(vendor.id)}
                                 title="Delete Vendor"
-                                style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 4 }}
+                                style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', padding: 4 }}
                               >
                                 <Trash2 size={15} />
                               </button>
@@ -832,7 +832,7 @@ export default function AgencyPage({ user }) {
                                             <button
                                               onClick={() => handleDeleteInvoice(vendor.id, inv.id)}
                                               title="Delete Invoice"
-                                              style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 4 }}
+                                              style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: 4 }}
                                             >
                                               <Trash2 size={14} />
                                             </button>

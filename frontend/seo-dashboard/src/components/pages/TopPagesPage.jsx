@@ -713,7 +713,7 @@ export default function TopPagesPage({ user }) {
                     href={`https://${currentDomainDisplay}`}
                     target="_blank"
                     rel="noreferrer"
-                    style={{ color: '#7c3aed', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
+                    style={{ color: '#2563eb', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
                   >
                     <ExternalLink size={16} />
                   </a>
@@ -866,29 +866,29 @@ export default function TopPagesPage({ user }) {
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
-                      background: 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)',
+                      background: 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)',
                       color: '#ffffff',
                       border: 'none',
                       borderRadius: 8,
                       padding: '8px 16px',
                       fontSize: 13,
-                      fontWeight: 700,
+                      fontWeight: 600,
                       cursor: isAnalyzing ? 'not-allowed' : 'pointer',
                       opacity: isAnalyzing ? 0.75 : 1,
-                      boxShadow: '0 2px 10px rgba(74, 26, 140, 0.3)',
+                      boxShadow: '0 3px 12px rgba(166, 28, 104, 0.28)',
                       transition: 'all 0.15s ease'
                     }}
                     onMouseEnter={e => {
                       if (!isAnalyzing) {
-                        e.currentTarget.style.background = 'linear-gradient(135deg, #581F9E 0%, #8E3CE0 100%)';
-                        e.currentTarget.style.boxShadow = '0 4px 14px rgba(123, 47, 190, 0.4)';
+                        e.currentTarget.style.background = 'linear-gradient(135deg, #8032CF 0%, #9E2CA0 35%, #B82276 70%, #CA2265 100%)';
+                        e.currentTarget.style.boxShadow = '0 5px 16px rgba(166, 28, 104, 0.38)';
                         e.currentTarget.style.transform = 'translateY(-1px)';
                       }
                     }}
                     onMouseLeave={e => {
                       if (!isAnalyzing) {
-                        e.currentTarget.style.background = 'linear-gradient(135deg, #4A1A8C 0%, #7B2FBE 100%)';
-                        e.currentTarget.style.boxShadow = '0 2px 10px rgba(74, 26, 140, 0.3)';
+                        e.currentTarget.style.background = 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)';
+                        e.currentTarget.style.boxShadow = '0 3px 12px rgba(166, 28, 104, 0.28)';
                         e.currentTarget.style.transform = 'translateY(0)';
                       }
                     }}
@@ -1139,31 +1139,6 @@ export default function TopPagesPage({ user }) {
           />
         </div>
 
-        {/* Download CSV Button */}
-        {userCanDownload && (
-          <button
-            onClick={handleExportCSV}
-            title="Export CSV Data"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: '#f8fafc',
-              color: '#64748b',
-              border: '1.5px solid #e2e8f0',
-              borderRadius: 12,
-              padding: '9px 14px',
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              transition: 'all 0.15s ease'
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }}
-          >
-            <Download size={16} />
-          </button>
-        )}
-
         {/* Filter Trigger Button & Popover */}
         <div className="tp-filter-menu" ref={filterRef} style={{ position: 'relative' }}>
           <button
@@ -1173,24 +1148,43 @@ export default function TopPagesPage({ user }) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: 6,
-              background: hasActiveFilters ? '#f5f3ff' : '#f8fafc',
-              color: hasActiveFilters ? '#7c3aed' : '#64748b',
-              border: hasActiveFilters ? '1.5px solid #7c3aed' : '1.5px solid #e2e8f0',
-              borderRadius: 12,
-              padding: '9px 14px',
+              position: 'relative',
+              background: hasActiveFilters ? '#f5f3ff' : '#f1f5f9',
+              color: hasActiveFilters ? '#7c3aed' : '#334155',
+              border: hasActiveFilters ? '1.5px solid #7c3aed' : '1px solid #e2e8f0',
+              borderRadius: 8,
+              padding: '7px 10px',
               cursor: 'pointer',
               fontFamily: 'inherit',
               transition: 'all 0.15s ease'
             }}
             onMouseEnter={e => {
-              if (!hasActiveFilters) { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }
+              if (!hasActiveFilters) { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }
             }}
             onMouseLeave={e => {
-              if (!hasActiveFilters) { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }
+              if (!hasActiveFilters) { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }
             }}
           >
-            <Filter size={16} />
+            <Filter size={14} />
+            {hasActiveFilters && (
+              <span style={{
+                position: 'absolute',
+                top: -4,
+                right: -4,
+                background: '#7c3aed',
+                color: '#ffffff',
+                fontSize: 10,
+                fontWeight: 700,
+                borderRadius: '50%',
+                width: 16,
+                height: 16,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                {Object.values(columnFilters).reduce((acc, v) => acc + (Array.isArray(v) ? v.length : (v !== 'all' ? 1 : 0)), 0) + (intentFilter !== 'all' ? 1 : 0) + (typeFilter !== 'all' ? 1 : 0)}
+              </span>
+            )}
           </button>
 
           {filterMenuOpen && (
@@ -1290,6 +1284,31 @@ export default function TopPagesPage({ user }) {
             </div>
           )}
         </div>
+
+        {/* Download CSV Button */}
+        {userCanDownload && (
+          <button
+            onClick={handleExportCSV}
+            title="Export CSV Data"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: '#f1f5f9',
+              color: '#334155',
+              border: '1px solid #e2e8f0',
+              borderRadius: 8,
+              padding: '7px 10px',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              transition: 'opacity 0.15s, background 0.15s'
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
+          >
+            <Download size={14} />
+          </button>
+        )}
       </div>
 
       {isPastDate && (
@@ -1394,8 +1413,28 @@ export default function TopPagesPage({ user }) {
                     </td>
 
                     {/* RANK */}
-                    <td style={{ padding: '12px 16px', fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap' }}>
-                      {row.rank > 0 ? row.rank : <span style={{ color: '#94a3b8', fontWeight: 400 }}>—</span>}
+                    <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                      {(() => {
+                        const num = Number(row.rank);
+                        if (!row.rank || isNaN(num) || num <= 0) {
+                          return <span style={{ color: '#94a3b8', fontWeight: 400 }}>—</span>;
+                        }
+                        const isTop3 = num <= 3;
+                        const isTop10 = num <= 10;
+                        return (
+                          <span style={{
+                            background: isTop3 ? '#dcfce7' : isTop10 ? '#fef9c3' : '#f1f5f9',
+                            color: isTop3 ? '#15803d' : isTop10 ? '#854d0e' : '#475569',
+                            fontWeight: 700,
+                            fontSize: 11.5,
+                            padding: '3px 10px',
+                            borderRadius: 12,
+                            display: 'inline-block'
+                          }}>
+                            {num}
+                          </span>
+                        );
+                      })()}
                     </td>
 
                     {/* KEYWORD / PAGE NAME */}

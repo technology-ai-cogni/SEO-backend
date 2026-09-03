@@ -36,14 +36,6 @@ export default function BrandInfinityLoader({
       }}
     >
       <style>{`
-        @keyframes bd-infinity-pulse {
-          0%, 100% {
-            transform: scale(1);
-          }
-          50% {
-            transform: scale(1.05);
-          }
-        }
         @keyframes bd-infinity-dash {
           0%   { stroke-dashoffset: ${cfg.dash}; }
           50%  { stroke-dashoffset: 0; }
@@ -53,6 +45,16 @@ export default function BrandInfinityLoader({
           0%   { transform: translateX(-100%); }
           100% { transform: translateX(300%); }
         }
+        @keyframes bd-dot-wave {
+          0%, 60%, 100% {
+            opacity: 0.25;
+            transform: translateY(0);
+          }
+          30% {
+            opacity: 1;
+            transform: translateY(-2.5px);
+          }
+        }
       `}</style>
 
       {/* Hariba Logo Infinity Icon */}
@@ -60,8 +62,7 @@ export default function BrandInfinityLoader({
         style={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center',
-          animation: 'bd-infinity-pulse 2s ease-in-out infinite'
+          justifyContent: 'center'
         }}
       >
         <svg
@@ -93,19 +94,37 @@ export default function BrandInfinityLoader({
         </svg>
       </div>
 
-      {/* Label */}
-      {label && (
-        <span
-          style={{
-            fontSize: cfg.fontSize,
-            color: '#64748B',
-            fontWeight: 600,
-            letterSpacing: '0.015em'
-          }}
-        >
-          {label}
-        </span>
-      )}
+      {/* Label with moving/animating dots */}
+      {label && (() => {
+        const cleanLabel = typeof label === 'string' ? label.replace(/[.…]+$/, '').trim() : label;
+        return (
+          <div
+            style={{
+              fontSize: cfg.fontSize,
+              color: '#64748B',
+              fontWeight: 600,
+              letterSpacing: '0.015em',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <span>{cleanLabel}</span>
+            <span
+              style={{
+                display: 'inline-flex',
+                width: '16px',
+                textAlign: 'left',
+                marginLeft: '2px'
+              }}
+            >
+              <span style={{ display: 'inline-block', animation: 'bd-dot-wave 1.2s infinite ease-in-out', animationDelay: '0s' }}>.</span>
+              <span style={{ display: 'inline-block', animation: 'bd-dot-wave 1.2s infinite ease-in-out', animationDelay: '0.2s' }}>.</span>
+              <span style={{ display: 'inline-block', animation: 'bd-dot-wave 1.2s infinite ease-in-out', animationDelay: '0.4s' }}>.</span>
+            </span>
+          </div>
+        );
+      })()}
 
       {/* Shimmer Bar (Only shown when showBar is true) */}
       {showBar && (

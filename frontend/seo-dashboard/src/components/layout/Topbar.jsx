@@ -16,8 +16,8 @@ export default function Topbar({ title, subtitle, onNavigate, user, onLogout }) 
       zIndex: 50,
     }}>
       <div>
-        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 21, fontWeight: 700, color: '#371035ff', lineHeight: 1.2 }}>{title}</h1>
-        {subtitle && <p style={{ fontSize: 12, color: '#7d2a8ebc', marginTop: 2 }}>{subtitle}</p>}
+        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 600, color: '#371035ff', lineHeight: 1.2, letterSpacing: '-0.01em' }}>{title}</h1>
+        {subtitle && <p style={{ fontSize: 13, color: '#7d2a8ebc', marginTop: 2, fontWeight: 300 }}>{subtitle}</p>}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

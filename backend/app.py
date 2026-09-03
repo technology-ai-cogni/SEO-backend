@@ -2643,6 +2643,16 @@ class AddOutreachSiteRequest(BaseModel):
     type: Optional[str] = None
     site_type: Optional[str] = None
     regions: Optional[List[str]] = None
+    landing_price: Optional[str] = None
+    selling_price: Optional[str] = None
+    sp_percentage: Optional[str] = None
+    calculate_sp: Optional[bool] = False
+    sourced_by: Optional[str] = None
+    agency_name: Optional[str] = None
+    country: Optional[str] = None
+    domain_industry: Optional[str] = None
+    status: Optional[str] = "New site"
+    rejected_reason: Optional[str] = None
 
 
 @app.get("/outreach")
@@ -2698,6 +2708,16 @@ def add_outreach_site_endpoint(project_slug: str, req: AddOutreachSiteRequest, u
             "region1_traffic": metrics["region1Traffic"],
             "region2_traffic": metrics["region2Traffic"],
             "region3_traffic": metrics["region3Traffic"],
+            "landing_price": req.landing_price,
+            "selling_price": req.selling_price,
+            "sp_percentage": req.sp_percentage,
+            "calculate_sp": bool(req.calculate_sp),
+            "sourced_by": req.sourced_by,
+            "agency_name": req.agency_name,
+            "country": req.country,
+            "domain_industry": req.domain_industry,
+            "status": req.status or "New site",
+            "rejected_reason": req.rejected_reason,
             "metrics_json": metrics
         }
 

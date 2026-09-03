@@ -271,6 +271,7 @@ export default function CompetitorsPage({ user }) {
                         <div>
                           <div style={{ marginBottom: 2 }}>
                             <a
+                              className="competitor-domain"
                               href={domainUrl}
                               target="_blank"
                               rel="noopener noreferrer"
@@ -296,7 +297,7 @@ export default function CompetitorsPage({ user }) {
                               title={fullUrl}
                               style={{
                                 fontSize: 12,
-                                color: 'var(--accent, #3b82f6)',
+                                color: '#2563eb',
                                 cursor: 'pointer',
                                 textDecoration: 'none',
                                 display: 'block',

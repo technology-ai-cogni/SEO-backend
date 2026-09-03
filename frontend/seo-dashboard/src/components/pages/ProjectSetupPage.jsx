@@ -562,14 +562,14 @@ function TableFilterDropdown({ filters, rows, activeFilters, onFiltersChange }) 
         title="Filter"
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
-          background: activeCount > 0 ? '#f5f3ff' : 'none',
-          border: activeCount > 0 ? '1.5px solid #7c3aed' : '1.5px solid var(--border)',
+          background: activeCount > 0 ? '#f5f3ff' : '#f1f5f9',
+          border: activeCount > 0 ? '1.5px solid #7c3aed' : '1px solid #e2e8f0',
           borderRadius: 8, padding: 8,
-          cursor: 'pointer', color: activeCount > 0 ? '#7c3aed' : 'var(--text-muted)',
+          cursor: 'pointer', color: activeCount > 0 ? '#7c3aed' : '#334155',
           transition: 'all 0.15s',
         }}
-        onMouseEnter={e => { e.currentTarget.style.borderColor = activeCount > 0 ? '#7c3aed' : 'var(--border-hover)'; e.currentTarget.style.color = activeCount > 0 ? '#7c3aed' : 'var(--text-primary)'; }}
-        onMouseLeave={e => { e.currentTarget.style.borderColor = activeCount > 0 ? '#7c3aed' : 'var(--border)'; e.currentTarget.style.color = activeCount > 0 ? '#7c3aed' : 'var(--text-muted)'; }}
+        onMouseEnter={e => { e.currentTarget.style.borderColor = activeCount > 0 ? '#7c3aed' : '#cbd5e1'; e.currentTarget.style.color = activeCount > 0 ? '#7c3aed' : '#0f172a'; e.currentTarget.style.background = activeCount > 0 ? '#f5f3ff' : '#e2e8f0'; }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = activeCount > 0 ? '#7c3aed' : '#e2e8f0'; e.currentTarget.style.color = activeCount > 0 ? '#7c3aed' : '#334155'; e.currentTarget.style.background = activeCount > 0 ? '#f5f3ff' : '#f1f5f9'; }}
       >
         <Filter size={14} />
         {activeCount > 0 && (
@@ -1051,7 +1051,7 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
                       <button
                         type="button"
                         onClick={() => removeBusinessCentre(idx)}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red, #dc2626)', padding: 2, display: 'flex', alignItems: 'center', opacity: 0.8 }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: 2, display: 'flex', alignItems: 'center', opacity: 0.8 }}
                         title="Remove Business Centre"
                       >
                         <Trash2 size={13} />
@@ -1110,7 +1110,7 @@ function CreateProjectModal({ open, onClose, onCreateProject }) {
             <Btn
               variant="primary"
               onClick={() => confirmRemoveBusinessCentre(centreToDeleteIndex)}
-              style={{ flex: 1, background: 'var(--red, #dc2626)' }}
+              style={{ flex: 1, background: '#dc2626', color: '#fff' }}
             >
               Delete
             </Btn>
@@ -2073,7 +2073,7 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
     return (
       <Modal open={open} onClose={handleClose} title="Delete Project"
         footer={<>
-          <Btn variant="primary" onClick={handleDelete} style={submitting ? { background: 'var(--red)', opacity: 0.6, pointerEvents: 'none' } : { background: 'var(--red)' }}>{submitting ? 'Deleting…' : 'Delete'}</Btn>
+          <Btn variant="primary" onClick={handleDelete} style={submitting ? { background: '#dc2626', opacity: 0.6, pointerEvents: 'none' } : { background: '#dc2626', color: '#fff' }}>{submitting ? 'Deleting…' : 'Delete'}</Btn>
           <Btn variant="outline" onClick={() => setConfirmDelete(false)} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
         </>}
       >
@@ -2279,7 +2279,7 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
                       <button
                         type="button"
                         onClick={() => removeBusinessCentre(idx)}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red, #dc2626)', padding: 2, display: 'flex', alignItems: 'center', opacity: 0.8 }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: 2, display: 'flex', alignItems: 'center', opacity: 0.8 }}
                         title="Remove Business Centre"
                       >
                         <Trash2 size={13} />
@@ -2338,7 +2338,7 @@ function EditDomainModal({ open, onClose, project, onSave, onDelete }) {
             <Btn
               variant="primary"
               onClick={() => confirmRemoveBusinessCentre(centreToDeleteIndex)}
-              style={{ flex: 1, background: 'var(--red, #dc2626)' }}
+              style={{ flex: 1, background: '#dc2626', color: '#fff' }}
             >
               Delete
             </Btn>
@@ -2455,7 +2455,7 @@ function EditOutreachSiteModal({ open, onClose, site, onSave, onDelete }) {
           {submitting ? 'Saving…' : 'Save Changes'}
         </Btn>
         {onDelete && (
-          <Btn variant="outline" onClick={() => { onClose(); onDelete(site); }} style={{ border: '1.5px solid var(--red, #dc2626)', color: 'var(--red, #dc2626)' }}>
+          <Btn variant="outline" onClick={() => { onClose(); onDelete(site); }} style={{ border: '1.5px solid #dc2626', color: '#dc2626' }}>
             Delete Site
           </Btn>
         )}
@@ -2873,7 +2873,7 @@ function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, tot
                     <button
                       onClick={() => setConfirmingProject(p)}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
-                      onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = '#dc2626'; }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
                       <Trash2 size={14} />
                     </button>
@@ -3025,7 +3025,7 @@ function DeleteProjectDataModal({ open, onClose, project, scopeLabel, onConfirm 
   return (
     <Modal open={open} onClose={handleClose} title="Confirm delete"
       footer={<>
-        <Btn variant="primary" onClick={handleConfirm} style={deleting ? { background: 'var(--red)', opacity: 0.6, pointerEvents: 'none' } : { background: 'var(--red)' }}>{deleting ? 'Deleting…' : 'Delete'}</Btn>
+        <Btn variant="primary" onClick={handleConfirm} style={deleting ? { background: '#dc2626', opacity: 0.6, pointerEvents: 'none' } : { background: '#dc2626', color: '#fff' }}>{deleting ? 'Deleting…' : 'Delete'}</Btn>
         <Btn variant="outline" onClick={handleClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
       </>}
     >
@@ -3066,7 +3066,7 @@ function RefindCompetitorsConfirmModal({ open, onClose, projectName, onConfirm }
 function BulkDeleteModal({ open, onClose, count, onConfirm, itemLabel = 'page' }) {
   return (
     <Modal open={open} onClose={onClose} title="Confirm Delete"
-      footer={<><Btn variant="primary" onClick={() => { onConfirm(); onClose(); }} style={{ background: 'var(--red)' }}>Delete {count} {itemLabel}{count !== 1 ? 's' : ''}</Btn><Btn variant="outline" onClick={onClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
+      footer={<><Btn variant="primary" onClick={() => { onConfirm(); onClose(); }} style={{ background: '#dc2626', color: '#fff' }}>Delete {count} {itemLabel}{count !== 1 ? 's' : ''}</Btn><Btn variant="outline" onClick={onClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn></>}
     >
       <div style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
         Are you sure you want to delete <strong>{count}</strong> selected {itemLabel}{count !== 1 ? 's' : ''}? This action cannot be undone.
@@ -3156,11 +3156,11 @@ function ActionsDropdown({ selectedCount, onBulkEdit, onBulkDelete }) {
           {onBulkDelete && (
             <button
               onClick={() => { setOpen(false); onBulkDelete(); }}
-              style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--red)', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
+              style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)', color: '#dc2626', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.15s' }}
               onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
             >
-              <Trash2 size={14} /> Bulk Delete
+              <Trash2 size={14} color="#dc2626" /> Bulk Delete
             </button>
           )}
         </div>,
@@ -3390,13 +3390,13 @@ function PageDetailView({ project, onBack, onUpdatePages, search, user }) {
             title="Download CSV"
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'var(--surface-2)', color: 'var(--text-secondary)',
-              border: '1px solid var(--border)', borderRadius: 8,
+              background: '#f1f5f9', color: '#334155',
+              border: '1px solid #e2e8f0', borderRadius: 8,
               padding: '7px 10px', cursor: 'pointer',
-              fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+              fontFamily: 'var(--font-body)', transition: 'all 0.15s',
             }}
-            onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+            onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
           >
             <Download size={14} />
           </button>
@@ -3521,7 +3521,7 @@ function PageDetailView({ project, onBack, onUpdatePages, search, user }) {
                 <td style={{ padding: '10px 16px' }}>
                   {userCanDelete && (
                     <button onClick={() => deleteRow(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
-                      onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = '#dc2626'; }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
                       <Trash2 size={14} />
                     </button>
@@ -4198,13 +4198,13 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
                 title="Download CSV"
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'var(--surface-2)', color: 'var(--text-secondary)',
-                  border: '1px solid var(--border)', borderRadius: 8,
+                  background: '#f1f5f9', color: '#334155',
+                  border: '1px solid #e2e8f0', borderRadius: 8,
                   padding: '7px 10px', cursor: 'pointer',
-                  fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                  fontFamily: 'var(--font-body)', transition: 'all 0.15s',
                 }}
-                onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
               >
                 <Download size={14} />
               </button>
@@ -4542,8 +4542,28 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.sv ?? '—'}</td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.kwDiff ?? '—'}</td>
                   {showRankColumn && (
-                    <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>
-                      {hasValidLandingPage(r.landingPage) ? (r.rank ?? '—') : '—'}
+                    <td style={{ padding: '10px 16px', fontSize: 13, whiteSpace: 'nowrap' }}>
+                      {(() => {
+                        const num = Number(r.rank);
+                        if (!hasValidLandingPage(r.landingPage) || !r.rank || isNaN(num) || num <= 0) {
+                          return <span style={{ color: '#94a3b8', fontWeight: 400 }}>—</span>;
+                        }
+                        const isTop3 = num <= 3;
+                        const isTop10 = num <= 10;
+                        return (
+                          <span style={{
+                            background: isTop3 ? '#dcfce7' : isTop10 ? '#fef9c3' : '#f1f5f9',
+                            color: isTop3 ? '#15803d' : isTop10 ? '#854d0e' : '#475569',
+                            fontWeight: 700,
+                            fontSize: 11.5,
+                            padding: '3px 10px',
+                            borderRadius: 12,
+                            display: 'inline-block'
+                          }}>
+                            {num}
+                          </span>
+                        );
+                      })()}
                     </td>
                   )}
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{r.cluster || '—'}</td>
@@ -4584,7 +4604,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
                   <td style={{ padding: '10px 16px' }}>
                     {userCanDelete && (
                       <button onClick={() => deleteRow(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
-                        onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = '#dc2626'; }}
                         onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
                         <Trash2 size={14} />
                       </button>
@@ -4740,13 +4760,13 @@ function CompetitorDetailView({ competitor, onBack, user }) {
             title="Download CSV"
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'var(--surface-2)', color: 'var(--text-secondary)',
-              border: '1px solid var(--border)', borderRadius: 8,
+              background: '#f1f5f9', color: '#334155',
+              border: '1px solid #e2e8f0', borderRadius: 8,
               padding: '7px 10px', cursor: 'pointer',
-              fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+              fontFamily: 'var(--font-body)', transition: 'all 0.15s',
             }}
-            onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+            onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
           >
             <Download size={14} />
           </button>
@@ -4907,7 +4927,7 @@ function EditCompetitorModal({ open, onClose, competitor, onSave, onDelete }) {
     return (
       <Modal open={open} onClose={handleClose} title="Delete Competitor"
         footer={<>
-          <Btn variant="primary" onClick={handleDelete} style={submitting ? { background: 'var(--red)', opacity: 0.6, pointerEvents: 'none' } : { background: 'var(--red)' }}>{submitting ? 'Deleting…' : 'Delete'}</Btn>
+          <Btn variant="primary" onClick={handleDelete} style={submitting ? { background: '#dc2626', opacity: 0.6, pointerEvents: 'none' } : { background: '#dc2626', color: '#fff' }}>{submitting ? 'Deleting…' : 'Delete'}</Btn>
           <Btn variant="outline" onClick={() => setConfirmDelete(false)} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
         </>}
       >
@@ -4928,7 +4948,7 @@ function EditCompetitorModal({ open, onClose, competitor, onSave, onDelete }) {
           <Btn variant="primary" onClick={handleSave} style={submitting ? { opacity: 0.6, pointerEvents: 'none' } : {}}>{submitting ? 'Saving…' : 'Save Project'}</Btn>
           <Btn variant="outline" onClick={handleClose} style={{ flex: 'none', padding: '10px 28px' }}>Cancel</Btn>
           {onDelete && (
-            <Btn variant="outline" onClick={() => setConfirmDelete(true)} style={{ flex: 'none', padding: '10px 16px', border: '1.5px solid var(--red)', color: 'var(--red)' }}>Delete</Btn>
+            <Btn variant="outline" onClick={() => setConfirmDelete(true)} style={{ flex: 'none', padding: '10px 16px', border: '1.5px solid #dc2626', color: '#dc2626' }}>Delete</Btn>
           )}
         </>
       }
@@ -5186,7 +5206,7 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</td></tr>
+              <tr><td colSpan={7} style={{ padding: '48px 12px', textAlign: 'center' }}><BrandInfinityLoader label="Loading competitor projects…" size="md" minHeight="180px" /></td></tr>
             ) : error ? (
               <tr><td colSpan={7} style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--red, #dc2626)', fontSize: 13 }}>{error}</td></tr>
             ) : rows.length === 0 ? (
@@ -5619,13 +5639,14 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
                           <div>
                             <div style={{ marginBottom: 2 }}>
                               <a
+                                className="competitor-domain"
                                 href={domainUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 style={{
                                   fontWeight: 600,
                                   fontSize: 13,
-                                  color: 'var(--text-primary)',
+                                  color: '#2563eb',
                                   textDecoration: 'none',
                                   cursor: 'pointer'
                                 }}
@@ -5644,7 +5665,7 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
                                 title={itemUrl}
                                 style={{
                                   fontSize: 11.5,
-                                  color: 'var(--accent, #3b82f6)',
+                                  color: '#2563eb',
                                   display: 'block',
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
@@ -5747,7 +5768,15 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
         </div>
       )}
 
-      {(!rows || rows.length === 0) ? (
+      {loading && (!rows || rows.length === 0) ? (
+        <div style={{ padding: '48px 20px', textAlign: 'center', background: '#fff', border: '1px solid var(--border)', borderRadius: 10, marginBottom: 16 }}>
+          <BrandInfinityLoader
+            label={scopedCompetitors.length > 0 ? `Loading categories & competitors… (${scopedCompetitors.length} loaded so far)` : "Loading competitors…"}
+            size="md"
+            minHeight="220px"
+          />
+        </div>
+      ) : (!rows || rows.length === 0) ? (
         <div style={{ padding: '24px 20px', background: '#fafbfc', borderBottom: '1px solid var(--border)', fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', marginBottom: 16 }}>
           No categories selected. Click <strong>Classify Competitors</strong> to select categories.
         </div>
@@ -6476,13 +6505,13 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                 title="Download CSV"
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'var(--surface-2)', color: 'var(--text-secondary)',
-                  border: '1px solid var(--border)', borderRadius: 8,
+                  background: '#f1f5f9', color: '#334155',
+                  border: '1px solid #e2e8f0', borderRadius: 8,
                   padding: '7px 10px', cursor: 'pointer',
-                  fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                  fontFamily: 'var(--font-body)', transition: 'all 0.15s',
                 }}
-                onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
               >
                 <Download size={14} />
               </button>
@@ -6624,7 +6653,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                         rel="noreferrer"
                         title={r.url || r.landingPage}
                         style={{
-                          color: 'var(--accent, #7928ca)',
+                          color: '#2563eb',
                           textDecoration: 'none',
                           display: 'inline-flex',
                           alignItems: 'center',
@@ -6650,7 +6679,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                   <td style={{ padding: '10px 16px', fontSize: 13, color: r.targetSubtype ? 'var(--text-primary)' : 'var(--text-muted)' }}>{r.targetSubtype || r.subtype || '—'}</td>
                   <td style={{ padding: '10px 16px' }}>
                     <button onClick={() => handleDeletePageRow(r.id || i, r.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}
-                      onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = 'var(--red)'; }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = '#dc2626'; }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
                       <Trash2 size={14} />
                     </button>
@@ -6806,6 +6835,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                       <td style={{ padding: '12px 16px' }}>
                         <div style={{ marginBottom: 2 }}>
                           <a
+                            className="competitor-domain"
                             href={domainUrl}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -6831,7 +6861,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
                             title={fullUrl}
                             style={{
                               fontSize: 12,
-                              color: 'var(--accent, #3b82f6)',
+                              color: '#2563eb',
                               cursor: 'pointer',
                               textDecoration: 'none',
                               display: 'block',
@@ -7259,14 +7289,15 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
   const [deletingOutreachLink, setDeletingOutreachLink] = useState(null);
   const [editingOutreachSite, setEditingOutreachSite] = useState(null);
 
-  const handleSaveOutreachSiteModal = (siteId, updatedFields) => {
+  const handleSaveOutreachSiteModal = async (siteId, updatedFields) => {
     setOutreachLinks(prev => prev.map(s => s.id === siteId ? { ...s, ...updatedFields } : s));
-    setOutreachPendingUpdates(prev => {
-      const next = new Map(prev);
-      const existing = next.get(siteId) || {};
-      next.set(siteId, { ...existing, ...updatedFields });
-      return next;
-    });
+    const targetSite = outreachLinks.find(s => s.id === siteId);
+    const pSlug = targetSite?.project_slug || targetSite?.project_name || selectedOutreachProject || activeProject?.project_slug || activeProject?.slug || 'global';
+    try {
+      await updateOutreachSiteApi(pSlug, siteId, updatedFields);
+    } catch (err) {
+      console.error('[handleSaveOutreachSiteModal] Failed to update outreach site:', err);
+    }
   };
 
   const OUTREACH_TYPES = useMemo(() => ['Paid Guest', 'Classified Ads', 'Brand Mention', 'Business Listing'], []);
@@ -7328,24 +7359,18 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
 
   const handleOutreachTypeChange = (lnkId, newType) => {
     setOutreachLinks(prev => prev.map(l => l.id === lnkId ? { ...l, type: newType } : l));
-    setOutreachPendingUpdates(prev => {
-      const next = new Map(prev);
-      const existing = next.get(lnkId) || {};
-      next.set(lnkId, { ...existing, type: newType });
-      return next;
-    });
+    const targetSite = outreachLinks.find(s => s.id === lnkId);
+    const pSlug = targetSite?.project_slug || targetSite?.project_name || selectedOutreachProject || activeProject?.project_slug || activeProject?.slug || 'global';
+    updateOutreachSiteApi(pSlug, lnkId, { type: newType }).catch(e => console.warn('[handleOutreachTypeChange] Failed:', e));
   };
 
   const STATUS_OPTIONS = useMemo(() => ['New site', 'Shortlisted', 'Need Negotiation', 'Rejected'], []);
 
   const handleOutreachStatusChange = (lnkId, newStatus) => {
     setOutreachLinks(prev => prev.map(l => l.id === lnkId ? { ...l, status: newStatus } : l));
-    setOutreachPendingUpdates(prev => {
-      const next = new Map(prev);
-      const existing = next.get(lnkId) || {};
-      next.set(lnkId, { ...existing, status: newStatus });
-      return next;
-    });
+    const targetSite = outreachLinks.find(s => s.id === lnkId);
+    const pSlug = targetSite?.project_slug || targetSite?.project_name || selectedOutreachProject || activeProject?.project_slug || activeProject?.slug || 'global';
+    updateOutreachSiteApi(pSlug, lnkId, { status: newStatus }).catch(e => console.warn('[handleOutreachStatusChange] Failed:', e));
   };
 
   const REJECTED_REASONS = useMemo(() => [
@@ -7358,12 +7383,9 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
 
   const handleOutreachRejectedReasonChange = (lnkId, newReason) => {
     setOutreachLinks(prev => prev.map(l => l.id === lnkId ? { ...l, rejectedReason: newReason } : l));
-    setOutreachPendingUpdates(prev => {
-      const next = new Map(prev);
-      const existing = next.get(lnkId) || {};
-      next.set(lnkId, { ...existing, rejected_reason: newReason });
-      return next;
-    });
+    const targetSite = outreachLinks.find(s => s.id === lnkId);
+    const pSlug = targetSite?.project_slug || targetSite?.project_name || selectedOutreachProject || activeProject?.project_slug || activeProject?.slug || 'global';
+    updateOutreachSiteApi(pSlug, lnkId, { rejected_reason: newReason }).catch(e => console.warn('[handleOutreachRejectedReasonChange] Failed:', e));
   };
 
   const [validatingOutreach, setValidatingOutreach] = useState(false);
@@ -7445,14 +7467,14 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
     return { country: '', rawCountry: '', traffic: trafficNum || 0 };
   };
 
-  const handleValidateOutreachSites = () => {
+  const handleValidateOutreachSites = async () => {
     if (!outreachLinks || outreachLinks.length === 0) return;
     setValidatingOutreach(true);
     setOutreachSaveError(null);
 
     let rejectedCount = 0;
     let shortlistedCount = 0;
-    const newPending = new Map(outreachPendingUpdates);
+    const defaultSlug = selectedOutreachProject || activeProject?.project_slug || activeProject?.slug || 'global';
 
     const updatedLinks = outreachLinks.map(lnk => {
       const reasons = [];
@@ -7526,20 +7548,42 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
       if (reasons.length > 0) {
         rejectedCount++;
         const combinedReason = reasons.join(', ');
-        newPending.set(lnk.id, { ...(newPending.get(lnk.id) || {}), status: 'Rejected', rejected_reason: combinedReason });
         return { ...lnk, status: 'Rejected', rejectedReason: combinedReason };
       } else {
         shortlistedCount++;
-        newPending.set(lnk.id, { ...(newPending.get(lnk.id) || {}), status: 'Shortlisted', rejected_reason: '' });
         return { ...lnk, status: 'Shortlisted', rejectedReason: '' };
       }
     });
 
     setOutreachLinks(updatedLinks);
-    setOutreachPendingUpdates(newPending);
-    setValidatingOutreach(false);
 
-    alert(`Validation Complete: ${shortlistedCount} site(s) Shortlisted, ${rejectedCount} site(s) Rejected. Please click 'Save changes' to persist.`);
+    try {
+      // 1. Bulk update all shortlisted sites directly in DB
+      const shortlistedIds = updatedLinks.filter(l => l.status === 'Shortlisted').map(l => l.id);
+      if (shortlistedIds.length > 0) {
+        await bulkUpdateOutreachSitesApi(defaultSlug, shortlistedIds, { status: 'Shortlisted', rejected_reason: '' });
+      }
+
+      // 2. Persist rejected sites with reasons directly in DB
+      const rejectedItems = updatedLinks.filter(l => l.status === 'Rejected');
+      if (rejectedItems.length > 0) {
+        await Promise.allSettled(
+          rejectedItems.map(item => {
+            const itemSlug = item.project_slug || item.project_name || defaultSlug;
+            return updateOutreachSiteApi(itemSlug, item.id, {
+              status: 'Rejected',
+              rejected_reason: item.rejectedReason
+            });
+          })
+        );
+      }
+    } catch (err) {
+      console.error('[handleValidateOutreachSites] Error persisting validation:', err);
+    } finally {
+      setValidatingOutreach(false);
+    }
+
+    alert(`Validation Complete: ${shortlistedCount} site(s) Shortlisted, ${rejectedCount} site(s) Rejected.`);
   };
 
   const formatRegions = (regions) => {
@@ -7679,6 +7723,8 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
       updates.rejected_reason = bulkEditOutreachData.rejectedReason;
     }
 
+    const defaultSlug = selectedOutreachProject || activeProject?.project_slug || activeProject?.slug || 'global';
+
     setOutreachLinks(prev => prev.map(l => {
       if (selectedOutreachIds.has(l.id)) {
         const finalLp = updates.landingPrice !== undefined ? updates.landingPrice : (l.landingPrice || '');
@@ -7701,13 +7747,25 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
       return l;
     }));
 
-    setOutreachPendingUpdates(prev => {
-      const next = new Map(prev);
-      ids.forEach(id => {
-        const existing = next.get(id) || {};
-        next.set(id, { ...existing, ...updates });
-      });
-      return next;
+    // Persist all selected rows to DB immediately
+    ids.forEach(async id => {
+      const rowItem = outreachLinks.find(l => l.id === id);
+      const rowLp = updates.landingPrice !== undefined ? updates.landingPrice : (rowItem?.landingPrice || '');
+      const rowPct = updates.spPercentage !== undefined ? updates.spPercentage : (rowItem?.spPercentage || '');
+      let rowSp = rowLp;
+      const lp = parseFloat(String(rowLp).replace(/[^0-9.]/g, ''));
+      const pct = parseFloat(String(rowPct).replace(/[^0-9.]/g, ''));
+      if (!isNaN(lp) && !isNaN(pct) && pct > 0) {
+        const spVal = lp + (lp * (pct / 100));
+        rowSp = Number.isInteger(spVal) ? String(spVal) : spVal.toFixed(2);
+      }
+      const itemUpdates = { ...updates, sellingPrice: rowSp, selling_price: rowSp };
+      const itemSlug = rowItem?.project_slug || rowItem?.project_name || defaultSlug;
+      try {
+        await updateOutreachSiteApi(itemSlug, id, itemUpdates);
+      } catch (err) {
+        console.error('[handleBulkEditOutreachSave] Failed to update outreach site:', id, err);
+      }
     });
 
     setBulkEditOutreachData({
@@ -7753,8 +7811,7 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
   };
 
   const handleSaveOutreachChanges = async () => {
-    const pSlug = activeProject?.project_slug || activeProject?.slug;
-    if (!pSlug) return;
+    const pSlug = selectedOutreachProject || activeProject?.project_slug || activeProject?.slug || 'global';
     setOutreachSaving(true);
     setOutreachSaveError('');
     try {
@@ -7763,7 +7820,9 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
       }
       if (outreachPendingUpdates.size > 0) {
         for (const [id, updates] of outreachPendingUpdates.entries()) {
-          await updateOutreachSiteApi(pSlug, id, updates);
+          const rowItem = outreachLinks.find(l => l.id === id);
+          const targetSlug = rowItem?.project_slug || rowItem?.project_name || pSlug;
+          await updateOutreachSiteApi(targetSlug, id, updates);
         }
       }
       setOutreachPendingUpdates(new Map());
@@ -8978,14 +9037,14 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
                   title="Filter"
                   style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
-                    background: activeDomainFilterCount > 0 ? '#f5f3ff' : 'none',
-                    border: activeDomainFilterCount > 0 ? '1.5px solid #7c3aed' : '1.5px solid var(--border)',
+                    background: activeDomainFilterCount > 0 ? '#f5f3ff' : '#f1f5f9',
+                    border: activeDomainFilterCount > 0 ? '1.5px solid #7c3aed' : '1px solid #e2e8f0',
                     borderRadius: 8, padding: 8,
-                    cursor: 'pointer', color: activeDomainFilterCount > 0 ? '#7c3aed' : 'var(--text-muted)',
+                    cursor: 'pointer', color: activeDomainFilterCount > 0 ? '#7c3aed' : '#334155',
                     transition: 'all 0.15s',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = activeDomainFilterCount > 0 ? '#7c3aed' : 'var(--border-hover)'; e.currentTarget.style.color = activeDomainFilterCount > 0 ? '#7c3aed' : 'var(--text-primary)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = activeDomainFilterCount > 0 ? '#7c3aed' : 'var(--border)'; e.currentTarget.style.color = activeDomainFilterCount > 0 ? '#7c3aed' : 'var(--text-muted)'; }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = activeDomainFilterCount > 0 ? '#7c3aed' : '#cbd5e1'; e.currentTarget.style.color = activeDomainFilterCount > 0 ? '#7c3aed' : '#0f172a'; e.currentTarget.style.background = activeDomainFilterCount > 0 ? '#f5f3ff' : '#e2e8f0'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = activeDomainFilterCount > 0 ? '#7c3aed' : '#e2e8f0'; e.currentTarget.style.color = activeDomainFilterCount > 0 ? '#7c3aed' : '#334155'; e.currentTarget.style.background = activeDomainFilterCount > 0 ? '#f5f3ff' : '#f1f5f9'; }}
                 >
                   <Filter size={14} />
                   {activeDomainFilterCount > 0 && (
@@ -9214,13 +9273,13 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
               title="Download CSV"
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'var(--surface-2)', color: 'var(--text-secondary)',
-                border: '1px solid var(--border)', borderRadius: 8,
+                background: '#f1f5f9', color: '#334155',
+                border: '1px solid #e2e8f0', borderRadius: 8,
                 padding: '7px 10px', cursor: 'pointer',
-                fontFamily: 'var(--font-body)', transition: 'opacity 0.15s',
+                fontFamily: 'var(--font-body)', transition: 'all 0.15s',
               }}
-              onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+              onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
             >
               <Download size={14} />
             </button>
@@ -9621,7 +9680,7 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
                                   </div>
                                 </td>
                                 <td style={{ padding: '14px 16px', fontSize: 13.5, width: 240, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  <a href={lnk.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}
+                                  <a href={lnk.url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'none' }}
                                     onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
                                     onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
                                     {lnk.url}
