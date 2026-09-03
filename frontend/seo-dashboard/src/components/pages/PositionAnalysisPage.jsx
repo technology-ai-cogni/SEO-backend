@@ -895,27 +895,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       }).catch(err => console.warn('[PositionAnalysisPage] Failed to fetch domain metrics:', err));
     }
 
-    const tabs = ['overview', 'chatgpt', 'gemini', 'ai overview'];
-    const newResults = {};
-
-    // 1. Try local cache first for instant UI response
-    tabs.forEach(tabKey => {
-      const cacheKey = `ai_results_${activeProject.slug}_${tabKey}`;
-      try {
-        const cached = localStorage.getItem(cacheKey);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            newResults[tabKey] = parsed;
-          }
-        }
-      } catch (err) { }
-    });
-    if (Object.keys(newResults).length > 0) {
-      setTabResults(prev => ({ ...prev, ...newResults }));
-    }
-
-    // 2. Fetch latest AI Analysis runs directly from Supabase DB for cross-system syncing
+    // AI analysis data comes straight from Supabase -- no localStorage cache layer.
     fetchAiAnalysisHistory(activeProject.slug)
       .then(history => {
         setAiHistory(Array.isArray(history) ? history : []);
@@ -935,10 +915,6 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 total_keywords: match.total_keywords || 0
               };
               dbTabResults[eng] = [resObj];
-              // Update local cache so next tab switch is instant
-              try {
-                localStorage.setItem(`ai_results_${activeProject.slug}_${eng}`, JSON.stringify([resObj]));
-              } catch (e) { }
             }
           });
 
@@ -955,40 +931,8 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
           }
 
           setTabResults(prev => ({ ...dbTabResults, ...prev }));
-
-          // Reconstruct multi-period trend history (P1..P15) across all devices from Supabase history
-          try {
-            engines.forEach(eng => {
-              const engHistory = history
-                .filter(h => (h.engine || '').toLowerCase().trim() === eng || (h.engine || '').toLowerCase().includes(eng))
-                .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
-
-              if (engHistory.length > 0) {
-                const reconstructedHits = engHistory.slice(0, 15).map((run, idx) => {
-                  const cCounts = {};
-                  const cited = run.cited_pages_list || [];
-                  cited.forEach(item => {
-                    const pageUrl = typeof item === 'string' ? item : (item.url || item.cited_url || item.page || '');
-                    if (!pageUrl) return;
-                    const normUrl = pageUrl.trim().toLowerCase();
-                    const matchedKw = (projectKeywords || []).find(k => {
-                      const kUrl = (k.landingPage || k.url || k.page_url || '').trim().toLowerCase();
-                      return kUrl && (kUrl === normUrl || kUrl.includes(normUrl) || normUrl.includes(kUrl));
-                    });
-                    const cName = matchedKw?.cluster || matchedKw?.type || '-';
-                    cCounts[cName] = (cCounts[cName] || 0) + 1;
-                  });
-                  return {
-                    dateStr: `Hit ${idx + 1}`,
-                    clusterCounts: cCounts
-                  };
-                });
-                localStorage.setItem(`ai_period_hits_${activeProject.slug}_${eng}`, JSON.stringify(reconstructedHits));
-              }
-            });
-          } catch (histErr) {
-            console.warn('[PositionAnalysisPage] Failed to reconstruct period history from DB:', histErr);
-          }
+          // The P1..P15 trend chart is computed live from `aiHistory` at render time
+          // (see the PAGE ANALYSIS section) -- no localStorage reconstruction needed.
         }
       })
       .catch(err => console.warn('[PositionAnalysisPage] Supabase history sync notice:', err));
@@ -1017,86 +961,9 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     setTabResults(buildTabResultsFromHistory(dayRows));
   }, [selectedDate, aiHistory, activeProject?.slug]);
 
-  const saveHitToPeriodHistory = (projectSlug, engineKey, visibilityResult, optionalKws = null) => {
-    if (!projectSlug || !engineKey) return;
-    const normEngine = engineKey.toLowerCase().trim();
-    const storageKey = `ai_period_hits_${projectSlug}_${normEngine}`;
-    let hits = [];
-    try {
-      hits = JSON.parse(localStorage.getItem(storageKey) || '[]');
-    } catch (e) { }
-
-    const kwsSource = optionalKws || projectKeywords || [];
-    let clusterCounts = {};
-
-    if (normEngine === 'organic') {
-      const uniquePagesByCluster = {};
-      kwsSource.forEach(k => {
-        const pUrl = (k.landingPage || k.url || k.page_url || k.landing_page_url || '').trim().toLowerCase();
-        if (pUrl) {
-          const cName = k.cluster || k.type || '-';
-          if (!uniquePagesByCluster[cName]) {
-            uniquePagesByCluster[cName] = new Set();
-          }
-          uniquePagesByCluster[cName].add(pUrl);
-        }
-      });
-      Object.keys(uniquePagesByCluster).forEach(cName => {
-        clusterCounts[cName] = uniquePagesByCluster[cName].size;
-      });
-
-      if (Object.keys(clusterCounts).length === 0) {
-        const uniqueUrls = new Set();
-        (projectPages || []).forEach(p => {
-          const pUrl = (p.url || p.page_url || '').trim().toLowerCase();
-          const cName = p.cluster || p.type || '-';
-          if (pUrl && !uniqueUrls.has(pUrl)) {
-            uniqueUrls.add(pUrl);
-            clusterCounts[cName] = (clusterCounts[cName] || 0) + 1;
-          }
-        });
-      }
-    } else {
-      const citedPages = visibilityResult?.cited_pages_list || [];
-      citedPages.forEach((item) => {
-        const pageUrl = typeof item === 'string' ? item : (item.url || item.cited_url || item.page || '');
-        if (!pageUrl) return;
-
-        const normUrl = pageUrl.trim().toLowerCase();
-        const matchedKw = kwsSource.find(k => {
-          const kUrl = (k.landingPage || k.url || k.page_url || '').trim().toLowerCase();
-          return kUrl && (kUrl === normUrl || kUrl.includes(normUrl) || normUrl.includes(kUrl));
-        });
-
-        const clusterName = matchedKw?.cluster || matchedKw?.type || '-';
-        clusterCounts[clusterName] = (clusterCounts[clusterName] || 0) + 1;
-      });
-
-      if (Object.keys(clusterCounts).length === 0) {
-        kwsSource.forEach(k => {
-          const cName = k.cluster || k.type || '-';
-          clusterCounts[cName] = (clusterCounts[cName] || 0) + 1;
-        });
-      }
-    }
-
-    const hitObj = {
-      timestamp: new Date().toISOString(),
-      dateStr: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      result: visibilityResult,
-      clusterCounts
-    };
-
-    hits.push(hitObj);
-
-    // FIFO Sliding Window: Max 15 periods (P1 to P15)
-    if (hits.length > 15) {
-      hits = hits.slice(-15);
-    }
-
-    localStorage.setItem(storageKey, JSON.stringify(hits));
-    return hits;
-  };
+  // No-op: period history is now read live from Supabase (the ai_analysis table)
+  // and rebuilt on every load / analyze -- nothing is persisted client-side.
+  const saveHitToPeriodHistory = () => {};
 
   const handleAiAnalysis = async (e, options = {}) => {
     if (e) e.preventDefault();
@@ -1185,10 +1052,6 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
             const newTabResults = {};
             allResults.forEach(({ key, result }) => {
               newTabResults[key] = result;
-              localStorage.setItem(`ai_results_${activeProject.slug}_${key}`, JSON.stringify(result));
-              if (result && result[0]) {
-                saveHitToPeriodHistory(activeProject.slug, key, result[0]);
-              }
             });
 
             // Overview aggregation
@@ -1205,7 +1068,6 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 cited_pages: totalCited
               }];
               newTabResults['overview'] = overviewRes;
-              localStorage.setItem(`ai_results_${activeProject.slug}_overview`, JSON.stringify(overviewRes));
             }
 
             setTabResults(prev => ({ ...prev, ...newTabResults }));
@@ -1263,9 +1125,6 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
 
             const results = [visibilityResult];
             setTabResults(prev => ({ ...prev, [engineKey]: results, [currentTab]: results }));
-            localStorage.setItem(`ai_results_${activeProject.slug}_${engineKey}`, JSON.stringify(results));
-            localStorage.setItem(`ai_results_${activeProject.slug}_${currentTab}`, JSON.stringify(results));
-            saveHitToPeriodHistory(activeProject.slug, engineKey, visibilityResult);
 
             if (isAssociateUser(user) && !isCurrentDateSelected) {
               recordAiModelAnalysisRun(user, activeProject?.slug, engineKey);
@@ -1421,23 +1280,11 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       return top5Pages;
     }
 
-    // AI LLM TABS (ChatGPT, Gemini, AI Overview)
+    // AI LLM TABS (ChatGPT, Gemini, AI Overview) -- from tabResults, populated from Supabase
     const llmKey = targetLlm === 'ai overview' ? 'ai overview' : targetLlm === 'gemini' ? 'gemini' : 'chatgpt';
     let llmResults = tabResults[llmKey] || tabResults[targetLlm] || [];
     let activeRes = llmResults[0] || {};
 
-    if ((!activeRes.cited_pages_list || activeRes.cited_pages_list.length === 0) && (!activeRes.mentioned_keywords || activeRes.mentioned_keywords.length === 0) && activeProject?.slug) {
-      try {
-        const stored = localStorage.getItem(`ai_results_${activeProject.slug}_${llmKey}`) ||
-                       localStorage.getItem(`ai_results_${activeProject.slug}_${llmKey.replace(/\s+/g, '')}`) ||
-                       localStorage.getItem(`ai_results_${activeProject.slug}_${llmKey.replace(/\s+/g, '_')}`);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          activeRes = Array.isArray(parsed) ? parsed[0] : parsed;
-        }
-      } catch (e) {}
-    }
-    
     const citedPagesList = activeRes.cited_pages_list || [];
     const mentionsList = activeRes.mentioned_keywords || [];
     const itemsToProcess = citedPagesList.length > 0 ? citedPagesList : mentionsList;
@@ -2864,10 +2711,33 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
           {/* Left Section: Mentions & Cited sub-columns */}
           {(() => {
             const isOverview = (aiTab || 'overview').toLowerCase() === 'overview';
-            const currentAiResults = tabResults[aiTab.toLowerCase()] || [];
-            const visibilityData = currentAiResults[0] || {};
-            const liveMentionedKws = visibilityData.mentioned_keywords || [];
-            const liveCitedPagesList = visibilityData.cited_pages_list || [];
+
+            // On Overview: show the deduped union of mentions / cited pages across
+            // all 3 engines (ChatGPT + Gemini + AI Overview). Otherwise: the
+            // selected engine's own lists.
+            let liveMentionedKws;
+            let liveCitedPagesList;
+            if (isOverview) {
+              const mSet = new Map();
+              const cSet = new Map();
+              ['chatgpt', 'gemini', 'ai overview'].forEach(e => {
+                const r = (tabResults[e] || [])[0] || {};
+                (r.mentioned_keywords || []).forEach(kw => {
+                  const k = String(kw).trim().toLowerCase();
+                  if (k && !mSet.has(k)) mSet.set(k, String(kw).trim());
+                });
+                (r.cited_pages_list || []).forEach(c => {
+                  const k = String(c).trim().toLowerCase();
+                  if (k && !cSet.has(k)) cSet.set(k, String(c).trim());
+                });
+              });
+              liveMentionedKws = Array.from(mSet.values());
+              liveCitedPagesList = Array.from(cSet.values());
+            } else {
+              const visibilityData = (tabResults[aiTab.toLowerCase()] || [])[0] || {};
+              liveMentionedKws = visibilityData.mentioned_keywords || [];
+              liveCitedPagesList = visibilityData.cited_pages_list || [];
+            }
 
             // cited_pages_list entries are the keyword/query strings where the
             // domain is cited (the AI agent does NOT return URLs -- see
@@ -2943,16 +2813,12 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ textAlign: 'center', marginBottom: 4 }}>
                       <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        Mentions ({isOverview ? 'N/A' : liveMentionedKws.length})
+                        Mentions ({liveMentionedKws.length})
                       </span>
                     </div>
 
                     <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, paddingRight: 4 }}>
-                      {isOverview ? (
-                        <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, padding: '20px 10px', textAlign: 'center' }}>
-                          N/A
-                        </div>
-                      ) : liveMentionedKws.length > 0 ? (
+                      {liveMentionedKws.length > 0 ? (
                         liveMentionedKws.map((kw, idx) => (
                           <div
                             key={idx}
@@ -2986,16 +2852,12 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ textAlign: 'center', marginBottom: 4 }}>
                       <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        Cited ({isOverview ? 'N/A' : `${uniqueCitedPages.length} Unique Pages`})
+                        Cited ({uniqueCitedPages.length} Unique Pages)
                       </span>
                     </div>
 
                     <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, paddingRight: 4 }}>
-                      {isOverview ? (
-                        <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, padding: '20px 10px', textAlign: 'center' }}>
-                          N/A
-                        </div>
-                      ) : uniqueCitedPages.length > 0 ? (
+                      {uniqueCitedPages.length > 0 ? (
                         uniqueCitedPages.map((item, idx) => {
                           const hasPage = Boolean(item.url);
                           const href = hasPage
@@ -3368,43 +3230,87 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               }
 
               const llmKey = pageAnalysisLlm === 'organic' ? 'organic' : pageAnalysisLlm === 'ai overview' ? 'ai overview' : pageAnalysisLlm === 'gemini' ? 'gemini' : 'chatgpt';
-              const storageKey = `ai_period_hits_${activeProject?.slug}_${llmKey}`;
-              let savedHits = [];
-              try {
-                savedHits = JSON.parse(localStorage.getItem(storageKey) || '[]');
-              } catch (e) { }
 
-              // Calculate total page counts per cluster from left-side table data
+              // Total page counts per cluster from the left-side (current) table
               const clusterCounts = {};
               pageAnalysisData.forEach((item) => {
                 const cName = item.clusterName || '-';
                 clusterCounts[cName] = (clusterCounts[cName] || 0) + 1;
               });
-
               const uniqueClusters = Object.keys(clusterCounts);
 
               const periods = Array.from({ length: 15 }, (_, i) => `P${i + 1}`);
-              // Determine how many analysis runs / period hits have actually been recorded
-              const effectiveHits = savedHits.length > 0 ? savedHits : [{ dateStr: 'Hit 1', clusterCounts }];
-              const recordedHitsCount = effectiveHits.length;
+
+              // Same keyword -> cluster resolution the CITATIONS table uses, so names always match.
+              const kwCluster = (s) => {
+                const t = String(s || '').trim().toLowerCase();
+                if (!t) return null;
+                const kws = projectKeywords || [];
+                const m = kws.find(k => String(k.kw || k.keyword || '').trim().toLowerCase() === t)
+                  || kws.find(k => {
+                    const kt = String(k.kw || k.keyword || '').trim().toLowerCase();
+                    return kt && (kt.includes(t) || t.includes(kt));
+                  });
+                return m ? (m.cluster || m.type || 'General') : null;
+              };
+
+              // Per-hit cluster counts, computed live from Supabase history (aiHistory).
+              const engRuns = (aiHistory || [])
+                .filter(h => {
+                  const e = String(h.engine || '').toLowerCase().trim();
+                  return e === llmKey || e.includes(llmKey);
+                })
+                .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0))
+                .slice(-15);
+
+              let hitList = engRuns.map((run, idx) => {
+                const counts = {};
+                const items = (run.cited_pages_list && run.cited_pages_list.length > 0)
+                  ? run.cited_pages_list
+                  : (run.mentioned_keywords || []);
+                items.forEach(it => {
+                  let s = typeof it === 'string' ? it : (it.url || it.keyword || it.page || '');
+                  s = String(s).trim();
+                  if (s.includes(' - ')) s = s.split(' - ')[0].trim();
+                  const cn = kwCluster(s) || 'General';
+                  counts[cn] = (counts[cn] || 0) + 1;
+                });
+                return {
+                  dateStr: run.created_at
+                    ? new Date(run.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                    : `Hit ${idx + 1}`,
+                  clusterCounts: counts
+                };
+              });
+
+              // No history from Supabase yet -> single synthetic point from the current table.
+              if (hitList.length === 0) {
+                hitList = [{ dateStr: 'Hit 1', clusterCounts }];
+              }
+
+              const recordedHitsCount = hitList.length;
 
               const clusterTrendData = periods.map((period, wIdx) => {
                 const row = { period };
-                const hit = effectiveHits[wIdx];
-
+                const hit = wIdx < recordedHitsCount ? hitList[wIdx] : null;
                 uniqueClusters.forEach((cName) => {
-                  if (wIdx < recordedHitsCount && hit) {
-                    if (hit.clusterCounts && hit.clusterCounts[cName] != null) {
-                      row[cName] = hit.clusterCounts[cName];
-                    } else {
-                      row[cName] = clusterCounts[cName] || 0;
-                    }
-                  } else {
-                    // Future unrecorded period: null so no point/line is drawn
-                    row[cName] = null;
-                  }
+                  const v = hit && hit.clusterCounts ? hit.clusterCounts[cName] : undefined;
+                  row[cName] = hit ? ((v != null) ? v : 0) : null;
                 });
                 return row;
+              });
+
+              // Each cluster's line starts at the first hit where it actually appears (count > 0).
+              // Skip the trim for a cluster that never goes above 0 anywhere, so it still draws.
+              uniqueClusters.forEach((cName) => {
+                const everRanks = clusterTrendData.some(r => (r[cName] || 0) > 0);
+                if (!everRanks) return;
+                let started = false;
+                for (let i = 0; i < clusterTrendData.length; i++) {
+                  if (started) continue;
+                  if ((clusterTrendData[i][cName] || 0) > 0) started = true;
+                  else clusterTrendData[i][cName] = null;
+                }
               });
 
               const colors = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#06b6d4', '#ec4899', '#8b5cf6', '#eab308'];
@@ -3479,7 +3385,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                               if (validPayload.length === 0) return null;
                               const pName = validPayload[0].payload.period;
                               const pIdx = periods.indexOf(pName);
-                              const hitObj = savedHits[pIdx];
+                              const hitObj = hitList[pIdx];
 
                               return (
                                 <div style={{

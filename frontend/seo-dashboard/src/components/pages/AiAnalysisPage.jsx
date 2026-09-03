@@ -447,7 +447,7 @@ export default function AiAnalysisPage({ user }) {
 
     const hitObj = {
       timestamp: new Date().toISOString(),
-      dateStr: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      dateStr: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       result: visibilityResult,
       clusterCounts
     };
