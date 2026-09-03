@@ -15,6 +15,7 @@ import {
   CornerDownRight
 } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
+import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
 // Reusable PDF Upload Dropzone Box Component
 function PdfUploadBox({ label, fileName, onFileSelect, onRemove }) {
@@ -547,8 +548,8 @@ export default function AgencyPage({ user }) {
       {/* Main Unified Tree Table */}
       <div style={{ background: '#ffffff', borderRadius: 16, border: '1px solid #E4DFEE', boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)', overflow: 'hidden' }}>
         {loading ? (
-          <div style={{ padding: '60px 20px', textAlign: 'center', color: '#64748b' }}>
-            Loading vendor records and activity tree...
+          <div style={{ padding: '60px 20px', textAlign: 'center' }}>
+            <BrandInfinityLoader label="Loading vendor records and activity tree…" size="md" minHeight="220px" />
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>

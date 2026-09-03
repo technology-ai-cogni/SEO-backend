@@ -24,6 +24,7 @@ import {
   deleteOffPageActivityApi,
   analyzeKeywordPushPotential
 } from '../../lib/projectsApi';
+import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
 // ─── PUSH-POTENTIAL BATCHING ───
 // Batch 1 (high): near-certain the keyword can be pushed up in ranking.
@@ -736,8 +737,7 @@ function CalendarPage({ user }) {
       }}>
         {loading ? (
           <div style={{ padding: '60px 20px', textAlign: 'center' }}>
-            <Sparkles size={32} className="animate-spin" color="var(--accent)" style={{ marginBottom: 12 }} />
-            <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>Loading data...</p>
+            <BrandInfinityLoader label="Loading calendar activities…" size="md" minHeight="220px" />
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>

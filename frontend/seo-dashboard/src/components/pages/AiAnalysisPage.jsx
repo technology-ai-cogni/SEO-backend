@@ -8,6 +8,7 @@ import {
 } from '../../lib/projectsApi';
 import { supabase } from '../../lib/supabaseClient';
 import { hasPermission, PERMISSIONS, canRunActions, canRunAiModelAnalysis, recordAiModelAnalysisRun, canDownload } from '../../lib/permissions';
+import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
 // Top-level helper function to pick top 2 keywords per category by search volume (SV)
 function getTop2KeywordsPerCategory(kws) {
@@ -216,6 +217,7 @@ export default function AiAnalysisPage({ user }) {
   const userCanDownload = canDownload(user);
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [projectKeywords, setProjectKeywords] = useState([]);
   const [history, setHistory] = useState([]);
@@ -285,6 +287,7 @@ export default function AiAnalysisPage({ user }) {
   useEffect(() => {
     let isMounted = true;
     async function loadData() {
+      setLoading(true);
       try {
         const domains = await fetchDomainRows();
         if (isMounted && domains && domains.length > 0) {
@@ -297,6 +300,8 @@ export default function AiAnalysisPage({ user }) {
         }
       } catch (err) {
         console.error('[AiAnalysisPage] Error loading projects:', err);
+      } finally {
+        if (isMounted) setLoading(false);
       }
     }
     loadData();
@@ -1545,7 +1550,13 @@ export default function AiAnalysisPage({ user }) {
                 </tr>
               </thead>
               <tbody>
-                {filteredMentions.length === 0 ? (
+                {loading ? (
+                  <tr>
+                    <td colSpan={5} style={{ padding: '48px 16px', textAlign: 'center' }}>
+                      <BrandInfinityLoader label={`Loading AI mentions for ${currentDomainDisplay}…`} size="md" minHeight="180px" />
+                    </td>
+                  </tr>
+                ) : filteredMentions.length === 0 ? (
                   <tr>
                     <td colSpan={5} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
                       No mentioned keywords found for {selectedEngine.toUpperCase()}.
@@ -1619,7 +1630,13 @@ export default function AiAnalysisPage({ user }) {
                 </tr>
               </thead>
               <tbody>
-                {filteredCitations.length === 0 ? (
+                {loading ? (
+                  <tr>
+                    <td colSpan={4} style={{ padding: '48px 16px', textAlign: 'center' }}>
+                      <BrandInfinityLoader label={`Loading AI citations for ${currentDomainDisplay}…`} size="md" minHeight="180px" />
+                    </td>
+                  </tr>
+                ) : filteredCitations.length === 0 ? (
                   <tr>
                     <td colSpan={4} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
                       No cited pages found for {selectedEngine.toUpperCase()}.
@@ -1682,19 +1699,7 @@ export default function AiAnalysisPage({ user }) {
             textAlign: 'center',
             gap: 18
           }}>
-            <div style={{
-              width: 64,
-              height: 64,
-              borderRadius: 20,
-              background: '#f5f3ff',
-              color: '#7c3aed',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 4px 12px rgba(124, 58, 237, 0.15)'
-            }}>
-              <Sparkles size={32} className="animate-spin" />
-            </div>
+            <BrandInfinityLoader label="" size="sm" minHeight="60px" />
             <div>
               <h3 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>
                 Analyzing {selectedEngine.toUpperCase()} Visibility...
@@ -1736,19 +1741,7 @@ export default function AiAnalysisPage({ user }) {
             textAlign: 'center',
             gap: 18
           }}>
-            <div style={{
-              width: 64,
-              height: 64,
-              borderRadius: 20,
-              background: '#f5f3ff',
-              color: '#7c3aed',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 4px 12px rgba(124, 58, 237, 0.15)'
-            }}>
-              <Sparkles size={32} className="animate-spin" />
-            </div>
+            <BrandInfinityLoader label="" size="sm" minHeight="60px" />
             <div>
               <h3 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>
                 Analyzing AI Search Visibility...

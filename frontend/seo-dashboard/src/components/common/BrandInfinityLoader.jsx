@@ -39,11 +39,9 @@ export default function BrandInfinityLoader({
         @keyframes bd-infinity-pulse {
           0%, 100% {
             transform: scale(1);
-            opacity: 0.92;
           }
           50% {
-            transform: scale(1.06);
-            opacity: 1;
+            transform: scale(1.05);
           }
         }
         @keyframes bd-infinity-dash {
@@ -72,7 +70,6 @@ export default function BrandInfinityLoader({
           viewBox="0 0 24 24"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
-          style={{ filter: 'drop-shadow(0 4px 16px rgba(123, 47, 190, 0.4))' }}
         >
           <defs>
             <linearGradient id="haribaInfinityGrad" x1="0%" y1="0%" x2="100%" y2="100%">
