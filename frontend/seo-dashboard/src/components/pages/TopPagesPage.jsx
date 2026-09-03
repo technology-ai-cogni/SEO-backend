@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, ChevronDown, ExternalLink, FileText, Filter, Download, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
 import { canDownload, canRunActions } from '../../lib/permissions';
 import { fetchDomainRows, fetchPageRows, fetchKeywordRows, runOrganicRankCheckApi } from '../../lib/projectsApi';
+import MarkedCalendar, { getLocalTodayStr, tsToLocalDateStr } from '../common/MarkedCalendar';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
 // MultiSelectField Component for Popover Filters
@@ -306,7 +307,7 @@ export default function TopPagesPage({ user }) {
   const [selectedRegion, setSelectedRegion] = useState('IN');
   const [countryMenuOpen, setCountryMenuOpen] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
-  const [selectedDate, setSelectedDate] = useState('2026-08-13');
+  const [selectedDate, setSelectedDate] = useState(() => getLocalTodayStr());
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const handleRunOrganicRankCheck = async () => {
@@ -418,6 +419,7 @@ export default function TopPagesPage({ user }) {
             targetSubtype: k.targetSubtype || k.target_category || k.targetCategory || k.subtype || 'Informational',
             targetGeo: k.targetGeo || k.geo || k.country || proj.country || 'India',
             priority: k.priority || k.prio || 'Medium',
+            rankCheckedAt: k.rankCheckedAt ?? k.rank_checked_at ?? null,
             totalKws: 1,
             ranks: rawRank > 0 && rawRank < 101 ? [rawRank] : []
           };
@@ -487,8 +489,18 @@ export default function TopPagesPage({ user }) {
     setTypeFilter('all');
   };
 
-  // Filtered pages based on search & column filters
+  // Days a rank check ran (from keyword_categories.rank_checked_at) -> red dots
+  const rankCheckDateSet = (() => {
+    const s = new Set();
+    (pagesData || []).forEach(p => { const ds = tsToLocalDateStr(p.rankCheckedAt); if (ds) s.add(ds); });
+    return s;
+  })();
+  const isPastDate = selectedDate && selectedDate !== getLocalTodayStr();
+
+  // Filtered pages based on search, column filters, and (past date) rank-check day
   const filteredPages = pagesData.filter(p => {
+    const matchDate = !isPastDate || tsToLocalDateStr(p.rankCheckedAt) === selectedDate;
+    if (!matchDate) return false;
     const matchSearch = searchQuery === '' ||
       (p.kw && p.kw.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (p.pageName && p.pageName.toLowerCase().includes(searchQuery.toLowerCase())) ||
@@ -835,41 +847,14 @@ export default function TopPagesPage({ user }) {
                 )}
               </div>
 
-              {/* Date Picker Button */}
-              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-                <button
-                  onClick={() => {
-                    const hiddenInput = document.getElementById('tp_header_date_picker');
-                    if (hiddenInput) hiddenInput.showPicker ? hiddenInput.showPicker() : hiddenInput.click();
-                  }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    background: 'transparent',
-                    border: 'none',
-                    padding: 0,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: '#2563eb',
-                    cursor: 'pointer',
-                    outline: 'none',
-                    whiteSpace: 'nowrap'
-                  }}
-                >
-                  <span>📅</span>
-                  <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>
-                    {new Date(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </span>
-                </button>
-                <input
-                  id="tp_header_date_picker"
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 0, height: 0 }}
-                />
-              </div>
+              {/* Calendar -- green dot = today, red dot = a day a rank check ran.
+                  Pick a past red day to see the keywords checked that day. */}
+              <MarkedCalendar
+                value={selectedDate}
+                onChange={setSelectedDate}
+                markedDates={rankCheckDateSet}
+                markLabel="Rank-checked"
+              />
 
               {/* Organic Re-analyze Button */}
               {userCanRunActions && activeProject?.slug !== 'all' && (
@@ -1306,6 +1291,24 @@ export default function TopPagesPage({ user }) {
           )}
         </div>
       </div>
+
+      {isPastDate && (
+        <div style={{
+          background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10,
+          padding: '8px 14px', fontSize: 12.5, color: '#92400e', display: 'flex',
+          alignItems: 'center', justifyContent: 'space-between', gap: 10
+        }}>
+          <span>
+            Showing keywords rank-checked on <strong>{selectedDate}</strong>. Organic ranks aren't stored per day — the values shown are the latest for those keywords.
+          </span>
+          <button
+            onClick={() => setSelectedDate(getLocalTodayStr())}
+            style={{ fontSize: 12, fontWeight: 700, color: '#2563eb', background: 'transparent', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
+          >
+            Back to today
+          </button>
+        </div>
+      )}
 
       {/* ─── TOP PAGES DATA TABLE ─────────────────────────────────────────────── */}
       <div style={{

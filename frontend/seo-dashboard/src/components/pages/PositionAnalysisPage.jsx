@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { ExternalLink, Search, ChevronDown, CheckCircle, Lock, ShieldAlert, Calendar, Sparkles, RefreshCw } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { fetchDomainRows, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi, fetchDomainMetricsApi, runOrganicRankCheckApi, fetchAiAnalysisHistory } from '../../lib/projectsApi';
+import { fetchProjectListLite, fetchKeywordRows, fetchPageRows, runAiVisibilityAnalysis, fetchProjectSummaryApi, fetchDomainMetricsApi, saveDomainMetricsToSupabase, runOrganicRankCheckApi, fetchAiAnalysisHistory } from '../../lib/projectsApi';
 import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions, canRunBrandDiscovery, isAssociateUser, canRunAiModelAnalysis, recordAiModelAnalysisRun } from '../../lib/permissions';
+import MarkedCalendar, { getLocalTodayStr, tsToLocalDateStr } from '../common/MarkedCalendar';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
 function AiVisibilityArcGauge({ visibility = 0, mentions = 0, citedPages = 0, kwMentionsList = [], kwCitationsList = [], totalKeywords = 0, projectTotalKeywords = 0 }) {
@@ -423,28 +424,6 @@ function RankHoverCell({ count, kwList, title, color }) {
   );
 }
 
-// Local "today" as YYYY-MM-DD -- matches what <input type="date"> produces and
-// avoids the UTC off-by-one that new Date().toISOString() can cause near midnight.
-function getLocalTodayStr() {
-  const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${mm}-${dd}`;
-}
-
-// A timestamp (ISO string / Date) -> local YYYY-MM-DD. Used to bucket ai_analysis
-// history rows (created_at) by the calendar day they were run on.
-function tsToLocalDateStr(ts) {
-  if (!ts) return '';
-  const d = new Date(ts);
-  if (isNaN(d.getTime())) return '';
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${mm}-${dd}`;
-}
-
-const CAL_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const CAL_WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
 // Build per-engine (+ overview) tabResults from a list of ai_analysis rows.
 // Latest row wins per engine. Returns {} when `rows` is empty.
@@ -520,19 +499,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   const [showDateModal, setShowDateModal] = useState(false);
   const [isAnalyzingOverlay, setIsAnalyzingOverlay] = useState(false);
 
-  // Custom calendar popup (replaces the native date picker so we can mark days).
-  const [showCalendar, setShowCalendar] = useState(false);
-  const [calMonth, setCalMonth] = useState(() => {
-    const t = new Date();
-    return new Date(t.getFullYear(), t.getMonth(), 1);
-  });
   // Raw ai_analysis history rows for this project (drives the day marks + historical view).
   const [aiHistory, setAiHistory] = useState([]);
 
   // Hidden cards state
   const [closedCards, setClosedCards] = useState({});
   const [selectedRegion, setSelectedRegion] = useState('US');
-  const [selectedDate, setSelectedDate] = useState(() => localStorage.getItem('bd_selected_date') || getLocalTodayStr());
+  const [selectedDate, setSelectedDate] = useState(() => getLocalTodayStr());
   const dateInputRef = useRef(null);
 
   // Brand Discovery can only be analyzed for the current date. On any other date
@@ -580,7 +553,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     async function loadData() {
       try {
         setLoading(true);
-        const domains = await fetchDomainRows();
+        const domains = await fetchProjectListLite();
         const isVendor = user?.category === 'Vendor' || user?.role?.toUpperCase() === 'VENDOR';
         const vendorProjectName = isVendor && user?.assigned_project && user.assigned_project !== 'All Projects' ? user.assigned_project : null;
 
@@ -691,12 +664,6 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       const isCountryMenu = event.target.closest('.country-menu-panel');
       if (!isCountryButton && !isCountryMenu) {
         setCountryMenuOpen(false);
-      }
-
-      const isCalButton = event.target.closest('.bd-cal-btn');
-      const isCalPanel = event.target.closest('.bd-cal-panel');
-      if (!isCalButton && !isCalPanel) {
-        setShowCalendar(false);
       }
     }
 
@@ -849,48 +816,28 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     setClosedCards(prev => ({ ...prev, [cardId]: true }));
   };
 
-  // Load cached AI analysis results & live domain metrics from localStorage whenever project changes
+  // Load per-project data whenever the selected project changes.
   useEffect(() => {
     if (!activeProject?.slug) return;
-    // Restore cached live DA & Spam Score if present, or fetch live metrics
-    const metricCacheKey = `bd_domain_metrics_${activeProject.slug}`;
-    let loadedCache = false;
-    try {
-      const cachedMetrics = localStorage.getItem(metricCacheKey);
-      if (cachedMetrics) {
-        const parsed = JSON.parse(cachedMetrics);
-        if ((parsed?.da || parsed?.spam_score || parsed?.ss) && parsed?.spam_score !== '0%') {
-          loadedCache = true;
-          setActiveProject(prev => prev ? {
-            ...prev,
-            da: parsed.da ?? prev.da,
-            spam_score: parsed.spam_score || parsed.ss || prev.spam_score || '0%',
-            total_traffic: parsed.total_traffic || prev.total_traffic || '0'
-          } : prev);
-        }
-      }
-    } catch (e) { }
 
-    if (!loadedCache && activeProject?.domain) {
+    // DA / Spam Score / traffic: come from the project's `domains` row in Supabase
+    // (mapped in domainRowToProject). If they aren't stored yet, fetch once from
+    // RapidAPI and persist to Supabase -- never cached in localStorage.
+    const hasStoredMetrics = (activeProject.da != null && String(activeProject.da) !== '')
+      || (activeProject.spam_score != null && String(activeProject.spam_score) !== '');
+
+    if (!hasStoredMetrics && activeProject?.domain) {
+      const slug = activeProject.slug;
       fetchDomainMetricsApi(activeProject.domain).then(res => {
         const m = res?.metrics || res;
         if (res?.status === 'success' || m?.da || m?.ss) {
           const liveDa = m.da ?? 0;
           const liveSs = m.ss || m.spam_score || '0%';
-          const metricsToSave = {
-            da: liveDa,
-            spam_score: liveSs,
-            ss: liveSs
-          };
-          try {
-            localStorage.setItem(metricCacheKey, JSON.stringify(metricsToSave));
-          } catch (err) { }
-          setActiveProject(prev => prev ? {
-            ...prev,
-            da: liveDa,
-            spam_score: liveSs,
-            ss: liveSs
+          const liveTraffic = m.total_traffic || m.traffic || res?.traffic || '0';
+          setActiveProject(prev => (prev && prev.slug === slug) ? {
+            ...prev, da: liveDa, spam_score: liveSs, ss: liveSs, total_traffic: liveTraffic
           } : prev);
+          saveDomainMetricsToSupabase(slug, { da: liveDa, spam_score: liveSs, traffic: liveTraffic });
         }
       }).catch(err => console.warn('[PositionAnalysisPage] Failed to fetch domain metrics:', err));
     }
@@ -1805,158 +1752,12 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                   )}
                 </div>
 
-                {/* Custom Calendar Date Selector -- red dot = day had an analyze hit, green dot = today */}
-                <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-                  <button
-                    className="bd-cal-btn"
-                    onClick={() => {
-                      setShowCalendar(v => {
-                        const next = !v;
-                        if (next) {
-                          try {
-                            const p = (selectedDate || getLocalTodayStr()).split('-');
-                            setCalMonth(new Date(Number(p[0]), Number(p[1]) - 1, 1));
-                          } catch (_) {}
-                        }
-                        return next;
-                      });
-                    }}
-                    title="Select Date"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      background: 'transparent',
-                      border: 'none',
-                      padding: 0,
-                      margin: 0,
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: '#2563eb',
-                      cursor: 'pointer',
-                      outline: 'none',
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
-                    <span style={{ fontSize: 14 }}>📅</span>
-                    <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>
-                      {(() => {
-                        try {
-                          const parts = selectedDate.split('-');
-                          const dObj = new Date(parts[0], parts[1] - 1, parts[2]);
-                          return dObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-                        } catch (e) {
-                          return selectedDate;
-                        }
-                      })()}
-                    </span>
-                  </button>
-
-                  {showCalendar && (
-                    <div
-                      className="bd-cal-panel"
-                      style={{ position: 'absolute', top: '100%', left: 0, marginTop: 6, background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 12, boxShadow: '0 12px 30px -8px rgba(0,0,0,0.18)', zIndex: 1000, width: 264, padding: 12, color: '#0f172a', fontWeight: 500 }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                        <button onClick={() => setCalMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 16, color: '#475569', lineHeight: 1, padding: '2px 6px' }}>‹</button>
-                        <span style={{ fontSize: 13, fontWeight: 800, color: '#0f172a' }}>
-                          {CAL_MONTH_NAMES[calMonth.getMonth()]} {calMonth.getFullYear()}
-                        </span>
-                        <button
-                          onClick={() => {
-                            const nm = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1);
-                            const cur = new Date();
-                            if (nm <= new Date(cur.getFullYear(), cur.getMonth(), 1)) setCalMonth(nm);
-                          }}
-                          style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 16, color: '#475569', lineHeight: 1, padding: '2px 6px' }}
-                        >›</button>
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2, marginBottom: 2 }}>
-                        {CAL_WEEKDAYS.map((w, i) => (
-                          <div key={i} style={{ textAlign: 'center', fontSize: 10.5, fontWeight: 700, color: '#94a3b8', padding: '2px 0' }}>{w}</div>
-                        ))}
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
-                        {(() => {
-                          const y = calMonth.getFullYear();
-                          const m = calMonth.getMonth();
-                          const startDow = new Date(y, m, 1).getDay();
-                          const daysIn = new Date(y, m + 1, 0).getDate();
-                          const cells = [];
-                          for (let i = 0; i < startDow; i++) cells.push(null);
-                          for (let d = 1; d <= daysIn; d++) cells.push(d);
-                          return cells.map((d, idx) => {
-                            if (d === null) return <div key={`e${idx}`} />;
-                            const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                            const isToday = ds === todayStr;
-                            const isHit = hitDateSet.has(ds);
-                            const isSelected = ds === selectedDate;
-                            const isFuture = ds > todayStr;
-                            return (
-                              <button
-                                key={ds}
-                                disabled={isFuture}
-                                onClick={() => {
-                                  setSelectedDate(ds);
-                                  try { localStorage.setItem('bd_selected_date', ds); } catch (_) {}
-                                  setShowCalendar(false);
-                                }}
-                                title={isHit ? 'Analyze was run on this day - click to view that snapshot' : (isToday ? 'Today' : '')}
-                                style={{
-                                  position: 'relative',
-                                  height: 30,
-                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                  fontSize: 12,
-                                  fontWeight: isSelected ? 800 : 500,
-                                  color: isFuture ? '#cbd5e1' : (isSelected ? '#2563eb' : '#0f172a'),
-                                  background: 'transparent',
-                                  border: isSelected ? '2px solid #2563eb' : '2px solid transparent',
-                                  borderRadius: 7,
-                                  cursor: isFuture ? 'default' : 'pointer'
-                                }}
-                              >
-                                {d}
-                                {(isToday || isHit) && (
-                                  <span style={{
-                                    position: 'absolute', bottom: 2, left: '50%', transform: 'translateX(-50%)',
-                                    width: 5, height: 5, borderRadius: '50%',
-                                    background: isToday ? '#16a34a' : '#dc2626'
-                                  }} />
-                                )}
-                              </button>
-                            );
-                          });
-                        })()}
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 10, color: '#64748b', fontWeight: 600 }}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#16a34a', display: 'inline-block' }} /> Today
-                          </span>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#dc2626', display: 'inline-block' }} /> Analyzed
-                          </span>
-                        </div>
-                        <button
-                          onClick={() => {
-                            const t = getLocalTodayStr();
-                            setSelectedDate(t);
-                            try { localStorage.setItem('bd_selected_date', t); } catch (_) {}
-                            const tn = new Date();
-                            setCalMonth(new Date(tn.getFullYear(), tn.getMonth(), 1));
-                            setShowCalendar(false);
-                          }}
-                          style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', background: 'transparent', border: 'none', cursor: 'pointer' }}
-                        >
-                          Today
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                {/* Calendar -- green dot = today, red dot = a day with a stored analyze hit */}
+                <MarkedCalendar
+                  value={selectedDate}
+                  onChange={setSelectedDate}
+                  markedDates={hitDateSet}
+                />
               </div>
             );
           })()}
@@ -3732,7 +3533,6 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 onClick={() => {
                   const t = getLocalTodayStr();
                   setSelectedDate(t);
-                  try { localStorage.setItem('bd_selected_date', t); } catch (_) {}
                   setShowDateModal(false);
                 }}
                 style={{

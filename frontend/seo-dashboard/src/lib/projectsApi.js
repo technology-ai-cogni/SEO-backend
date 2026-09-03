@@ -272,6 +272,10 @@ function domainRowToProject(row, kwCounts = EMPTY_KW_COUNTS) {
     traffic: Number(row.traffic) || 0,
     trafficDir: null,
     da: row.domain_authority,
+    spam_score: row.spam_score ?? row.ss ?? null,
+    ss: row.spam_score ?? row.ss ?? null,
+    total_traffic: row.traffic ?? null,
+    metricsUpdatedAt: row.metrics_updated_at ?? null,
     keywords: kwCounts.total,
     keywordsDir: null,
     targetPages: landingCount,
@@ -459,6 +463,58 @@ export async function fetchDomainRows() {
 
   const mergedDomains = Array.from(domainMap.values());
   return mergedDomains.map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
+}
+
+// Lightweight project list for pages that only need the dropdown (name / slug /
+// domain / da / spam) and fetch keyword/page data per-project on demand.
+// Unlike fetchDomainRows() it does NOT scan the whole keyword_categories table.
+export async function fetchProjectListLite() {
+  if (isLocalMode) {
+    return fetchDomainRows();
+  }
+  try {
+    const [{ data: activeProjects }, { data: domains }] = await Promise.all([
+      supabase.from('projects').select('slug').is('deleted_at', null),
+      supabase.from('domains').select('*').order('created_at', { ascending: false }),
+    ]);
+    const activeSlugs = new Set((activeProjects || []).map(p => p.slug));
+    const rows = (domains || []).filter(d =>
+      d.domain && String(d.domain).trim() !== '' &&
+      (activeSlugs.size === 0 || activeSlugs.has(d.project_slug))
+    );
+    if (rows.length > 0) {
+      return rows.map(d => domainRowToProject(d, EMPTY_KW_COUNTS));
+    }
+  } catch (e) {
+    console.warn('[fetchProjectListLite] Supabase query failed, falling back:', e);
+  }
+  return fetchDomainRows();
+}
+
+// Persist the live DA / Spam Score / traffic (from fetchDomainMetricsApi) onto
+// the project's `domains` row in Supabase, so it is never cached client-side.
+export async function saveDomainMetricsToSupabase(projectSlug, { da, spam_score, traffic } = {}) {
+  if (!projectSlug) return;
+  const patch = { metrics_updated_at: new Date().toISOString() };
+  if (da != null && da !== '') patch.domain_authority = String(da);
+  if (spam_score != null && spam_score !== '') patch.spam_score = String(spam_score);
+  if (traffic != null && traffic !== '') patch.traffic = String(traffic);
+
+  if (supabase) {
+    try {
+      await supabase.from('domains').update(patch).eq('project_slug', projectSlug);
+    } catch (e) {
+      console.warn('[saveDomainMetricsToSupabase] Supabase update skipped:', e);
+    }
+  }
+  // Best-effort backend sync (keeps the FastAPI Postgres copy in step)
+  try {
+    await fetch(`${getApiBaseUrl()}/domains/${encodeURIComponent(projectSlug)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ da, spam_score, traffic }),
+    }).catch(() => {});
+  } catch (e) { /* ignore */ }
 }
 
 export async function createProject({ name, domain, regions, platforms, da, industry, nap_business_centre, nap_phone, nap_website, nap_address, nap_email, nap_bc_phone, nap_bc_website, nap_bc_address, nap_bc_email, business_centres, branded_terms, users }) {

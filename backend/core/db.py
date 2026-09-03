@@ -366,6 +366,11 @@ def _init_db_inner():
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS nap_bc_email TEXT"))
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS business_centres JSONB"))
         conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS branded_terms TEXT"))
+        # Live domain metrics (DA / Spam Score / organic traffic) fetched from
+        # RapidAPI and shown on the Brand Discovery header -- persisted here so
+        # the frontend never has to cache them client-side.
+        conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS spam_score TEXT"))
+        conn.execute(text("ALTER TABLE domains ADD COLUMN IF NOT EXISTS metrics_updated_at TIMESTAMPTZ"))
 
         # --- Single Unified Monthly Operations Table -----------------
         conn.execute(text("""
@@ -1283,12 +1288,19 @@ def update_domain_record(project_slug: str, updates: dict):
         "project_name", "target_regions", "platforms", "industry", "industry_type",
         "status", "is_active", "nap_business_centre", "nap_phone", "nap_website",
         "nap_address", "nap_email", "nap_bc_phone", "nap_bc_website", "nap_bc_address",
-        "nap_bc_email", "business_centres", "branded_terms"
+        "nap_bc_email", "business_centres", "branded_terms",
+        "domain_authority", "spam_score", "traffic", "metrics_updated_at"
     }
 
     field_mappings = {
         "name": "project_name",
         "project_name": "project_name",
+        "da": "domain_authority",
+        "domain_authority": "domain_authority",
+        "spam_score": "spam_score",
+        "ss": "spam_score",
+        "traffic": "traffic",
+        "metrics_updated_at": "metrics_updated_at",
         "regions": "target_regions",
         "targetRegions": "target_regions",
         "target_regions": "target_regions",

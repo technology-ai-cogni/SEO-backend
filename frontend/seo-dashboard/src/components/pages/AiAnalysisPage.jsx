@@ -7,6 +7,7 @@ import {
   runAiVisibilityAnalysis
 } from '../../lib/projectsApi';
 import { supabase } from '../../lib/supabaseClient';
+import MarkedCalendar, { getLocalTodayStr, tsToLocalDateStr } from '../common/MarkedCalendar';
 import { hasPermission, PERMISSIONS, canRunActions, canRunAiModelAnalysis, recordAiModelAnalysisRun, canDownload } from '../../lib/permissions';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
@@ -249,7 +250,7 @@ export default function AiAnalysisPage({ user }) {
   const [selectedRegion, setSelectedRegion] = useState('IN');
   const [countryMenuOpen, setCountryMenuOpen] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
-  const [selectedDate, setSelectedDate] = useState('2026-08-13');
+  const [selectedDate, setSelectedDate] = useState(() => getLocalTodayStr());
 
   const filterRef = useRef(null);
   const projectMenuRef = useRef(null);
@@ -528,48 +529,40 @@ export default function AiAnalysisPage({ user }) {
   };
 
   // Get active AI Analysis Result for the selected engine (ChatGPT / Gemini / AI Overview)
+  // ai_analysis rows for this project, sorted newest-first
+  const engineHistorySorted = useMemo(
+    () => (history || []).slice().sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)),
+    [history]
+  );
+
+  // Calendar marks: every day that has a stored analysis run for this project.
+  const analysisDateSet = useMemo(() => {
+    const s = new Set();
+    (history || []).forEach(h => { const ds = tsToLocalDateStr(h.created_at); if (ds) s.add(ds); });
+    return s;
+  }, [history]);
+
+  // Selected engine's result -- straight from Supabase (`ai_analysis`). On a past
+  // date it's that day's latest run; on today it's the newest run overall.
   const getActiveEngineResult = () => {
     if (!activeProject?.slug) return null;
     const engKey = selectedEngine.toLowerCase().trim();
+    const isPast = selectedDate && selectedDate !== getLocalTodayStr();
 
-    // 1. Try shared localStorage key set by Brand Discovery (PositionAnalysisPage)
-    const keysToTry = [
-      `ai_results_${activeProject.slug}_${engKey}`,
-      `ai_results_${activeProject.slug}_${engKey.replace(/\s+/g, '')}`,
-      `ai_results_${activeProject.slug}_overview`
-    ];
-
-    for (const key of keysToTry) {
-      try {
-        const item = localStorage.getItem(key);
-        if (!item) continue;
-        const parsed = JSON.parse(item);
-        const resObj = Array.isArray(parsed) ? parsed[0] : parsed;
-        if (resObj && (resObj.mentions !== undefined || resObj.mentioned_keywords !== undefined)) {
-          return {
-            mentions: resObj.mentions || (resObj.mentioned_keywords ? resObj.mentioned_keywords.length : 0),
-            cited_pages: resObj.cited_pages || (resObj.cited_pages_list ? resObj.cited_pages_list.length : 0),
-            mentioned_keywords: resObj.mentioned_keywords || [],
-            cited_pages_list: resObj.cited_pages_list || [],
-            total_keywords: resObj.total_keywords || projectKeywords.length
-          };
-        }
-      } catch (e) { }
-    }
-
-    // 2. Try DB history from Supabase table `ai_analysis`
-    const matchingRun = history.find(h => (h.engine || '').toLowerCase().trim() === engKey || (h.engine || '').toLowerCase().includes(engKey));
-    if (matchingRun && (matchingRun.mentioned_keywords?.length > 0 || matchingRun.cited_pages_list?.length > 0)) {
-      return {
-        mentions: matchingRun.mentions || 0,
-        cited_pages: matchingRun.cited_pages || 0,
-        mentioned_keywords: matchingRun.mentioned_keywords || [],
-        cited_pages_list: matchingRun.cited_pages_list || [],
-        total_keywords: matchingRun.total_keywords || projectKeywords.length
-      };
-    }
-
-    return null;
+    const run = engineHistorySorted.find(h => {
+      const e = (h.engine || '').toLowerCase().trim();
+      if (!(e === engKey || e.includes(engKey))) return false;
+      if (isPast) return tsToLocalDateStr(h.created_at) === selectedDate;
+      return true;
+    });
+    if (!run) return null;
+    return {
+      mentions: run.mentions || 0,
+      cited_pages: run.cited_pages || 0,
+      mentioned_keywords: run.mentioned_keywords || [],
+      cited_pages_list: run.cited_pages_list || [],
+      total_keywords: run.total_keywords || projectKeywords.length
+    };
   };
 
     // Get Mentions Data for selected engine: Top 2 keywords per category mapped with Project Setup
@@ -691,8 +684,8 @@ export default function AiAnalysisPage({ user }) {
     });
   };
 
-  const mentionsData = useMemo(() => getEngineMentions(), [selectedEngine, activeProject?.slug, projectKeywords, history]);
-  const citationsData = useMemo(() => getEngineCitations(), [selectedEngine, activeProject?.slug, projectKeywords, history]);
+  const mentionsData = useMemo(() => getEngineMentions(), [selectedEngine, selectedDate, activeProject?.slug, projectKeywords, history]);
+  const citationsData = useMemo(() => getEngineCitations(), [selectedEngine, selectedDate, activeProject?.slug, projectKeywords, history]);
 
   // Total Search Terms = count of the top-2 keywords per category (same set shown on Top Pages Organic)
   const totalSearchTerms = useMemo(() => getTop2KeywordsPerCategory(projectKeywords).length, [projectKeywords]);
@@ -1018,44 +1011,13 @@ export default function AiAnalysisPage({ user }) {
                 )}
               </div>
 
-              {/* Calendar Date Selector Button beside Country -- opens a date picker, does NOT run analysis */}
-              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    const inp = document.getElementById('ai_header_date_picker');
-                    if (inp) { inp.showPicker ? inp.showPicker() : inp.click(); }
-                  }}
-                  title="Select date"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    background: 'transparent',
-                    border: 'none',
-                    padding: 0,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: '#2563eb',
-                    cursor: 'pointer',
-                    outline: 'none',
-                    whiteSpace: 'nowrap'
-                  }}
-                >
-                  <span>📅</span>
-                  <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>
-                    {new Date(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </span>
-                </button>
-                <input
-                  id="ai_header_date_picker"
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => { if (e.target.value) setSelectedDate(e.target.value); }}
-                  style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 0, height: 0 }}
-                />
-              </div>
+              {/* Calendar -- green dot = today, red dot = a day that has a stored analysis.
+                  Pick a past red day to view that day's mentions / citations. */}
+              <MarkedCalendar
+                value={selectedDate}
+                onChange={setSelectedDate}
+                markedDates={analysisDateSet}
+              />
             </div>
           </div>
         );
