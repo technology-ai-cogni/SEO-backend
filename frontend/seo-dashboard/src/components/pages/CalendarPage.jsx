@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Bookmark,
   Clock,
@@ -25,6 +25,74 @@ import {
   analyzeKeywordPushPotential
 } from '../../lib/projectsApi';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
+
+// Custom single-select whose option list always opens BELOW the control
+// (native <select> on macOS pops over elements above it).
+function PlainSelect({ value, onChange, options, placeholder = 'Select...', required }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+
+  const norm = (options || []).map(o => (o && typeof o === 'object') ? o : { value: o, label: o });
+  const current = norm.find(o => o.value === value);
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        style={{
+          width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1',
+          borderRadius: 8, outline: 'none', background: '#ffffff',
+          color: current ? '#0f172a' : '#94a3b8', fontWeight: 600, textAlign: 'left',
+          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {current ? current.label : placeholder}
+        </span>
+        <ChevronDown size={15} color="#64748b" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }} />
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
+          background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 8,
+          boxShadow: '0 10px 24px rgba(0,0,0,0.14)', zIndex: 1100, maxHeight: 220, overflowY: 'auto', padding: 4
+        }}>
+          {norm.map(o => {
+            const sel = o.value === value;
+            return (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => { onChange(o.value); setOpen(false); }}
+                style={{
+                  width: '100%', textAlign: 'left', padding: '8px 10px', fontSize: 12.5,
+                  border: 'none', background: sel ? '#f5f3ff' : 'transparent',
+                  color: sel ? '#7c3aed' : '#0f172a', fontWeight: sel ? 700 : 500,
+                  borderRadius: 6, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                }}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {required && (
+        <input tabIndex={-1} aria-hidden required value={value || ''} onChange={() => {}}
+          style={{ position: 'absolute', bottom: 0, left: 12, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />
+      )}
+    </div>
+  );
+}
 
 // ─── PUSH-POTENTIAL BATCHING ───
 // Batch 1 (high): near-certain the keyword can be pushed up in ranking.
@@ -251,7 +319,7 @@ function CalendarPage({ user }) {
     setSelectedKwIds(new Set());
     setTopicLinks({});
     setFormData({
-      activity_name: 'Guest Post',
+      activity_name: 'Paid Guest Post',
       project_name: activeProject?.name || activeProject?.domain || (projects[0]?.name || projects[0]?.domain || ''),
       main_poc: '',
       content_poc: '',
@@ -995,43 +1063,26 @@ function CalendarPage({ user }) {
                     <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
                       Project Name *
                     </label>
-                    <select
+                    <PlainSelect
                       required
+                      placeholder="Select Project..."
                       value={formData.project_name}
-                      onChange={e => setFormData({ ...formData, project_name: e.target.value })}
-                      style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none', background: '#ffffff', color: '#0f172a', fontWeight: 600 }}
-                    >
-                      <option value="">Select Project...</option>
-                      {projects.map(p => (
-                        <option key={p.slug} value={p.name || p.domain}>
-                          {p.name || p.domain}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={v => setFormData({ ...formData, project_name: v })}
+                      options={projects.map(p => ({ value: p.name || p.domain, label: p.name || p.domain }))}
+                    />
                   </div>
 
                   <div>
                     <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
                       Activity Name *
                     </label>
-                    <select
+                    <PlainSelect
                       required
+                      placeholder="Select Activity..."
                       value={formData.activity_name}
-                      onChange={e => setFormData({ ...formData, activity_name: e.target.value })}
-                      style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none', background: '#ffffff', color: '#0f172a', fontWeight: 600 }}
-                    >
-                      <option value="">Select Activity...</option>
-                      <option value="Guest Post">Guest Post</option>
-                      <option value="Press Release">Press Release</option>
-                      <option value="Niche Edit">Niche Edit</option>
-                      <option value="Directory Submission">Directory Submission</option>
-                      <option value="Social Bookmarking">Social Bookmarking</option>
-                      <option value="Web 2.0 Backlink">Web 2.0 Backlink</option>
-                      <option value="Forum Discussion">Forum Discussion</option>
-                      <option value="PBN Placement">PBN Placement</option>
-                      <option value="Quora Answer">Quora Answer</option>
-                      <option value="Reddit Promotion">Reddit Promotion</option>
-                    </select>
+                      onChange={v => setFormData({ ...formData, activity_name: v })}
+                      options={['Forum - Quora', 'Forum - Reddit', 'Business Listing', 'Classified Ads', 'Paid Guest Post']}
+                    />
                   </div>
 
                   {/* AI Push-Potential Analysis -- Rank 5-20 keywords, batched by
