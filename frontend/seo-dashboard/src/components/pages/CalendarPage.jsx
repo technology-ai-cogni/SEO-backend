@@ -12,17 +12,18 @@ import {
   Trash2,
   X,
   Sparkles,
-  Download
+  Download,
+  Check
 } from 'lucide-react';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import {
   fetchDomainRows,
-  fetchKeywordRows,
-  listOffPageActivitiesApi,
-  createOffPageActivityApi,
-  updateOffPageActivityApi,
-  deleteOffPageActivityApi,
-  analyzeKeywordPushPotential
+  listCalendarActivitiesApi,
+  createCalendarActivityApi,
+  updateCalendarActivityApi,
+  deleteCalendarActivityApi,
+  fetchCalendarPotentialKeywordsApi,
+  analyzeCalendarAiPushPotentialApi
 } from '../../lib/projectsApi';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
@@ -95,94 +96,41 @@ function PlainSelect({ value, onChange, options, placeholder = 'Select...', requ
 }
 
 // ─── PUSH-POTENTIAL BATCHING ───
-// Batch 1 (high): near-certain the keyword can be pushed up in ranking.
-// Batch 2 (medium): real potential, less certain.
-// Batch 3 (low): unlikely to move meaningfully.
-// The backend does this with an LLM; this is the local fallback / instant view.
+// Batch 1 (high): Live rank extremely improved vs keywords_categories + Top 3 SERP are Landing Pages
+// Batch 2 (medium): Live rank extremely dropped vs keywords_categories + Top 3 SERP are Landing Pages (Recovery target)
+// Batch 3 (low): Rank didn't even move OR Top 3 SERP shifted away from Landing Pages
 const PUSH_BATCH_META = {
-  high: { key: 'high', order: 1, label: 'Batch 1 · High confidence', tint: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0', Icon: TrendingUp, hint: 'Very likely can be pushed up in ranking' },
-  medium: { key: 'medium', order: 2, label: 'Batch 2 · Moderate', tint: '#d97706', bg: '#fffbeb', border: '#fde68a', Icon: Minus, hint: 'Some potential, a bit lower confidence' },
-  low: { key: 'low', order: 3, label: 'Batch 3 · Low / unlikely', tint: '#dc2626', bg: '#fef2f2', border: '#fecaca', Icon: TrendingDown, hint: "Unlikely to move up with reasonable effort" },
+  high: {
+    key: 'high',
+    order: 1,
+    label: 'Batch 1 · Extremely Improved',
+    tint: '#16a34a',
+    bg: '#f0fdf4',
+    border: '#bbf7d0',
+    Icon: TrendingUp,
+    hint: 'Live rank surged vs previous keywords_categories rank & Top 3 Google SERP are Landing Pages'
+  },
+  medium: {
+    key: 'medium',
+    order: 2,
+    label: 'Batch 2 · Extremely Dropped',
+    tint: '#d97706',
+    bg: '#fffbeb',
+    border: '#fde68a',
+    Icon: TrendingDown,
+    hint: 'Live rank dropped vs keywords_categories & Top 3 Google SERP are Landing Pages (Prime recovery targets)'
+  },
+  low: {
+    key: 'low',
+    order: 3,
+    label: 'Batch 3 · Didn’t Move / Stagnant',
+    tint: '#64748b',
+    bg: '#f8fafc',
+    border: '#cbd5e1',
+    Icon: Minus,
+    hint: 'Rank didn’t even move or Top 3 Google SERP shifted away from Landing Pages'
+  },
 };
-
-function clientHeuristicBatches(potential) {
-  const out = { high: [], medium: [], low: [] };
-  (potential || []).forEach(k => {
-    const rank = Number(k.rank) || 99;
-    const kd = Number(k.kd) || 0;
-    const sv = Number(k.sv) || 0;
-    let batch = 'low', confidence = 30, reason = 'Far from page 1 or a hard SERP.';
-    if (rank <= 10 && kd <= 40 && sv > 0) { batch = 'high'; confidence = 80; reason = 'Close to page 1 with manageable difficulty.'; }
-    else if (rank <= 15 && kd <= 60) { batch = 'medium'; confidence = 55; reason = 'Moderate distance to page 1 and difficulty.'; }
-    out[batch].push({ ...k, batch, confidence, reason });
-  });
-  return out;
-}
-
-// Reconcile the backend's AI batches back onto the local keyword rows (match by
-// keyword text). Any keyword the model skipped falls into Batch 3.
-function mergeAiBatches(aiBatches, potential) {
-  const byKw = new Map((potential || []).map(p => [String(p.keyword || '').toLowerCase(), p]));
-  const out = { high: [], medium: [], low: [] };
-  const placed = new Set();
-  ['high', 'medium', 'low'].forEach(b => {
-    (aiBatches?.[b] || []).forEach(row => {
-      const kwLower = String(row.keyword || '').toLowerCase();
-      const base = byKw.get(kwLower) || row;
-      out[b].push({ ...base, batch: b, confidence: row.confidence ?? 50, reason: row.reason || '' });
-      placed.add(kwLower);
-    });
-  });
-  (potential || []).forEach(p => {
-    if (!placed.has(String(p.keyword || '').toLowerCase())) {
-      out.low.push({ ...p, batch: 'low', confidence: 25, reason: 'Not classified by AI.' });
-    }
-  });
-  return out;
-}
-
-// ─── POTENTIAL KEYWORD SELECTION ───
-// Two rules only:
-//   1. Current rank is between 5 and 20 (inclusive).
-//   2. Order by search volume, highest first.
-function getPotentialKeywordsForProject(kws) {
-  if (!kws || !Array.isArray(kws) || kws.length === 0) return [];
-
-  const parseNum = (v) => Number(String(v ?? '').replace(/[^0-9.]/g, '')) || 0;
-
-  const seen = new Set();
-  const scored = [];
-
-  kws.forEach(k => {
-    // Rule 1: rank 5-20
-    const rank = Number(k.rank || k.position || 0);
-    if (!(rank >= 5 && rank <= 20)) return;
-
-    const kwText = String(k.kw || k.keyword || '').trim();
-    const kwLower = kwText.toLowerCase();
-    if (!kwText || seen.has(kwLower)) return;
-    seen.add(kwLower);
-
-    const sv = parseNum(k.sv ?? k.search_volume ?? k.kw_volume ?? k.volume);
-    // keyword rows from fetchKeywordRows expose difficulty as `kwDiff` (db col kw_diff)
-    const kd = parseNum(k.kwDiff ?? k.kw_diff ?? k.kd ?? k.keyword_difficulty ?? k.difficulty);
-
-    scored.push({
-      id: k.id || kwText,
-      keyword: kwText,
-      category: k.category || k.targetSubtype || k.subtype || 'General',
-      cluster: k.cluster || k.type || 'General',
-      rank: rank,
-      sv: sv,
-      kd: kd,
-      potentialScore: sv,
-      topicLink: ''
-    });
-  });
-
-  // Rule 2: highest search volume first
-  return scored.sort((a, b) => b.sv - a.sv);
-}
 
 function CalendarPage({ user }) {
   const [projects, setProjects] = useState([]);
@@ -200,8 +148,12 @@ function CalendarPage({ user }) {
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
-  const [schedulingType, setSchedulingType] = useState('ai'); // 'ai' | 'manual'
-    const [modalKeywords, setModalKeywords] = useState([]);
+  const [aiSchedulingEnabled, setAiSchedulingEnabled] = useState(true);
+  const [modalStep, setModalStep] = useState('form'); // 'form' | 'keywords_prompt'
+  const [createdActivity, setCreatedActivity] = useState(null);
+  const [savingActivity, setSavingActivity] = useState(false);
+  const [loadingKeywords, setLoadingKeywords] = useState(false);
+  const [modalKeywords, setModalKeywords] = useState([]);
   const [potentialKws, setPotentialKws] = useState([]);
   const [pushBatches, setPushBatches] = useState({ high: [], medium: [], low: [] });
   const [analyzingPotential, setAnalyzingPotential] = useState(false);
@@ -229,8 +181,8 @@ function CalendarPage({ user }) {
   const loadData = async () => {
     setLoading(true);
     try {
-      const offPageList = await listOffPageActivitiesApi().catch(() => []);
-      setActivities(offPageList || []);
+      const res = await listCalendarActivitiesApi().catch(() => ({ activities: [] }));
+      setActivities(res.activities || []);
     } catch (err) {
       console.error('[CalendarPage] Error loading activities:', err);
     } finally {
@@ -312,12 +264,16 @@ function CalendarPage({ user }) {
   // Form Handlers
   const handleOpenAddModal = (defaultStatus = activeSubTab) => {
     setEditingItem(null);
-    setSchedulingType('ai');
+    setModalStep('form');
+    setAiSchedulingEnabled(true);
+    setSavingActivity(false);
+    setLoadingKeywords(false);
     setAnalyzingPotential(false);
     setPushBatches({ high: [], medium: [], low: [] });
     setPotentialKws([]);
     setSelectedKwIds(new Set());
     setTopicLinks({});
+    setCreatedActivity(null);
     setFormData({
       activity_name: 'Paid Guest Post',
       project_name: activeProject?.name || activeProject?.domain || (projects[0]?.name || projects[0]?.domain || ''),
@@ -336,6 +292,10 @@ function CalendarPage({ user }) {
 
   const handleOpenEditModal = (item) => {
     setEditingItem(item);
+    setModalStep('form');
+    setAiSchedulingEnabled(false);
+    setSavingActivity(false);
+    setCreatedActivity(null);
     setFormData({
       activity_name: item.activity_name || '',
       project_name: item.project_name || '',
@@ -352,110 +312,170 @@ function CalendarPage({ user }) {
     setIsModalOpen(true);
   };
 
-  
-  // Load project keywords, shortlist Rank 5-20 by search volume, then AI-triage
-  // them into 3 push-potential batches.
-  useEffect(() => {
-    let cancelled = false;
-    async function loadModalKws() {
-      if (!formData.project_name) {
-        setPotentialKws([]);
-        setPushBatches({ high: [], medium: [], low: [] });
-        setSelectedKwIds(new Set());
-        return;
-      }
-      const matchedProj = projects.find(p => (p.name || p.domain) === formData.project_name);
-      const slug = matchedProj?.slug || formData.project_name.toLowerCase().replace(/\s+/g, '');
-      try {
-        const kws = await fetchKeywordRows(slug);
-        if (cancelled) return;
-        setModalKeywords(kws || []);
-        const potential = getPotentialKeywordsForProject(kws || []);
-        setPotentialKws(potential);
-
-        if (potential.length === 0) {
-          setPushBatches({ high: [], medium: [], low: [] });
-          setSelectedKwIds(new Set());
-          return;
-        }
-
-        // 1. Instant local heuristic split + pre-select Batch 1.
-        const heuristic = clientHeuristicBatches(potential);
-        setPushBatches(heuristic);
-        setSelectedKwIds(new Set(heuristic.high.map(k => k.id)));
-
-        // 2. Ask the backend AI for a smarter split; replace when it returns.
-        setAnalyzingPotential(true);
-        try {
-          const domain = matchedProj?.domain || '';
-          const aiBatches = await analyzeKeywordPushPotential(slug, potential, domain, 'India');
-          if (!cancelled && aiBatches) {
-            const merged = mergeAiBatches(aiBatches, potential);
-            setPushBatches(merged);
-            setSelectedKwIds(new Set(merged.high.map(k => k.id)));
-          }
-        } catch (aiErr) {
-          console.warn('[CalendarPage] push-potential AI notice:', aiErr);
-        } finally {
-          if (!cancelled) setAnalyzingPotential(false);
-        }
-      } catch (err) {
-        console.error('[CalendarPage] Error loading modal keywords:', err);
-      }
-    }
-    if (isModalOpen && schedulingType === 'ai') {
-      loadModalKws();
-    }
-    return () => { cancelled = true; };
-  }, [formData.project_name, isModalOpen, schedulingType]);
-
   const handleSaveForm = async (e) => {
     e.preventDefault();
+    if (!formData.project_name || !formData.activity_name) {
+      alert('Please fill in required fields: Project Name and Activity Name');
+      return;
+    }
+
+    setSavingActivity(true);
     try {
-      let payload = { ...formData };
-      if (schedulingType === 'ai' && !editingItem) {
-        const batchById = new Map();
-        ['high', 'medium', 'low'].forEach(b => (pushBatches[b] || []).forEach(r => batchById.set(r.id, r)));
-        const selectedPotential = potentialKws.filter(k => selectedKwIds.has(k.id)).map(k => {
-          const info = batchById.get(k.id) || {};
-          return {
-            keyword: k.keyword,
-            category: k.category,
-            cluster: k.cluster,
-            rank: k.rank,
-            sv: k.sv,
-            kd: k.kd,
-            push_batch: info.batch || null,
-            push_confidence: info.confidence ?? null,
-            push_reason: info.reason || '',
-            topic_link: topicLinks[k.id] || ''
-          };
+      const payload = {
+        ...formData,
+        quantity: parseInt(formData.quantity, 10) || 1
+      };
+
+      if (editingItem) {
+        await updateCalendarActivityApi(editingItem.id, payload);
+        setActivities(prev => prev.map(a => a.id === editingItem.id ? { ...a, ...payload } : a));
+        setIsModalOpen(false);
+        setSavingActivity(false);
+        return;
+      }
+
+      // Create new activity
+      const created = await createCalendarActivityApi(payload);
+      setActivities(prev => [created, ...prev]);
+
+      if (!aiSchedulingEnabled) {
+        // Toggle is off -> close immediately
+        setIsModalOpen(false);
+        setSavingActivity(false);
+        return;
+      }
+
+      // Toggle is ON -> switch to Step 2: "These are the keywords we got, do you want to add?"
+      setCreatedActivity(created);
+      setModalStep('keywords_prompt');
+      setSavingActivity(false);
+      setLoadingKeywords(true);
+
+      const matchedProj = projects.find(p => (p.name || p.domain) === formData.project_name);
+      const slug = matchedProj?.slug || formData.project_name.toLowerCase().replace(/\s+/g, '');
+      const domain = matchedProj?.domain || '';
+
+      try {
+        const res = await fetchCalendarPotentialKeywordsApi(slug, domain, false);
+        const kws = res.potential_keywords || [];
+        const batches = res.batches || { high: [], medium: [], low: [] };
+        setPotentialKws(kws);
+        setPushBatches(batches);
+
+        // Pre-fill topic links from candidate landing_page_url or topicLink
+        const initialTopicLinks = {};
+        kws.forEach(k => {
+          if (k.topicLink || k.landing_page_url) {
+            initialTopicLinks[k.id] = k.topicLink || k.landing_page_url;
+          }
         });
-        payload.potential_keywords = selectedPotential;
-        if (selectedPotential.length > 0) {
-          payload.keyword_name = selectedPotential.map(k => k.keyword).join(', ');
-          payload.category = selectedPotential[0].category;
-          payload.cluster = selectedPotential[0].cluster;
-          payload.topic_link = selectedPotential.map(k => k.topic_link).filter(Boolean).join(' | ');
+        setTopicLinks(initialTopicLinks);
+
+        // Auto-select batch 1 and batch 2 initially
+        const initialSelected = new Set([
+          ...(batches.high || []).map(k => k.id),
+          ...(batches.medium || []).map(k => k.id)
+        ]);
+        setSelectedKwIds(initialSelected);
+        setLoadingKeywords(false);
+
+        if (kws.length > 0) {
+          setAnalyzingPotential(true);
+          analyzeCalendarAiPushPotentialApi(slug, domain, kws, 'India')
+            .then(aiRes => {
+              if (aiRes?.batches) {
+                setPushBatches(aiRes.batches);
+                if (aiRes.evaluated_keywords && aiRes.evaluated_keywords.length > 0) {
+                  setPotentialKws(aiRes.evaluated_keywords);
+                  setTopicLinks(prev => {
+                    const next = { ...prev };
+                    aiRes.evaluated_keywords.forEach(ek => {
+                      if (!next[ek.id] && (ek.topicLink || ek.landing_page_url)) {
+                        next[ek.id] = ek.topicLink || ek.landing_page_url;
+                      }
+                    });
+                    return next;
+                  });
+                }
+                // Consider and auto-select Batch 1 & Batch 2 keywords
+                const b1and2 = [
+                  ...(aiRes.batches.high || []).map(k => k.id),
+                  ...(aiRes.batches.medium || []).map(k => k.id)
+                ];
+                setSelectedKwIds(new Set(b1and2));
+              }
+            })
+            .catch(err => console.warn('[CalendarPage] Live rank check notice:', err))
+            .finally(() => setAnalyzingPotential(false));
+        }
+      } catch (err) {
+        console.error('[CalendarPage] Error loading potential keywords:', err);
+        setLoadingKeywords(false);
+      }
+    } catch (err) {
+      alert(`Error saving activity: ${err.message}`);
+      setSavingActivity(false);
+    }
+  };
+
+  const handleConfirmAddKeywords = async () => {
+    if (!createdActivity) {
+      setIsModalOpen(false);
+      return;
+    }
+    setSavingActivity(true);
+    try {
+      const isPaidGuestPost = String(createdActivity?.activity_name || formData.activity_name || '').toLowerCase().includes('guest');
+      const batchById = new Map();
+      ['high', 'medium', 'low'].forEach(b => (pushBatches[b] || []).forEach(r => batchById.set(r.id, r)));
+      const selectedPotential = potentialKws.filter(k => selectedKwIds.has(k.id)).map(k => {
+        const info = batchById.get(k.id) || {};
+        return {
+          keyword: k.keyword,
+          category: k.category,
+          cluster: k.cluster,
+          rank: k.new_rank || k.rank,
+          prev_rank: k.prev_rank || k.rank,
+          new_rank: k.new_rank || k.rank,
+          delta: k.delta || 0,
+          sv: k.sv,
+          kd: k.kd,
+          target_type: k.target_type || 'Landing Page',
+          top3_is_landing: k.top3_is_landing ?? info.top3_is_landing ?? true,
+          push_batch: info.batch || null,
+          push_confidence: info.confidence ?? null,
+          push_reason: info.reason || '',
+          topic_link: isPaidGuestPost ? '' : (topicLinks[k.id] || k.topicLink || k.landing_page_url || '')
+        };
+      });
+
+      const updatePayload = {
+        potential_keywords: selectedPotential
+      };
+      if (selectedPotential.length > 0) {
+        updatePayload.keyword_name = selectedPotential.map(k => k.keyword).join(', ');
+        updatePayload.category = selectedPotential[0].category;
+        updatePayload.cluster = selectedPotential[0].cluster;
+        if (!isPaidGuestPost) {
+          updatePayload.topic_link = selectedPotential.map(k => k.topic_link).filter(Boolean).join(' | ');
+        } else {
+          updatePayload.topic_link = '';
         }
       }
 
-      if (editingItem) {
-        await updateOffPageActivityApi(editingItem.id, payload);
-        setActivities(prev => prev.map(a => a.id === editingItem.id ? { ...a, ...payload } : a));
-      } else {
-        const created = await createOffPageActivityApi(payload);
-        setActivities(prev => [created, ...prev]);
-      }
+      await updateCalendarActivityApi(createdActivity.id, updatePayload);
+      setActivities(prev => prev.map(a => a.id === createdActivity.id ? { ...a, ...updatePayload } : a));
       setIsModalOpen(false);
     } catch (err) {
-      alert(`Error saving activity: ${err.message}`);
+      alert(`Error adding keywords: ${err.message}`);
+    } finally {
+      setSavingActivity(false);
     }
   };
 
   const handleMoveStatus = async (item, newStatus) => {
     try {
-      await updateOffPageActivityApi(item.id, { status: newStatus });
+      await updateCalendarActivityApi(item.id, { status: newStatus });
       setActivities(prev => prev.map(a => a.id === item.id ? { ...a, status: newStatus } : a));
     } catch (err) {
       console.error('[CalendarPage] Error moving status:', err);
@@ -465,7 +485,7 @@ function CalendarPage({ user }) {
   const handleDeleteItem = async (item) => {
     if (!window.confirm(`Are you sure you want to delete "${item.activity_name}"?`)) return;
     try {
-      await deleteOffPageActivityApi(item.id);
+      await deleteCalendarActivityApi(item.id);
       setActivities(prev => prev.filter(a => a.id !== item.id));
     } catch (err) {
       alert(`Error deleting item: ${err.message}`);
@@ -968,443 +988,711 @@ function CalendarPage({ user }) {
           left: 0,
           right: 0,
           bottom: 0,
-          background: 'rgba(15, 23, 42, 0.5)',
+          background: 'rgba(15, 23, 42, 0.55)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           zIndex: 1000,
-          backdropFilter: 'blur(4px)'
+          backdropFilter: 'blur(4px)',
+          padding: 16
         }}>
           <div style={{
             background: '#ffffff',
             borderRadius: 16,
             width: '100%',
-            maxWidth: 580,
+            maxWidth: modalStep === 'keywords_prompt' ? 760 : 600,
             padding: 24,
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
             maxHeight: '90vh',
-            overflowY: 'auto'
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            transition: 'max-width 0.2s ease'
           }}>
-            {/* Modal Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0 }}>
-                {editingItem ? 'Edit Activity' : 'Add New Off-Page Activity'}
-              </h3>
-              <button onClick={() => setIsModalOpen(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#64748b' }}>
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* 2-Tab Toggles: AI Scheduling | Manual Scheduling */}
-            {!editingItem && (
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                background: '#f1f5f9',
-                padding: 4,
-                borderRadius: 12,
-                marginBottom: 20
-              }}>
-                <button
-                  type="button"
-                  onClick={() => setSchedulingType('ai')}
-                  style={{
-                    padding: '10px 16px',
-                    borderRadius: 9,
-                    border: 'none',
-                    background: schedulingType === 'ai' ? '#ffffff' : 'transparent',
-                    color: schedulingType === 'ai' ? '#4f46e5' : '#64748b',
-                    fontSize: 13.5,
-                    fontWeight: schedulingType === 'ai' ? 700 : 600,
-                    cursor: 'pointer',
-                    boxShadow: schedulingType === 'ai' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none',
-                    transition: 'all 0.15s ease',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8
-                  }}
-                >
-                  <Sparkles size={16} color={schedulingType === 'ai' ? '#6366f1' : '#64748b'} />
-                  <span>AI Scheduling</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setSchedulingType('manual')}
-                  style={{
-                    padding: '10px 16px',
-                    borderRadius: 9,
-                    border: 'none',
-                    background: schedulingType === 'manual' ? '#ffffff' : 'transparent',
-                    color: schedulingType === 'manual' ? '#4f46e5' : '#64748b',
-                    fontSize: 13.5,
-                    fontWeight: schedulingType === 'manual' ? 700 : 600,
-                    cursor: 'pointer',
-                    boxShadow: schedulingType === 'manual' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none',
-                    transition: 'all 0.15s ease',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8
-                  }}
-                >
-                  <Edit3 size={15} color={schedulingType === 'manual' ? '#6366f1' : '#64748b'} />
-                  <span>Manual Scheduling</span>
-                </button>
-              </div>
-            )}
-
-            <form onSubmit={handleSaveForm} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {/* TAB 1: AI SCHEDULING */}
-              {schedulingType === 'ai' && !editingItem ? (
-                <>
+            {/* STEP 1: FORM VIEW */}
+            {modalStep === 'form' ? (
+              <>
+                {/* Modal Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                      Project Name *
-                    </label>
-                    <PlainSelect
-                      required
-                      placeholder="Select Project..."
-                      value={formData.project_name}
-                      onChange={v => setFormData({ ...formData, project_name: v })}
-                      options={projects.map(p => ({ value: p.name || p.domain, label: p.name || p.domain }))}
-                    />
+                    <h3 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {editingItem ? 'Edit Activity' : 'Choose Project & Activity'}
+                    </h3>
+                    <p style={{ fontSize: 12.5, color: '#64748b', margin: '4px 0 0 0' }}>
+                      {editingItem ? 'Update details for this scheduled activity.' : 'Configure activity settings and choose whether to run AI keyword scheduling.'}
+                    </p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    onMouseEnter={e => e.currentTarget.style.color = '#334155'}
+                    onMouseLeave={e => e.currentTarget.style.color = '#94a3b8'}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
 
-                  <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                      Activity Name *
-                    </label>
-                    <PlainSelect
-                      required
-                      placeholder="Select Activity..."
-                      value={formData.activity_name}
-                      onChange={v => setFormData({ ...formData, activity_name: v })}
-                      options={['Forum - Quora', 'Forum - Reddit', 'Business Listing', 'Classified Ads', 'Paid Guest Post']}
-                    />
-                  </div>
-
-                  {/* AI Push-Potential Analysis -- Rank 5-20 keywords, batched by
-                      how confidently each can be pushed UP in ranking. */}
-                  {formData.project_name && (
-                    <div style={{
-                      background: '#f8fafc',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 10,
-                      padding: 14,
-                      marginTop: 4,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 10
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <Sparkles size={14} color="#7c3aed" className={analyzingPotential ? 'animate-spin' : ''} />
-                          <span style={{ fontSize: 12.5, fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                            AI Push-Potential (Rank 5–20)
-                          </span>
+                <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
+                  <form onSubmit={handleSaveForm} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    {/* AI Scheduling Toggle Card (only when adding new activity) */}
+                    {!editingItem && (
+                      <div
+                        onClick={() => setAiSchedulingEnabled(prev => !prev)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '12px 16px',
+                          borderRadius: 12,
+                          background: aiSchedulingEnabled ? 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)' : '#f8fafc',
+                          border: aiSchedulingEnabled ? '1.5px solid #c4b5fd' : '1px solid #e2e8f0',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          userSelect: 'none'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 10,
+                            background: aiSchedulingEnabled ? '#7c3aed' : '#e2e8f0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#ffffff',
+                            transition: 'all 0.2s ease',
+                            boxShadow: aiSchedulingEnabled ? '0 2px 8px rgba(124, 58, 237, 0.3)' : 'none'
+                          }}>
+                            <Sparkles size={18} color={aiSchedulingEnabled ? '#ffffff' : '#64748b'} />
+                          </div>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 13.5, fontWeight: 700, color: aiSchedulingEnabled ? '#4c1d95' : '#1e293b' }}>
+                                AI Scheduling
+                              </span>
+                              <span style={{
+                                fontSize: 10.5,
+                                fontWeight: 700,
+                                padding: '1px 7px',
+                                borderRadius: 20,
+                                background: aiSchedulingEnabled ? '#7c3aed' : '#94a3b8',
+                                color: '#ffffff',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em'
+                              }}>
+                                {aiSchedulingEnabled ? 'Enabled' : 'Off'}
+                              </span>
+                            </div>
+                            <p style={{ fontSize: 11.5, color: aiSchedulingEnabled ? '#6d28d9' : '#64748b', margin: '2px 0 0 0' }}>
+                              {aiSchedulingEnabled
+                                ? 'Once created, automatically shortlists Rank 5+ Landing Page keywords with AI push-potential'
+                                : 'Create standard activity without automated keyword suggestions'}
+                            </p>
+                          </div>
                         </div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', background: '#ede9fe', padding: '2px 8px', borderRadius: 12 }}>
-                          {analyzingPotential ? 'AI analyzing…' : `${potentialKws.length} keyword${potentialKws.length === 1 ? '' : 's'}`}
-                        </span>
+
+                        {/* Modern Toggle Switch */}
+                        <div
+                          role="switch"
+                          aria-checked={aiSchedulingEnabled}
+                          style={{
+                            width: 44,
+                            height: 24,
+                            borderRadius: 12,
+                            background: aiSchedulingEnabled ? '#7c3aed' : '#cbd5e1',
+                            position: 'relative',
+                            padding: 2,
+                            transition: 'background-color 0.2s ease',
+                            flexShrink: 0
+                          }}
+                        >
+                          <div style={{
+                            width: 20,
+                            height: 20,
+                            borderRadius: '50%',
+                            background: '#ffffff',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                            transform: aiSchedulingEnabled ? 'translateX(20px)' : 'translateX(0)',
+                            transition: 'transform 0.2s ease'
+                          }} />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Row 1: Project Name & Activity Name */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                          Project Name *
+                        </label>
+                        <PlainSelect
+                          required
+                          placeholder="Select Project..."
+                          value={formData.project_name}
+                          onChange={v => setFormData({ ...formData, project_name: v })}
+                          options={projects.map(p => ({ value: p.name || p.domain, label: p.name || p.domain }))}
+                        />
                       </div>
 
-                      {potentialKws.length === 0 ? (
-                        <div style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic', padding: 12, textAlign: 'center' }}>
-                          No rank 5-20 keywords found for this project yet. Run a rank check first.
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                          {['high', 'medium', 'low'].map(bKey => {
-                            const meta = PUSH_BATCH_META[bKey];
-                            const rows = pushBatches[bKey] || [];
-                            const BIcon = meta.Icon;
-                            const batchIds = rows.map(r => r.id);
-                            const allSelected = batchIds.length > 0 && batchIds.every(id => selectedKwIds.has(id));
-                            return (
-                              <div key={bKey} style={{ border: `1px solid ${meta.border}`, borderRadius: 8, overflow: 'hidden', background: '#ffffff' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 10px', background: meta.bg, borderBottom: `1px solid ${meta.border}` }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }} title={meta.hint}>
-                                    <BIcon size={14} color={meta.tint} />
-                                    <span style={{ fontSize: 11.5, fontWeight: 800, color: meta.tint }}>{meta.label}</span>
-                                    <span style={{ fontSize: 10.5, fontWeight: 700, color: '#64748b', background: '#ffffff', border: `1px solid ${meta.border}`, borderRadius: 10, padding: '0 6px' }}>{rows.length}</span>
-                                  </div>
-                                  {rows.length > 0 && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const next = new Set(selectedKwIds);
-                                        if (allSelected) batchIds.forEach(id => next.delete(id));
-                                        else batchIds.forEach(id => next.add(id));
-                                        setSelectedKwIds(next);
-                                      }}
-                                      style={{ fontSize: 10.5, fontWeight: 700, color: meta.tint, background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-                                    >
-                                      {allSelected ? 'Unselect all' : 'Select all'}
-                                    </button>
-                                  )}
-                                </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                          Activity Name *
+                        </label>
+                        <PlainSelect
+                          required
+                          placeholder="Select Activity..."
+                          value={formData.activity_name}
+                          onChange={v => setFormData({ ...formData, activity_name: v })}
+                          options={['Paid Guest Post', 'Forum - Quora', 'Forum - Reddit', 'Business Listing', 'Classified Ads']}
+                        />
+                      </div>
+                    </div>
 
-                                {rows.length === 0 ? (
-                                  <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic', padding: '8px 10px' }}>None in this batch.</div>
-                                ) : (
-                                  <div style={{ maxHeight: 190, overflowY: 'auto' }}>
-                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5, textAlign: 'left' }}>
+                    {/* Row 2: Status & Quantity */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                          Status *
+                        </label>
+                        <select
+                          value={formData.status}
+                          onChange={e => setFormData({ ...formData, status: e.target.value })}
+                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none', background: '#ffffff', color: '#0f172a', fontWeight: 600 }}
+                        >
+                          <option value="saved">Saved</option>
+                          <option value="scheduled">Scheduled</option>
+                          <option value="approved">Approved</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                          Quantity
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={formData.quantity}
+                          onChange={e => setFormData({ ...formData, quantity: parseInt(e.target.value, 10) || 1 })}
+                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Row 3: Budget & Period / Date */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                          Budget
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="$250"
+                          value={formData.budget}
+                          onChange={e => setFormData({ ...formData, budget: e.target.value })}
+                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                          Period / Date
+                        </label>
+                        <input
+                          type="date"
+                          value={formData.period}
+                          onChange={e => setFormData({ ...formData, period: e.target.value })}
+                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Row 4: Main POC & Content POC */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                          Main POC
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. John Doe"
+                          value={formData.main_poc}
+                          onChange={e => setFormData({ ...formData, main_poc: e.target.value })}
+                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                          Content POC
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Jane Smith"
+                          value={formData.content_poc}
+                          onChange={e => setFormData({ ...formData, content_poc: e.target.value })}
+                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Row 5: User, Scheduler, Auditor */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                          User
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.user}
+                          onChange={e => setFormData({ ...formData, user: e.target.value })}
+                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                          Scheduler
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.scheduler}
+                          onChange={e => setFormData({ ...formData, scheduler: e.target.value })}
+                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                          Auditor
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.auditor}
+                          onChange={e => setFormData({ ...formData, auditor: e.target.value })}
+                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Form Footer Actions */}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 8, paddingTop: 14, borderTop: '1px solid #f1f5f9' }}>
+                      <button
+                        type="button"
+                        onClick={() => setIsModalOpen(false)}
+                        style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, color: '#64748b', background: '#f1f5f9', border: 'none', borderRadius: 8, cursor: 'pointer' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={savingActivity}
+                        style={{
+                          padding: '9px 22px',
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: '#ffffff',
+                          background: aiSchedulingEnabled ? '#7c3aed' : '#2D2D44',
+                          border: 'none',
+                          borderRadius: 8,
+                          cursor: savingActivity ? 'not-allowed' : 'pointer',
+                          opacity: savingActivity ? 0.7 : 1,
+                          boxShadow: aiSchedulingEnabled ? '0 2px 10px rgba(124, 58, 237, 0.3)' : '0 2px 8px rgba(45, 45, 68, 0.25)',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8
+                        }}
+                      >
+                        {savingActivity ? (
+                          <>
+                            <div style={{ width: 14, height: 14, border: '2px solid #ffffff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                            <span>Saving...</span>
+                          </>
+                        ) : (
+                          <>
+                            {aiSchedulingEnabled && !editingItem && <Sparkles size={15} />}
+                            <span>{editingItem ? 'Update Activity' : 'Create Activity'}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </>
+            ) : (
+              /* STEP 2: KEYWORDS PROMPT VIEW */
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxHeight: '80vh' }}>
+                {/* Step 2 Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    <div style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 12,
+                      background: 'linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                      marginTop: 2
+                    }}>
+                      <Sparkles size={22} color="#7c3aed" />
+                    </div>
+                    <div>
+                      <h3 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>
+                        These are the keywords we got, do you want to add?
+                      </h3>
+                      <p style={{ fontSize: 12.5, color: '#64748b', margin: '4px 0 0 0' }}>
+                        Activity <strong>"{createdActivity?.activity_name}"</strong> has been created. Evaluated Landing Page keywords (Rank 5+) against live Google SERP: Batch 1 (extremely improved), Batch 2 (extremely dropped / recovery target), and Batch 3 (didn’t move / stagnant).
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 4, borderRadius: 6 }}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {/* Content Area */}
+                <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4, minHeight: 280, display: 'flex', flexDirection: 'column' }}>
+                  {loadingKeywords ? (
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 24px', gap: 14 }}>
+                      <div style={{ width: 36, height: 36, border: '3px solid #ede9fe', borderTopColor: '#7c3aed', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                      <div style={{ fontSize: 14, fontWeight: 700, color: '#1e293b' }}>
+                        Fetching Landing Page keywords (Rank 5+)...
+                      </div>
+                      <div style={{ fontSize: 12, color: '#64748b' }}>
+                        Scanning database for {createdActivity?.project_name}
+                      </div>
+                    </div>
+                  ) : potentialKws.length === 0 ? (
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 24px', gap: 12, textAlign: 'center' }}>
+                      <div style={{ width: 48, height: 48, borderRadius: 24, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Search size={22} color="#94a3b8" />
+                      </div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: '#1e293b' }}>
+                        No Landing Page (Rank 5+) keywords found
+                      </div>
+                      <div style={{ fontSize: 12.5, color: '#64748b', maxWidth: 420 }}>
+                        No Landing Page keywords (Rank 5+) were found for <strong>{createdActivity?.project_name}</strong> yet. You can perform a rank check from the Rankings tab to discover opportunities.
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {/* Summary Chip Bar */}
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '8px 12px',
+                        background: '#f8fafc',
+                        borderRadius: 8,
+                        border: '1px solid #e2e8f0',
+                        fontSize: 12
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontWeight: 700, color: '#1e293b' }}>
+                            Found: <strong style={{ color: '#7c3aed' }}>{potentialKws.length}</strong> keywords
+                          </span>
+                          <span style={{ color: '#cbd5e1' }}>•</span>
+                          <span style={{ fontWeight: 600, color: '#475569' }}>
+                            Selected: <strong style={{ color: '#0f172a' }}>{selectedKwIds.size}</strong>
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Sparkles size={13} color="#7c3aed" className={analyzingPotential ? 'animate-spin' : ''} />
+                          <span style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: analyzingPotential ? '#7c3aed' : '#15803d',
+                            background: analyzingPotential ? '#ede9fe' : '#dcfce7',
+                            padding: '2px 8px',
+                            borderRadius: 10
+                          }}>
+                            {analyzingPotential ? 'Re-checking live rank & Top 3 Landing Pages…' : 'Live AI Verified'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Batched Keywords */}
+                      {(() => {
+                        const isPaidGuestPost = String(createdActivity?.activity_name || formData.activity_name || '').toLowerCase().includes('guest');
+                        return ['high', 'medium', 'low'].map(bKey => {
+                          const meta = PUSH_BATCH_META[bKey];
+                          const rows = pushBatches[bKey] || [];
+                          const BIcon = meta.Icon;
+                          const batchIds = rows.map(r => r.id);
+                          const allSelected = batchIds.length > 0 && batchIds.every(id => selectedKwIds.has(id));
+
+                          return (
+                            <div key={bKey} style={{ border: `1px solid ${meta.border}`, borderRadius: 10, overflow: 'hidden', background: '#ffffff' }}>
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: 8,
+                                padding: '8px 12px',
+                                background: meta.bg,
+                                borderBottom: `1px solid ${meta.border}`
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} title={meta.hint}>
+                                  <BIcon size={14} color={meta.tint} />
+                                  <span style={{ fontSize: 12, fontWeight: 800, color: meta.tint }}>{meta.label}</span>
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', background: '#ffffff', border: `1px solid ${meta.border}`, borderRadius: 10, padding: '0 7px' }}>
+                                    {rows.length}
+                                  </span>
+                                </div>
+                                {rows.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const next = new Set(selectedKwIds);
+                                      if (allSelected) batchIds.forEach(id => next.delete(id));
+                                      else batchIds.forEach(id => next.add(id));
+                                      setSelectedKwIds(next);
+                                    }}
+                                    style={{ fontSize: 11, fontWeight: 700, color: meta.tint, background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                                  >
+                                    {allSelected ? 'Unselect batch' : 'Select batch'}
+                                  </button>
+                                )}
+                              </div>
+
+                              {rows.length === 0 ? (
+                                <div style={{ fontSize: 11.5, color: '#94a3b8', fontStyle: 'italic', padding: '10px 12px' }}>
+                                  No keywords categorized into this batch.
+                                </div>
+                              ) : (
+                                <div style={{ maxHeight: 210, overflowY: 'auto' }}>
+                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
                                     <thead>
-                                      <tr style={{ color: '#475569', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                                        <th style={{ padding: '6px 8px', width: 26, background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1 }}></th>
-                                        <th style={{ padding: '6px 8px', background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1 }}>Keyword</th>
-                                        <th style={{ padding: '6px 8px', width: 44, background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1 }}>Rank</th>
-                                        <th style={{ padding: '6px 8px', width: 54, background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1 }}>SV</th>
-                                        <th style={{ padding: '6px 8px', width: 36, background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1 }}>KD</th>
-                                        <th style={{ padding: '6px 8px', width: 44, background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1 }}>Conf</th>
-                                        <th style={{ padding: '6px 8px', width: 120, background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1 }}>Topic Link</th>
+                                      <tr style={{ color: '#64748b', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.04em', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                        <th style={{ padding: '6px 10px', width: 32, position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}></th>
+                                        <th style={{ padding: '6px 10px', position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>Keyword</th>
+                                        <th style={{ padding: '6px 10px', width: 85, position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>Rank Shift</th>
+                                        <th style={{ padding: '6px 10px', width: 65, position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>SV</th>
+                                        <th style={{ padding: '6px 10px', width: 45, position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>KD</th>
+                                        <th style={{ padding: '6px 10px', width: 70, position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>Conf</th>
+                                        <th style={{ padding: '6px 10px', width: 140, position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>Live AI Status</th>
+                                        {!isPaidGuestPost && (
+                                          <th style={{ padding: '6px 10px', width: 160, position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>Topic Link</th>
+                                        )}
                                       </tr>
                                     </thead>
                                     <tbody>
-                                      {rows.map(item => {
-                                        const isChecked = selectedKwIds.has(item.id);
-                                        return (
-                                          <tr key={item.id} style={{ borderTop: '1px solid #f1f5f9', background: isChecked ? '#f5f3ff' : 'transparent' }}>
-                                            <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-                                              <input
-                                                type="checkbox"
-                                                checked={isChecked}
-                                                onChange={(e) => {
-                                                  const next = new Set(selectedKwIds);
-                                                  if (e.target.checked) next.add(item.id);
-                                                  else next.delete(item.id);
-                                                  setSelectedKwIds(next);
-                                                }}
-                                                style={{ cursor: 'pointer' }}
-                                              />
-                                            </td>
-                                            <td style={{ padding: '6px 8px' }} title={item.reason || ''}>
-                                              <div style={{ fontWeight: 700, color: '#0f172a' }}>{item.keyword}</div>
-                                            </td>
-                                            <td style={{ padding: '6px 8px' }}>
-                                              <span style={{ background: item.rank <= 10 ? '#dcfce7' : '#e0f2fe', color: item.rank <= 10 ? '#15803d' : '#0369a1', padding: '1px 5px', borderRadius: 4, fontSize: 10, fontWeight: 800 }}>#{item.rank}</span>
-                                            </td>
-                                            <td style={{ padding: '6px 8px', fontWeight: 600, color: '#334155' }}>{Number(item.sv || 0).toLocaleString()}</td>
-                                            <td style={{ padding: '6px 8px', fontWeight: 600, color: (item.kd || 0) > 50 ? '#ef4444' : '#16a34a' }}>{item.kd ?? 0}</td>
-                                            <td style={{ padding: '6px 8px', fontWeight: 700, color: meta.tint }}>{item.confidence != null ? `${item.confidence}%` : '–'}</td>
-                                            <td style={{ padding: '4px 8px' }}>
+                                    {rows.map(item => {
+                                      const isChecked = selectedKwIds.has(item.id);
+                                      const currentRank = item.new_rank ?? item.rank;
+                                      return (
+                                        <tr key={item.id} style={{ borderTop: '1px solid #f1f5f9', background: isChecked ? '#f5f3ff' : 'transparent', transition: 'background-color 0.1s ease' }}>
+                                          <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                                            <input
+                                              type="checkbox"
+                                              checked={isChecked}
+                                              onChange={(e) => {
+                                                const next = new Set(selectedKwIds);
+                                                if (e.target.checked) next.add(item.id);
+                                                else next.delete(item.id);
+                                                setSelectedKwIds(next);
+                                              }}
+                                              style={{ cursor: 'pointer', width: 15, height: 15, accentColor: '#7c3aed' }}
+                                            />
+                                          </td>
+                                          <td style={{ padding: '6px 10px' }} title={item.reason || ''}>
+                                            <div style={{ fontWeight: 700, color: '#0f172a' }}>{item.keyword}</div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
+                                              {(item.category || item.cluster) && (
+                                                <span style={{ fontSize: 10, color: '#64748b' }}>
+                                                  {[item.category, item.cluster].filter(Boolean).join(' • ')}
+                                                </span>
+                                              )}
+                                              {item.top3_is_landing !== undefined && (
+                                                <span style={{
+                                                  fontSize: 9.5,
+                                                  fontWeight: 700,
+                                                  color: item.top3_is_landing ? '#16a34a' : '#dc2626',
+                                                  background: item.top3_is_landing ? '#dcfce7' : '#fee2e2',
+                                                  border: `1px solid ${item.top3_is_landing ? '#bbf7d0' : '#fecaca'}`,
+                                                  padding: '0.5px 5px',
+                                                  borderRadius: 4
+                                                }}>
+                                                  {item.top3_is_landing ? 'Top 3: Landing Page ✓' : 'Top 3: Non-Landing'}
+                                                </span>
+                                              )}
+                                            </div>
+                                          </td>
+                                          <td style={{ padding: '6px 10px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                              <span style={{
+                                                background: currentRank <= 10 ? '#dcfce7' : '#e0f2fe',
+                                                color: currentRank <= 10 ? '#15803d' : '#0369a1',
+                                                padding: '2px 6px',
+                                                borderRadius: 4,
+                                                fontSize: 11,
+                                                fontWeight: 800
+                                              }}>
+                                                #{currentRank}
+                                              </span>
+                                              {item.delta > 0 && (
+                                                <span style={{ color: '#16a34a', fontWeight: 800, fontSize: 11 }} title={`Improved by ${item.delta} spots`}>
+                                                  ↑{item.delta}
+                                                </span>
+                                              )}
+                                              {item.delta < 0 && (
+                                                <span style={{ color: '#ea580c', fontWeight: 800, fontSize: 11 }} title={`Dropped by ${Math.abs(item.delta)} spots`}>
+                                                  ↓{Math.abs(item.delta)}
+                                                </span>
+                                              )}
+                                              {item.delta === 0 && item.prev_rank != null && (
+                                                <span style={{ color: '#94a3b8', fontWeight: 700, fontSize: 11 }} title="Rank didn't move">
+                                                  =
+                                                </span>
+                                              )}
+                                            </div>
+                                            {item.prev_rank != null && (
+                                              <div style={{ fontSize: 9.5, color: '#64748b', marginTop: 2, whiteSpace: 'nowrap' }}>
+                                                was #{item.prev_rank}
+                                              </div>
+                                            )}
+                                          </td>
+                                          <td style={{ padding: '6px 10px', fontWeight: 600, color: '#334155' }}>
+                                            {Number(item.sv || 0).toLocaleString()}
+                                          </td>
+                                          <td style={{ padding: '6px 10px', fontWeight: 700, color: (item.kd || 0) > 50 ? '#ef4444' : '#16a34a' }}>
+                                            {item.kd ?? 0}
+                                          </td>
+                                          <td style={{ padding: '6px 10px' }}>
+                                            <span style={{
+                                              fontSize: 11,
+                                              fontWeight: 800,
+                                              color: meta.tint,
+                                              background: meta.bg,
+                                              border: `1px solid ${meta.border}`,
+                                              padding: '2px 6px',
+                                              borderRadius: 6
+                                            }}>
+                                              {item.confidence != null ? `${item.confidence}%` : '–'}
+                                            </span>
+                                          </td>
+                                          <td style={{ padding: '6px 10px', fontSize: 11, color: '#475569', maxWidth: 180, whiteSpace: 'normal' }} title={item.reason || ''}>
+                                            <div style={{ fontWeight: 600, color: meta.tint, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                                              {item.reason || (item.confidence != null ? `${item.confidence}% confidence` : '–')}
+                                            </div>
+                                          </td>
+                                          {!isPaidGuestPost && (
+                                            <td style={{ padding: '4px 10px' }}>
                                               <input
                                                 type="url"
-                                                placeholder="Topic Link…"
-                                                value={topicLinks[item.id] || ''}
+                                                placeholder="Target Landing Page URL…"
+                                                value={topicLinks[item.id] !== undefined ? topicLinks[item.id] : (item.topicLink || item.landing_page_url || '')}
                                                 onChange={(e) => setTopicLinks({ ...topicLinks, [item.id]: e.target.value })}
-                                                style={{ width: '100%', padding: '3px 6px', fontSize: 10.5, border: '1px solid #cbd5e1', borderRadius: 4, outline: 'none' }}
+                                                style={{ width: '100%', padding: '4px 8px', fontSize: 11, border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', background: '#ffffff' }}
                                               />
                                             </td>
-                                          </tr>
-                                        );
-                                      })}
-                                    </tbody>
-                                  </table>
-                                  </div>
-                                )}
+                                          )}
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                            )}
+                          </div>
+                        );
+                      })})()}
                     </div>
                   )}
+                </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                        Status *
-                      </label>
-                      <select
-                        value={formData.status}
-                        onChange={e => setFormData({ ...formData, status: e.target.value })}
-                        style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none', background: '#ffffff', color: '#0f172a', fontWeight: 600 }}
+                {/* Step 2 Footer Actions */}
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginTop: 16,
+                  paddingTop: 14,
+                  borderTop: '1px solid #f1f5f9'
+                }}>
+                  <div style={{ fontSize: 12.5, color: '#64748b' }}>
+                    {potentialKws.length > 0 && (
+                      <span>
+                        <strong style={{ color: '#0f172a' }}>{selectedKwIds.size}</strong> of {potentialKws.length} keyword{potentialKws.length === 1 ? '' : 's'} selected
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsModalOpen(false)}
+                      style={{
+                        padding: '9px 18px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: '#64748b',
+                        background: '#f1f5f9',
+                        border: 'none',
+                        borderRadius: 8,
+                        cursor: 'pointer',
+                        transition: 'background-color 0.15s ease'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#e2e8f0'}
+                      onMouseLeave={e => e.currentTarget.style.background = '#f1f5f9'}
+                    >
+                      {potentialKws.length === 0 ? 'Done' : 'Skip for now'}
+                    </button>
+
+                    {potentialKws.length > 0 && (
+                      <button
+                        type="button"
+                        disabled={selectedKwIds.size === 0 || savingActivity}
+                        onClick={handleConfirmAddKeywords}
+                        style={{
+                          padding: '9px 20px',
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: '#ffffff',
+                          background: selectedKwIds.size === 0 ? '#cbd5e1' : '#7c3aed',
+                          border: 'none',
+                          borderRadius: 8,
+                          cursor: (selectedKwIds.size === 0 || savingActivity) ? 'not-allowed' : 'pointer',
+                          boxShadow: selectedKwIds.size === 0 ? 'none' : '0 2px 10px rgba(124, 58, 237, 0.3)',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8
+                        }}
+                        onMouseEnter={e => {
+                          if (selectedKwIds.size > 0 && !savingActivity) e.currentTarget.style.background = '#6d28d9';
+                        }}
+                        onMouseLeave={e => {
+                          if (selectedKwIds.size > 0 && !savingActivity) e.currentTarget.style.background = '#7c3aed';
+                        }}
                       >
-                        <option value="saved">Saved</option>
-                        <option value="scheduled">Scheduled</option>
-                        <option value="approved">Approved</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                        Quantity
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={formData.quantity}
-                        onChange={e => setFormData({ ...formData, quantity: parseInt(e.target.value, 10) || 1 })}
-                        style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                      />
-                    </div>
+                        {savingActivity ? (
+                          <>
+                            <div style={{ width: 14, height: 14, border: '2px solid #ffffff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                            <span>Adding...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Plus size={16} />
+                            <span>Add Selected Keywords ({selectedKwIds.size})</span>
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
-                </>
-              ) : (
-                /* TAB 2: MANUAL SCHEDULING */
-                <>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Activity Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.activity_name}
-                      onChange={e => setFormData({ ...formData, activity_name: e.target.value })}
-                      style={{ width: '100%', padding: '8px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                    />
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Project Name *</label>
-                      <select
-                        required
-                        value={formData.project_name}
-                        onChange={e => setFormData({ ...formData, project_name: e.target.value })}
-                        style={{ width: '100%', padding: '8px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none', background: '#ffffff', color: '#0f172a', fontWeight: 600 }}
-                      >
-                        <option value="">Select Project...</option>
-                        {projects.map(p => (
-                          <option key={p.slug} value={p.name || p.domain}>
-                            {p.name || p.domain}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Status *</label>
-                      <select
-                        value={formData.status}
-                        onChange={e => setFormData({ ...formData, status: e.target.value })}
-                        style={{ width: '100%', padding: '8px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none', background: '#ffffff' }}
-                      >
-                        <option value="saved">Saved</option>
-                        <option value="scheduled">Scheduled</option>
-                        <option value="approved">Approved</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Main POC</label>
-                      <input
-                        type="text"
-                        value={formData.main_poc}
-                        onChange={e => setFormData({ ...formData, main_poc: e.target.value })}
-                        style={{ width: '100%', padding: '8px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Content POC</label>
-                      <input
-                        type="text"
-                        value={formData.content_poc}
-                        onChange={e => setFormData({ ...formData, content_poc: e.target.value })}
-                        style={{ width: '100%', padding: '8px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Quantity</label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={formData.quantity}
-                        onChange={e => setFormData({ ...formData, quantity: parseInt(e.target.value, 10) || 1 })}
-                        style={{ width: '100%', padding: '8px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Budget</label>
-                      <input
-                        type="text"
-                        value={formData.budget}
-                        onChange={e => setFormData({ ...formData, budget: e.target.value })}
-                        style={{ width: '100%', padding: '8px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>User</label>
-                      <input
-                        type="text"
-                        value={formData.user}
-                        onChange={e => setFormData({ ...formData, user: e.target.value })}
-                        style={{ width: '100%', padding: '8px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Period / Date</label>
-                      <input
-                        type="text"
-                        value={formData.period}
-                        onChange={e => setFormData({ ...formData, period: e.target.value })}
-                        style={{ width: '100%', padding: '8px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Scheduler</label>
-                      <input
-                        type="text"
-                        value={formData.scheduler}
-                        onChange={e => setFormData({ ...formData, scheduler: e.target.value })}
-                        style={{ width: '100%', padding: '8px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Auditor</label>
-                      <input
-                        type="text"
-                        value={formData.auditor}
-                        onChange={e => setFormData({ ...formData, auditor: e.target.value })}
-                        style={{ width: '100%', padding: '8px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                      />
-                    </div>
-                  </div>
-                </>
-              )
-              }
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 16 }}>
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  style={{ padding: '8px 16px', fontSize: 13, fontWeight: 600, color: '#64748b', background: '#f1f5f9', border: 'none', borderRadius: 8, cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  style={{
-                    padding: '8px 20px',
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: '#ffffff',
-                    background: '#2D2D44',
-                    border: 'none',
-                    borderRadius: 8,
-                    cursor: 'pointer',
-                    boxShadow: '0 2px 8px rgba(45, 45, 68, 0.25)',
-                    transition: 'all 0.15s ease'
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = '#1F1F30'}
-                  onMouseLeave={e => e.currentTarget.style.background = '#2D2D44'}
-                >
-                  {editingItem ? 'Update Activity' : 'Create Activity'}
-                </button>
+                </div>
               </div>
-            </form>
+            )}
           </div>
         </div>
       )}

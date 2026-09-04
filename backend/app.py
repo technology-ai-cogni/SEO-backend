@@ -3001,3 +3001,15 @@ def get_ai_analysis_history_endpoint(project_slug: str, engine: Optional[str] = 
     except Exception as e:
         print(f"[app] Notice in get_ai_analysis_history_endpoint: {e}", file=sys.stderr, flush=True)
         return {"status": "success", "history": []}
+
+
+# ─────────────────────────────────────────────────────────────
+# MOUNT CALENDAR BACKEND ROUTER
+# ─────────────────────────────────────────────────────────────
+try:
+    from calendar_backend import router as calendar_router
+    app.include_router(calendar_router)
+    app.include_router(calendar_router, prefix="/api")
+except Exception as err:
+    print(f"[app] Error mounting calendar_router: {err}", file=sys.stderr, flush=True)
+

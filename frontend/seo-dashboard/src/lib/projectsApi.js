@@ -2943,35 +2943,29 @@ export async function runOrganicRankCheckApi(projectSlug, country = 'India') {
 }
 
 
-// Off-Page Activities API
-export async function listOffPageActivitiesApi() {
+// --- Calendar & Off-Page Activities (Python Backend) -------------------------
+export async function listCalendarActivitiesApi(projectName = null, status = null, search = null) {
+  const params = new URLSearchParams();
+  if (projectName && projectName !== 'All Projects') params.append('project', projectName);
+  if (status && status !== 'all') params.append('status', status);
+  if (search) params.append('search', search);
+
+  const qs = params.toString() ? `?${params.toString()}` : '';
   try {
-    const res = await fetch(`${CATEGORY_API_BASE}/off-page-activities`);
+    const res = await fetch(`${CATEGORY_API_BASE}/calendar/activities${qs}`);
     if (res.ok) {
       const data = await res.json();
-      return data.activities || data.data || [];
+      return data;
     }
   } catch (e) {
-    console.warn('[listOffPageActivitiesApi] Backend unavailable, trying Supabase:', e);
+    console.warn('[listCalendarActivitiesApi] Backend unavailable:', e);
   }
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from('off_page_activities')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (!error) return data || [];
-    } catch (e) {
-      console.warn('[listOffPageActivitiesApi] Supabase fetch error:', e);
-    }
-  }
-  return [];
+  return { activities: [], counts: { saved: 0, scheduled: 0, approved: 0 }, total: 0 };
 }
 
-
-export async function createOffPageActivityApi(payload) {
+export async function createCalendarActivityApi(payload) {
   try {
-    const res = await fetch(`${CATEGORY_API_BASE}/off-page-activities`, {
+    const res = await fetch(`${CATEGORY_API_BASE}/calendar/activities`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -2981,55 +2975,81 @@ export async function createOffPageActivityApi(payload) {
       return data.activity || data;
     }
   } catch (e) {
-    console.warn('[createOffPageActivityApi] Backend unavailable:', e);
-  }
-  if (supabase) {
-    try {
-      const { data, error } = await supabase.from('off_page_activities').insert([payload]).select();
-      if (!error && data && data.length > 0) return data[0];
-    } catch (e) {
-      console.warn('[createOffPageActivityApi] Supabase insert failed:', e);
-    }
+    console.warn('[createCalendarActivityApi] Backend unavailable:', e);
   }
   return { id: Date.now(), ...payload };
 }
 
-export async function updateOffPageActivityApi(id, updates) {
+export async function updateCalendarActivityApi(id, updates) {
   try {
-    const res = await fetch(`${CATEGORY_API_BASE}/off-page-activities/${id}`, {
+    const res = await fetch(`${CATEGORY_API_BASE}/calendar/activities/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates)
     });
-    if (res.ok) return await res.json();
-  } catch (e) {
-    console.warn('[updateOffPageActivityApi] Backend unavailable:', e);
-  }
-  if (supabase) {
-    try {
-      await supabase.from('off_page_activities').update(updates).eq('id', id);
-    } catch (e) {
-      console.warn('[updateOffPageActivityApi] Supabase update failed:', e);
+    if (res.ok) {
+      const data = await res.json();
+      return data.activity || data;
     }
+  } catch (e) {
+    console.warn('[updateCalendarActivityApi] Backend unavailable:', e);
   }
   return { id, ...updates };
 }
 
-export async function deleteOffPageActivityApi(id) {
+export async function deleteCalendarActivityApi(id) {
   try {
-    const res = await fetch(`${CATEGORY_API_BASE}/off-page-activities/${id}`, {
+    const res = await fetch(`${CATEGORY_API_BASE}/calendar/activities/${id}`, {
       method: 'DELETE'
     });
     if (res.ok) return await res.json();
   } catch (e) {
-    console.warn('[deleteOffPageActivityApi] Backend unavailable:', e);
-  }
-  if (supabase) {
-    try {
-      await supabase.from('off_page_activities').delete().eq('id', id);
-    } catch (e) {
-      console.warn('[deleteOffPageActivityApi] Supabase delete failed:', e);
-    }
+    console.warn('[deleteCalendarActivityApi] Backend unavailable:', e);
   }
   return { id };
+}
+
+// Backwards compatibility aliases
+export const listOffPageActivitiesApi = async () => {
+  const res = await listCalendarActivitiesApi();
+  return res.activities || [];
+};
+export const createOffPageActivityApi = createCalendarActivityApi;
+export const updateOffPageActivityApi = updateCalendarActivityApi;
+export const deleteOffPageActivityApi = deleteCalendarActivityApi;
+
+// Fetch Rank 5-20 potential keywords and push-potential batches directly from Python backend
+export async function fetchCalendarPotentialKeywordsApi(projectSlug, domain = '', runAi = false) {
+  if (!projectSlug) return { potential_keywords: [], batches: { high: [], medium: [], low: [] }, total_potential: 0 };
+  const params = new URLSearchParams({
+    project_slug: projectSlug,
+    domain: domain || '',
+    run_ai: runAi ? 'true' : 'false'
+  });
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/calendar/potential-keywords?${params.toString()}`);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('[fetchCalendarPotentialKeywordsApi] error:', e);
+  }
+  return { potential_keywords: [], batches: { high: [], medium: [], low: [] }, total_potential: 0 };
+}
+
+// Run AI push-potential triage via Python backend
+export async function analyzeCalendarAiPushPotentialApi(projectSlug, domain = '', keywords = [], country = 'India') {
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/calendar/analyze-potential`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_slug: projectSlug, domain, country, keywords })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('[analyzeCalendarAiPushPotentialApi] error:', e);
+  }
+  return null;
 }

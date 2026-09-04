@@ -8,6 +8,7 @@ __pycache__/
 *.xlsx
 *.tar.gz
 datasets/
+offpage_scheduler_template*.csv
 
 # Ignored scripts
 backend/scripts/apify.py
