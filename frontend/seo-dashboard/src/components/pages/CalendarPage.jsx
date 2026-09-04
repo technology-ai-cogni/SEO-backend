@@ -293,7 +293,8 @@ function CalendarPage({ user }) {
   const handleOpenEditModal = (item) => {
     setEditingItem(item);
     setModalStep('form');
-    setAiSchedulingEnabled(false);
+    const isAi = String(item.scheduler || '').toLowerCase().includes('ai');
+    setAiSchedulingEnabled(isAi);
     setSavingActivity(false);
     setCreatedActivity(null);
     setFormData({
@@ -305,11 +306,22 @@ function CalendarPage({ user }) {
       budget: item.budget || '',
       user: item.user || user?.name || user?.email || '',
       period: item.period || new Date().toISOString().split('T')[0],
-      scheduler: item.scheduler || '',
+      scheduler: item.scheduler || (isAi ? 'AI Auto-Scheduler' : 'Manual'),
       auditor: item.auditor || '',
       status: getNormalizedStatus(item.status)
     });
     setIsModalOpen(true);
+  };
+
+  const handleToggleAiScheduling = () => {
+    setAiSchedulingEnabled(prev => {
+      const next = !prev;
+      setFormData(fd => ({
+        ...fd,
+        scheduler: next ? 'AI Auto-Scheduler' : 'Manual'
+      }));
+      return next;
+    });
   };
 
   const handleSaveForm = async (e) => {
@@ -900,8 +912,19 @@ function CalendarPage({ user }) {
                       <td style={{ padding: '14px 16px', fontSize: 12, color: '#64748b' }}>
                         {item.period || '—'}
                       </td>
-                      <td style={{ padding: '14px 16px', fontSize: 12, color: '#64748b' }}>
-                        {item.scheduler || '—'}
+                      <td style={{ padding: '14px 16px', fontSize: 12 }}>
+                        {item.scheduler ? (
+                          String(item.scheduler).toLowerCase().includes('ai') ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#ede9fe', color: '#6d28d9', padding: '3px 8px', borderRadius: 6, fontSize: 11.5, fontWeight: 700 }}>
+                              <Sparkles size={11} color="#7c3aed" />
+                              {item.scheduler}
+                            </span>
+                          ) : (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#f1f5f9', color: '#475569', padding: '3px 8px', borderRadius: 6, fontSize: 11.5, fontWeight: 600 }}>
+                              {item.scheduler}
+                            </span>
+                          )
+                        ) : '—'}
                       </td>
                       <td style={{ padding: '14px 16px', fontSize: 12, color: '#64748b' }}>
                         {item.auditor || '—'}
@@ -1035,91 +1058,89 @@ function CalendarPage({ user }) {
 
                 <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
                   <form onSubmit={handleSaveForm} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    {/* AI Scheduling Toggle Card (only when adding new activity) */}
-                    {!editingItem && (
-                      <div
-                        onClick={() => setAiSchedulingEnabled(prev => !prev)}
-                        style={{
+                    {/* AI Scheduling Toggle Card */}
+                    <div
+                      onClick={handleToggleAiScheduling}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '12px 16px',
+                        borderRadius: 12,
+                        background: aiSchedulingEnabled ? 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)' : '#f8fafc',
+                        border: aiSchedulingEnabled ? '1.5px solid #c4b5fd' : '1px solid #e2e8f0',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        userSelect: 'none'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 10,
+                          background: aiSchedulingEnabled ? '#7c3aed' : '#e2e8f0',
                           display: 'flex',
                           alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '12px 16px',
-                          borderRadius: 12,
-                          background: aiSchedulingEnabled ? 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)' : '#f8fafc',
-                          border: aiSchedulingEnabled ? '1.5px solid #c4b5fd' : '1px solid #e2e8f0',
-                          cursor: 'pointer',
+                          justifyContent: 'center',
+                          color: '#ffffff',
                           transition: 'all 0.2s ease',
-                          userSelect: 'none'
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div style={{
-                            width: 36,
-                            height: 36,
-                            borderRadius: 10,
-                            background: aiSchedulingEnabled ? '#7c3aed' : '#e2e8f0',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: '#ffffff',
-                            transition: 'all 0.2s ease',
-                            boxShadow: aiSchedulingEnabled ? '0 2px 8px rgba(124, 58, 237, 0.3)' : 'none'
-                          }}>
-                            <Sparkles size={18} color={aiSchedulingEnabled ? '#ffffff' : '#64748b'} />
-                          </div>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <span style={{ fontSize: 13.5, fontWeight: 700, color: aiSchedulingEnabled ? '#4c1d95' : '#1e293b' }}>
-                                AI Scheduling
-                              </span>
-                              <span style={{
-                                fontSize: 10.5,
-                                fontWeight: 700,
-                                padding: '1px 7px',
-                                borderRadius: 20,
-                                background: aiSchedulingEnabled ? '#7c3aed' : '#94a3b8',
-                                color: '#ffffff',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.04em'
-                              }}>
-                                {aiSchedulingEnabled ? 'Enabled' : 'Off'}
-                              </span>
-                            </div>
-                            <p style={{ fontSize: 11.5, color: aiSchedulingEnabled ? '#6d28d9' : '#64748b', margin: '2px 0 0 0' }}>
-                              {aiSchedulingEnabled
-                                ? 'Once created, automatically shortlists Rank 5+ Landing Page keywords with AI push-potential'
-                                : 'Create standard activity without automated keyword suggestions'}
-                            </p>
-                          </div>
+                          boxShadow: aiSchedulingEnabled ? '0 2px 8px rgba(124, 58, 237, 0.3)' : 'none'
+                        }}>
+                          <Sparkles size={18} color={aiSchedulingEnabled ? '#ffffff' : '#64748b'} />
                         </div>
-
-                        {/* Modern Toggle Switch */}
-                        <div
-                          role="switch"
-                          aria-checked={aiSchedulingEnabled}
-                          style={{
-                            width: 44,
-                            height: 24,
-                            borderRadius: 12,
-                            background: aiSchedulingEnabled ? '#7c3aed' : '#cbd5e1',
-                            position: 'relative',
-                            padding: 2,
-                            transition: 'background-color 0.2s ease',
-                            flexShrink: 0
-                          }}
-                        >
-                          <div style={{
-                            width: 20,
-                            height: 20,
-                            borderRadius: '50%',
-                            background: '#ffffff',
-                            boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                            transform: aiSchedulingEnabled ? 'translateX(20px)' : 'translateX(0)',
-                            transition: 'transform 0.2s ease'
-                          }} />
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontSize: 13.5, fontWeight: 700, color: aiSchedulingEnabled ? '#4c1d95' : '#1e293b' }}>
+                              AI Auto-Scheduler
+                            </span>
+                            <span style={{
+                              fontSize: 10.5,
+                              fontWeight: 700,
+                              padding: '1px 7px',
+                              borderRadius: 20,
+                              background: aiSchedulingEnabled ? '#7c3aed' : '#94a3b8',
+                              color: '#ffffff',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.04em'
+                            }}>
+                              {aiSchedulingEnabled ? 'AI Auto-Scheduler' : 'Manual'}
+                            </span>
+                          </div>
+                          <p style={{ fontSize: 11.5, color: aiSchedulingEnabled ? '#6d28d9' : '#64748b', margin: '2px 0 0 0' }}>
+                            {aiSchedulingEnabled
+                              ? 'Automatically evaluates Rank 5+ landing page keywords & sets scheduler to "AI Auto-Scheduler"'
+                              : 'Standard manual activity without automated keyword push evaluation (sets scheduler to "Manual")'}
+                          </p>
                         </div>
                       </div>
-                    )}
+
+                      {/* Modern Toggle Switch */}
+                      <div
+                        role="switch"
+                        aria-checked={aiSchedulingEnabled}
+                        style={{
+                          width: 44,
+                          height: 24,
+                          borderRadius: 12,
+                          background: aiSchedulingEnabled ? '#7c3aed' : '#cbd5e1',
+                          position: 'relative',
+                          padding: 2,
+                          transition: 'background-color 0.2s ease',
+                          flexShrink: 0
+                        }}
+                      >
+                        <div style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: '50%',
+                          background: '#ffffff',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                          transform: aiSchedulingEnabled ? 'translateX(20px)' : 'translateX(0)',
+                          transition: 'transform 0.2s ease'
+                        }} />
+                      </div>
+                    </div>
 
                     {/* Row 1: Project Name & Activity Name */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
@@ -1253,14 +1274,39 @@ function CalendarPage({ user }) {
                       </div>
 
                       <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                          Scheduler
-                        </label>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <label style={{ fontSize: 12, fontWeight: 700, color: '#475569' }}>
+                            Scheduler
+                          </label>
+                          <span style={{ fontSize: 10.5, fontWeight: 700, color: aiSchedulingEnabled ? '#7c3aed' : '#64748b' }}>
+                            {aiSchedulingEnabled ? '⚡ AI Mode' : '✋ Manual'}
+                          </span>
+                        </div>
                         <input
                           type="text"
                           value={formData.scheduler}
-                          onChange={e => setFormData({ ...formData, scheduler: e.target.value })}
-                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setFormData({ ...formData, scheduler: val });
+                            if (val.toLowerCase().includes('ai')) {
+                              setAiSchedulingEnabled(true);
+                            } else if (val.toLowerCase().includes('manual')) {
+                              setAiSchedulingEnabled(false);
+                            }
+                          }}
+                          placeholder={aiSchedulingEnabled ? 'AI Auto-Scheduler' : 'Manual'}
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px',
+                            fontSize: 13,
+                            border: aiSchedulingEnabled ? '1.5px solid #c4b5fd' : '1px solid #cbd5e1',
+                            borderRadius: 8,
+                            outline: 'none',
+                            background: aiSchedulingEnabled ? '#faf5ff' : '#ffffff',
+                            color: aiSchedulingEnabled ? '#6d28d9' : '#0f172a',
+                            fontWeight: aiSchedulingEnabled ? 600 : 500,
+                            transition: 'all 0.2s ease'
+                          }}
                         />
                       </div>
 

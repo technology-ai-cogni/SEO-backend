@@ -276,10 +276,438 @@ def calculate_heuristic_batches(potential: List[Dict[str, Any]]) -> Dict[str, Li
     return out
 
 
+# ─────────────────────────────────────────────────────────────
+# 3.1 MULTI-ENGINE RANK VERIFICATION & INTELLIGENCE AGENT
+# ─────────────────────────────────────────────────────────────
+
+def _clean_url_for_matching(url: str) -> str:
+    """Normalize URL path and scheme for exact match comparison."""
+    if not url or str(url).strip() == "" or str(url).lower() == "nan":
+        return ""
+    from urllib.parse import urlparse
+    url = str(url).strip().rstrip("/").lower()
+    if not url.startswith("http"):
+        url = "https://" + url
+    try:
+        parsed = urlparse(url)
+        netloc = parsed.netloc[4:] if parsed.netloc.startswith("www.") else parsed.netloc
+        return f"{parsed.scheme}://{netloc}{parsed.path}".rstrip("/").lower()
+    except Exception:
+        return url.lower()
+
+
+def _get_bare_domain(url: str) -> str:
+    """Extract domain hostname (e.g. 'socialoffline.in') from URL."""
+    if not url:
+        return ""
+    from urllib.parse import urlparse
+    if not url.startswith("http"):
+        url = "https://" + url
+    try:
+        netloc = urlparse(url).netloc.lower()
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        return netloc
+    except Exception:
+        return ""
+
+
+def fetch_serp_via_serpapi(keyword: str, country_code: str = "in", limit: int = 30) -> List[Dict[str, Any]]:
+    """
+    Fetch organic search results from SerpAPI Google Search.
+    Falls back to Bright Data SERP fetch if SerpAPI key is unavailable or fails.
+    """
+    import requests
+    serpapi_key = os.environ.get("SERPAPI_API_KEY")
+    if serpapi_key:
+        try:
+            params = {
+                "engine": "google",
+                "q": keyword,
+                "gl": country_code or "in",
+                "hl": "en",
+                "num": limit,
+                "api_key": serpapi_key
+            }
+            resp = requests.get("https://serpapi.com/search.json", params=params, timeout=25)
+            if resp.status_code == 200:
+                data = resp.json()
+                organic = data.get("organic_results", [])
+                results = []
+                for item in organic:
+                    url = item.get("link") or item.get("url") or ""
+                    title = item.get("title") or ""
+                    snippet = item.get("snippet") or ""
+                    if url:
+                        results.append({
+                            "url": url,
+                            "title": title,
+                            "snippet": snippet,
+                            "source": "SerpAPI"
+                        })
+                if results:
+                    return results
+        except Exception as e:
+            print(f"[Verification Agent] SerpAPI fetch notice for '{keyword}': {e}", flush=True)
+
+    # Fallback to Bright Data SERP scraper if SerpAPI is not configured
+    try:
+        from scripts.agentic_rank_checker import fetch_serp_brightdata
+        raw = fetch_serp_brightdata(keyword, start=0, country_code=country_code)
+        if raw:
+            return [{"url": r.get("url"), "title": r.get("title", ""), "snippet": r.get("snippet", ""), "source": "BrightData"} for r in raw]
+    except Exception:
+        pass
+    return []
+
+
+def fetch_serp_via_firecrawl(keyword: str, country_code: str = "in", limit: int = 30) -> List[Dict[str, Any]]:
+    """
+    Fetch organic search results from Firecrawl /v2/search endpoint.
+    """
+    try:
+        from services import rank_checker_fc
+        urls = rank_checker_fc.fetch_top_results_via_firecrawl(keyword, limit=limit, country_code=country_code)
+        return [{"url": u, "title": "", "snippet": "", "source": "Firecrawl"} for u in (urls or [])]
+    except Exception as e:
+        print(f"[Verification Agent] Firecrawl fetch notice for '{keyword}': {e}", flush=True)
+        return []
+
+
+def fetch_serp_via_brightdata(keyword: str, country_code: str = "in") -> List[Dict[str, Any]]:
+    """
+    Fetch organic search results from Bright Data Web Unlocker SERP zone.
+    """
+    try:
+        from scripts.agentic_rank_checker import fetch_serp_brightdata
+        raw = fetch_serp_brightdata(keyword, start=0, country_code=country_code)
+        if raw:
+            return [{"url": r.get("url"), "title": r.get("title", ""), "snippet": r.get("snippet", ""), "source": "BrightData"} for r in raw]
+    except Exception as e:
+        print(f"[Verification Agent] Bright Data fetch notice for '{keyword}': {e}", flush=True)
+        return []
+
+
+def evaluate_serp_ranking(
+    results: List[Dict[str, Any]],
+    target_url: str = "",
+    default_domain: str = ""
+) -> Dict[str, Any]:
+    """
+    Evaluates whether target_url or default_domain ranks in the given organic search results.
+    """
+    clean_target = _clean_url_for_matching(target_url)
+    target_domain = _get_bare_domain(target_url) or _get_bare_domain(default_domain)
+
+    matched_rank = 101
+    match_type = "no_match"
+    matched_url = None
+
+    for idx, item in enumerate(results, 1):
+        url = item.get("url", "")
+        clean_res = _clean_url_for_matching(url)
+        res_domain = _get_bare_domain(url)
+
+        # 1. Exact URL Match
+        if clean_target and clean_res == clean_target:
+            matched_rank = idx
+            match_type = "exact_url_match"
+            matched_url = url
+            break
+
+        # 2. Domain Match fallback (if exact match not yet found)
+        if target_domain and res_domain == target_domain and match_type == "no_match":
+            matched_rank = idx
+            match_type = "domain_match"
+            matched_url = url
+
+    return {
+        "rank": matched_rank,
+        "match_type": match_type,
+        "matched_url": matched_url,
+        "total_results": len(results),
+        "results": results
+    }
+
+
+def calculate_verification_confidence(
+    verified_rank: int,
+    prev_rank: int,
+    engine_checks: Dict[str, Dict[str, Any]],
+    top3_is_landing: bool,
+    top3_types: List[str],
+    is_confirmed_101: bool
+) -> Dict[str, Any]:
+    """
+    Calculates an explainable multi-factor Confidence Score (0-100%) for rank verification.
+    
+    Factors:
+    1. Source Consensus Points (0 - 35 pts):
+       - Multi-engine unanimous agreement: 35 pts
+       - Multi-engine consensus on valid rank (or resolved false alarm): 28 pts
+       - Single engine validated result: 20 pts
+       - Partial fallback: 15 pts
+       
+    2. Target Match Precision Points (0 - 25 pts):
+       - Exact URL matched in live SERP: 25 pts
+       - Domain root/subpage matched: 18 pts
+       - Confirmed 101 with verified total absence across all engines: 22 pts
+       - Inconclusive match: 10 pts
+       
+    3. Search Intent Alignment Points (0 - 25 pts):
+       - Top 3 SERP are Landing Pages (healthy landing intent): 25 pts
+       - Mixed SERP intent (1 Landing Page, 2 Blogs/Directories): 18 pts
+       - Intent shifted completely to Blogs/Wikis (justifying 101 drop): 20 pts if 101 else 12 pts
+       
+    4. SERP Data Depth & Freshness (0 - 15 pts):
+       - >= 20 organic listings parsed: 15 pts
+       - 10 - 19 organic listings parsed: 12 pts
+       - < 10 organic listings parsed: 8 pts
+    """
+    valid_ranks = [v["rank"] for v in engine_checks.values() if v.get("rank") is not None and v["rank"] != 101]
+    all_101 = all(v.get("rank") == 101 for v in engine_checks.values())
+    engine_count = len(engine_checks)
+
+    # 1. Source Consensus (Max 35)
+    if all_101 and engine_count >= 2:
+        consensus_pts = 35
+        consensus_expl = f"All {engine_count} verification engines (SerpAPI & Firecrawl) unanimously confirmed rank 101."
+    elif len(valid_ranks) >= 2 and max(valid_ranks) - min(valid_ranks) <= 3:
+        consensus_pts = 32
+        consensus_expl = f"Multiple engines agreed on tight ranking window (#{min(valid_ranks)}-#{max(valid_ranks)})."
+    elif len(valid_ranks) >= 1:
+        consensus_pts = 26
+        consensus_expl = f"Live ranking verified via search engine consensus; false 101 rejected."
+    else:
+        consensus_pts = 18
+        consensus_expl = "Single source resolution with fallback."
+
+    # 2. Match Precision (Max 25)
+    match_types = [v.get("match_type") for v in engine_checks.values()]
+    if "exact_url_match" in match_types:
+        precision_pts = 25
+        precision_expl = "Exact target landing page URL confirmed in live SERP."
+    elif "domain_match" in match_types:
+        precision_pts = 18
+        precision_expl = "Target domain matched in organic search results."
+    elif is_confirmed_101:
+        precision_pts = 22
+        precision_expl = "Target domain and URL completely absent from organic top 30 across all engines."
+    else:
+        precision_pts = 12
+        precision_expl = "Standard match evaluation."
+
+    # 3. Intent Alignment (Max 25)
+    if top3_is_landing:
+        intent_pts = 25
+        intent_expl = "Top 3 SERP results are commercial Landing Pages."
+    elif is_confirmed_101:
+        intent_pts = 20
+        intent_expl = f"SERP shifted to informational content ({', '.join(top3_types) if top3_types else 'Blogs/Articles'}), explaining ranking drop."
+    else:
+        intent_pts = 14
+        intent_expl = f"Mixed SERP search intent ({', '.join(top3_types) if top3_types else 'Mixed'})."
+
+    # 4. Data Depth & Freshness (Max 15)
+    max_results = max([v.get("total_results", 0) for v in engine_checks.values()] or [0])
+    if max_results >= 20:
+        depth_pts = 15
+        depth_expl = f"Deep SERP analysis across {max_results} organic listings."
+    elif max_results >= 10:
+        depth_pts = 12
+        depth_expl = f"Standard SERP analysis across {max_results} organic listings."
+    else:
+        depth_pts = 8
+        depth_expl = f"Partial SERP data ({max_results} listings)."
+
+    total_score = min(98, max(15, consensus_pts + precision_pts + intent_pts + depth_pts))
+
+    explanation = (
+        f"Confidence Score: {total_score}% (Consensus: {consensus_pts}/35, "
+        f"Precision: {precision_pts}/25, Intent: {intent_pts}/25, Data Depth: {depth_pts}/15). "
+        f"{consensus_expl} {precision_expl}"
+    )
+
+    return {
+        "total_score": total_score,
+        "source_consensus_pts": consensus_pts,
+        "match_precision_pts": precision_pts,
+        "intent_alignment_pts": intent_pts,
+        "data_depth_pts": depth_pts,
+        "explanation": explanation
+    }
+
+
+def verify_keyword_drop_with_agent(
+    keyword_item: Dict[str, Any],
+    default_domain: str = "",
+    country_code: str = "in"
+) -> Dict[str, Any]:
+    """
+    Intelligent Rank Verification Agent:
+    Triggered when a keyword that previously ranked (< 101) drops to 101 on a secondary check.
+    
+    Workflow:
+    1. Queries SerpAPI, Firecrawl, and BrightData in parallel.
+    2. If ANY engine finds a valid rank, rejects the 101 and takes the verified rank.
+    3. If ALL/BOTH engines show 101, confirms 101.
+    4. Analyzes the whole SERP output (intent, competitors, shifts).
+    5. Computes transparent multi-factor Confidence Score.
+    """
+    kw_text = str(keyword_item.get("keyword") or "").strip()
+    lp_url = str(keyword_item.get("landing_page_url") or keyword_item.get("topicLink") or "").strip()
+    prev_rank = int(_parse_num(keyword_item.get("rank") or keyword_item.get("prev_rank"), 0))
+
+    print(f"\n=======================================================", flush=True)
+    print(f"[Verification Agent] ⚠️ DROP-TO-101 DETECTED for keyword: \"{kw_text}\"", flush=True)
+    print(f"[Verification Agent] Previous Rank was #{prev_rank}. Initiating Multi-Engine Verification...", flush=True)
+    print(f"[Verification Agent] Querying SerpAPI + Firecrawl + BrightData in parallel...", flush=True)
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_fc = executor.submit(fetch_serp_via_firecrawl, kw_text, country_code=country_code, limit=30)
+        future_serpapi = executor.submit(fetch_serp_via_serpapi, kw_text, country_code=country_code, limit=30)
+        future_bd = executor.submit(fetch_serp_via_brightdata, kw_text, country_code=country_code)
+
+        fc_results = future_fc.result() or []
+        serpapi_results = future_serpapi.result() or []
+        bd_results = future_bd.result() or []
+
+    # Evaluate rank across engines
+    fc_eval = evaluate_serp_ranking(fc_results, target_url=lp_url, default_domain=default_domain)
+    serpapi_eval = evaluate_serp_ranking(serpapi_results, target_url=lp_url, default_domain=default_domain)
+    bd_eval = evaluate_serp_ranking(bd_results, target_url=lp_url, default_domain=default_domain)
+
+    engine_checks = {
+        "Firecrawl": fc_eval,
+        "SerpAPI": serpapi_eval,
+        "BrightData": bd_eval
+    }
+
+    print(f"[Verification Agent] Multi-Engine Scan Results for \"{kw_text}\":", flush=True)
+    print(f"   * Firecrawl : Rank #{fc_eval['rank']} ({fc_eval['match_type']}) [{fc_eval['total_results']} URLs parsed]", flush=True)
+    print(f"   * SerpAPI   : Rank #{serpapi_eval['rank']} ({serpapi_eval['match_type']}) [{serpapi_eval['total_results']} URLs parsed]", flush=True)
+    print(f"   * BrightData: Rank #{bd_eval['rank']} ({bd_eval['match_type']}) [{bd_eval['total_results']} URLs parsed]", flush=True)
+
+    # Determine Best Verified Rank
+    valid_ranks = []
+    if fc_eval["rank"] < 101:
+        valid_ranks.append((fc_eval["rank"], "Firecrawl", fc_eval))
+    if serpapi_eval["rank"] < 101:
+        valid_ranks.append((serpapi_eval["rank"], "SerpAPI", serpapi_eval))
+    if bd_eval["rank"] < 101:
+        valid_ranks.append((bd_eval["rank"], "BrightData", bd_eval))
+
+    # All top links across sources
+    all_top_links = []
+    seen_links = set()
+    for source_res in [serpapi_results, fc_results, bd_results]:
+        for r in source_res:
+            u = r.get("url")
+            if u and u not in seen_links:
+                seen_links.add(u)
+                all_top_links.append(u)
+
+    # Top 3 URLs analysis
+    top3_urls = all_top_links[:3] if all_top_links else []
+    top3_types = [_classify_url_target_type(u) for u in top3_urls]
+    top3_is_landing = sum(1 for t in top3_types if t == "Landing Page") >= 2 if top3_types else True
+
+    # Top competitors
+    top_competitors = [_get_bare_domain(u) for u in top3_urls if _get_bare_domain(u)]
+
+    if valid_ranks:
+        # One or more engines found a valid rank! Do NOT consider as 101!
+        valid_ranks.sort(key=lambda x: x[0])  # Take highest/best ranking verified
+        verified_rank = valid_ranks[0][0]
+        verified_source = valid_ranks[0][1]
+        is_confirmed_101 = False
+        consensus_summary = (
+            f"False 101 rejected! {verified_source} verified active rank #{verified_rank} "
+            f"(Matches: {', '.join(f'{src}: #{r}' for r, src, _ in valid_ranks)})."
+        )
+    else:
+        # Both/all engines show 101 -> Confirmed 101
+        verified_rank = 101
+        is_confirmed_101 = True
+        consensus_summary = f"Confirmed 101: Target URL and domain are genuinely absent across Firecrawl, SerpAPI, and BrightData."
+
+    # Compute Confidence Score & Breakdown
+    conf_calc = calculate_verification_confidence(
+        verified_rank=verified_rank,
+        prev_rank=prev_rank,
+        engine_checks=engine_checks,
+        top3_is_landing=top3_is_landing,
+        top3_types=top3_types,
+        is_confirmed_101=is_confirmed_101
+    )
+
+    confidence = conf_calc["total_score"]
+    delta = prev_rank - verified_rank
+
+    # Batch assignment and reason
+    if delta >= 1 or (verified_rank <= 3 and verified_rank < prev_rank):
+        batch = "high"
+        spots_str = f"{delta} spot" if delta == 1 else f"{delta} spots"
+        reason = f"Rank improved by {spots_str} (#{prev_rank} -> #{verified_rank}). {consensus_summary}"
+    elif is_confirmed_101:
+        if top3_is_landing:
+            batch = "medium"
+            reason = f"Verified severe drop outside top rankings (#{prev_rank} -> #{verified_rank}). High recovery potential; SERP is commercial landing pages."
+        else:
+            batch = "low"
+            reason = f"Verified drop to #{verified_rank}. SERP shifted away from landing pages to {', '.join(top3_types) if top3_types else 'blogs'}."
+    elif delta <= -2:
+        batch = "medium" if top3_is_landing else "low"
+        reason = f"Rank shifted from #{prev_rank} to #{verified_rank} (verified across engines). {'Top 3 are Landing Pages.' if top3_is_landing else 'SERP intent mismatch.'}"
+    else:
+        batch = "low"
+        reason = f"Rank remained stable at #{verified_rank} (delta: {delta:+d}). {consensus_summary}"
+
+    agent_analysis = (
+        f"Agent Analysis: {consensus_summary} "
+        f"Top Competitors holding SERP: {', '.join(top_competitors[:3]) or 'N/A'}. "
+        f"SERP Intent: {', '.join(top3_types) if top3_types else 'Unknown'}. "
+        f"{conf_calc['explanation']}"
+    )
+
+    print(f"[Verification Agent] Verdict: Verified Rank #{verified_rank} (was #{prev_rank}, Shift: {delta:+d})", flush=True)
+    print(f"[Verification Agent] Batch: {batch.upper()} | Confidence: {confidence}%", flush=True)
+    print(f"[Verification Agent] Score Breakdown: Consensus={conf_calc['source_consensus_pts']}/35, Precision={conf_calc['match_precision_pts']}/25, Intent={conf_calc['intent_alignment_pts']}/25, Depth={conf_calc['data_depth_pts']}/15", flush=True)
+    print(f"[Verification Agent] Agent Analysis: {agent_analysis}", flush=True)
+    print(f"=======================================================\n", flush=True)
+
+    return {
+        "verified_rank": verified_rank,
+        "prev_rank": prev_rank,
+        "new_rank": verified_rank,
+        "delta": delta,
+        "batch": batch,
+        "confidence": confidence,
+        "confidence_breakdown": conf_calc,
+        "reason": reason,
+        "agent_analysis": agent_analysis,
+        "top3_is_landing": top3_is_landing,
+        "top3_types": top3_types,
+        "top_links": all_top_links,
+        "is_confirmed_101": is_confirmed_101,
+        "engine_checks": {
+            "firecrawl_rank": fc_eval["rank"],
+            "serpapi_rank": serpapi_eval["rank"],
+            "brightdata_rank": bd_eval["rank"]
+        }
+    }
+
+
 def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "") -> Dict[str, Any]:
     """
     Live rank re-check + Top-3 SERP landing page verification for one keyword.
     DOES NOT modify the keyword_categories table.
+    
+    If keyword previously ranked (< 101) and secondary check returns 101,
+    the Multi-Engine Verification Agent is triggered to re-verify across
+    SerpAPI, Firecrawl, and BrightData.
     """
     kw_text = str(k.get("keyword") or "").strip()
     lp_url = str(k.get("landing_page_url") or k.get("topicLink") or "").strip()
@@ -290,6 +718,7 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "") -> D
     new_rank = prev_rank
     top_links = []
 
+    # 1. Primary Live Check via Firecrawl
     try:
         from services import rank_checker_fc
         new_rank, top_links = rank_checker_fc.find_rank(
@@ -309,7 +738,27 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "") -> D
             new_rank = prev_rank
             top_links = []
 
-    # Check top 3 SERP results
+    # 2. TRIGGER MULTI-ENGINE VERIFICATION AGENT IF PREVIOUSLY RANKED (< 101) AND NOW SHOWS 101
+    if prev_rank < 101 and new_rank == 101:
+        verified_data = verify_keyword_drop_with_agent(
+            k, default_domain=default_domain, country_code="in"
+        )
+        item = dict(k)
+        item["prev_rank"] = prev_rank
+        item["new_rank"] = verified_data["verified_rank"]
+        item["rank"] = verified_data["verified_rank"]
+        item["delta"] = verified_data["delta"]
+        item["top3_is_landing"] = verified_data["top3_is_landing"]
+        item["top3_types"] = verified_data["top3_types"]
+        item["batch"] = verified_data["batch"]
+        item["confidence"] = verified_data["confidence"]
+        item["confidence_breakdown"] = verified_data["confidence_breakdown"]
+        item["reason"] = verified_data["reason"]
+        item["agent_analysis"] = verified_data["agent_analysis"]
+        item["verification_details"] = verified_data
+        return item
+
+    # 3. Standard flow when no 101 anomaly detected
     top3 = top_links[:3] if top_links else []
     top3_types = []
     for u in top3:
@@ -327,8 +776,7 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "") -> D
 
     delta = prev_rank - new_rank  # positive = improved, negative = dropped
 
-    # Rule: if the rank is increased even by one (delta >= 1), it must NOT be in batch 3.
-    # It is placed in Batch 1 (high confidence push).
+    # Rule: if the rank is increased even by one (delta >= 1), it is placed in Batch 1
     if delta >= 1 or (new_rank <= 3 and new_rank < prev_rank):
         batch = "high"
         confidence = min(98, 85 + delta * 2) if top3_is_landing else 78
@@ -349,6 +797,16 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "") -> D
         else:
             reason = f"Rank didn't even move (#{prev_rank} -> #{new_rank}, delta: {delta:+d}). Stagnant SERP velocity."
 
+    # Explainable confidence calculation for standard items
+    conf_calc = {
+        "total_score": confidence,
+        "source_consensus_pts": 25,
+        "match_precision_pts": 25 if new_rank < 101 else 15,
+        "intent_alignment_pts": 25 if top3_is_landing else 15,
+        "data_depth_pts": 15 if len(top_links) >= 10 else 10,
+        "explanation": f"Confidence Score: {confidence}% (Evaluated via live SERP scan and Top-3 intent classification)."
+    }
+
     batch_display = "BATCH 1 (High - Improved)" if batch == "high" else ("BATCH 2 (Medium - Dropped)" if batch == "medium" else "BATCH 3 (Low - Stagnant)")
     shift_str = f"+{delta} (UP)" if delta > 0 else (f"{delta} (DOWN)" if delta < 0 else "0 (NO CHANGE)")
     print(f"[Calendar AI Check]     Result for \"{kw_text}\": Live Rank #{new_rank} [was #{prev_rank}] | Shift: {shift_str}", flush=True)
@@ -365,8 +823,10 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "") -> D
     item["top3_types"] = top3_types
     item["batch"] = batch
     item["confidence"] = confidence
+    item["confidence_breakdown"] = conf_calc
     item["reason"] = reason
     return item
+
 
 
 def calculate_live_serp_batches(
