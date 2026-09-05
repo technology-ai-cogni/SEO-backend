@@ -14,7 +14,7 @@ import json
 import csv
 import io
 from decimal import Decimal
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
@@ -126,6 +126,8 @@ class PushPotentialRequest(BaseModel):
     domain: Optional[str] = ""
     country: Optional[str] = "India"
     keywords: Optional[List[Dict[str, Any]]] = None
+    budget: Optional[float] = None
+    quantity: Optional[int] = None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -177,7 +179,7 @@ def get_potential_keywords_from_db(project_slug_or_name: str) -> List[Dict[str, 
 
     # Query with target_type landing check and min rank 5, ordered by search volume descending
     query = text("""
-        SELECT id, keyword, category, cluster, rank, sv, kw_diff, landing_page_url, target_type
+        SELECT id, keyword, category, cluster, rank, sv, kw_diff, landing_page_url, target_type, rank_meta
         FROM keyword_categories
         WHERE (LOWER(project_name) = :slug OR LOWER(project_name) = :alt_slug)
           AND LOWER(COALESCE(target_type, '')) LIKE '%landing%'
@@ -208,15 +210,28 @@ def get_potential_keywords_from_db(project_slug_or_name: str) -> List[Dict[str, 
         sv = _parse_num(k.get("sv"), 0)
         kd = _parse_num(k.get("kw_diff"), 0)
 
+        # Baseline vs Historical / Previous Rank Analysis
+        rm = k.get("rank_meta")
+        if isinstance(rm, str):
+            try:
+                rm = json.loads(rm)
+            except Exception:
+                rm = {}
+        elif not isinstance(rm, dict):
+            rm = {}
+
+        prev_rank = _parse_num(rm.get("previous_rank") or rm.get("prev_rank") or rm.get("initial_rank") or rank, rank)
+        delta = int(prev_rank) - int(rank)  # delta < 0 means rank worsened (dropped); delta > 0 means gained
+
         scored.append({
             "id": k.get("id") or kw_text,
             "keyword": kw_text,
             "category": k.get("category") or "General",
             "cluster": k.get("cluster") or "General",
             "rank": int(rank),
-            "prev_rank": int(rank),
+            "prev_rank": int(prev_rank),
             "new_rank": int(rank),
-            "delta": 0,
+            "delta": int(delta),
             "sv": int(sv),
             "kd": int(kd),
             "target_type": k.get("target_type") or "Landing Page",
@@ -240,28 +255,158 @@ def get_potential_keywords_from_db(project_slug_or_name: str) -> List[Dict[str, 
     return scored
 
 
+# ─────────────────────────────────────────────────────────────
+# 3.0 OUTREACH SITES INTEGRATION & 3-DOMAIN LIMIT ALLOCATOR
+# ─────────────────────────────────────────────────────────────
+
+def fetch_available_outreach_sites(project_slug: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Fetch active outreach sites for the project, falling back to all active sites if none exist for project.
+    Filters out rejected sites and sorts by Domain Authority (DA) descending.
+    """
+    clean_slug = (project_slug or "").strip().lower()
+    sites = []
+    with engine.begin() as conn:
+        if clean_slug:
+            try:
+                res = conn.execute(
+                    text("""
+                        SELECT id, domain, url, type, da, pa, ss, landing_price, selling_price, country, domain_industry, status
+                        FROM outreach_sites
+                        WHERE LOWER(project_slug) = :slug AND LOWER(COALESCE(status, '')) != 'rejected'
+                        ORDER BY da DESC NULLS LAST, id ASC
+                    """),
+                    {"slug": clean_slug}
+                )
+                sites = [_clean_for_json(dict(r._mapping)) for r in res]
+            except Exception as e:
+                print(f"[Calendar Outreach] Error querying project sites: {e}", file=sys.stderr)
+
+        if not sites:
+            try:
+                res = conn.execute(
+                    text("""
+                        SELECT id, domain, url, type, da, pa, ss, landing_price, selling_price, country, domain_industry, status
+                        FROM outreach_sites
+                        WHERE LOWER(COALESCE(status, '')) != 'rejected'
+                        ORDER BY da DESC NULLS LAST, id ASC
+                        LIMIT 50
+                    """)
+                )
+                sites = [_clean_for_json(dict(r._mapping)) for r in res]
+            except Exception as e:
+                print(f"[Calendar Outreach] Error querying fallback sites: {e}", file=sys.stderr)
+
+    # Fallback curated inventory if table is empty in development
+    if not sites:
+        sites = [
+            {"id": 101, "domain": "techbullion.com", "url": "https://techbullion.com", "da": 62, "ss": "1%", "selling_price": "180", "status": "Active"},
+            {"id": 102, "domain": "bignewsnetwork.com", "url": "https://bignewsnetwork.com", "da": 68, "ss": "2%", "selling_price": "220", "status": "Active"},
+            {"id": 103, "domain": "ventsmagazine.com", "url": "https://ventsmagazine.com", "da": 64, "ss": "1%", "selling_price": "160", "status": "Active"},
+            {"id": 104, "domain": "techtimes.com", "url": "https://techtimes.com", "da": 75, "ss": "1%", "selling_price": "290", "status": "Active"},
+            {"id": 105, "domain": "startupguys.net", "url": "https://startupguys.net", "da": 55, "ss": "1%", "selling_price": "130", "status": "Active"},
+            {"id": 106, "domain": "geekflare.com", "url": "https://geekflare.com", "da": 71, "ss": "1%", "selling_price": "250", "status": "Active"},
+            {"id": 107, "domain": "readwrite.com", "url": "https://readwrite.com", "da": 79, "ss": "2%", "selling_price": "350", "status": "Active"}
+        ]
+    return sites
+
+
+def assign_outreach_sites_to_keywords(
+    keywords: List[Dict[str, Any]],
+    available_sites: List[Dict[str, Any]],
+    budget_ceiling: Optional[float] = None,
+    requested_quantity: Optional[int] = None
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Assigns outreach sites to candidate keywords enforcing:
+    1. Maximum 3 assignments per domain in a single campaign batch (anti-footprint / diversification).
+    2. Budget optimization (calculates unit price, total spend, savings).
+    """
+    if not available_sites:
+        available_sites = fetch_available_outreach_sites(None)
+
+    domain_usage_counts = {}
+    assigned_keywords = []
+    total_cost = 0.0
+
+    for kw in keywords:
+        item = dict(kw)
+        # Find next available site where domain usage count < 3
+        chosen_site = None
+        for site in available_sites:
+            d = str(site.get("domain") or "").strip().lower()
+            if not d:
+                continue
+            if domain_usage_counts.get(d, 0) < 3:
+                chosen_site = site
+                domain_usage_counts[d] = domain_usage_counts.get(d, 0) + 1
+                break
+
+        # Fallback: if all sites reached 3-count limit, pick site with lowest usage
+        if not chosen_site and available_sites:
+            chosen_site = min(available_sites, key=lambda s: domain_usage_counts.get(str(s.get("domain") or "").lower(), 0))
+            d = str(chosen_site.get("domain") or "").lower()
+            domain_usage_counts[d] = domain_usage_counts.get(d, 0) + 1
+
+        price_val = _parse_num(chosen_site.get("selling_price") or chosen_site.get("landing_price") or 180.0, 180.0)
+
+        item["outreach_site"] = {
+            "id": chosen_site.get("id"),
+            "domain": chosen_site.get("domain") or "outreach-partner.com",
+            "url": chosen_site.get("url") or f"https://{chosen_site.get('domain', 'site.com')}",
+            "da": int(chosen_site.get("da") or 50),
+            "ss": str(chosen_site.get("ss") or "1%"),
+            "price": f"${int(price_val)}"
+        }
+        total_cost += price_val
+        assigned_keywords.append(item)
+
+    # Budget & Activity anti-waste optimization
+    req_qty = requested_quantity or len(assigned_keywords)
+    budget_cap = budget_ceiling if (budget_ceiling and budget_ceiling > 0) else float(req_qty * 200.0)
+    recommended_qty = len(assigned_keywords)
+    savings = max(0.0, budget_cap - total_cost)
+
+    budget_summary = {
+        "requested_quantity": req_qty,
+        "recommended_quantity": recommended_qty,
+        "redundant_posts_saved": max(0, req_qty - recommended_qty),
+        "budget_cap": round(budget_cap, 2),
+        "planned_spend": round(total_cost, 2),
+        "projected_savings": round(savings, 2),
+        "avg_cost_per_post": round(total_cost / max(1, recommended_qty), 2)
+    }
+
+    return assigned_keywords, budget_summary
+
+
 def calculate_heuristic_batches(potential: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """
     Initial fast heuristic fallback before live SERP rank checking finishes.
+    Splits keywords into Gains (Batch 1), Drops / Red Alert (Batch 2), and Stagnant (Batch 3).
     """
     out = {"high": [], "medium": [], "low": []}
     for k in potential or []:
         rank = _parse_num(k.get("rank"), 99)
+        prev_rank = _parse_num(k.get("prev_rank"), rank)
+        delta = int(k.get("delta") or (prev_rank - rank))
         kd = _parse_num(k.get("kd"), 0)
         sv = _parse_num(k.get("sv"), 0)
 
-        if rank <= 10 and kd <= 45 and sv > 0:
-            batch = "high"
-            confidence = 80
-            reason = "Page 1 striking distance with landing page intent."
-        elif rank <= 15 and kd <= 65:
-            batch = "medium"
-            confidence = 60
-            reason = "Moderate rank position with landing page intent."
+        # Batch 2: Drops (Red Alert) - rank slipped down compared to baseline/previous
+        if delta < 0 or (rank >= 12 and kd <= 60):
+            batch = "medium"  # Batch 2: Extremely Dropped (Red Alert)
+            confidence = 75 if delta < 0 else 60
+            reason = f"Rank dropped by {abs(delta)} positions (was #{int(prev_rank)} -> now #{int(rank)}). Prime recovery target." if delta < 0 else "Moderate rank position in range with recovery potential."
+        # Batch 1: Gains - improved or page 1 striking distance
+        elif delta > 0 or (rank <= 10 and kd <= 50 and sv > 0):
+            batch = "high"   # Batch 1: Extremely Improved (Gains)
+            confidence = 85 if delta > 0 else 80
+            reason = f"Rank gained +{delta} positions (was #{int(prev_rank)} -> now #{int(rank)}). High momentum candidate." if delta > 0 else "Page 1 striking distance with landing page intent."
         else:
-            batch = "low"
-            confidence = 35
-            reason = "Lower rank position in range."
+            batch = "low"    # Batch 3: Stagnant / Low Movement
+            confidence = 40
+            reason = "Rank hasn't moved significantly. Stagnant SERP velocity candidate."
 
         item = dict(k)
         item["batch"] = batch
@@ -352,10 +497,10 @@ def fetch_serp_via_serpapi(keyword: str, country_code: str = "in", limit: int = 
 
     # Fallback to Bright Data SERP scraper if SerpAPI is not configured
     try:
-        from scripts.agentic_rank_checker import fetch_serp_brightdata
-        raw = fetch_serp_brightdata(keyword, start=0, country_code=country_code)
-        if raw:
-            return [{"url": r.get("url"), "title": r.get("title", ""), "snippet": r.get("snippet", ""), "source": "BrightData"} for r in raw]
+        from services import rank_checker
+        links = rank_checker.get_top_n_organic_links(keyword, n=limit, country_code=country_code)
+        if links:
+            return [{"url": u, "title": "", "snippet": "", "source": "BrightData"} for u in links]
     except Exception:
         pass
     return []
@@ -374,15 +519,16 @@ def fetch_serp_via_firecrawl(keyword: str, country_code: str = "in", limit: int 
         return []
 
 
-def fetch_serp_via_brightdata(keyword: str, country_code: str = "in") -> List[Dict[str, Any]]:
+def fetch_serp_via_brightdata(keyword: str, country_code: str = "in", limit: int = 30) -> List[Dict[str, Any]]:
     """
     Fetch organic search results from Bright Data Web Unlocker SERP zone.
     """
     try:
-        from scripts.agentic_rank_checker import fetch_serp_brightdata
-        raw = fetch_serp_brightdata(keyword, start=0, country_code=country_code)
-        if raw:
-            return [{"url": r.get("url"), "title": r.get("title", ""), "snippet": r.get("snippet", ""), "source": "BrightData"} for r in raw]
+        from services import rank_checker
+        links = rank_checker.get_top_n_organic_links(keyword, n=limit, country_code=country_code)
+        if links:
+            return [{"url": u, "title": "", "snippet": "", "source": "BrightData"} for u in links]
+        return []
     except Exception as e:
         print(f"[Verification Agent] Bright Data fetch notice for '{keyword}': {e}", flush=True)
         return []
@@ -396,6 +542,7 @@ def evaluate_serp_ranking(
     """
     Evaluates whether target_url or default_domain ranks in the given organic search results.
     """
+    results = results or []
     clean_target = _clean_url_for_matching(target_url)
     target_domain = _get_bare_domain(target_url) or _get_bare_domain(default_domain)
 
@@ -469,18 +616,15 @@ def calculate_verification_confidence(
     engine_count = len(engine_checks)
 
     # 1. Source Consensus (Max 35)
-    if all_101 and engine_count >= 2:
+    if all_101:
         consensus_pts = 35
-        consensus_expl = f"All {engine_count} verification engines (SerpAPI & Firecrawl) unanimously confirmed rank 101."
-    elif len(valid_ranks) >= 2 and max(valid_ranks) - min(valid_ranks) <= 3:
-        consensus_pts = 32
-        consensus_expl = f"Multiple engines agreed on tight ranking window (#{min(valid_ranks)}-#{max(valid_ranks)})."
+        consensus_expl = "Bright Data SERP verification confirmed rank 101."
     elif len(valid_ranks) >= 1:
-        consensus_pts = 26
-        consensus_expl = f"Live ranking verified via search engine consensus; false 101 rejected."
+        consensus_pts = 32
+        consensus_expl = f"Live ranking #{valid_ranks[0]} verified via Bright Data SERP."
     else:
-        consensus_pts = 18
-        consensus_expl = "Single source resolution with fallback."
+        consensus_pts = 20
+        consensus_expl = "Bright Data resolution."
 
     # 2. Match Precision (Max 25)
     match_types = [v.get("match_type") for v in engine_checks.values()]
@@ -492,7 +636,7 @@ def calculate_verification_confidence(
         precision_expl = "Target domain matched in organic search results."
     elif is_confirmed_101:
         precision_pts = 22
-        precision_expl = "Target domain and URL completely absent from organic top 30 across all engines."
+        precision_expl = "Target domain and URL completely absent from organic top 30 in Bright Data."
     else:
         precision_pts = 12
         precision_expl = "Standard match evaluation."
@@ -560,54 +704,32 @@ def verify_keyword_drop_with_agent(
 
     print(f"\n=======================================================", flush=True)
     print(f"[Verification Agent] ⚠️ DROP-TO-101 DETECTED for keyword: \"{kw_text}\"", flush=True)
-    print(f"[Verification Agent] Previous Rank was #{prev_rank}. Initiating Multi-Engine Verification...", flush=True)
-    print(f"[Verification Agent] Querying SerpAPI + Firecrawl + BrightData in parallel...", flush=True)
+    print(f"[Verification Agent] Previous Rank was #{prev_rank}. Initiating Bright Data Deep Verification...", flush=True)
 
-    from concurrent.futures import ThreadPoolExecutor
-
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        future_fc = executor.submit(fetch_serp_via_firecrawl, kw_text, country_code=country_code, limit=30)
-        future_serpapi = executor.submit(fetch_serp_via_serpapi, kw_text, country_code=country_code, limit=30)
-        future_bd = executor.submit(fetch_serp_via_brightdata, kw_text, country_code=country_code)
-
-        fc_results = future_fc.result() or []
-        serpapi_results = future_serpapi.result() or []
-        bd_results = future_bd.result() or []
-
-    # Evaluate rank across engines
-    fc_eval = evaluate_serp_ranking(fc_results, target_url=lp_url, default_domain=default_domain)
-    serpapi_eval = evaluate_serp_ranking(serpapi_results, target_url=lp_url, default_domain=default_domain)
+    bd_results = fetch_serp_via_brightdata(kw_text, country_code=country_code, limit=40) or []
     bd_eval = evaluate_serp_ranking(bd_results, target_url=lp_url, default_domain=default_domain)
 
     engine_checks = {
-        "Firecrawl": fc_eval,
-        "SerpAPI": serpapi_eval,
         "BrightData": bd_eval
     }
 
-    print(f"[Verification Agent] Multi-Engine Scan Results for \"{kw_text}\":", flush=True)
-    print(f"   * Firecrawl : Rank #{fc_eval['rank']} ({fc_eval['match_type']}) [{fc_eval['total_results']} URLs parsed]", flush=True)
-    print(f"   * SerpAPI   : Rank #{serpapi_eval['rank']} ({serpapi_eval['match_type']}) [{serpapi_eval['total_results']} URLs parsed]", flush=True)
+    print(f"[Verification Agent] Bright Data Scan Result for \"{kw_text}\":", flush=True)
     print(f"   * BrightData: Rank #{bd_eval['rank']} ({bd_eval['match_type']}) [{bd_eval['total_results']} URLs parsed]", flush=True)
 
     # Determine Best Verified Rank
-    valid_ranks = []
-    if fc_eval["rank"] < 101:
-        valid_ranks.append((fc_eval["rank"], "Firecrawl", fc_eval))
-    if serpapi_eval["rank"] < 101:
-        valid_ranks.append((serpapi_eval["rank"], "SerpAPI", serpapi_eval))
     if bd_eval["rank"] < 101:
-        valid_ranks.append((bd_eval["rank"], "BrightData", bd_eval))
+        verified_rank = bd_eval["rank"]
+        verified_source = "BrightData"
+        is_confirmed_101 = False
+        consensus_summary = f"False 101 rejected! Bright Data verified active rank #{verified_rank}."
+    else:
+        verified_rank = 101
+        verified_source = "BrightData"
+        is_confirmed_101 = True
+        consensus_summary = "Confirmed 101: Target URL and domain are absent from top organic rankings in Bright Data."
 
-    # All top links across sources
-    all_top_links = []
-    seen_links = set()
-    for source_res in [serpapi_results, fc_results, bd_results]:
-        for r in source_res:
-            u = r.get("url")
-            if u and u not in seen_links:
-                seen_links.add(u)
-                all_top_links.append(u)
+    # All top links from Bright Data
+    all_top_links = [r.get("url") for r in bd_results if r.get("url")]
 
     # Top 3 URLs analysis
     top3_urls = all_top_links[:3] if all_top_links else []
@@ -616,22 +738,6 @@ def verify_keyword_drop_with_agent(
 
     # Top competitors
     top_competitors = [_get_bare_domain(u) for u in top3_urls if _get_bare_domain(u)]
-
-    if valid_ranks:
-        # One or more engines found a valid rank! Do NOT consider as 101!
-        valid_ranks.sort(key=lambda x: x[0])  # Take highest/best ranking verified
-        verified_rank = valid_ranks[0][0]
-        verified_source = valid_ranks[0][1]
-        is_confirmed_101 = False
-        consensus_summary = (
-            f"False 101 rejected! {verified_source} verified active rank #{verified_rank} "
-            f"(Matches: {', '.join(f'{src}: #{r}' for r, src, _ in valid_ranks)})."
-        )
-    else:
-        # Both/all engines show 101 -> Confirmed 101
-        verified_rank = 101
-        is_confirmed_101 = True
-        consensus_summary = f"Confirmed 101: Target URL and domain are genuinely absent across Firecrawl, SerpAPI, and BrightData."
 
     # Compute Confidence Score & Breakdown
     conf_calc = calculate_verification_confidence(
@@ -660,7 +766,7 @@ def verify_keyword_drop_with_agent(
             reason = f"Verified drop to #{verified_rank}. SERP shifted away from landing pages to {', '.join(top3_types) if top3_types else 'blogs'}."
     elif delta <= -2:
         batch = "medium" if top3_is_landing else "low"
-        reason = f"Rank shifted from #{prev_rank} to #{verified_rank} (verified across engines). {'Top 3 are Landing Pages.' if top3_is_landing else 'SERP intent mismatch.'}"
+        reason = f"Rank shifted from #{prev_rank} to #{verified_rank} (verified via Bright Data). {'Top 3 are Landing Pages.' if top3_is_landing else 'SERP intent mismatch.'}"
     else:
         batch = "low"
         reason = f"Rank remained stable at #{verified_rank} (delta: {delta:+d}). {consensus_summary}"
@@ -693,8 +799,6 @@ def verify_keyword_drop_with_agent(
         "top_links": all_top_links,
         "is_confirmed_101": is_confirmed_101,
         "engine_checks": {
-            "firecrawl_rank": fc_eval["rank"],
-            "serpapi_rank": serpapi_eval["rank"],
             "brightdata_rank": bd_eval["rank"]
         }
     }
@@ -703,40 +807,28 @@ def verify_keyword_drop_with_agent(
 def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "") -> Dict[str, Any]:
     """
     Live rank re-check + Top-3 SERP landing page verification for one keyword.
-    DOES NOT modify the keyword_categories table.
-    
-    If keyword previously ranked (< 101) and secondary check returns 101,
-    the Multi-Engine Verification Agent is triggered to re-verify across
-    SerpAPI, Firecrawl, and BrightData.
+    Exclusively powered by Bright Data Web Unlocker SERP zone.
     """
     kw_text = str(k.get("keyword") or "").strip()
     lp_url = str(k.get("landing_page_url") or k.get("topicLink") or "").strip()
     prev_rank = int(_parse_num(k.get("rank") or k.get("prev_rank"), 0))
 
-    print(f"[Calendar AI Check] >>> Checking keyword: \"{kw_text}\" | DB Rank: #{prev_rank} | LP URL: {lp_url or 'None'}", flush=True)
+    print(f"[Calendar AI Check] >>> Checking keyword via Bright Data: \"{kw_text}\" | DB Rank: #{prev_rank} | LP URL: {lp_url or 'None'}", flush=True)
 
     new_rank = prev_rank
     top_links = []
 
-    # 1. Primary Live Check via Firecrawl
+    # Live Check via Bright Data Web Unlocker
     try:
-        from services import rank_checker_fc
-        new_rank, top_links = rank_checker_fc.find_rank(
+        from services import rank_checker
+        new_rank, top_links = rank_checker.find_rank(
             kw_text, lp_url, default_domain=default_domain, country_code="in"
         )
         top_links = top_links or []
     except Exception as e:
-        print(f"[Calendar AI Check] Firecrawl notice for \"{kw_text}\": {e}. Trying secondary rank checker...", flush=True)
-        try:
-            from services import rank_checker
-            new_rank, top_links = rank_checker.find_rank(
-                kw_text, lp_url, default_domain=default_domain, country_code="in"
-            )
-            top_links = top_links or []
-        except Exception as e2:
-            print(f"[Calendar AI Check] Secondary rank checker notice for \"{kw_text}\": {e2}", flush=True)
-            new_rank = prev_rank
-            top_links = []
+        print(f"[Calendar AI Check] Bright Data rank check error for \"{kw_text}\": {e}", flush=True)
+        new_rank = prev_rank
+        top_links = []
 
     # 2. TRIGGER MULTI-ENGINE VERIFICATION AGENT IF PREVIOUSLY RANKED (< 101) AND NOW SHOWS 101
     if prev_rank < 101 and new_rank == 101:
@@ -1002,6 +1094,8 @@ def calculate_ai_batches(
 
 def _normalize_status(st: Any) -> str:
     s = str(st or "saved").lower().strip()
+    if "pub" in s or "live" in s:
+        return "published"
     if "sched" in s or "pend" in s:
         return "scheduled"
     if "appr" in s or "comp" in s or "done" in s:
@@ -1016,7 +1110,7 @@ def list_calendar_activities(
 ) -> Dict[str, Any]:
     """
     List activities from `off_page_activities`, filtered by project, status, and search query.
-    Returns activities plus count breakdown across 'saved', 'scheduled', 'approved'.
+    Returns activities plus count breakdown across 'saved', 'scheduled', 'approved', 'published'.
     """
     with engine.begin() as conn:
         try:
@@ -1024,9 +1118,9 @@ def list_calendar_activities(
             all_rows = [dict(r._mapping) for r in res]
         except Exception as e:
             print(f"[calendar_backend] Error querying off_page_activities: {e}", file=sys.stderr)
-            return {"activities": [], "counts": {"saved": 0, "scheduled": 0, "approved": 0}}
+            return {"activities": [], "counts": {"saved": 0, "scheduled": 0, "approved": 0, "published": 0}}
 
-    counts = {"saved": 0, "scheduled": 0, "approved": 0}
+    counts = {"saved": 0, "scheduled": 0, "approved": 0, "published": 0}
     filtered = []
 
     clean_proj = (project_name or "").strip().lower()
@@ -1248,7 +1342,9 @@ def get_potential_keywords_endpoint(
     project_slug: str = Query(..., description="Project slug or name"),
     domain: Optional[str] = Query("", description="Domain name for intent matching"),
     country: Optional[str] = Query("India", description="Target region"),
-    run_ai: bool = Query(False, description="Whether to run full OpenAI triage immediately")
+    run_ai: bool = Query(False, description="Whether to run full OpenAI triage immediately"),
+    budget: Optional[float] = Query(None, description="Total budget cap for batch"),
+    quantity: Optional[int] = Query(None, description="Requested number of activities")
 ):
     """
     Retrieve Rank 5+ potential keywords for a project and calculate push batches.
@@ -1264,8 +1360,19 @@ def get_potential_keywords_endpoint(
             "total_potential": 0,
             "potential_keywords": [],
             "batches": {"high": [], "medium": [], "low": []},
-            "summary": "No rank 5+ keywords found for this project."
+            "summary": "No rank 5+ keywords found for this project.",
+            "available_outreach_sites": [],
+            "budget_optimization": None
         }
+
+    # Fetch available outreach sites and assign with 3-domain limit
+    available_sites = fetch_available_outreach_sites(project_slug)
+    potential, budget_summary = assign_outreach_sites_to_keywords(
+        potential,
+        available_sites,
+        budget_ceiling=budget,
+        requested_quantity=quantity
+    )
 
     if run_ai:
         print(f"[Calendar API] run_ai=True: Running live SERP rank & intent evaluation...", flush=True)
@@ -1282,7 +1389,9 @@ def get_potential_keywords_endpoint(
         "total_potential": len(potential),
         "potential_keywords": potential,
         "batches": batches,
-        "summary": summary
+        "summary": summary,
+        "available_outreach_sites": available_sites,
+        "budget_optimization": budget_summary
     }
 
 
@@ -1300,10 +1409,25 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
         print(f"[Calendar API] No keywords provided for analysis.", flush=True)
         return {
             "batches": {"high": [], "medium": [], "low": []},
-            "summary": "No keywords provided."
+            "summary": "No keywords provided.",
+            "available_outreach_sites": [],
+            "budget_optimization": None
         }
 
     ai_res = calculate_live_serp_batches(keywords, domain=payload.domain or payload.project_slug or "", country=payload.country or "India")
+    
+    # Enrich with outreach sites & 3-domain rule
+    available_sites = fetch_available_outreach_sites(payload.project_slug)
+    eval_kws = ai_res.get("evaluated_keywords") or keywords
+    assigned_kws, budget_summary = assign_outreach_sites_to_keywords(
+        eval_kws,
+        available_sites,
+        budget_ceiling=payload.budget,
+        requested_quantity=payload.quantity
+    )
+    ai_res["evaluated_keywords"] = assigned_kws
+    ai_res["available_outreach_sites"] = available_sites
+    ai_res["budget_optimization"] = budget_summary
     return ai_res
 
 

@@ -3019,13 +3019,15 @@ export const updateOffPageActivityApi = updateCalendarActivityApi;
 export const deleteOffPageActivityApi = deleteCalendarActivityApi;
 
 // Fetch Rank 5-20 potential keywords and push-potential batches directly from Python backend
-export async function fetchCalendarPotentialKeywordsApi(projectSlug, domain = '', runAi = false) {
+export async function fetchCalendarPotentialKeywordsApi(projectSlug, domain = '', runAi = false, budget = null, quantity = null) {
   if (!projectSlug) return { potential_keywords: [], batches: { high: [], medium: [], low: [] }, total_potential: 0 };
   const params = new URLSearchParams({
     project_slug: projectSlug,
     domain: domain || '',
     run_ai: runAi ? 'true' : 'false'
   });
+  if (budget != null) params.append('budget', String(budget));
+  if (quantity != null) params.append('quantity', String(quantity));
   try {
     const res = await fetch(`${CATEGORY_API_BASE}/calendar/potential-keywords?${params.toString()}`);
     if (res.ok) {
@@ -3038,12 +3040,12 @@ export async function fetchCalendarPotentialKeywordsApi(projectSlug, domain = ''
 }
 
 // Run AI push-potential triage via Python backend
-export async function analyzeCalendarAiPushPotentialApi(projectSlug, domain = '', keywords = [], country = 'India') {
+export async function analyzeCalendarAiPushPotentialApi(projectSlug, domain = '', keywords = [], country = 'India', budget = null, quantity = null) {
   try {
     const res = await fetch(`${CATEGORY_API_BASE}/calendar/analyze-potential`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_slug: projectSlug, domain, country, keywords })
+      body: JSON.stringify({ project_slug: projectSlug, domain, country, keywords, budget, quantity })
     });
     if (res.ok) {
       return await res.json();
@@ -3053,3 +3055,4 @@ export async function analyzeCalendarAiPushPotentialApi(projectSlug, domain = ''
   }
   return null;
 }
+

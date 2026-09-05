@@ -6,6 +6,8 @@ import {
   Search,
   FolderOpen,
   ChevronDown,
+  ChevronUp,
+  ArrowLeft,
   Plus,
   FileSpreadsheet,
   Edit3,
@@ -13,9 +15,24 @@ import {
   X,
   Sparkles,
   Download,
-  Check
+  Check,
+  Info,
+  Calendar as CalendarIcon,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Layers,
+  Eye,
+  Sliders,
+  ExternalLink,
+  HelpCircle,
+  User as UserIcon,
+  AlertCircle,
+  Globe,
+  Bot,
+  DollarSign,
+  Send
 } from 'lucide-react';
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import {
   fetchDomainRows,
   listCalendarActivitiesApi,
@@ -27,8 +44,14 @@ import {
 } from '../../lib/projectsApi';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+const PERIOD_YEARS = [2025, 2026, 2027, 2028];
+
 // Custom single-select whose option list always opens BELOW the control
-// (native <select> on macOS pops over elements above it).
 function PlainSelect({ value, onChange, options, placeholder = 'Select...', required }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -96,29 +119,26 @@ function PlainSelect({ value, onChange, options, placeholder = 'Select...', requ
 }
 
 // ─── PUSH-POTENTIAL BATCHING ───
-// Batch 1 (high): Live rank extremely improved vs keywords_categories + Top 3 SERP are Landing Pages
-// Batch 2 (medium): Live rank extremely dropped vs keywords_categories + Top 3 SERP are Landing Pages (Recovery target)
-// Batch 3 (low): Rank didn't even move OR Top 3 SERP shifted away from Landing Pages
 const PUSH_BATCH_META = {
   high: {
     key: 'high',
     order: 1,
-    label: 'Batch 1 · Extremely Improved',
+    label: 'Batch 1 · Extremely Improved (Gains)',
     tint: '#16a34a',
     bg: '#f0fdf4',
     border: '#bbf7d0',
     Icon: TrendingUp,
-    hint: 'Live rank surged vs previous keywords_categories rank & Top 3 Google SERP are Landing Pages'
+    hint: 'Live rank surged vs previous rank & Top 3 Google SERP are Landing Pages'
   },
   medium: {
     key: 'medium',
     order: 2,
-    label: 'Batch 2 · Extremely Dropped',
+    label: 'Batch 2 · Extremely Dropped (Red Alert)',
     tint: '#d97706',
     bg: '#fffbeb',
     border: '#fde68a',
     Icon: TrendingDown,
-    hint: 'Live rank dropped vs keywords_categories & Top 3 Google SERP are Landing Pages (Prime recovery targets)'
+    hint: 'Live rank dropped vs previous rank & Top 3 Google SERP are Landing Pages (Prime recovery targets)'
   },
   low: {
     key: 'low',
@@ -128,11 +148,11 @@ const PUSH_BATCH_META = {
     bg: '#f8fafc',
     border: '#cbd5e1',
     Icon: Minus,
-    hint: 'Rank didn’t even move or Top 3 Google SERP shifted away from Landing Pages'
+    hint: 'Rank didn’t move or Top 3 Google SERP shifted away from Landing Pages'
   },
 };
 
-function CalendarPage({ user }) {
+function CalendarPage({ user, onNavigate }) {
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -142,47 +162,106 @@ function CalendarPage({ user }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Live Supabase / Backend off_page_activities data
+  // Live activities data
   const [activities, setActivities] = useState([]);
+
+  // Tree Table state (which project rows are expanded)
+  const [expandedProjects, setExpandedProjects] = useState(new Set());
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [aiSchedulingEnabled, setAiSchedulingEnabled] = useState(true);
+  const [confirmAiModalOpen, setConfirmAiModalOpen] = useState(false);
   const [modalStep, setModalStep] = useState('form'); // 'form' | 'keywords_prompt'
   const [createdActivity, setCreatedActivity] = useState(null);
   const [savingActivity, setSavingActivity] = useState(false);
   const [loadingKeywords, setLoadingKeywords] = useState(false);
-  const [modalKeywords, setModalKeywords] = useState([]);
+  const [loadingStepText, setLoadingStepText] = useState('Scanning database & checking live rankings…');
+  
+  // Step 2 view state
+  const [step2ViewMode, setStep2ViewMode] = useState('strategy'); // 'strategy' | 'breakdown'
+  const [activeInfoKwId, setActiveInfoKwId] = useState(null);
   const [potentialKws, setPotentialKws] = useState([]);
   const [pushBatches, setPushBatches] = useState({ high: [], medium: [], low: [] });
   const [analyzingPotential, setAnalyzingPotential] = useState(false);
   const [selectedKwIds, setSelectedKwIds] = useState(new Set());
   const [topicLinks, setTopicLinks] = useState({});
+  const [collapsedBatches, setCollapsedBatches] = useState({ high: false, medium: false, low: false });
+
+  // Outreach Sites & Budget Optimization State
+  const [availableOutreachSites, setAvailableOutreachSites] = useState([]);
+  const [budgetOptimization, setBudgetOptimization] = useState(null);
+  const [selectedOutreachSites, setSelectedOutreachSites] = useState({});
+
+  const handleSelectSiteForKeyword = (kwId, site) => {
+    setSelectedOutreachSites(prev => ({
+      ...prev,
+      [kwId]: site
+    }));
+  };
+
+  // Period Selector defaults
+  const now = new Date();
+  const [periodMonth, setPeriodMonth] = useState(MONTH_NAMES[now.getMonth()]);
+  const [periodYear, setPeriodYear] = useState(now.getFullYear());
+
+  // Multi-activity list in Step 1 modal
+  const [activitiesList, setActivitiesList] = useState([
+    { id: 'act-1', activity_name: 'Paid Guest Post', quantity: 1, budget: '$250' }
+  ]);
+
+  // Form POC and metadata state
   const [formData, setFormData] = useState({
-    activity_name: '',
     project_name: '',
     main_poc: '',
-    content_poc: '',
-    quantity: 1,
-    budget: '',
-    user: user?.name || user?.email || '',
-    period: new Date().toISOString().split('T')[0],
-    scheduler: '',
-    auditor: '',
-    status: 'saved'
+    content_poc: 'Content Lead',
+    auditor: 'SEO Audit Team',
+    channel: 'off-page'
   });
 
-  // Load Off-Page Activities + Projects from Supabase.
-  // The activities table is the actual page content, so unblock the UI as soon
-  // as that returns. The project list only feeds the selector dropdown / filter,
-  // and fetchDomainRows() runs a slow full-table keyword-count scan, so it's
-  // loaded in the background instead of holding up the whole page.
+  const toggleBatchCollapse = (key) => {
+    setCollapsedBatches(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const toggleProjectExpand = (pName) => {
+    setExpandedProjects(prev => {
+      const next = new Set(prev);
+      if (next.has(pName)) next.delete(pName);
+      else next.add(pName);
+      return next;
+    });
+  };
+
+  const selectedByBatch = useMemo(() => {
+    const counts = { high: 0, medium: 0, low: 0 };
+    ['high', 'medium', 'low'].forEach(bKey => {
+      (pushBatches[bKey] || []).forEach(item => {
+        if (selectedKwIds.has(item.id)) counts[bKey]++;
+      });
+    });
+    return counts;
+  }, [pushBatches, selectedKwIds]);
+
+  const uniqueLandingPagesCount = useMemo(() => {
+    const set = new Set();
+    potentialKws.forEach(k => {
+      const lp = k.landing_page_url || k.topicLink || topicLinks[k.id];
+      if (lp) set.add(lp);
+    });
+    return Math.max(1, set.size);
+  }, [potentialKws, topicLinks]);
+
+  // Load Off-Page Activities + Projects + Notifications
   const loadData = async () => {
     setLoading(true);
     try {
       const res = await listCalendarActivitiesApi().catch(() => ({ activities: [] }));
-      setActivities(res.activities || []);
+      const loaded = res.activities || [];
+      setActivities(loaded);
+      // Auto-expand all unique projects initially so tree structure is visible
+      const projsInActivities = new Set(loaded.map(a => a.project_name || 'General'));
+      setExpandedProjects(projsInActivities);
     } catch (err) {
       console.error('[CalendarPage] Error loading activities:', err);
     } finally {
@@ -212,10 +291,11 @@ function CalendarPage({ user }) {
     setProjectMenuOpen(false);
   };
 
-  // Normalize status helper: 'saved' | 'scheduled' | 'approved'
+  // Normalize status helper: 'saved' | 'scheduled' | 'approved' | 'published'
   const getNormalizedStatus = (itemStatus) => {
     if (!itemStatus) return 'saved';
     const s = String(itemStatus).toLowerCase().trim();
+    if (s.includes('pub') || s.includes('live')) return 'published';
     if (s.includes('sched') || s.includes('pending')) return 'scheduled';
     if (s.includes('appr') || s.includes('comp') || s.includes('done')) return 'approved';
     return 'saved';
@@ -224,68 +304,115 @@ function CalendarPage({ user }) {
   // Filter activities by active project, active sub-tab, and search query
   const filteredActivities = useMemo(() => {
     return activities.filter(item => {
-      // 1. Sub-tab status match
       const normStatus = getNormalizedStatus(item.status);
       if (normStatus !== activeSubTab) return false;
 
-      // 2. Project match (if activeProject selected and item has project_name)
       if (activeProject && item.project_name && item.project_name !== 'General') {
         const itemProj = String(item.project_name).toLowerCase().trim();
         const curProjName = String(activeProject.name || activeProject.domain || '').toLowerCase().trim();
         const curProjSlug = String(activeProject.slug || '').toLowerCase().trim();
         if (itemProj && !curProjName.includes(itemProj) && !curProjSlug.includes(itemProj) && !itemProj.includes(curProjName)) {
-          // Keep item if it matches search or general
+          // keep if general or matches search
         }
       }
 
-      // 3. Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchesName = String(item.activity_name || '').toLowerCase().includes(q);
         const matchesProj = String(item.project_name || '').toLowerCase().includes(q);
         const matchesPoc = String(item.main_poc || '').toLowerCase().includes(q) || String(item.content_poc || '').toLowerCase().includes(q);
-        const matchesUser = String(item.user || '').toLowerCase().includes(q);
-        if (!matchesName && !matchesProj && !matchesPoc && !matchesUser) return false;
+        const matchesScheduler = String(item.scheduler || '').toLowerCase().includes(q);
+        if (!matchesName && !matchesProj && !matchesPoc && !matchesScheduler) return false;
       }
 
       return true;
     });
   }, [activities, activeSubTab, activeProject, searchQuery]);
 
+  // Group filtered activities by project for Tree Structure display
+  const groupedProjects = useMemo(() => {
+    const map = new Map();
+    filteredActivities.forEach(act => {
+      const pName = act.project_name || 'General';
+      if (!map.has(pName)) {
+        map.set(pName, {
+          projectName: pName,
+          items: [],
+          totalBudget: 0,
+          totalQuantity: 0,
+          hasAi: false,
+          period: act.period || `${periodMonth} ${periodYear}`,
+          channel: act.channel || 'off-page',
+          primaryActivityId: act.id
+        });
+      }
+      const entry = map.get(pName);
+      entry.items.push(act);
+      entry.totalQuantity += parseInt(act.quantity || 1, 10);
+      const bNum = parseFloat(String(act.budget || '0').replace(/[^0-9.]/g, '')) || 0;
+      entry.totalBudget += bNum;
+      if (act.is_ai_scheduled || String(act.scheduler || '').toLowerCase().includes('ai')) {
+        entry.hasAi = true;
+      }
+    });
+    return Array.from(map.values());
+  }, [filteredActivities, periodMonth, periodYear]);
+
   // Counts by tab
   const counts = useMemo(() => {
     return {
       saved: activities.filter(a => getNormalizedStatus(a.status) === 'saved').length,
       scheduled: activities.filter(a => getNormalizedStatus(a.status) === 'scheduled').length,
-      approved: activities.filter(a => getNormalizedStatus(a.status) === 'approved').length
+      approved: activities.filter(a => getNormalizedStatus(a.status) === 'approved').length,
+      published: activities.filter(a => getNormalizedStatus(a.status) === 'published').length
     };
   }, [activities]);
 
+  // Multi-activity row helpers
+  const handleAddActivityRow = () => {
+    setActivitiesList(prev => [
+      ...prev,
+      { id: `act-${Date.now()}`, activity_name: 'Forum - Quora', quantity: 1, budget: '$150' }
+    ]);
+  };
+
+  const handleUpdateActivityRow = (id, field, value) => {
+    setActivitiesList(prev => prev.map(a => a.id === id ? { ...a, [field]: value } : a));
+  };
+
+  const handleRemoveActivityRow = (id) => {
+    if (activitiesList.length <= 1) return;
+    setActivitiesList(prev => prev.filter(a => a.id !== id));
+  };
+
   // Form Handlers
-  const handleOpenAddModal = (defaultStatus = activeSubTab) => {
+  const handleOpenAddModal = () => {
     setEditingItem(null);
     setModalStep('form');
     setAiSchedulingEnabled(true);
+    setConfirmAiModalOpen(false);
     setSavingActivity(false);
     setLoadingKeywords(false);
     setAnalyzingPotential(false);
+    setStep2ViewMode('strategy');
     setPushBatches({ high: [], medium: [], low: [] });
+    setCollapsedBatches({ high: false, medium: false, low: false });
     setPotentialKws([]);
     setSelectedKwIds(new Set());
     setTopicLinks({});
     setCreatedActivity(null);
+    setAvailableOutreachSites([]);
+    setBudgetOptimization(null);
+    setSelectedOutreachSites({});
+    setActivitiesList([
+      { id: 'act-1', activity_name: 'Paid Guest Post', quantity: 1, budget: '$250' }
+    ]);
     setFormData({
-      activity_name: 'Paid Guest Post',
       project_name: activeProject?.name || activeProject?.domain || (projects[0]?.name || projects[0]?.domain || ''),
       main_poc: '',
-      content_poc: '',
-      quantity: 1,
-      budget: '$250',
-      user: user?.name || user?.email || 'Admin User',
-      period: new Date().toISOString().split('T')[0],
-      scheduler: 'AI Auto-Scheduler',
+      content_poc: 'Content Lead',
       auditor: 'SEO Audit Team',
-      status: defaultStatus
+      channel: 'off-page'
     });
     setIsModalOpen(true);
   };
@@ -293,143 +420,257 @@ function CalendarPage({ user }) {
   const handleOpenEditModal = (item) => {
     setEditingItem(item);
     setModalStep('form');
-    const isAi = String(item.scheduler || '').toLowerCase().includes('ai');
-    setAiSchedulingEnabled(isAi);
+    setAiSchedulingEnabled(Boolean(item.is_ai_scheduled || String(item.scheduler || '').toLowerCase().includes('ai')));
     setSavingActivity(false);
     setCreatedActivity(null);
+    setActivitiesList([
+      { id: item.id, activity_name: item.activity_name || 'Paid Guest Post', quantity: item.quantity || 1, budget: item.budget || '$250' }
+    ]);
+    if (item.period) {
+      const parts = String(item.period).split(' ');
+      if (parts.length >= 2 && MONTH_NAMES.includes(parts[0])) {
+        setPeriodMonth(parts[0]);
+        setPeriodYear(parseInt(parts[1], 10) || now.getFullYear());
+      }
+    }
     setFormData({
-      activity_name: item.activity_name || '',
       project_name: item.project_name || '',
       main_poc: item.main_poc || '',
-      content_poc: item.content_poc || '',
-      quantity: item.quantity || 1,
-      budget: item.budget || '',
-      user: item.user || user?.name || user?.email || '',
-      period: item.period || new Date().toISOString().split('T')[0],
-      scheduler: item.scheduler || (isAi ? 'AI Auto-Scheduler' : 'Manual'),
-      auditor: item.auditor || '',
-      status: getNormalizedStatus(item.status)
+      content_poc: item.content_poc || 'Content Lead',
+      auditor: item.auditor || 'SEO Audit Team',
+      channel: item.channel || 'off-page'
     });
     setIsModalOpen(true);
   };
 
-  const handleToggleAiScheduling = () => {
-    setAiSchedulingEnabled(prev => {
-      const next = !prev;
-      setFormData(fd => ({
-        ...fd,
-        scheduler: next ? 'AI Auto-Scheduler' : 'Manual'
-      }));
-      return next;
-    });
-  };
-
-  const handleSaveForm = async (e) => {
-    e.preventDefault();
-    if (!formData.project_name || !formData.activity_name) {
-      alert('Please fill in required fields: Project Name and Activity Name');
+  // ─── SAVE AS DRAFT (Manual or Direct Draft) ───
+  const handleSaveAsDraft = async (e) => {
+    if (e) e.preventDefault();
+    if (!formData.project_name) {
+      alert('Please select a Project Name');
       return;
     }
 
     setSavingActivity(true);
     try {
-      const payload = {
-        ...formData,
-        quantity: parseInt(formData.quantity, 10) || 1
-      };
+      const formattedPeriod = `${periodMonth} ${periodYear}`;
 
       if (editingItem) {
+        const primaryAct = activitiesList[0] || {};
+        const payload = {
+          activity_name: primaryAct.activity_name,
+          quantity: parseInt(primaryAct.quantity, 10) || 1,
+          budget: primaryAct.budget,
+          project_name: formData.project_name,
+          main_poc: formData.main_poc,
+          content_poc: formData.content_poc,
+          auditor: formData.auditor,
+          period: formattedPeriod,
+          channel: formData.channel || 'off-page',
+          scheduler: aiSchedulingEnabled ? 'AI Auto-Scheduler' : (formData.main_poc || 'Manual Scheduler'),
+          status: 'saved'
+        };
         await updateCalendarActivityApi(editingItem.id, payload);
         setActivities(prev => prev.map(a => a.id === editingItem.id ? { ...a, ...payload } : a));
         setIsModalOpen(false);
         setSavingActivity(false);
+        setActiveSubTab('saved');
         return;
       }
 
-      // Create new activity
-      const created = await createCalendarActivityApi(payload);
-      setActivities(prev => [created, ...prev]);
-
-      if (!aiSchedulingEnabled) {
-        // Toggle is off -> close immediately
-        setIsModalOpen(false);
-        setSavingActivity(false);
-        return;
+      // Create each activity in the batch as draft
+      const newCreatedList = [];
+      for (const act of activitiesList) {
+        const payload = {
+          activity_name: act.activity_name,
+          project_name: formData.project_name,
+          main_poc: formData.main_poc,
+          content_poc: formData.content_poc,
+          auditor: formData.auditor,
+          quantity: parseInt(act.quantity, 10) || 1,
+          budget: act.budget,
+          period: formattedPeriod,
+          channel: formData.channel || 'off-page',
+          scheduler: aiSchedulingEnabled ? 'AI Auto-Scheduler' : (formData.main_poc || 'Manual Scheduler'),
+          status: 'saved'
+        };
+        const res = await createCalendarActivityApi(payload);
+        newCreatedList.push(res);
       }
 
-      // Toggle is ON -> switch to Step 2: "These are the keywords we got, do you want to add?"
-      setCreatedActivity(created);
+      setActivities(prev => [...newCreatedList, ...prev]);
+      setIsModalOpen(false);
+      setSavingActivity(false);
+      setActiveSubTab('saved');
+    } catch (err) {
+      alert(`Error saving activities: ${err.message}`);
+      setSavingActivity(false);
+    }
+  };
+
+  // ─── EXECUTE AI SCHEDULE (Runs scanning & live ranking after confirmation) ───
+  const handleExecuteAiSchedule = async () => {
+    setConfirmAiModalOpen(false);
+    setSavingActivity(true);
+
+    try {
+      const formattedPeriod = `${periodMonth} ${periodYear}`;
+      const primaryAct = activitiesList[0] || { activity_name: 'Paid Guest Post', quantity: 1, budget: '$250' };
+
+      // Calculate total requested quantity and budget across multi-activity batch
+      let totalQty = 0;
+      let totalBudget = 0;
+      for (const act of activitiesList) {
+        totalQty += parseInt(act.quantity, 10) || 1;
+        const b = parseFloat(String(act.budget || '0').replace(/[^0-9.]/g, '')) || 0;
+        totalBudget += b;
+      }
+
+      // Create base activities in DB
+      const newCreatedList = [];
+      for (const act of activitiesList) {
+        const payload = {
+          activity_name: act.activity_name,
+          project_name: formData.project_name,
+          main_poc: 'AI Auto-Scheduler',
+          content_poc: formData.content_poc || 'Content Lead',
+          auditor: formData.auditor || 'SEO Audit Team',
+          quantity: parseInt(act.quantity, 10) || 1,
+          budget: act.budget,
+          period: formattedPeriod,
+          channel: formData.channel || 'off-page',
+          scheduler: 'AI Auto-Scheduler',
+          status: 'saved'
+        };
+        const created = await createCalendarActivityApi(payload);
+        newCreatedList.push(created);
+      }
+
+      setActivities(prev => [...newCreatedList, ...prev]);
+      const primaryCreated = newCreatedList[0];
+      setCreatedActivity(primaryCreated);
+
+      // Transition to Step 2
       setModalStep('keywords_prompt');
+      setStep2ViewMode('strategy');
       setSavingActivity(false);
       setLoadingKeywords(true);
+      setLoadingStepText('Scanning database for candidate Landing Page keywords (Rank 5+)...');
 
       const matchedProj = projects.find(p => (p.name || p.domain) === formData.project_name);
       const slug = matchedProj?.slug || formData.project_name.toLowerCase().replace(/\s+/g, '');
       const domain = matchedProj?.domain || '';
 
-      try {
-        const res = await fetchCalendarPotentialKeywordsApi(slug, domain, false);
-        const kws = res.potential_keywords || [];
-        const batches = res.batches || { high: [], medium: [], low: [] };
-        setPotentialKws(kws);
-        setPushBatches(batches);
+      // Step 1: Query candidates with budget and quantity optimization
+      const res = await fetchCalendarPotentialKeywordsApi(slug, domain, false, totalBudget, totalQty);
+      const kws = res.potential_keywords || [];
+      const fallbackBatches = res.batches || { high: [], medium: [], low: [] };
 
-        // Pre-fill topic links from candidate landing_page_url or topicLink
-        const initialTopicLinks = {};
-        kws.forEach(k => {
-          if (k.topicLink || k.landing_page_url) {
-            initialTopicLinks[k.id] = k.topicLink || k.landing_page_url;
-          }
-        });
-        setTopicLinks(initialTopicLinks);
+      if (res.available_outreach_sites) {
+        setAvailableOutreachSites(res.available_outreach_sites);
+      }
+      if (res.budget_optimization) {
+        setBudgetOptimization(res.budget_optimization);
+      }
 
-        // Auto-select batch 1 and batch 2 initially
-        const initialSelected = new Set([
-          ...(batches.high || []).map(k => k.id),
-          ...(batches.medium || []).map(k => k.id)
-        ]);
-        setSelectedKwIds(initialSelected);
-        setLoadingKeywords(false);
-
-        if (kws.length > 0) {
-          setAnalyzingPotential(true);
-          analyzeCalendarAiPushPotentialApi(slug, domain, kws, 'India')
-            .then(aiRes => {
-              if (aiRes?.batches) {
-                setPushBatches(aiRes.batches);
-                if (aiRes.evaluated_keywords && aiRes.evaluated_keywords.length > 0) {
-                  setPotentialKws(aiRes.evaluated_keywords);
-                  setTopicLinks(prev => {
-                    const next = { ...prev };
-                    aiRes.evaluated_keywords.forEach(ek => {
-                      if (!next[ek.id] && (ek.topicLink || ek.landing_page_url)) {
-                        next[ek.id] = ek.topicLink || ek.landing_page_url;
-                      }
-                    });
-                    return next;
-                  });
-                }
-                // Consider and auto-select Batch 1 & Batch 2 keywords
-                const b1and2 = [
-                  ...(aiRes.batches.high || []).map(k => k.id),
-                  ...(aiRes.batches.medium || []).map(k => k.id)
-                ];
-                setSelectedKwIds(new Set(b1and2));
-              }
-            })
-            .catch(err => console.warn('[CalendarPage] Live rank check notice:', err))
-            .finally(() => setAnalyzingPotential(false));
+      const initialSites = {};
+      kws.forEach(k => {
+        if (k.outreach_site) {
+          initialSites[k.id] = k.outreach_site;
         }
-      } catch (err) {
-        console.error('[CalendarPage] Error loading potential keywords:', err);
+      });
+      setSelectedOutreachSites(initialSites);
+
+      if (kws.length === 0) {
+        setPotentialKws([]);
+        setPushBatches({ high: [], medium: [], low: [] });
+        setSelectedKwIds(new Set());
+        setLoadingKeywords(false);
+        return;
+      }
+
+      const initialTopicLinks = {};
+      kws.forEach(k => {
+        if (k.topicLink || k.landing_page_url) {
+          initialTopicLinks[k.id] = k.topicLink || k.landing_page_url;
+        }
+      });
+      setTopicLinks(initialTopicLinks);
+
+      // Step 2: Live ranking ping with budget and quantity optimization
+      setLoadingStepText(`Checking live Google rankings & search intent for ${kws.length} candidate keywords...`);
+      setAnalyzingPotential(true);
+
+      try {
+        const aiRes = await analyzeCalendarAiPushPotentialApi(slug, domain, kws, 'India', totalBudget, totalQty);
+        if (aiRes?.batches) {
+          setPushBatches(aiRes.batches);
+          const evaluated = (aiRes.evaluated_keywords && aiRes.evaluated_keywords.length > 0)
+            ? aiRes.evaluated_keywords
+            : kws;
+          setPotentialKws(evaluated);
+
+          if (aiRes.available_outreach_sites) {
+            setAvailableOutreachSites(aiRes.available_outreach_sites);
+          }
+          if (aiRes.budget_optimization) {
+            setBudgetOptimization(aiRes.budget_optimization);
+          }
+
+          setSelectedOutreachSites(prev => {
+            const next = { ...prev };
+            evaluated.forEach(ek => {
+              if (ek.outreach_site && !next[ek.id]) {
+                next[ek.id] = ek.outreach_site;
+              }
+            });
+            return next;
+          });
+
+          setTopicLinks(prev => {
+            const next = { ...prev };
+            evaluated.forEach(ek => {
+              if (!next[ek.id] && (ek.topicLink || ek.landing_page_url)) {
+                next[ek.id] = ek.topicLink || ek.landing_page_url;
+              }
+            });
+            return next;
+          });
+
+          // Auto-select Batch 1 (Gains) & Batch 2 (Drops)
+          const b1and2 = [
+            ...(aiRes.batches.high || []).map(k => k.id),
+            ...(aiRes.batches.medium || []).map(k => k.id)
+          ];
+          setSelectedKwIds(new Set(b1and2));
+        } else {
+          setPotentialKws(kws);
+          setPushBatches(fallbackBatches);
+          setSelectedKwIds(new Set([
+            ...(fallbackBatches.high || []).map(k => k.id),
+            ...(fallbackBatches.medium || []).map(k => k.id)
+          ]));
+        }
+      } catch (liveErr) {
+        console.warn('[CalendarPage] Live rank check notice:', liveErr);
+        setPotentialKws(kws);
+        setPushBatches(fallbackBatches);
+        setSelectedKwIds(new Set([
+          ...(fallbackBatches.high || []).map(k => k.id),
+          ...(fallbackBatches.medium || []).map(k => k.id)
+        ]));
+      } finally {
+        setAnalyzingPotential(false);
         setLoadingKeywords(false);
       }
     } catch (err) {
-      alert(`Error saving activity: ${err.message}`);
+      alert(`Error running AI schedule: ${err.message}`);
       setSavingActivity(false);
+      setLoadingKeywords(false);
     }
   };
 
+  // ─── CONFIRM & SCHEDULE KEYWORDS FROM STEP 2 ───
   const handleConfirmAddKeywords = async () => {
     if (!createdActivity) {
       setIsModalOpen(false);
@@ -437,11 +678,13 @@ function CalendarPage({ user }) {
     }
     setSavingActivity(true);
     try {
-      const isPaidGuestPost = String(createdActivity?.activity_name || formData.activity_name || '').toLowerCase().includes('guest');
+      const isPaidGuestPost = String(createdActivity?.activity_name || '').toLowerCase().includes('guest');
       const batchById = new Map();
       ['high', 'medium', 'low'].forEach(b => (pushBatches[b] || []).forEach(r => batchById.set(r.id, r)));
+      
       const selectedPotential = potentialKws.filter(k => selectedKwIds.has(k.id)).map(k => {
         const info = batchById.get(k.id) || {};
+        const chosenSite = selectedOutreachSites[k.id] || k.outreach_site || null;
         return {
           keyword: k.keyword,
           category: k.category,
@@ -457,12 +700,14 @@ function CalendarPage({ user }) {
           push_batch: info.batch || null,
           push_confidence: info.confidence ?? null,
           push_reason: info.reason || '',
-          topic_link: isPaidGuestPost ? '' : (topicLinks[k.id] || k.topicLink || k.landing_page_url || '')
+          topic_link: isPaidGuestPost ? '' : (topicLinks[k.id] || k.topicLink || k.landing_page_url || ''),
+          outreach_site: chosenSite
         };
       });
 
       const updatePayload = {
-        potential_keywords: selectedPotential
+        potential_keywords: selectedPotential,
+        status: 'scheduled'
       };
       if (selectedPotential.length > 0) {
         updatePayload.keyword_name = selectedPotential.map(k => k.keyword).join(', ');
@@ -470,16 +715,15 @@ function CalendarPage({ user }) {
         updatePayload.cluster = selectedPotential[0].cluster;
         if (!isPaidGuestPost) {
           updatePayload.topic_link = selectedPotential.map(k => k.topic_link).filter(Boolean).join(' | ');
-        } else {
-          updatePayload.topic_link = '';
         }
       }
 
       await updateCalendarActivityApi(createdActivity.id, updatePayload);
       setActivities(prev => prev.map(a => a.id === createdActivity.id ? { ...a, ...updatePayload } : a));
       setIsModalOpen(false);
+      setActiveSubTab('scheduled');
     } catch (err) {
-      alert(`Error adding keywords: ${err.message}`);
+      alert(`Error scheduling keywords: ${err.message}`);
     } finally {
       setSavingActivity(false);
     }
@@ -510,7 +754,7 @@ function CalendarPage({ user }) {
       alert('No data available to export.');
       return;
     }
-    const headers = ['Activity Name', 'Project Name', 'Main POC', 'Content POC', 'Quantity', 'Budget', 'User', 'Period', 'Scheduler', 'Auditor', 'Status'];
+    const headers = ['Activity Name', 'Project Name', 'Main POC', 'Content POC', 'Quantity', 'Budget', 'Period', 'Scheduler', 'Auditor', 'Status'];
     const rows = filteredActivities.map(a => [
       `"${(a.activity_name || '').replace(/"/g, '""')}"`,
       `"${(a.project_name || '').replace(/"/g, '""')}"`,
@@ -518,7 +762,6 @@ function CalendarPage({ user }) {
       `"${(a.content_poc || '').replace(/"/g, '""')}"`,
       a.quantity || 1,
       `"${String(a.budget || '').replace(/"/g, '""')}"`,
-      `"${(a.user || '').replace(/"/g, '""')}"`,
       `"${a.period || ''}"`,
       `"${(a.scheduler || '').replace(/"/g, '""')}"`,
       `"${(a.auditor || '').replace(/"/g, '""')}"`,
@@ -537,6 +780,944 @@ function CalendarPage({ user }) {
     document.body.removeChild(link);
   };
 
+  // ─────────────────────────────────────────────────────────────
+  // STEP 2: AI STRATEGIC DECISION & KEYWORD EVALUATION VIEW
+  // ─────────────────────────────────────────────────────────────
+  if (isModalOpen && modalStep === 'keywords_prompt') {
+    const isPaidGuestPost = String(createdActivity?.activity_name || formData.activity_name || '').toLowerCase().includes('guest');
+    const totalAllocatedBudget = activitiesList.reduce((acc, a) => acc + (parseFloat(String(a.budget || '0').replace(/[^0-9.]/g, '')) || 0), 0);
+    const totalAllocatedBudgetFormatted = totalAllocatedBudget > 0 ? `$${totalAllocatedBudget.toLocaleString()}` : '$250';
+    const totalRequestedQuantity = activitiesList.reduce((acc, a) => acc + (parseInt(a.quantity, 10) || 1), 0);
+
+    return (
+      <div style={{ padding: '24px 32px', minHeight: '100%', background: 'var(--bg)', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        {/* Top Header Card */}
+        <div style={{
+          background: '#ffffff',
+          borderRadius: 14,
+          border: '1px solid #E4DFEE',
+          padding: '16px 24px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+          flexWrap: 'wrap',
+          boxShadow: '0 2px 8px rgba(74, 26, 140, 0.04)'
+        }}>
+          {/* Left side: Back to Calendar button, Icon, Titles */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0, flex: 1 }}>
+            <button
+              type="button"
+              onClick={() => { setIsModalOpen(false); setModalStep('form'); }}
+              title="Return to Calendar"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                background: '#F6EEFD',
+                border: '1px solid #E5CCF7',
+                color: '#7B2FBE',
+                borderRadius: 8,
+                padding: '8px 14px',
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                flexShrink: 0
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#EDE0FA'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#F6EEFD'; }}
+            >
+              <ArrowLeft size={16} />
+              <span>Back to Calendar</span>
+            </button>
+
+            <div style={{ width: 1, height: 28, background: '#E4DFEE', flexShrink: 0 }} />
+
+            <div style={{
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              background: 'linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}>
+              <Sparkles size={20} color="#7c3aed" />
+            </div>
+
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <h1 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>
+                  AI Scheduling Decision &amp; Keyword Strategy
+                </h1>
+                {createdActivity?.project_name && (
+                  <span style={{
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    color: '#4338ca',
+                    background: '#eef2ff',
+                    border: '1px solid #c7d2fe',
+                    padding: '2px 8px',
+                    borderRadius: 6
+                  }}>
+                    {createdActivity.project_name}
+                  </span>
+                )}
+                <span style={{
+                  fontSize: 11.5,
+                  fontWeight: 700,
+                  color: '#7c3aed',
+                  background: '#ede9fe',
+                  border: '1px solid #ddd6fe',
+                  padding: '2px 8px',
+                  borderRadius: 6
+                }}>
+                  {createdActivity?.activity_name || 'Campaign'}
+                </span>
+              </div>
+              <p style={{ fontSize: 12.5, color: '#64748b', margin: '3px 0 0 0' }}>
+                AI evaluated keyword intent, verified landing page SERPs, and generated optimal resource allocation.
+              </p>
+            </div>
+          </div>
+
+          {/* Right side: View Mode Switch */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f1f5f9', padding: 3, borderRadius: 10 }}>
+            <button
+              type="button"
+              onClick={() => setStep2ViewMode('strategy')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 14px',
+                fontSize: 12.5,
+                fontWeight: step2ViewMode === 'strategy' ? 700 : 600,
+                color: step2ViewMode === 'strategy' ? '#7c3aed' : '#64748b',
+                background: step2ViewMode === 'strategy' ? '#ffffff' : 'transparent',
+                border: 'none',
+                borderRadius: 7,
+                cursor: 'pointer',
+                boxShadow: step2ViewMode === 'strategy' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'
+              }}
+            >
+              <Bot size={14} />
+              <span>Executive Strategy</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep2ViewMode('breakdown')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 14px',
+                fontSize: 12.5,
+                fontWeight: step2ViewMode === 'breakdown' ? 700 : 600,
+                color: step2ViewMode === 'breakdown' ? '#7c3aed' : '#64748b',
+                background: step2ViewMode === 'breakdown' ? '#ffffff' : 'transparent',
+                border: 'none',
+                borderRadius: 7,
+                cursor: 'pointer',
+                boxShadow: step2ViewMode === 'breakdown' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'
+              }}
+            >
+              <Layers size={14} />
+              <span>Keyword Breakdown ({potentialKws.length})</span>
+            </button>
+          </div>
+        </div>
+
+        {/* LOADING STATE */}
+        {loadingKeywords ? (
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 14,
+            border: '1px solid #E4DFEE',
+            padding: '64px 32px',
+            textAlign: 'center',
+            boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06)'
+          }}>
+            <BrandInfinityLoader label={loadingStepText} size="lg" minHeight="240px" />
+            <div style={{ marginTop: 24, fontSize: 13, color: '#64748b', maxWidth: 480, margin: '16px auto 0' }}>
+              We are checking live rankings and ensuring 100% Landing Page intent matching before showing recommendations.
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* EXECUTIVE STRATEGY HERO CARD */}
+            <div style={{
+              background: 'linear-gradient(135deg, #ffffff 0%, #faf8ff 100%)',
+              borderRadius: 16,
+              border: '1px solid #E4DFEE',
+              padding: '24px 28px',
+              boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 280 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      fontSize: 11,
+                      fontWeight: 800,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                      color: '#7c3aed',
+                      background: '#ede9fe',
+                      padding: '3px 10px',
+                      borderRadius: 20
+                    }}>
+                      <Sparkles size={12} />
+                      AI Autonomous Strategy
+                    </span>
+                    <span style={{ fontSize: 12, color: '#94a3b8' }}>•</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>
+                      Period: {createdActivity?.period || `${periodMonth} ${periodYear}`}
+                    </span>
+                  </div>
+
+                  <h2 style={{ fontSize: 19, fontWeight: 800, color: '#0f172a', margin: '0 0 10px 0', letterSpacing: '-0.02em' }}>
+                    Executive Allocation &amp; Growth Narrative
+                  </h2>
+
+                  <p style={{ fontSize: 13.5, color: '#334155', lineHeight: 1.6, margin: 0 }}>
+                    For <strong>{createdActivity?.project_name || formData.project_name}</strong>, AI scanned{' '}
+                    <strong>{potentialKws.length}</strong> candidate keywords and shortlisted{' '}
+                    <strong style={{ color: '#7c3aed' }}>{selectedKwIds.size} high-impact landing page targets</strong> across{' '}
+                    <strong>{uniqueLandingPagesCount} unique landing pages</strong>. 
+                    Based on your requested <strong>{totalRequestedQuantity} activities</strong> and budget of{' '}
+                    <strong>{totalAllocatedBudgetFormatted}</strong>, AI has prioritized{' '}
+                    <strong style={{ color: '#d97706' }}>{selectedByBatch.medium} dropped keywords (red alert recovery targets)</strong> and{' '}
+                    <strong style={{ color: '#16a34a' }}>{selectedByBatch.high} near-threshold gainers</strong>, avoiding redundant expenditure on keywords already performing in the Top 3.
+                  </p>
+                </div>
+
+                {/* Primary Decision Action Buttons */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 200 }}>
+                  <button
+                    type="button"
+                    disabled={selectedKwIds.size === 0 || savingActivity}
+                    onClick={handleConfirmAddKeywords}
+                    style={{
+                      padding: '11px 22px',
+                      fontSize: 13.5,
+                      fontWeight: 700,
+                      color: '#ffffff',
+                      background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                      border: 'none',
+                      borderRadius: 10,
+                      cursor: (selectedKwIds.size === 0 || savingActivity) ? 'not-allowed' : 'pointer',
+                      boxShadow: '0 4px 14px rgba(124, 58, 237, 0.35)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {savingActivity ? (
+                      <>
+                        <div style={{ width: 14, height: 14, border: '2px solid #ffffff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                        <span>Scheduling...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check size={16} />
+                        <span>Confirm &amp; Schedule ({selectedKwIds.size})</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStep2ViewMode('breakdown')}
+                    style={{
+                      padding: '9px 18px',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: '#475569',
+                      background: '#ffffff',
+                      border: '1px solid #E4DFEE',
+                      borderRadius: 10,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      transition: 'background-color 0.15s ease'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                    onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
+                  >
+                    <Eye size={15} color="#7c3aed" />
+                    <span>View Keyword Breakdown</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 4 STRATEGIC KPI CARDS */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14, marginTop: 22 }}>
+                {/* Card 1: Keywords */}
+                <div style={{ background: '#ffffff', border: '1px solid #E4DFEE', borderRadius: 12, padding: '14px 18px' }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                    Keywords Scanned vs Targeted
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: '#0f172a' }}>{selectedKwIds.size}</span>
+                    <span style={{ fontSize: 13, color: '#94a3b8' }}>of {potentialKws.length} scanned</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: '#16a34a', background: '#f0fdf4', padding: '1px 6px', borderRadius: 6, border: '1px solid #bbf7d0' }}>
+                      +{selectedByBatch.high} Gains
+                    </span>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: '#d97706', background: '#fffbeb', padding: '1px 6px', borderRadius: 6, border: '1px solid #fde68a' }}>
+                      -{selectedByBatch.medium} Drops
+                    </span>
+                  </div>
+                </div>
+
+                {/* Card 2: Activities Allocation */}
+                <div style={{ background: '#ffffff', border: '1px solid #E4DFEE', borderRadius: 12, padding: '14px 18px' }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                    Activities Planned
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: '#7c3aed' }}>{totalRequestedQuantity}</span>
+                    <span style={{ fontSize: 13, color: '#64748b' }}>across {activitiesList.length} types</span>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 6 }}>
+                    Optimal activity pacing
+                  </div>
+                </div>
+
+                {/* Card 3: Budget Optimization */}
+                <div style={{ background: '#ffffff', border: '1px solid #E4DFEE', borderRadius: 12, padding: '14px 18px' }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                    Budget Allocation
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: '#059669' }}>
+                      {budgetOptimization?.planned_spend !== undefined ? `$${budgetOptimization.planned_spend.toLocaleString()}` : totalAllocatedBudgetFormatted}
+                    </span>
+                    <span style={{ fontSize: 12, color: '#059669', fontWeight: 600 }}>
+                      {budgetOptimization?.projected_savings > 0 ? `Saves $${budgetOptimization.projected_savings.toLocaleString()}` : 'Optimized'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 6 }}>
+                    {budgetOptimization?.total_budget_cap ? `Cap: $${budgetOptimization.total_budget_cap.toLocaleString()}` : 'Direct spend against high-ROI assets'}
+                  </div>
+                </div>
+
+                {/* Card 4: Target Landing Pages */}
+                <div style={{ background: '#ffffff', border: '1px solid #E4DFEE', borderRadius: 12, padding: '14px 18px' }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                    Landing Pages Targeted
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: '#0f172a' }}>{uniqueLandingPagesCount}</span>
+                    <span style={{ fontSize: 13, color: '#64748b' }}>Unique URLs</span>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#16a34a', fontWeight: 700, marginTop: 6 }}>
+                    100% Landing Page SERP Verified
+                  </div>
+                </div>
+              </div>
+
+              {/* AI Anti-Waste & Budget Efficiency Advisory */}
+              {budgetOptimization?.anti_waste_advisory && (
+                <div style={{
+                  marginTop: 18,
+                  padding: '16px 20px',
+                  borderRadius: 12,
+                  background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)',
+                  border: '1px solid #FDE68A',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 14,
+                  boxShadow: '0 2px 8px rgba(217, 119, 6, 0.08)'
+                }}>
+                  <div style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 8,
+                    background: '#F59E0B',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}>
+                    <AlertCircle size={20} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 800, color: '#92400E' }}>
+                        AI Anti-Waste &amp; Budget Efficiency Advisory
+                      </span>
+                      <span style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        background: '#16A34A',
+                        color: '#ffffff',
+                        padding: '2px 8px',
+                        borderRadius: 10
+                      }}>
+                        ${budgetOptimization.projected_savings?.toLocaleString()} Projected Savings
+                      </span>
+                    </div>
+                    <p style={{ fontSize: 12.5, color: '#78350F', margin: '4px 0 0 0', lineHeight: 1.5 }}>
+                      {budgetOptimization.anti_waste_advisory}
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 8, fontSize: 11.5, color: '#92400E', flexWrap: 'wrap' }}>
+                      <span>Requested: <strong>{budgetOptimization.requested_activities} activities</strong> (${budgetOptimization.total_budget_cap?.toLocaleString()})</span>
+                      <span>•</span>
+                      <span>AI Recommended: <strong>{budgetOptimization.recommended_activities} target keywords</strong> (${budgetOptimization.planned_spend?.toLocaleString()})</span>
+                      <span>•</span>
+                      <span style={{ color: '#15803d', fontWeight: 700 }}>Strict 3-Domain Backlink Limit Rule Active</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* KEYWORD BATCH TABLES */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {['high', 'medium', 'low'].map(batchKey => {
+                const meta = PUSH_BATCH_META[batchKey];
+                const rows = pushBatches[batchKey] || [];
+                const isCollapsed = collapsedBatches[batchKey];
+                const checkedCount = rows.filter(r => selectedKwIds.has(r.id)).length;
+
+                return (
+                  <div
+                    key={batchKey}
+                    style={{
+                      background: '#ffffff',
+                      borderRadius: 14,
+                      border: `1px solid ${meta.border}`,
+                      overflow: 'hidden',
+                      boxShadow: '0 2px 10px rgba(0,0,0,0.03)'
+                    }}
+                  >
+                    {/* Batch Header */}
+                    <div style={{
+                      padding: '12px 20px',
+                      background: meta.bg,
+                      borderBottom: isCollapsed ? 'none' : `1px solid ${meta.border}`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: 12
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: 8,
+                          background: '#ffffff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          border: `1px solid ${meta.border}`
+                        }}>
+                          <meta.Icon size={16} color={meta.tint} />
+                        </div>
+                        <div>
+                          <span style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>
+                            {meta.label}
+                          </span>
+                          <span style={{
+                            marginLeft: 8,
+                            fontSize: 11,
+                            fontWeight: 800,
+                            padding: '2px 8px',
+                            borderRadius: 10,
+                            background: '#ffffff',
+                            color: meta.tint,
+                            border: `1px solid ${meta.border}`
+                          }}>
+                            {checkedCount} / {rows.length} selected
+                          </span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        {rows.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const allIds = rows.map(r => r.id);
+                              const allChecked = allIds.every(id => selectedKwIds.has(id));
+                              const next = new Set(selectedKwIds);
+                              if (allChecked) allIds.forEach(id => next.delete(id));
+                              else allIds.forEach(id => next.add(id));
+                              setSelectedKwIds(next);
+                            }}
+                            style={{
+                              fontSize: 11.5,
+                              fontWeight: 700,
+                              color: meta.tint,
+                              background: '#ffffff',
+                              border: `1px solid ${meta.border}`,
+                              padding: '4px 10px',
+                              borderRadius: 6,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {rows.every(r => selectedKwIds.has(r.id)) ? 'Deselect All' : 'Select All'}
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => toggleBatchCollapse(batchKey)}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: '#64748b',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            fontSize: 12,
+                            fontWeight: 600
+                          }}
+                        >
+                          <span>{isCollapsed ? 'Expand' : 'Collapse'}</span>
+                          {isCollapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Batch Table Body */}
+                    {!isCollapsed && (
+                      <>
+                        {rows.length === 0 ? (
+                          <div style={{ fontSize: 12.5, color: '#94a3b8', fontStyle: 'italic', padding: '16px 20px' }}>
+                            No keywords categorized into this batch.
+                          </div>
+                        ) : (
+                          <div style={{ overflowX: 'auto' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, textAlign: 'left' }}>
+                              <thead>
+                                <tr style={{
+                                  color: '#64748b',
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.04em',
+                                  background: '#f8fafc',
+                                  borderBottom: '1px solid #e2e8f0'
+                                }}>
+                                  <th style={{ padding: '9px 12px', width: 44, textAlign: 'center' }}></th>
+                                  <th style={{ padding: '9px 14px', minWidth: 240 }}>Keyword &amp; Strategy Intent</th>
+                                  <th style={{ padding: '9px 14px', width: 170 }}>Rank Shift</th>
+                                  <th style={{ padding: '9px 14px', width: 80 }}>SV</th>
+                                  <th style={{ padding: '9px 14px', width: 60 }}>KD</th>
+                                  <th style={{ padding: '9px 14px', width: 70 }}>Conf</th>
+                                  <th style={{ padding: '9px 14px', minWidth: 220 }}>Live AI Status &amp; Rationale</th>
+                                  <th style={{ padding: '9px 14px', width: 230 }}>Target Outreach Site</th>
+                                  {!isPaidGuestPost && (
+                                    <th style={{ padding: '9px 14px', width: 200 }}>Topic Link</th>
+                                  )}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows.map(item => {
+                                  const isChecked = selectedKwIds.has(item.id);
+                                  const currentRank = item.new_rank ?? item.rank;
+                                  const isInfoOpen = activeInfoKwId === item.id;
+
+                                  return (
+                                    <tr
+                                      key={item.id}
+                                      style={{
+                                        borderTop: '1px solid #f1f5f9',
+                                        background: isChecked ? '#f5f3ff' : 'transparent',
+                                        transition: 'background-color 0.1s ease'
+                                      }}
+                                    >
+                                      <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                        <input
+                                          type="checkbox"
+                                          checked={isChecked}
+                                          onChange={(e) => {
+                                            const next = new Set(selectedKwIds);
+                                            if (e.target.checked) next.add(item.id);
+                                            else next.delete(item.id);
+                                            setSelectedKwIds(next);
+                                          }}
+                                          style={{ cursor: 'pointer', width: 16, height: 16, accentColor: '#7c3aed' }}
+                                        />
+                                      </td>
+                                      <td style={{ padding: '8px 14px', position: 'relative' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                          <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 13 }}>{item.keyword}</div>
+                                          {/* Info (i) button with rationale explanation */}
+                                          <button
+                                            type="button"
+                                            onClick={() => setActiveInfoKwId(isInfoOpen ? null : item.id)}
+                                            title="View AI Strategy Justification"
+                                            style={{
+                                              background: 'transparent',
+                                              border: 'none',
+                                              cursor: 'pointer',
+                                              padding: 2,
+                                              color: isInfoOpen ? '#7c3aed' : '#94a3b8',
+                                              display: 'flex',
+                                              alignItems: 'center'
+                                            }}
+                                          >
+                                            <Info size={14} />
+                                          </button>
+                                        </div>
+
+                                        {/* Floating Justification Tooltip Popover */}
+                                        {isInfoOpen && (
+                                          <div style={{
+                                            position: 'absolute',
+                                            top: '100%',
+                                            left: 14,
+                                            zIndex: 60,
+                                            background: '#1e1b4b',
+                                            color: '#ffffff',
+                                            borderRadius: 8,
+                                            padding: '10px 14px',
+                                            maxWidth: 320,
+                                            boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+                                            fontSize: 12,
+                                            lineHeight: 1.4
+                                          }}>
+                                            <div style={{ fontWeight: 700, color: '#c4b5fd', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                              <Sparkles size={12} />
+                                              <span>AI Selection Rationale</span>
+                                            </div>
+                                            <div>
+                                              This keyword was selected because SERP results are landing pages. It has a high confidence score ({item.confidence || 85}%) to rank in Top 3.
+                                              {item.reason ? ` Rationale: ${item.reason}` : ''}
+                                            </div>
+                                          </div>
+                                        )}
+
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
+                                          {(item.category || item.cluster) && (
+                                            <span style={{ fontSize: 11, color: '#64748b' }}>
+                                              {[item.category, item.cluster].filter(Boolean).join(' • ')}
+                                            </span>
+                                          )}
+                                          {item.top3_is_landing !== undefined && (
+                                            <span style={{
+                                              fontSize: 10,
+                                              fontWeight: 700,
+                                              color: item.top3_is_landing ? '#16a34a' : '#dc2626',
+                                              background: item.top3_is_landing ? '#dcfce7' : '#fee2e2',
+                                              border: `1px solid ${item.top3_is_landing ? '#bbf7d0' : '#fecaca'}`,
+                                              padding: '1px 6px',
+                                              borderRadius: 4
+                                            }}>
+                                              {item.top3_is_landing ? 'Top 3: Landing Page ✓' : 'Top 3: Non-Landing'}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </td>
+                                      <td style={{ padding: '8px 14px' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                          {item.delta > 0 && (
+                                            <div style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: 4,
+                                              background: '#dcfce7',
+                                              color: '#15803d',
+                                              border: '1px solid #bbf7d0',
+                                              padding: '2px 8px',
+                                              borderRadius: 6,
+                                              fontSize: 11,
+                                              fontWeight: 800,
+                                              width: 'fit-content'
+                                            }}>
+                                              <span>↑ +{item.delta}</span>
+                                              <span style={{ fontSize: 9.5, letterSpacing: '0.04em' }}>GAIN</span>
+                                            </div>
+                                          )}
+                                          {item.delta < 0 && (
+                                            <div style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: 4,
+                                              background: '#fee2e2',
+                                              color: '#b91c1c',
+                                              border: '1px solid #fecaca',
+                                              padding: '2px 8px',
+                                              borderRadius: 6,
+                                              fontSize: 11,
+                                              fontWeight: 800,
+                                              width: 'fit-content'
+                                            }}>
+                                              <span>↓ {item.delta}</span>
+                                              <span style={{ fontSize: 9.5, letterSpacing: '0.04em' }}>DROP</span>
+                                            </div>
+                                          )}
+                                          {(!item.delta || item.delta === 0) && (
+                                            <div style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: 4,
+                                              background: '#f1f5f9',
+                                              color: '#64748b',
+                                              border: '1px solid #e2e8f0',
+                                              padding: '2px 8px',
+                                              borderRadius: 6,
+                                              fontSize: 11,
+                                              fontWeight: 700,
+                                              width: 'fit-content'
+                                            }}>
+                                              <span>— 0</span>
+                                              <span style={{ fontSize: 9.5 }}>STEADY</span>
+                                            </div>
+                                          )}
+                                          <div style={{ fontSize: 11, color: '#64748b' }}>
+                                            Prev: #{item.prev_rank ?? item.rank} → Now: <strong style={{ color: '#0f172a' }}>#{currentRank}</strong>
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td style={{ padding: '8px 14px', fontWeight: 600, color: '#334155' }}>
+                                        {item.sv ? item.sv.toLocaleString() : '—'}
+                                      </td>
+                                      <td style={{ padding: '8px 14px', color: '#64748b' }}>
+                                        {item.kd ?? '—'}
+                                      </td>
+                                      <td style={{ padding: '8px 14px' }}>
+                                        {item.confidence !== undefined ? (
+                                          <span style={{
+                                            fontWeight: 700,
+                                            fontSize: 11.5,
+                                            color: item.confidence >= 80 ? '#16a34a' : (item.confidence >= 60 ? '#d97706' : '#64748b')
+                                          }}>
+                                            {item.confidence}%
+                                          </span>
+                                        ) : '—'}
+                                      </td>
+                                      <td style={{ padding: '8px 14px', color: '#334155', lineHeight: 1.45, fontSize: 12 }}>
+                                        {item.reason || 'Optimal candidate for top-3 rankings based on search intent.'}
+                                      </td>
+                                      <td style={{ padding: '8px 14px' }}>
+                                        {(() => {
+                                          const assignedSite = selectedOutreachSites[item.id] || item.outreach_site;
+                                          return (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                              {availableOutreachSites && availableOutreachSites.length > 0 ? (
+                                                <select
+                                                  value={assignedSite?.domain || ''}
+                                                  onChange={(e) => {
+                                                    const domainVal = e.target.value;
+                                                    const matchedSite = availableOutreachSites.find(s => s.domain === domainVal);
+                                                    handleSelectSiteForKeyword(item.id, matchedSite || null);
+                                                  }}
+                                                  style={{
+                                                    padding: '4px 8px',
+                                                    fontSize: 12,
+                                                    fontWeight: 600,
+                                                    color: assignedSite ? '#1e1b4b' : '#64748b',
+                                                    background: '#ffffff',
+                                                    border: '1px solid #cbd5e1',
+                                                    borderRadius: 6,
+                                                    outline: 'none',
+                                                    maxWidth: 210,
+                                                    cursor: 'pointer'
+                                                  }}
+                                                >
+                                                  <option value="">-- Select Outreach Site --</option>
+                                                  {availableOutreachSites.map(site => (
+                                                    <option key={site.id || site.domain} value={site.domain}>
+                                                      {site.domain} (DA {site.da} | ${site.price})
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              ) : assignedSite ? (
+                                                <span style={{ fontSize: 12, fontWeight: 700, color: '#1e1b4b' }}>
+                                                  {assignedSite.domain}
+                                                </span>
+                                              ) : (
+                                                <span style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
+                                                  Auto-assigned on schedule
+                                                </span>
+                                              )}
+
+                                              {assignedSite && (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                                                  <span style={{
+                                                    fontSize: 10,
+                                                    fontWeight: 800,
+                                                    background: (assignedSite.da || 0) >= 50 ? '#dcfce7' : '#f1f5f9',
+                                                    color: (assignedSite.da || 0) >= 50 ? '#15803d' : '#475569',
+                                                    border: `1px solid ${(assignedSite.da || 0) >= 50 ? '#bbf7d0' : '#cbd5e1'}`,
+                                                    padding: '1px 5px',
+                                                    borderRadius: 4
+                                                  }}>
+                                                    DA {assignedSite.da}
+                                                  </span>
+                                                  <span style={{
+                                                    fontSize: 10,
+                                                    fontWeight: 700,
+                                                    background: (assignedSite.spam_score || 0) <= 5 ? '#f0fdf4' : '#fee2e2',
+                                                    color: (assignedSite.spam_score || 0) <= 5 ? '#166534' : '#991b1b',
+                                                    border: `1px solid ${(assignedSite.spam_score || 0) <= 5 ? '#bbf7d0' : '#fecaca'}`,
+                                                    padding: '1px 5px',
+                                                    borderRadius: 4
+                                                  }}>
+                                                    Spam {assignedSite.spam_score}%
+                                                  </span>
+                                                  <span style={{
+                                                    fontSize: 10,
+                                                    fontWeight: 700,
+                                                    color: '#059669',
+                                                    background: '#ecfdf5',
+                                                    padding: '1px 5px',
+                                                    borderRadius: 4
+                                                  }}>
+                                                    ${assignedSite.price}
+                                                  </span>
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })()}
+                                      </td>
+                                      {!isPaidGuestPost && (
+                                        <td style={{ padding: '8px 14px' }}>
+                                          <input
+                                            type="text"
+                                            placeholder="https://..."
+                                            value={topicLinks[item.id] || ''}
+                                            onChange={(e) => setTopicLinks({ ...topicLinks, [item.id]: e.target.value })}
+                                            style={{
+                                              width: '100%',
+                                              padding: '5px 8px',
+                                              fontSize: 12,
+                                              border: '1px solid #cbd5e1',
+                                              borderRadius: 6,
+                                              outline: 'none',
+                                              background: '#ffffff'
+                                            }}
+                                          />
+                                        </td>
+                                      )}
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* STICKY BOTTOM ACTION BAR */}
+            <div style={{
+              position: 'sticky',
+              bottom: 16,
+              zIndex: 30,
+              background: 'rgba(255, 255, 255, 0.96)',
+              backdropFilter: 'blur(8px)',
+              border: '1px solid #E4DFEE',
+              borderRadius: 12,
+              padding: '12px 24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 16,
+              boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.08)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: 13, color: '#475569' }}>
+                  <strong style={{ color: '#0f172a', fontSize: 14 }}>{selectedKwIds.size}</strong> of {potentialKws.length} keywords selected
+                </div>
+                {potentialKws.length > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>•</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#16a34a', background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '2px 8px', borderRadius: 10 }}>
+                      {selectedByBatch.high} Gains
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#d97706', background: '#fffbeb', border: '1px solid #fde68a', padding: '2px 8px', borderRadius: 10 }}>
+                      {selectedByBatch.medium} Drops
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', background: '#f8fafc', border: '1px solid #e2e8f0', padding: '2px 8px', borderRadius: 10 }}>
+                      {selectedByBatch.low} Stagnant
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => { setIsModalOpen(false); setModalStep('form'); }}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: '#64748b',
+                    background: '#ffffff',
+                    border: '1px solid #E4DFEE',
+                    borderRadius: 8,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  disabled={selectedKwIds.size === 0 || savingActivity}
+                  onClick={handleConfirmAddKeywords}
+                  style={{
+                    padding: '9px 24px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#ffffff',
+                    background: selectedKwIds.size === 0 ? '#cbd5e1' : 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                    border: 'none',
+                    borderRadius: 8,
+                    cursor: (selectedKwIds.size === 0 || savingActivity) ? 'not-allowed' : 'pointer',
+                    boxShadow: selectedKwIds.size === 0 ? 'none' : '0 2px 12px rgba(124, 58, 237, 0.35)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8
+                  }}
+                >
+                  {savingActivity ? (
+                    <>
+                      <div style={{ width: 14, height: 14, border: '2px solid #ffffff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                      <span>Scheduling...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check size={16} />
+                      <span>Confirm &amp; Schedule Calendar ({selectedKwIds.size})</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // MAIN CALENDAR DASHBOARD (Tree Structure)
+  // ─────────────────────────────────────────────────────────────
   return (
     <div style={{ padding: '24px 32px', minHeight: '100vh', background: 'var(--bg)' }}>
       {/* Top Header */}
@@ -547,19 +1728,21 @@ function CalendarPage({ user }) {
               Calendar
             </h1>
           </div>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>          </p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+            Plan, schedule, and execute monthly SEO campaigns across off-page, on-page, and content activities.
+          </p>
         </div>
 
         {/* Right Header Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button
-            onClick={() => handleOpenAddModal(activeSubTab)}
+            onClick={() => handleOpenAddModal()}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: 8,
-              padding: '8px 16px',
-              fontSize: 13,
+              padding: '9px 20px',
+              fontSize: 13.5,
               fontWeight: 700,
               color: '#ffffff',
               background: '#2D2D44',
@@ -572,111 +1755,23 @@ function CalendarPage({ user }) {
             onMouseEnter={e => { e.currentTarget.style.background = '#1F1F30'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
             onMouseLeave={e => { e.currentTarget.style.background = '#2D2D44'; e.currentTarget.style.transform = 'translateY(0)'; }}
           >
-            <Sparkles size={16} />
-            <span>Choose Project</span>
+            <span>Create Calendar</span>
           </button>
-
-          <button
-            onClick={handleExportCSV}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '8px 14px',
-              fontSize: 13,
-              fontWeight: 600,
-              color: '#334155',
-              background: '#ffffff',
-              border: '1px solid #E4DFEE',
-              borderRadius: 8,
-              cursor: 'pointer',
-              boxShadow: '0 1px 3px rgba(74, 26, 140, 0.04)'
-            }}
-          >
-            <Download size={15} />
-            <span>Export CSV</span>
-          </button>
-
-          {/* Project Selector */}
-          <div style={{ position: 'relative' }}>
-            <button
-              onClick={() => setProjectMenuOpen(!projectMenuOpen)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                background: '#ffffff',
-                border: '1px solid #E4DFEE',
-                borderRadius: 10,
-                padding: '8px 14px',
-                fontSize: 13,
-                fontWeight: 600,
-                color: '#1A1A1A',
-                cursor: 'pointer',
-                boxShadow: '0 2px 6px rgba(74, 26, 140, 0.04)'
-              }}
-            >
-              <FolderOpen size={16} color="var(--accent)" />
-              <span>{activeProject?.name || activeProject?.domain || 'All Projects'}</span>
-              <ChevronDown size={14} color="#64748b" />
-            </button>
-
-            {projectMenuOpen && (
-              <div style={{
-                position: 'absolute',
-                top: '100%',
-                right: 0,
-                marginTop: 6,
-                width: 220,
-                background: '#ffffff',
-                border: '1px solid #E4DFEE',
-                borderRadius: 10,
-                boxShadow: '0 10px 25px -5px rgba(74, 26, 140, 0.12)',
-                zIndex: 50,
-                overflow: 'hidden'
-              }}>
-                {projects.map(p => (
-                  <button
-                    key={p.slug}
-                    onClick={() => handleSelectProject(p)}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '10px 14px',
-                      border: 'none',
-                      background: activeProject?.slug === p.slug ? '#F6EEFD' : 'transparent',
-                      fontSize: 13,
-                      fontWeight: activeProject?.slug === p.slug ? 700 : 500,
-                      color: activeProject?.slug === p.slug ? '#7B2FBE' : '#334155',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between'
-                    }}
-                  >
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name || p.domain}</span>
-                    {activeProject?.slug === p.slug && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#7B2FBE' }} />}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       </div>
 
-      {/* Main Sub-Tab Bar Container */}
+      {/* Sub-Tabs: Saved (Draft) | Scheduled | Approved */}
       <div style={{
         background: '#ffffff',
         borderRadius: 14,
         border: '1px solid #E4DFEE',
         padding: '16px 20px',
         marginBottom: 20,
-        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
+        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06)'
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
-          {/* Sub-Tabs: Saved | Scheduled | Approved */}
           <div style={{ display: 'flex', gap: 8, background: '#F4F1FA', padding: 4, borderRadius: 10 }}>
-            {/* 1. Saved Tab */}
+            {/* 1. Saved (Draft) Tab */}
             <button
               onClick={() => setActiveSubTab('saved')}
               style={{
@@ -691,12 +1786,11 @@ function CalendarPage({ user }) {
                 fontSize: 13,
                 fontWeight: activeSubTab === 'saved' ? 800 : 600,
                 cursor: 'pointer',
-                boxShadow: activeSubTab === 'saved' ? '0 1px 3px rgba(74, 26, 140, 0.08)' : 'none',
                 transition: 'all 0.15s ease'
               }}
             >
               <Bookmark size={15} color={activeSubTab === 'saved' ? '#7B2FBE' : '#64748b'} />
-              <span>Saved</span>
+              <span>Draft</span>
               <span style={{
                 background: activeSubTab === 'saved' ? '#E5CCF7' : '#E2DBEC',
                 color: activeSubTab === 'saved' ? '#4A1A8C' : '#475569',
@@ -724,7 +1818,6 @@ function CalendarPage({ user }) {
                 fontSize: 13,
                 fontWeight: activeSubTab === 'scheduled' ? 800 : 600,
                 cursor: 'pointer',
-                boxShadow: activeSubTab === 'scheduled' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
                 transition: 'all 0.15s ease'
               }}
             >
@@ -757,7 +1850,6 @@ function CalendarPage({ user }) {
                 fontSize: 13,
                 fontWeight: activeSubTab === 'approved' ? 800 : 600,
                 cursor: 'pointer',
-                boxShadow: activeSubTab === 'approved' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
                 transition: 'all 0.15s ease'
               }}
             >
@@ -774,15 +1866,47 @@ function CalendarPage({ user }) {
                 {counts.approved}
               </span>
             </button>
+
+            {/* 4. Published (Live) Tab */}
+            <button
+              onClick={() => setActiveSubTab('published')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '8px 18px',
+                borderRadius: 8,
+                border: activeSubTab === 'published' ? '1px solid #6EE7B7' : '1px solid transparent',
+                background: activeSubTab === 'published' ? 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)' : 'transparent',
+                color: activeSubTab === 'published' ? '#047857' : '#64748b',
+                fontSize: 13,
+                fontWeight: activeSubTab === 'published' ? 800 : 600,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <Send size={15} color={activeSubTab === 'published' ? '#047857' : '#64748b'} />
+              <span>Published (Live)</span>
+              <span style={{
+                background: activeSubTab === 'published' ? '#A7F3D0' : '#E2DBEC',
+                color: activeSubTab === 'published' ? '#065F46' : '#475569',
+                fontSize: 11,
+                fontWeight: 800,
+                padding: '1px 7px',
+                borderRadius: 10
+              }}>
+                {counts.published}
+              </span>
+            </button>
           </div>
 
-          {/* Search & Utility Bar */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* Search */}
+          <div style={{ display: 'flex', alignItems: 'center' }}>
             <div style={{ position: 'relative' }}>
               <Search size={15} color="#94a3b8" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
               <input
                 type="text"
-                placeholder={`Search ${activeSubTab} activities...`}
+                placeholder={`Search activities...`}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 style={{
@@ -794,46 +1918,22 @@ function CalendarPage({ user }) {
                   border: '1px solid #E4DFEE',
                   borderRadius: 8,
                   outline: 'none',
-                  width: 240,
+                  width: 260,
                   background: '#ffffff'
                 }}
               />
             </div>
-
-            <button
-              onClick={() => handleOpenAddModal(activeSubTab)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                background: '#2D2D44',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: 8,
-                padding: '8px 16px',
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: 'pointer',
-                boxShadow: '0 2px 8px rgba(45, 45, 68, 0.25)',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = '#1F1F30'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = '#2D2D44'; e.currentTarget.style.transform = 'translateY(0)'; }}
-            >
-              <Plus size={15} />
-              <span>New Entry</span>
-            </button>
           </div>
         </div>
       </div>
 
-      {/* Content Table Container - ALWAYS RENDERS TABLE HEADERS REGARDLESS OF EMPTY OR NOT */}
+      {/* TREE TABLE CONTAINER */}
       <div style={{
         background: '#ffffff',
         borderRadius: 14,
         border: '1px solid #E4DFEE',
         overflow: 'hidden',
-        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
+        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06)'
       }}>
         {loading ? (
           <div style={{ padding: '60px 20px', textAlign: 'center' }}>
@@ -841,158 +1941,594 @@ function CalendarPage({ user }) {
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: 1000 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: 1050 }}>
               <thead>
                 <tr style={{ background: '#FAF8FD', borderBottom: '1px solid #E4DFEE' }}>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Activity Name
+                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', width: 280 }}>
+                    Project / Activities
                   </th>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Project Name
+                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', width: 140 }}>
+                    Mode
                   </th>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Main POC
+                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', width: 130 }}>
+                    Status
                   </th>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Content POC
+                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'center', width: 80 }}>
+                    Qty
                   </th>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'center' }}>
-                    Quantity
+                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', width: 120 }}>
+                    Total Budget
                   </th>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Budget
-                  </th>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    User
-                  </th>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', width: 140 }}>
                     Period
                   </th>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Scheduler
+                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', width: 140 }}>
+                    Content POC
                   </th>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', width: 140 }}>
                     Auditor
                   </th>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'center' }}>
-                    Move Status
+                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'center', width: 140 }}>
+                    Schedule / Move
                   </th>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'right' }}>
+                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'right', width: 90 }}>
                     Actions
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {filteredActivities.length > 0 ? (
-                  filteredActivities.map((item, idx) => (
-                    <tr key={item.id || idx} style={{ borderBottom: idx === filteredActivities.length - 1 ? 'none' : '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fafafa' }}>
-                      <td style={{ padding: '14px 16px', fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
-                        {item.activity_name || '—'}
-                      </td>
-                      <td style={{ padding: '14px 16px', fontSize: 12.5, color: '#475569', fontWeight: 600 }}>
-                        <span style={{ background: '#eef2ff', color: '#4338ca', padding: '3px 8px', borderRadius: 6 }}>
-                          {item.project_name || '—'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '14px 16px', fontSize: 12.5, color: '#334155', fontWeight: 500 }}>
-                        {item.main_poc || '—'}
-                      </td>
-                      <td style={{ padding: '14px 16px', fontSize: 12.5, color: '#334155', fontWeight: 500 }}>
-                        {item.content_poc || '—'}
-                      </td>
-                      <td style={{ padding: '14px 16px', fontSize: 12.5, color: '#0f172a', fontWeight: 700, textAlign: 'center' }}>
-                        {item.quantity ?? 1}
-                      </td>
-                      <td style={{ padding: '14px 16px', fontSize: 12.5, color: '#059669', fontWeight: 700 }}>
-                        {item.budget ? (String(item.budget).startsWith('$') ? item.budget : `$${item.budget}`) : '—'}
-                      </td>
-                      <td style={{ padding: '14px 16px', fontSize: 12, color: '#64748b' }}>
-                        {item.user || '—'}
-                      </td>
-                      <td style={{ padding: '14px 16px', fontSize: 12, color: '#64748b' }}>
-                        {item.period || '—'}
-                      </td>
-                      <td style={{ padding: '14px 16px', fontSize: 12 }}>
-                        {item.scheduler ? (
-                          String(item.scheduler).toLowerCase().includes('ai') ? (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#ede9fe', color: '#6d28d9', padding: '3px 8px', borderRadius: 6, fontSize: 11.5, fontWeight: 700 }}>
-                              <Sparkles size={11} color="#7c3aed" />
-                              {item.scheduler}
-                            </span>
-                          ) : (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#f1f5f9', color: '#475569', padding: '3px 8px', borderRadius: 6, fontSize: 11.5, fontWeight: 600 }}>
-                              {item.scheduler}
-                            </span>
-                          )
-                        ) : '—'}
-                      </td>
-                      <td style={{ padding: '14px 16px', fontSize: 12, color: '#64748b' }}>
-                        {item.auditor || '—'}
-                      </td>
+                {groupedProjects.length > 0 ? (
+                  groupedProjects.map((group, gIdx) => {
+                    const isExpanded = expandedProjects.has(group.projectName);
+                    return (
+                      <React.Fragment key={group.projectName || gIdx}>
+                        {/* PARENT ROW: Project Summary */}
+                        <tr style={{
+                          borderBottom: '1px solid #e2e8f0',
+                          background: gIdx % 2 === 0 ? '#ffffff' : '#fafafa',
+                          fontWeight: 600
+                        }}>
+                          {/* Project Name + Tree expander */}
+                          <td style={{ padding: '14px 16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <button
+                                type="button"
+                                onClick={() => toggleProjectExpand(group.projectName)}
+                                style={{
+                                  background: '#f1f5f9',
+                                  border: '1px solid #cbd5e1',
+                                  borderRadius: 6,
+                                  width: 24,
+                                  height: 24,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  cursor: 'pointer',
+                                  color: '#475569'
+                                }}
+                              >
+                                {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                              </button>
+                              <div>
+                                <div style={{ fontSize: 13.5, fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <FolderOpen size={15} color="#7c3aed" />
+                                  <span>{group.projectName}</span>
+                                </div>
+                                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                                  {group.items.length} activit{group.items.length === 1 ? 'y' : 'ies'} scheduled
+                                </div>
+                              </div>
+                            </div>
+                          </td>
 
-                      {/* Move Status Buttons */}
-                      <td style={{ padding: '14px 16px', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                          {activeSubTab !== 'saved' && (
-                            <button
-                              onClick={() => handleMoveStatus(item, 'saved')}
-                              title="Move to Saved"
-                              style={{ background: '#fef3c7', color: '#b45309', border: 'none', padding: '3px 7px', borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
-                            >
-                              Saved
-                            </button>
-                          )}
-                          {activeSubTab !== 'scheduled' && (
-                            <button
-                              onClick={() => handleMoveStatus(item, 'scheduled')}
-                              title="Move to Scheduled"
-                              style={{ background: '#dbeafe', color: '#1d4ed8', border: 'none', padding: '3px 7px', borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
-                            >
-                              Scheduled
-                            </button>
-                          )}
-                          {activeSubTab !== 'approved' && (
-                            <button
-                              onClick={() => handleMoveStatus(item, 'approved')}
-                              title="Move to Approved"
-                              style={{ background: '#d1fae5', color: '#047857', border: 'none', padding: '3px 7px', borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
-                            >
-                              Approved
-                            </button>
-                          )}
-                        </div>
-                      </td>
+                          {/* AI vs Manual Icon Badge */}
+                          <td style={{ padding: '14px 16px' }}>
+                            {group.hasAi ? (
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                background: '#f5f3ff',
+                                color: '#7c3aed',
+                                border: '1px solid #c4b5fd',
+                                padding: '3px 8px',
+                                borderRadius: 8,
+                                fontSize: 11.5,
+                                fontWeight: 700
+                              }}>
+                                <Sparkles size={12} />
+                                AI Scheduled
+                              </span>
+                            ) : (
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                background: '#f8fafc',
+                                color: '#475569',
+                                border: '1px solid #cbd5e1',
+                                padding: '3px 8px',
+                                borderRadius: 8,
+                                fontSize: 11.5,
+                                fontWeight: 700
+                              }}>
+                                <UserIcon size={12} />
+                                Manual
+                              </span>
+                            )}
+                          </td>
 
-                      {/* Actions: Edit / Delete */}
-                      <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                          <button
-                            onClick={() => handleOpenEditModal(item)}
-                            title="Edit Activity"
-                            style={{ background: 'transparent', border: 'none', color: '#6366f1', cursor: 'pointer', padding: 4 }}
+                          {/* Status & Optional Redirect on Published */}
+                          <td style={{ padding: '14px 16px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {/* Status Tag */}
+                              <span style={{
+                                display: 'inline-block',
+                                fontSize: 10.5,
+                                fontWeight: 800,
+                                textTransform: 'uppercase',
+                                padding: '2px 7px',
+                                borderRadius: 6,
+                                width: 'fit-content',
+                                background: activeSubTab === 'saved' ? '#fef3c7' : (activeSubTab === 'scheduled' ? '#dbeafe' : (activeSubTab === 'approved' ? '#d1fae5' : '#dcfce7')),
+                                color: activeSubTab === 'saved' ? '#b45309' : (activeSubTab === 'scheduled' ? '#1d4ed8' : (activeSubTab === 'approved' ? '#047857' : '#15803d')),
+                                border: `1px solid ${activeSubTab === 'saved' ? '#fde68a' : (activeSubTab === 'scheduled' ? '#bfdbfe' : (activeSubTab === 'approved' ? '#a7f3d0' : '#bbf7d0'))}`
+                              }}>
+                                {activeSubTab === 'saved' ? 'Draft' : (activeSubTab === 'published' ? 'Published (Live)' : activeSubTab)}
+                              </span>
+
+                              {/* Redirect to off-page: Only shown on publish page */}
+                              {activeSubTab === 'published' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (onNavigate) {
+                                      if (group.channel === 'content') onNavigate('content-engine');
+                                      else onNavigate('search-visibility/off-page');
+                                    }
+                                  }}
+                                  title={`Navigate to ${group.channel || 'off-page'}`}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    fontSize: 10.5,
+                                    fontWeight: 700,
+                                    padding: '2px 7px',
+                                    borderRadius: 6,
+                                    width: 'fit-content',
+                                    background: '#f5f3ff',
+                                    color: '#7c3aed',
+                                    border: '1px solid #ddd6fe',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  <span>{group.channel || 'Off-page'}</span>
+                                  <ExternalLink size={10} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Total Quantity */}
+                          <td style={{ padding: '14px 16px', textAlign: 'center', fontWeight: 800, color: '#0f172a' }}>
+                            {group.totalQuantity}
+                          </td>
+
+                          {/* Total Budget */}
+                          <td style={{ padding: '14px 16px', fontWeight: 800, color: '#059669', fontSize: 13.5 }}>
+                            ${group.totalBudget.toLocaleString()}
+                          </td>
+
+                          {/* Period (Month & Year) */}
+                          <td style={{ padding: '14px 16px', fontSize: 12.5, color: '#334155', fontWeight: 600 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                              <CalendarIcon size={14} color="#64748b" />
+                              <span>{group.period}</span>
+                            </div>
+                          </td>
+
+                          {/* Content POC */}
+                          <td style={{ padding: '14px 16px', fontSize: 12.5, color: '#334155', fontWeight: 600 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                              <UserIcon size={13} color="#7c3aed" />
+                              <span>{group.items[0]?.content_poc || 'Content Lead'}</span>
+                            </div>
+                          </td>
+
+                          {/* Auditor */}
+                          <td style={{ padding: '14px 16px', fontSize: 12.5, color: '#334155', fontWeight: 600 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                              <UserIcon size={13} color="#059669" />
+                              <span>{group.items[0]?.auditor || 'SEO Audit Team'}</span>
+                            </div>
+                          </td>
+
+                          {/* Move Status / Direct Schedule Button */}
+                          <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                            {activeSubTab === 'saved' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  // Open confirmation to AI schedule or move directly
+                                  const firstItem = group.items[0];
+                                  if (firstItem) {
+                                    handleOpenEditModal(firstItem);
+                                  }
+                                }}
+                                style={{
+                                  background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                                  color: '#ffffff',
+                                  border: 'none',
+                                  padding: '5px 12px',
+                                  borderRadius: 6,
+                                  fontSize: 11.5,
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  boxShadow: '0 2px 6px rgba(124, 58, 237, 0.25)',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 5
+                                }}
+                              >
+                                <Clock size={12} />
+                                <span>Schedule</span>
+                              </button>
+                            )}
+                            {activeSubTab === 'scheduled' && (
+                              <button
+                                type="button"
+                                onClick={() => group.items.forEach(it => handleMoveStatus(it, 'approved'))}
+                                style={{
+                                  background: '#d1fae5',
+                                  color: '#047857',
+                                  border: '1px solid #a7f3d0',
+                                  padding: '5px 10px',
+                                  borderRadius: 6,
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                Approve All
+                              </button>
+                            )}
+                            {activeSubTab === 'approved' && (
+                              <button
+                                type="button"
+                                onClick={() => group.items.forEach(it => handleMoveStatus(it, 'published'))}
+                                style={{
+                                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                  color: '#ffffff',
+                                  border: 'none',
+                                  padding: '5px 12px',
+                                  borderRadius: 6,
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 5,
+                                  boxShadow: '0 2px 6px rgba(16, 185, 129, 0.25)'
+                                }}
+                              >
+                                <Send size={12} />
+                                <span>Publish All</span>
+                              </button>
+                            )}
+                            {activeSubTab === 'published' && (
+                              <span style={{ fontSize: 11, fontWeight: 700, color: '#047857', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                <CheckCircle2 size={13} color="#047857" />
+                                <span>Live &amp; Published</span>
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Project Actions */}
+                          <td style={{ padding: '14px 16px', textAlign: 'right' }}>
+                            <button
+                              type="button"
+                              onClick={() => toggleProjectExpand(group.projectName)}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#7c3aed',
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {isExpanded ? 'Hide' : 'View'} ({group.items.length})
+                            </button>
+                          </td>
+                        </tr>
+
+                        {/* CHILD ROWS (Expanded Tree Structure) */}
+                        {isExpanded && group.items.map((item, idx) => (
+                          <tr
+                            key={item.id || idx}
+                            style={{
+                              borderBottom: '1px solid #f1f5f9',
+                              background: '#fcfbfe'
+                            }}
                           >
-                            <Edit3 size={15} />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteItem(item)}
-                            title="Delete Activity"
-                            style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', padding: 4 }}
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                            {/* Indented Activity Name */}
+                            <td style={{ padding: '10px 16px 10px 36px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ color: '#cbd5e1', fontSize: 14 }}>↳</span>
+                                <div>
+                                  <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>
+                                    {item.activity_name}
+                                  </div>
+                                  {item.keyword_name && (
+                                    <div style={{ fontSize: 11, color: '#7c3aed', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                      <Sparkles size={11} />
+                                      <span>{item.keyword_name.split(',').length} keywords assigned</span>
+                                    </div>
+                                  )}
+                                  {(() => {
+                                    let kws = [];
+                                    if (Array.isArray(item.potential_keywords)) kws = item.potential_keywords;
+                                    else if (typeof item.potential_keywords === 'string') {
+                                      try { kws = JSON.parse(item.potential_keywords); } catch (_) {}
+                                    }
+                                    const siteWithDomain = kws.find(k => k.outreach_site?.domain)?.outreach_site;
+                                    if (siteWithDomain) {
+                                      return (
+                                        <div style={{ fontSize: 10.5, color: '#047857', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                          <Globe size={11} />
+                                          <span>Site: <strong>{siteWithDomain.domain}</strong> (DA {siteWithDomain.da || '—'})</span>
+                                        </div>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Activity Mode */}
+                            <td style={{ padding: '10px 16px', fontSize: 12, color: '#64748b' }}>
+                              {item.scheduler || 'Manual'}
+                            </td>
+
+                            {/* Sub Activity Status & Optional Redirect on Published */}
+                            <td style={{ padding: '10px 16px' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                <span style={{
+                                  display: 'inline-block',
+                                  fontSize: 10,
+                                  fontWeight: 800,
+                                  textTransform: 'uppercase',
+                                  padding: '2px 6px',
+                                  borderRadius: 5,
+                                  width: 'fit-content',
+                                  background: (item.status || activeSubTab) === 'saved' ? '#fef3c7' : ((item.status || activeSubTab) === 'scheduled' ? '#dbeafe' : ((item.status || activeSubTab) === 'approved' ? '#d1fae5' : '#dcfce7')),
+                                  color: (item.status || activeSubTab) === 'saved' ? '#b45309' : ((item.status || activeSubTab) === 'scheduled' ? '#1d4ed8' : ((item.status || activeSubTab) === 'approved' ? '#047857' : '#15803d')),
+                                  border: `1px solid ${(item.status || activeSubTab) === 'saved' ? '#fde68a' : ((item.status || activeSubTab) === 'scheduled' ? '#bfdbfe' : ((item.status || activeSubTab) === 'approved' ? '#a7f3d0' : '#bbf7d0'))}`
+                                }}>
+                                  {(item.status || activeSubTab) === 'saved' ? 'Draft' : ((item.status || activeSubTab) === 'published' ? 'Live' : (item.status || activeSubTab))}
+                                </span>
+
+                                {/* Redirect only on publish page */}
+                                {activeSubTab === 'published' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (onNavigate) {
+                                        if (item.channel === 'content') onNavigate('content-engine');
+                                        else onNavigate('search-visibility/off-page');
+                                      }
+                                    }}
+                                    title={`Navigate to ${item.channel || 'off-page'}`}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 4,
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                      padding: '2px 6px',
+                                      borderRadius: 5,
+                                      width: 'fit-content',
+                                      background: '#f5f3ff',
+                                      color: '#7c3aed',
+                                      border: '1px solid #ddd6fe',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    <span>{item.channel || 'Off-page'}</span>
+                                    <ExternalLink size={10} />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Individual Quantity */}
+                            <td style={{ padding: '10px 16px', textAlign: 'center', fontSize: 12.5, fontWeight: 600, color: '#334155' }}>
+                              {item.quantity || 1}
+                            </td>
+
+                            {/* Individual Budget */}
+                            <td style={{ padding: '10px 16px', fontSize: 12.5, fontWeight: 700, color: '#059669' }}>
+                              {item.budget ? (String(item.budget).startsWith('$') ? item.budget : `$${item.budget}`) : '—'}
+                            </td>
+
+                            {/* Activity Period */}
+                            <td style={{ padding: '10px 16px', fontSize: 12, color: '#64748b' }}>
+                              {item.period || group.period}
+                            </td>
+
+                            {/* Content POC */}
+                            <td style={{ padding: '10px 16px', fontSize: 12, color: '#475569' }}>
+                              <span>{item.content_poc || '—'}</span>
+                            </td>
+
+                            {/* Auditor */}
+                            <td style={{ padding: '10px 16px', fontSize: 12, color: '#475569' }}>
+                              <span>{item.auditor || '—'}</span>
+                            </td>
+
+                            {/* Move Status Buttons */}
+                            <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                                {/* On Draft: Only show Schedule button (never Approve) */}
+                                {activeSubTab === 'saved' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveStatus(item, 'scheduled')}
+                                    title="Move to Scheduled"
+                                    style={{
+                                      background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                                      color: '#ffffff',
+                                      border: 'none',
+                                      padding: '4px 10px',
+                                      borderRadius: 5,
+                                      fontSize: 11,
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 4,
+                                      boxShadow: '0 1px 4px rgba(124, 58, 237, 0.2)'
+                                    }}
+                                  >
+                                    <Clock size={11} />
+                                    <span>Schedule</span>
+                                  </button>
+                                )}
+
+                                {/* On Scheduled: Show Draft (to revert) and Approve (to advance) */}
+                                {activeSubTab === 'scheduled' && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveStatus(item, 'saved')}
+                                      title="Move back to Draft"
+                                      style={{
+                                        background: '#fef3c7',
+                                        color: '#b45309',
+                                        border: '1px solid #fde68a',
+                                        padding: '4px 8px',
+                                        borderRadius: 5,
+                                        fontSize: 10.5,
+                                        fontWeight: 700,
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      Draft
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveStatus(item, 'approved')}
+                                      title="Move to Approved"
+                                      style={{
+                                        background: '#d1fae5',
+                                        color: '#047857',
+                                        border: '1px solid #a7f3d0',
+                                        padding: '4px 9px',
+                                        borderRadius: 5,
+                                        fontSize: 10.5,
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 3
+                                      }}
+                                    >
+                                      <Check size={11} />
+                                      <span>Approve</span>
+                                    </button>
+                                  </>
+                                )}
+
+                                {/* On Approved: Show Scheduled (to revert) and Publish (to advance) */}
+                                {activeSubTab === 'approved' && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveStatus(item, 'scheduled')}
+                                      title="Move back to Scheduled"
+                                      style={{
+                                        background: '#dbeafe',
+                                        color: '#1d4ed8',
+                                        border: '1px solid #bfdbfe',
+                                        padding: '4px 8px',
+                                        borderRadius: 5,
+                                        fontSize: 10.5,
+                                        fontWeight: 700,
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      Scheduled
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveStatus(item, 'published')}
+                                      title="Publish Live"
+                                      style={{
+                                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                        color: '#ffffff',
+                                        border: 'none',
+                                        padding: '4px 10px',
+                                        borderRadius: 5,
+                                        fontSize: 10.5,
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 3,
+                                        boxShadow: '0 1px 4px rgba(16, 185, 129, 0.25)'
+                                      }}
+                                    >
+                                      <Send size={10} />
+                                      <span>Publish</span>
+                                    </button>
+                                  </>
+                                )}
+
+                                {/* On Published: Live status */}
+                                {activeSubTab === 'published' && (
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: '#15803d', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                    <CheckCircle2 size={12} color="#15803d" />
+                                    <span>Live</span>
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Individual Actions */}
+                            <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                                <button
+                                  onClick={() => handleOpenEditModal(item)}
+                                  title="Edit Activity"
+                                  style={{ background: 'transparent', border: 'none', color: '#6366f1', cursor: 'pointer', padding: 4 }}
+                                >
+                                  <Edit3 size={14} />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteItem(item)}
+                                  title="Delete Activity"
+                                  style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', padding: 4 }}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    );
+                  })
                 ) : (
                   <tr>
-                    <td colSpan={12} style={{ padding: '50px 20px', textAlign: 'center', color: '#94a3b8' }}>
+                    <td colSpan={10} style={{ padding: '50px 20px', textAlign: 'center', color: '#94a3b8' }}>
                       <FileSpreadsheet size={36} color="#cbd5e1" style={{ marginBottom: 8 }} />
                       <div style={{ fontSize: 14, fontWeight: 600, color: '#64748b' }}>
                         No {activeSubTab} activities found in database table
                       </div>
                       <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
-                        Click "+ New Entry" above to add a new {activeSubTab} activity.
+                        Click "Create Calendar" above to add new activities to your campaign.
                       </div>
                     </td>
                   </tr>
@@ -1003,8 +2539,10 @@ function CalendarPage({ user }) {
         )}
       </div>
 
-      {/* Add / Edit Activity Modal */}
-      {isModalOpen && (
+      {/* ─────────────────────────────────────────────────────────────
+          STEP 1: ADD / EDIT ACTIVITY MODAL
+      ───────────────────────────────────────────────────────────── */}
+      {isModalOpen && modalStep === 'form' && (
         <div style={{
           position: 'fixed',
           top: 0,
@@ -1023,728 +2561,488 @@ function CalendarPage({ user }) {
             background: '#ffffff',
             borderRadius: 16,
             width: '100%',
-            maxWidth: modalStep === 'keywords_prompt' ? 760 : 600,
+            maxWidth: 640,
             padding: 24,
             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-            maxHeight: '90vh',
+            maxHeight: '92vh',
             display: 'flex',
             flexDirection: 'column',
-            overflow: 'hidden',
-            transition: 'max-width 0.2s ease'
+            overflow: 'hidden'
           }}>
-            {/* STEP 1: FORM VIEW */}
-            {modalStep === 'form' ? (
-              <>
-                {/* Modal Header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
-                  <div>
-                    <h3 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {editingItem ? 'Edit Activity' : 'Choose Project & Activity'}
-                    </h3>
-                    <p style={{ fontSize: 12.5, color: '#64748b', margin: '4px 0 0 0' }}>
-                      {editingItem ? 'Update details for this scheduled activity.' : 'Configure activity settings and choose whether to run AI keyword scheduling.'}
-                    </p>
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+              <div>
+                <h3 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                  {editingItem ? 'Edit Activity' : 'Create Calendar'}
+                </h3>
+                <p style={{ fontSize: 12.5, color: '#64748b', margin: '3px 0 0 0' }}>
+                  Configure your monthly calendar campaign activities and scheduling mode.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 4, borderRadius: 6 }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* TOP AI SCHEDULING TOGGLE (Switch, not a tab) */}
+            {!editingItem && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                background: aiSchedulingEnabled ? '#f5f3ff' : '#f8fafc',
+                border: aiSchedulingEnabled ? '1px solid #c4b5fd' : '1px solid #e2e8f0',
+                borderRadius: 10,
+                marginBottom: 16,
+                transition: 'all 0.2s ease'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 8,
+                    background: aiSchedulingEnabled ? '#ede9fe' : '#e2e8f0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: aiSchedulingEnabled ? '#7c3aed' : '#64748b',
+                    flexShrink: 0
+                  }}>
+                    <Bot size={16} />
                   </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>AI Scheduling</span>
+                      <span style={{
+                        fontSize: 9.5,
+                        fontWeight: 800,
+                        padding: '1px 6px',
+                        borderRadius: 8,
+                        background: aiSchedulingEnabled ? '#7c3aed' : '#94a3b8',
+                        color: '#ffffff',
+                        textTransform: 'uppercase'
+                      }}>
+                        {aiSchedulingEnabled ? 'ON' : 'OFF'}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 1 }}>
+                      {aiSchedulingEnabled
+                        ? 'AI will automatically analyze keywords & schedule'
+                        : 'Manual calendar scheduling (set custom period & scheduler)'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Modern Toggle Switch */}
+                <div
+                  role="switch"
+                  aria-checked={aiSchedulingEnabled}
+                  onClick={() => setAiSchedulingEnabled(prev => !prev)}
+                  title={aiSchedulingEnabled ? 'Click to switch to Manual scheduling' : 'Click to enable AI scheduling'}
+                  style={{
+                    width: 44,
+                    height: 24,
+                    borderRadius: 12,
+                    background: aiSchedulingEnabled ? '#7c3aed' : '#cbd5e1',
+                    padding: 2,
+                    cursor: 'pointer',
+                    transition: 'background-color 0.2s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexShrink: 0
+                  }}
+                >
+                  <div style={{
+                    width: 20,
+                    height: 20,
+                    borderRadius: '50%',
+                    background: '#ffffff',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+                    transform: aiSchedulingEnabled ? 'translateX(20px)' : 'translateX(0)',
+                    transition: 'transform 0.2s ease'
+                  }} />
+                </div>
+              </div>
+            )}
+
+            <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
+              <form onSubmit={handleSaveAsDraft} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {/* Row 1: Project Name & (if manual) Period Month/Year */}
+                <div style={{ display: 'grid', gridTemplateColumns: !aiSchedulingEnabled ? '1fr 1fr' : '1fr', gap: 14 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                      Project Name *
+                    </label>
+                    <PlainSelect
+                      required
+                      placeholder="Select Project..."
+                      value={formData.project_name}
+                      onChange={v => setFormData({ ...formData, project_name: v })}
+                      options={projects.map(p => ({ value: p.name || p.domain, label: p.name || p.domain }))}
+                    />
+                  </div>
+
+                  {/* Period (Month & Year Selector for Manual) */}
+                  {!aiSchedulingEnabled && (
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                        Period (Month &amp; Year) *
+                      </label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 6 }}>
+                        <select
+                          value={periodMonth}
+                          onChange={e => setPeriodMonth(e.target.value)}
+                          style={{
+                            padding: '10px 10px',
+                            fontSize: 13,
+                            border: '1px solid #cbd5e1',
+                            borderRadius: 8,
+                            outline: 'none',
+                            background: '#ffffff',
+                            fontWeight: 600,
+                            color: '#0f172a'
+                          }}
+                        >
+                          {MONTH_NAMES.map(m => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={periodYear}
+                          onChange={e => setPeriodYear(parseInt(e.target.value, 10) || now.getFullYear())}
+                          style={{
+                            padding: '10px 10px',
+                            fontSize: 13,
+                            border: '1px solid #cbd5e1',
+                            borderRadius: 8,
+                            outline: 'none',
+                            background: '#ffffff',
+                            fontWeight: 600,
+                            color: '#0f172a'
+                          }}
+                        >
+                          {PERIOD_YEARS.map(y => (
+                            <option key={y} value={y}>{y}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* CAMPAIGN ACTIVITIES LIST (Stack multiple activities) */}
+                <div style={{ background: '#fcfbfe', border: '1px solid #e2e8f0', borderRadius: 12, padding: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <label style={{ fontSize: 12, fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Campaign Activities &amp; Budgets
+                    </label>
+                    <span style={{ fontSize: 11, color: '#64748b' }}>
+                      {activitiesList.length} activit{activitiesList.length === 1 ? 'y' : 'ies'} in batch
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {activitiesList.map((actItem, idx) => (
+                      <div
+                        key={actItem.id}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '2fr 1fr 1.2fr auto',
+                          gap: 8,
+                          alignItems: 'center',
+                          background: '#ffffff',
+                          padding: 8,
+                          borderRadius: 8,
+                          border: '1px solid #e2e8f0'
+                        }}
+                      >
+                        {/* Activity Name */}
+                        <div>
+                          <PlainSelect
+                            value={actItem.activity_name}
+                            onChange={v => handleUpdateActivityRow(actItem.id, 'activity_name', v)}
+                            options={['Paid Guest Post', 'Forum - Quora', 'Forum - Reddit', 'Business Listing', 'Classified Ads']}
+                          />
+                        </div>
+
+                        {/* Quantity */}
+                        <div>
+                          <input
+                            type="number"
+                            min="1"
+                            placeholder="Qty"
+                            value={actItem.quantity}
+                            onChange={e => handleUpdateActivityRow(actItem.id, 'quantity', parseInt(e.target.value, 10) || 1)}
+                            style={{
+                              width: '100%',
+                              padding: '9px 10px',
+                              fontSize: 13,
+                              border: '1px solid #cbd5e1',
+                              borderRadius: 8,
+                              outline: 'none',
+                              textAlign: 'center',
+                              fontWeight: 600
+                            }}
+                          />
+                        </div>
+
+                        {/* Budget */}
+                        <div>
+                          <input
+                            type="text"
+                            placeholder="$250"
+                            value={actItem.budget}
+                            onChange={e => handleUpdateActivityRow(actItem.id, 'budget', e.target.value)}
+                            style={{
+                              width: '100%',
+                              padding: '9px 10px',
+                              fontSize: 13,
+                              border: '1px solid #cbd5e1',
+                              borderRadius: 8,
+                              outline: 'none',
+                              fontWeight: 600
+                            }}
+                          />
+                        </div>
+
+                        {/* Remove row button */}
+                        <div>
+                          {activitiesList.length > 1 && !editingItem ? (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveActivityRow(actItem.id)}
+                              style={{
+                                background: '#fee2e2',
+                                border: '1px solid #fecaca',
+                                color: '#dc2626',
+                                borderRadius: 6,
+                                width: 28,
+                                height: 28,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <X size={14} />
+                            </button>
+                          ) : <div style={{ width: 28 }} />}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Centered "+ Add Another Activity" Button */}
+                  {!editingItem && (
+                    <div style={{ textAlign: 'center', marginTop: 12 }}>
+                      <button
+                        type="button"
+                        onClick={handleAddActivityRow}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '7px 16px',
+                          fontSize: 12.5,
+                          fontWeight: 700,
+                          color: '#7c3aed',
+                          background: '#ffffff',
+                          border: '1px dashed #c4b5fd',
+                          borderRadius: 8,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#f5f3ff'; e.currentTarget.style.borderColor = '#7c3aed'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.borderColor = '#c4b5fd'; }}
+                      >
+                        <Plus size={14} />
+                        <span>Add Another Activity</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* POC ROLES (Conditional based on Manual vs AI) */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: !aiSchedulingEnabled ? '1fr 1fr 1fr' : '1fr 1fr',
+                  gap: 12
+                }}>
+                  {!aiSchedulingEnabled && (
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                        Scheduler (Main POC)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. John Doe"
+                        value={formData.main_poc}
+                        onChange={e => setFormData({ ...formData, main_poc: e.target.value })}
+                        style={{ width: '100%', padding: '9px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                      Content POC
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Content Lead"
+                      value={formData.content_poc}
+                      onChange={e => setFormData({ ...formData, content_poc: e.target.value })}
+                      style={{ width: '100%', padding: '9px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                      Auditor
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. SEO Audit Team"
+                      value={formData.auditor}
+                      onChange={e => setFormData({ ...formData, auditor: e.target.value })}
+                      style={{ width: '100%', padding: '9px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
+                    />
+                  </div>
+                </div>
+
+                {/* Footer Action Buttons */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginTop: 8, paddingTop: 14, borderTop: '1px solid #f1f5f9' }}>
                   <button
                     type="button"
                     onClick={() => setIsModalOpen(false)}
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                    onMouseEnter={e => e.currentTarget.style.color = '#334155'}
-                    onMouseLeave={e => e.currentTarget.style.color = '#94a3b8'}
+                    style={{ padding: '9px 16px', fontSize: 13, fontWeight: 600, color: '#64748b', background: '#f1f5f9', border: 'none', borderRadius: 8, cursor: 'pointer' }}
                   >
-                    <X size={20} />
+                    Cancel
                   </button>
-                </div>
 
-                <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
-                  <form onSubmit={handleSaveForm} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    {/* AI Scheduling Toggle Card */}
-                    <div
-                      onClick={handleToggleAiScheduling}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {/* Save as Draft button (always present) */}
+                    <button
+                      type="submit"
+                      disabled={savingActivity}
                       style={{
+                        padding: '9px 18px',
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: '#334155',
+                        background: '#ffffff',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: 8,
+                        cursor: savingActivity ? 'not-allowed' : 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '12px 16px',
-                        borderRadius: 12,
-                        background: aiSchedulingEnabled ? 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)' : '#f8fafc',
-                        border: aiSchedulingEnabled ? '1.5px solid #c4b5fd' : '1px solid #e2e8f0',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s ease',
-                        userSelect: 'none'
+                        gap: 6
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div style={{
-                          width: 36,
-                          height: 36,
-                          borderRadius: 10,
-                          background: aiSchedulingEnabled ? '#7c3aed' : '#e2e8f0',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: '#ffffff',
-                          transition: 'all 0.2s ease',
-                          boxShadow: aiSchedulingEnabled ? '0 2px 8px rgba(124, 58, 237, 0.3)' : 'none'
-                        }}>
-                          <Sparkles size={18} color={aiSchedulingEnabled ? '#ffffff' : '#64748b'} />
-                        </div>
-                        <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ fontSize: 13.5, fontWeight: 700, color: aiSchedulingEnabled ? '#4c1d95' : '#1e293b' }}>
-                              AI Auto-Scheduler
-                            </span>
-                            <span style={{
-                              fontSize: 10.5,
-                              fontWeight: 700,
-                              padding: '1px 7px',
-                              borderRadius: 20,
-                              background: aiSchedulingEnabled ? '#7c3aed' : '#94a3b8',
-                              color: '#ffffff',
-                              textTransform: 'uppercase',
-                              letterSpacing: '0.04em'
-                            }}>
-                              {aiSchedulingEnabled ? 'AI Auto-Scheduler' : 'Manual'}
-                            </span>
-                          </div>
-                          <p style={{ fontSize: 11.5, color: aiSchedulingEnabled ? '#6d28d9' : '#64748b', margin: '2px 0 0 0' }}>
-                            {aiSchedulingEnabled
-                              ? 'Automatically evaluates Rank 5+ landing page keywords & sets scheduler to "AI Auto-Scheduler"'
-                              : 'Standard manual activity without automated keyword push evaluation (sets scheduler to "Manual")'}
-                          </p>
-                        </div>
-                      </div>
+                      <Bookmark size={15} color="#64748b" />
+                      <span>Save as Draft</span>
+                    </button>
 
-                      {/* Modern Toggle Switch */}
-                      <div
-                        role="switch"
-                        aria-checked={aiSchedulingEnabled}
-                        style={{
-                          width: 44,
-                          height: 24,
-                          borderRadius: 12,
-                          background: aiSchedulingEnabled ? '#7c3aed' : '#cbd5e1',
-                          position: 'relative',
-                          padding: 2,
-                          transition: 'background-color 0.2s ease',
-                          flexShrink: 0
-                        }}
-                      >
-                        <div style={{
-                          width: 20,
-                          height: 20,
-                          borderRadius: '50%',
-                          background: '#ffffff',
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                          transform: aiSchedulingEnabled ? 'translateX(20px)' : 'translateX(0)',
-                          transition: 'transform 0.2s ease'
-                        }} />
-                      </div>
-                    </div>
-
-                    {/* Row 1: Project Name & Activity Name */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                          Project Name *
-                        </label>
-                        <PlainSelect
-                          required
-                          placeholder="Select Project..."
-                          value={formData.project_name}
-                          onChange={v => setFormData({ ...formData, project_name: v })}
-                          options={projects.map(p => ({ value: p.name || p.domain, label: p.name || p.domain }))}
-                        />
-                      </div>
-
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                          Activity Name *
-                        </label>
-                        <PlainSelect
-                          required
-                          placeholder="Select Activity..."
-                          value={formData.activity_name}
-                          onChange={v => setFormData({ ...formData, activity_name: v })}
-                          options={['Paid Guest Post', 'Forum - Quora', 'Forum - Reddit', 'Business Listing', 'Classified Ads']}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Row 2: Status & Quantity */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                          Status *
-                        </label>
-                        <select
-                          value={formData.status}
-                          onChange={e => setFormData({ ...formData, status: e.target.value })}
-                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none', background: '#ffffff', color: '#0f172a', fontWeight: 600 }}
-                        >
-                          <option value="saved">Saved</option>
-                          <option value="scheduled">Scheduled</option>
-                          <option value="approved">Approved</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                          Quantity
-                        </label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={formData.quantity}
-                          onChange={e => setFormData({ ...formData, quantity: parseInt(e.target.value, 10) || 1 })}
-                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Row 3: Budget & Period / Date */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                          Budget
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="$250"
-                          value={formData.budget}
-                          onChange={e => setFormData({ ...formData, budget: e.target.value })}
-                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                        />
-                      </div>
-
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                          Period / Date
-                        </label>
-                        <input
-                          type="date"
-                          value={formData.period}
-                          onChange={e => setFormData({ ...formData, period: e.target.value })}
-                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Row 4: Main POC & Content POC */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                          Main POC
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="e.g. John Doe"
-                          value={formData.main_poc}
-                          onChange={e => setFormData({ ...formData, main_poc: e.target.value })}
-                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                        />
-                      </div>
-
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                          Content POC
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="e.g. Jane Smith"
-                          value={formData.content_poc}
-                          onChange={e => setFormData({ ...formData, content_poc: e.target.value })}
-                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Row 5: User, Scheduler, Auditor */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                          User
-                        </label>
-                        <input
-                          type="text"
-                          value={formData.user}
-                          onChange={e => setFormData({ ...formData, user: e.target.value })}
-                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                        />
-                      </div>
-
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                          <label style={{ fontSize: 12, fontWeight: 700, color: '#475569' }}>
-                            Scheduler
-                          </label>
-                          <span style={{ fontSize: 10.5, fontWeight: 700, color: aiSchedulingEnabled ? '#7c3aed' : '#64748b' }}>
-                            {aiSchedulingEnabled ? '⚡ AI Mode' : '✋ Manual'}
-                          </span>
-                        </div>
-                        <input
-                          type="text"
-                          value={formData.scheduler}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setFormData({ ...formData, scheduler: val });
-                            if (val.toLowerCase().includes('ai')) {
-                              setAiSchedulingEnabled(true);
-                            } else if (val.toLowerCase().includes('manual')) {
-                              setAiSchedulingEnabled(false);
-                            }
-                          }}
-                          placeholder={aiSchedulingEnabled ? 'AI Auto-Scheduler' : 'Manual'}
-                          style={{
-                            width: '100%',
-                            padding: '10px 12px',
-                            fontSize: 13,
-                            border: aiSchedulingEnabled ? '1.5px solid #c4b5fd' : '1px solid #cbd5e1',
-                            borderRadius: 8,
-                            outline: 'none',
-                            background: aiSchedulingEnabled ? '#faf5ff' : '#ffffff',
-                            color: aiSchedulingEnabled ? '#6d28d9' : '#0f172a',
-                            fontWeight: aiSchedulingEnabled ? 600 : 500,
-                            transition: 'all 0.2s ease'
-                          }}
-                        />
-                      </div>
-
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                          Auditor
-                        </label>
-                        <input
-                          type="text"
-                          value={formData.auditor}
-                          onChange={e => setFormData({ ...formData, auditor: e.target.value })}
-                          style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Form Footer Actions */}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 8, paddingTop: 14, borderTop: '1px solid #f1f5f9' }}>
+                    {/* Run AI Schedule button (if AI mode is on) */}
+                    {aiSchedulingEnabled && !editingItem && (
                       <button
                         type="button"
-                        onClick={() => setIsModalOpen(false)}
-                        style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, color: '#64748b', background: '#f1f5f9', border: 'none', borderRadius: 8, cursor: 'pointer' }}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
                         disabled={savingActivity}
+                        onClick={() => {
+                          if (!formData.project_name) {
+                            alert('Please select a Project Name');
+                            return;
+                          }
+                          setConfirmAiModalOpen(true);
+                        }}
                         style={{
                           padding: '9px 22px',
                           fontSize: 13,
                           fontWeight: 700,
                           color: '#ffffff',
-                          background: aiSchedulingEnabled ? '#7c3aed' : '#2D2D44',
+                          background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
                           border: 'none',
                           borderRadius: 8,
                           cursor: savingActivity ? 'not-allowed' : 'pointer',
-                          opacity: savingActivity ? 0.7 : 1,
-                          boxShadow: aiSchedulingEnabled ? '0 2px 10px rgba(124, 58, 237, 0.3)' : '0 2px 8px rgba(45, 45, 68, 0.25)',
-                          transition: 'all 0.15s ease',
+                          boxShadow: '0 2px 10px rgba(124, 58, 237, 0.35)',
                           display: 'flex',
                           alignItems: 'center',
                           gap: 8
                         }}
                       >
-                        {savingActivity ? (
-                          <>
-                            <div style={{ width: 14, height: 14, border: '2px solid #ffffff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-                            <span>Saving...</span>
-                          </>
-                        ) : (
-                          <>
-                            {aiSchedulingEnabled && !editingItem && <Sparkles size={15} />}
-                            <span>{editingItem ? 'Update Activity' : 'Create Activity'}</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              </>
-            ) : (
-              /* STEP 2: KEYWORDS PROMPT VIEW */
-              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxHeight: '80vh' }}>
-                {/* Step 2 Header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                    <div style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 12,
-                      background: 'linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
-                      marginTop: 2
-                    }}>
-                      <Sparkles size={22} color="#7c3aed" />
-                    </div>
-                    <div>
-                      <h3 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>
-                        These are the keywords we got, do you want to add?
-                      </h3>
-                      <p style={{ fontSize: 12.5, color: '#64748b', margin: '4px 0 0 0' }}>
-                        Activity <strong>"{createdActivity?.activity_name}"</strong> has been created. Evaluated Landing Page keywords (Rank 5+) against live Google SERP: Batch 1 (extremely improved), Batch 2 (extremely dropped / recovery target), and Batch 3 (didn’t move / stagnant).
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsModalOpen(false)}
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 4, borderRadius: 6 }}
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-
-                {/* Content Area */}
-                <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4, minHeight: 280, display: 'flex', flexDirection: 'column' }}>
-                  {loadingKeywords ? (
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 24px', gap: 14 }}>
-                      <div style={{ width: 36, height: 36, border: '3px solid #ede9fe', borderTopColor: '#7c3aed', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-                      <div style={{ fontSize: 14, fontWeight: 700, color: '#1e293b' }}>
-                        Fetching Landing Page keywords (Rank 5+)...
-                      </div>
-                      <div style={{ fontSize: 12, color: '#64748b' }}>
-                        Scanning database for {createdActivity?.project_name}
-                      </div>
-                    </div>
-                  ) : potentialKws.length === 0 ? (
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 24px', gap: 12, textAlign: 'center' }}>
-                      <div style={{ width: 48, height: 48, borderRadius: 24, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Search size={22} color="#94a3b8" />
-                      </div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: '#1e293b' }}>
-                        No Landing Page (Rank 5+) keywords found
-                      </div>
-                      <div style={{ fontSize: 12.5, color: '#64748b', maxWidth: 420 }}>
-                        No Landing Page keywords (Rank 5+) were found for <strong>{createdActivity?.project_name}</strong> yet. You can perform a rank check from the Rankings tab to discover opportunities.
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                      {/* Summary Chip Bar */}
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '8px 12px',
-                        background: '#f8fafc',
-                        borderRadius: 8,
-                        border: '1px solid #e2e8f0',
-                        fontSize: 12
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontWeight: 700, color: '#1e293b' }}>
-                            Found: <strong style={{ color: '#7c3aed' }}>{potentialKws.length}</strong> keywords
-                          </span>
-                          <span style={{ color: '#cbd5e1' }}>•</span>
-                          <span style={{ fontWeight: 600, color: '#475569' }}>
-                            Selected: <strong style={{ color: '#0f172a' }}>{selectedKwIds.size}</strong>
-                          </span>
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <Sparkles size={13} color="#7c3aed" className={analyzingPotential ? 'animate-spin' : ''} />
-                          <span style={{
-                            fontSize: 11,
-                            fontWeight: 700,
-                            color: analyzingPotential ? '#7c3aed' : '#15803d',
-                            background: analyzingPotential ? '#ede9fe' : '#dcfce7',
-                            padding: '2px 8px',
-                            borderRadius: 10
-                          }}>
-                            {analyzingPotential ? 'Re-checking live rank & Top 3 Landing Pages…' : 'Live AI Verified'}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Batched Keywords */}
-                      {(() => {
-                        const isPaidGuestPost = String(createdActivity?.activity_name || formData.activity_name || '').toLowerCase().includes('guest');
-                        return ['high', 'medium', 'low'].map(bKey => {
-                          const meta = PUSH_BATCH_META[bKey];
-                          const rows = pushBatches[bKey] || [];
-                          const BIcon = meta.Icon;
-                          const batchIds = rows.map(r => r.id);
-                          const allSelected = batchIds.length > 0 && batchIds.every(id => selectedKwIds.has(id));
-
-                          return (
-                            <div key={bKey} style={{ border: `1px solid ${meta.border}`, borderRadius: 10, overflow: 'hidden', background: '#ffffff' }}>
-                              <div style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                gap: 8,
-                                padding: '8px 12px',
-                                background: meta.bg,
-                                borderBottom: `1px solid ${meta.border}`
-                              }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} title={meta.hint}>
-                                  <BIcon size={14} color={meta.tint} />
-                                  <span style={{ fontSize: 12, fontWeight: 800, color: meta.tint }}>{meta.label}</span>
-                                  <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', background: '#ffffff', border: `1px solid ${meta.border}`, borderRadius: 10, padding: '0 7px' }}>
-                                    {rows.length}
-                                  </span>
-                                </div>
-                                {rows.length > 0 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const next = new Set(selectedKwIds);
-                                      if (allSelected) batchIds.forEach(id => next.delete(id));
-                                      else batchIds.forEach(id => next.add(id));
-                                      setSelectedKwIds(next);
-                                    }}
-                                    style={{ fontSize: 11, fontWeight: 700, color: meta.tint, background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-                                  >
-                                    {allSelected ? 'Unselect batch' : 'Select batch'}
-                                  </button>
-                                )}
-                              </div>
-
-                              {rows.length === 0 ? (
-                                <div style={{ fontSize: 11.5, color: '#94a3b8', fontStyle: 'italic', padding: '10px 12px' }}>
-                                  No keywords categorized into this batch.
-                                </div>
-                              ) : (
-                                <div style={{ maxHeight: 210, overflowY: 'auto' }}>
-                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
-                                    <thead>
-                                      <tr style={{ color: '#64748b', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.04em', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                                        <th style={{ padding: '6px 10px', width: 32, position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}></th>
-                                        <th style={{ padding: '6px 10px', position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>Keyword</th>
-                                        <th style={{ padding: '6px 10px', width: 85, position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>Rank Shift</th>
-                                        <th style={{ padding: '6px 10px', width: 65, position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>SV</th>
-                                        <th style={{ padding: '6px 10px', width: 45, position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>KD</th>
-                                        <th style={{ padding: '6px 10px', width: 70, position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>Conf</th>
-                                        <th style={{ padding: '6px 10px', width: 140, position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>Live AI Status</th>
-                                        {!isPaidGuestPost && (
-                                          <th style={{ padding: '6px 10px', width: 160, position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>Topic Link</th>
-                                        )}
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                    {rows.map(item => {
-                                      const isChecked = selectedKwIds.has(item.id);
-                                      const currentRank = item.new_rank ?? item.rank;
-                                      return (
-                                        <tr key={item.id} style={{ borderTop: '1px solid #f1f5f9', background: isChecked ? '#f5f3ff' : 'transparent', transition: 'background-color 0.1s ease' }}>
-                                          <td style={{ padding: '6px 10px', textAlign: 'center' }}>
-                                            <input
-                                              type="checkbox"
-                                              checked={isChecked}
-                                              onChange={(e) => {
-                                                const next = new Set(selectedKwIds);
-                                                if (e.target.checked) next.add(item.id);
-                                                else next.delete(item.id);
-                                                setSelectedKwIds(next);
-                                              }}
-                                              style={{ cursor: 'pointer', width: 15, height: 15, accentColor: '#7c3aed' }}
-                                            />
-                                          </td>
-                                          <td style={{ padding: '6px 10px' }} title={item.reason || ''}>
-                                            <div style={{ fontWeight: 700, color: '#0f172a' }}>{item.keyword}</div>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
-                                              {(item.category || item.cluster) && (
-                                                <span style={{ fontSize: 10, color: '#64748b' }}>
-                                                  {[item.category, item.cluster].filter(Boolean).join(' • ')}
-                                                </span>
-                                              )}
-                                              {item.top3_is_landing !== undefined && (
-                                                <span style={{
-                                                  fontSize: 9.5,
-                                                  fontWeight: 700,
-                                                  color: item.top3_is_landing ? '#16a34a' : '#dc2626',
-                                                  background: item.top3_is_landing ? '#dcfce7' : '#fee2e2',
-                                                  border: `1px solid ${item.top3_is_landing ? '#bbf7d0' : '#fecaca'}`,
-                                                  padding: '0.5px 5px',
-                                                  borderRadius: 4
-                                                }}>
-                                                  {item.top3_is_landing ? 'Top 3: Landing Page ✓' : 'Top 3: Non-Landing'}
-                                                </span>
-                                              )}
-                                            </div>
-                                          </td>
-                                          <td style={{ padding: '6px 10px' }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                              <span style={{
-                                                background: currentRank <= 10 ? '#dcfce7' : '#e0f2fe',
-                                                color: currentRank <= 10 ? '#15803d' : '#0369a1',
-                                                padding: '2px 6px',
-                                                borderRadius: 4,
-                                                fontSize: 11,
-                                                fontWeight: 800
-                                              }}>
-                                                #{currentRank}
-                                              </span>
-                                              {item.delta > 0 && (
-                                                <span style={{ color: '#16a34a', fontWeight: 800, fontSize: 11 }} title={`Improved by ${item.delta} spots`}>
-                                                  ↑{item.delta}
-                                                </span>
-                                              )}
-                                              {item.delta < 0 && (
-                                                <span style={{ color: '#ea580c', fontWeight: 800, fontSize: 11 }} title={`Dropped by ${Math.abs(item.delta)} spots`}>
-                                                  ↓{Math.abs(item.delta)}
-                                                </span>
-                                              )}
-                                              {item.delta === 0 && item.prev_rank != null && (
-                                                <span style={{ color: '#94a3b8', fontWeight: 700, fontSize: 11 }} title="Rank didn't move">
-                                                  =
-                                                </span>
-                                              )}
-                                            </div>
-                                            {item.prev_rank != null && (
-                                              <div style={{ fontSize: 9.5, color: '#64748b', marginTop: 2, whiteSpace: 'nowrap' }}>
-                                                was #{item.prev_rank}
-                                              </div>
-                                            )}
-                                          </td>
-                                          <td style={{ padding: '6px 10px', fontWeight: 600, color: '#334155' }}>
-                                            {Number(item.sv || 0).toLocaleString()}
-                                          </td>
-                                          <td style={{ padding: '6px 10px', fontWeight: 700, color: (item.kd || 0) > 50 ? '#ef4444' : '#16a34a' }}>
-                                            {item.kd ?? 0}
-                                          </td>
-                                          <td style={{ padding: '6px 10px' }}>
-                                            <span style={{
-                                              fontSize: 11,
-                                              fontWeight: 800,
-                                              color: meta.tint,
-                                              background: meta.bg,
-                                              border: `1px solid ${meta.border}`,
-                                              padding: '2px 6px',
-                                              borderRadius: 6
-                                            }}>
-                                              {item.confidence != null ? `${item.confidence}%` : '–'}
-                                            </span>
-                                          </td>
-                                          <td style={{ padding: '6px 10px', fontSize: 11, color: '#475569', maxWidth: 180, whiteSpace: 'normal' }} title={item.reason || ''}>
-                                            <div style={{ fontWeight: 600, color: meta.tint, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                                              {item.reason || (item.confidence != null ? `${item.confidence}% confidence` : '–')}
-                                            </div>
-                                          </td>
-                                          {!isPaidGuestPost && (
-                                            <td style={{ padding: '4px 10px' }}>
-                                              <input
-                                                type="url"
-                                                placeholder="Target Landing Page URL…"
-                                                value={topicLinks[item.id] !== undefined ? topicLinks[item.id] : (item.topicLink || item.landing_page_url || '')}
-                                                onChange={(e) => setTopicLinks({ ...topicLinks, [item.id]: e.target.value })}
-                                                style={{ width: '100%', padding: '4px 8px', fontSize: 11, border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', background: '#ffffff' }}
-                                              />
-                                            </td>
-                                          )}
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })})()}
-                    </div>
-                  )}
-                </div>
-
-                {/* Step 2 Footer Actions */}
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginTop: 16,
-                  paddingTop: 14,
-                  borderTop: '1px solid #f1f5f9'
-                }}>
-                  <div style={{ fontSize: 12.5, color: '#64748b' }}>
-                    {potentialKws.length > 0 && (
-                      <span>
-                        <strong style={{ color: '#0f172a' }}>{selectedKwIds.size}</strong> of {potentialKws.length} keyword{potentialKws.length === 1 ? '' : 's'} selected
-                      </span>
-                    )}
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <button
-                      type="button"
-                      onClick={() => setIsModalOpen(false)}
-                      style={{
-                        padding: '9px 18px',
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: '#64748b',
-                        background: '#f1f5f9',
-                        border: 'none',
-                        borderRadius: 8,
-                        cursor: 'pointer',
-                        transition: 'background-color 0.15s ease'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = '#e2e8f0'}
-                      onMouseLeave={e => e.currentTarget.style.background = '#f1f5f9'}
-                    >
-                      {potentialKws.length === 0 ? 'Done' : 'Skip for now'}
-                    </button>
-
-                    {potentialKws.length > 0 && (
-                      <button
-                        type="button"
-                        disabled={selectedKwIds.size === 0 || savingActivity}
-                        onClick={handleConfirmAddKeywords}
-                        style={{
-                          padding: '9px 20px',
-                          fontSize: 13,
-                          fontWeight: 700,
-                          color: '#ffffff',
-                          background: selectedKwIds.size === 0 ? '#cbd5e1' : '#7c3aed',
-                          border: 'none',
-                          borderRadius: 8,
-                          cursor: (selectedKwIds.size === 0 || savingActivity) ? 'not-allowed' : 'pointer',
-                          boxShadow: selectedKwIds.size === 0 ? 'none' : '0 2px 10px rgba(124, 58, 237, 0.3)',
-                          transition: 'all 0.15s ease',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8
-                        }}
-                        onMouseEnter={e => {
-                          if (selectedKwIds.size > 0 && !savingActivity) e.currentTarget.style.background = '#6d28d9';
-                        }}
-                        onMouseLeave={e => {
-                          if (selectedKwIds.size > 0 && !savingActivity) e.currentTarget.style.background = '#7c3aed';
-                        }}
-                      >
-                        {savingActivity ? (
-                          <>
-                            <div style={{ width: 14, height: 14, border: '2px solid #ffffff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-                            <span>Adding...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Plus size={16} />
-                            <span>Add Selected Keywords ({selectedKwIds.size})</span>
-                          </>
-                        )}
+                        <span>Schedule Calendar</span>
                       </button>
                     )}
                   </div>
                 </div>
-              </div>
-            )}
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          CONFIRMATION MODAL FOR AI SCHEDULING
+      ───────────────────────────────────────────────────────────── */}
+      {confirmAiModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(15, 23, 42, 0.6)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1100,
+          backdropFilter: 'blur(4px)',
+          padding: 16
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 16,
+            maxWidth: 440,
+            width: '100%',
+            padding: 24,
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            textAlign: 'center'
+          }}>
+            <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#ede9fe', color: '#7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+              <Bot size={24} />
+            </div>
+            <h3 style={{ fontSize: 17, fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>
+              Confirm AI Calendar Scheduling
+            </h3>
+            <p style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, margin: '0 0 20px 0' }}>
+              Are you sure you want to AI schedule for <strong>{formData.project_name}</strong>? This will analyze candidate landing page keywords, ping live SERPs for rank 5+ targets, and formulate an optimized monthly activity distribution.
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setConfirmAiModalOpen(false)}
+                style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, color: '#64748b', background: '#f1f5f9', border: 'none', borderRadius: 8, cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteAiSchedule}
+                style={{ padding: '9px 22px', fontSize: 13, fontWeight: 700, color: '#ffffff', background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)', border: 'none', borderRadius: 8, cursor: 'pointer', boxShadow: '0 2px 10px rgba(124, 58, 237, 0.35)' }}
+              >
+                Yes, Run AI Schedule
+              </button>
+            </div>
           </div>
         </div>
       )}
     </div>
   );
 }
-
 
 export default CalendarPage;

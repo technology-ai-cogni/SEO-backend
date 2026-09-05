@@ -576,7 +576,7 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
       }
       return <OffPageSchedulerPage user={user} />;
     }
-    case 'search-visibility/calendar': return <CalendarPage user={user} />;
+    case 'search-visibility/calendar': return <CalendarPage user={user} onNavigate={onNavigate} />;
     case 'search-visibility/activity-table': return <AgencyPage user={user} />;
     case 'content-engine': return <ContentEnginePage />;
     default: {
