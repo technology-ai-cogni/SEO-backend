@@ -73,22 +73,9 @@ export default function LoginPage({ onNavigate, initialAdminMode = false, user =
         setIsLoading(false);
         return;
       } else {
-        // Fallback: Check local storage users list if backend server is offline
-        const localUsers = JSON.parse(localStorage.getItem('seo_users_list') || '[]');
-        const matched = localUsers.find(u =>
-          u.email?.toLowerCase() === email.trim().toLowerCase() ||
-          u.name?.toLowerCase() === email.trim().toLowerCase()
-        );
-        if (matched) {
-          if (matched.status === 'Disabled') {
-            setErrorMsg('Access Denied: Your account profile has been disabled by an administrator.');
-            setIsLoading(false);
-            return;
-          }
-          loggedInUser = matched;
-        } else {
-          loggedInUser = { email: email.trim(), name: email.split('@')[0], role: 'USER', status: 'Active' };
-        }
+        setErrorMsg('Unable to connect to authentication server. Please check your internet connection and try again.');
+        setIsLoading(false);
+        return;
       }
     } catch (err) {
       setErrorMsg('Unable to connect to authentication server. Please try again.');

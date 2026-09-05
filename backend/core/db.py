@@ -249,11 +249,13 @@ def _init_db_inner():
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'USER',
                 status TEXT NOT NULL DEFAULT 'Active',
+                failed_login_attempts INTEGER DEFAULT 0,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
         _add_column_if_not_exists(conn, "users", "role", "TEXT NOT NULL DEFAULT 'USER'")
         _add_column_if_not_exists(conn, "users", "status", "TEXT NOT NULL DEFAULT 'Active'")
+        _add_column_if_not_exists(conn, "users", "failed_login_attempts", "INTEGER DEFAULT 0")
         _add_column_if_not_exists(conn, "users", "attendance", "TEXT NOT NULL DEFAULT 'Not Present'")
         _add_column_if_not_exists(conn, "users", "assigned_project", "TEXT NOT NULL DEFAULT 'All Projects'")
         _add_column_if_not_exists(conn, "users", "category", "TEXT DEFAULT 'Internal'")

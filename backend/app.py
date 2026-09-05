@@ -141,8 +141,12 @@ from auth.router import router as auth_router
 from auth.dependencies import (
     require_authenticated_user,
     require_admin,
-    require_project_access
+    require_project_access,
+    require_edit_permission,
+    require_delete_permission,
+    require_action_permission
 )
+
 
 MIN_SEARCH_VOLUME = 5
 NEAR_ME_PHRASE = "near me"
@@ -539,11 +543,12 @@ class AuditAllocationRequest(BaseModel):
     system_associates: Optional[List[str]] = None
 
 @app.post("/monthly-operations/run-audit-allocation")
-def run_audit_allocation_endpoint(payload: AuditAllocationRequest):
+def run_audit_allocation_endpoint(payload: AuditAllocationRequest, user: dict = Depends(require_edit_permission)):
     """
     Divides resources equally between all associated team members/publishers
     so that each associate handles an equal share of monthly operations (max 1-2 difference).
     """
+
     try:
         imports = db.list_monthly_imports()
         target_imports = [imp for imp in imports if str(imp.get("id")) == str(payload.dataset_id)] if payload.dataset_id else imports
@@ -1109,7 +1114,7 @@ async def run_ai_status_check_endpoint(payload: AiStatusCheckRequest):
     }
 
 @app.post("/monthly-operations/imports")
-def create_monthly_import(payload: MonthlyImportRequest):
+def create_monthly_import(payload: MonthlyImportRequest, user: dict = Depends(require_edit_permission)):
     new_id = db.save_monthly_import(
         filename=payload.filename,
         project_name=payload.project,
@@ -1120,7 +1125,7 @@ def create_monthly_import(payload: MonthlyImportRequest):
     return {"status": "success", "id": new_id}
 
 @app.put("/monthly-operations/imports/{import_id}")
-def update_monthly_import_endpoint(import_id: int, payload: UpdateMonthlyImportRequest):
+def update_monthly_import_endpoint(import_id: int, payload: UpdateMonthlyImportRequest, user: dict = Depends(require_edit_permission)):
     db.update_monthly_import(
         import_id=import_id,
         rows_data=payload.rowsData,
@@ -1132,7 +1137,7 @@ def update_monthly_import_endpoint(import_id: int, payload: UpdateMonthlyImportR
     return {"status": "success"}
 
 @app.delete("/monthly-operations/imports/{import_id}")
-def delete_monthly_import_endpoint(import_id: int):
+def delete_monthly_import_endpoint(import_id: int, user: dict = Depends(require_delete_permission)):
     db.delete_monthly_import(import_id)
     return {"status": "success"}
 
@@ -1147,7 +1152,7 @@ def get_scheduled_activities(user: dict = Depends(require_authenticated_user)):
     return {"schedules": scoped}
 
 @app.post("/monthly-operations/schedules")
-def create_scheduled_activity(payload: ScheduledActivityRequest):
+def create_scheduled_activity(payload: ScheduledActivityRequest, user: dict = Depends(require_edit_permission)):
     new_id = db.save_scheduled_activity(
         action=payload.action,
         project_name=payload.project,
@@ -1158,14 +1163,15 @@ def create_scheduled_activity(payload: ScheduledActivityRequest):
     return {"status": "success", "id": new_id}
 
 @app.patch("/monthly-operations/schedules/{schedule_id}")
-def update_schedule_status(schedule_id: int, payload: UpdateScheduleStatusRequest):
+def update_schedule_status(schedule_id: int, payload: UpdateScheduleStatusRequest, user: dict = Depends(require_edit_permission)):
     db.update_scheduled_activity_status(schedule_id, payload.status)
     return {"status": "success"}
 
 @app.delete("/monthly-operations/schedules/{schedule_id}")
-def delete_scheduled_activity_endpoint(schedule_id: int):
+def delete_scheduled_activity_endpoint(schedule_id: int, user: dict = Depends(require_delete_permission)):
     db.delete_scheduled_activity(schedule_id)
     return {"status": "success"}
+
 
 
 class AuditLogRequest(BaseModel):
@@ -1346,7 +1352,7 @@ def get_project_clusters(project: str, user: dict = Depends(require_project_acce
 
 
 @app.post("/projects/{project}/recluster")
-def recluster_project(project: str, user: dict = Depends(require_project_access)):
+def recluster_project(project: str, user: dict = Depends(require_action_permission)):
     """Manually re-run the deterministic clustering pass over this
     project's entire category list. Normally this happens automatically
     once a job's categorization finishes -- this endpoint is for
@@ -1373,6 +1379,7 @@ async def create_category_job(
     file: UploadFile = File(...),
     country: str = Form(...),
     project: str = Form(...),
+    user: dict = Depends(require_action_permission)
 ):
     """Upload a .csv/.xlsx with a 'Keywords' column (optionally 'Search
     Volume'). `country` is a country name (e.g. "India", "United States")
@@ -1431,9 +1438,10 @@ async def create_category_job(
 
     run_categorize_job_in_background(job_id, project_slug, rows_for_job, country_code)
 
+    acting_user = user.get("email") or "system"
     try:
         db.insert_audit_log(
-            user_email="system",
+            user_email=acting_user,
             action=f"Keyword Sheet Uploaded & Processed: {filename} ({project_name})",
             status="Success",
             project_name=project_slug,
@@ -1455,7 +1463,7 @@ class CategorizeExistingRequest(BaseModel):
 
 
 @app.post("/projects/{project}/categorize")
-def categorize_existing_keywords(project: str, payload: CategorizeExistingRequest):
+def categorize_existing_keywords(project: str, payload: CategorizeExistingRequest, user: dict = Depends(require_action_permission)):
     """Trigger categorization for keywords ALREADY sitting in this
     project (inserted directly into Supabase by the frontend -- see
     projectsApi.js's insertKeywordRows -- with no category yet). This is
@@ -1507,9 +1515,10 @@ def categorize_existing_keywords(project: str, payload: CategorizeExistingReques
 
     run_categorize_job_in_background(job_id, proj["slug"], rows, country_code)
 
+    acting_user = user.get("email") or "system"
     try:
         db.insert_audit_log(
-            user_email="system",
+            user_email=acting_user,
             action=f"AI Clustering Triggered: {proj['name']} ({len(rows)} keywords)",
             status="Success",
             project_name=proj["slug"],
@@ -1522,6 +1531,7 @@ def categorize_existing_keywords(project: str, payload: CategorizeExistingReques
 
 
 class PageRow(BaseModel):
+
     pageName: Optional[str] = None
     url: Optional[str] = None
     cluster: Optional[str] = None
@@ -1583,7 +1593,7 @@ def list_project_pages(project: str, user: dict = Depends(require_project_access
 
 
 @app.post("/projects/{project}/pages")
-def create_project_pages(project: str, rows: List[PageRow], user: dict = Depends(require_project_access)):
+def create_project_pages(project: str, rows: List[PageRow], user: dict = Depends(require_edit_permission)):
     """Bulk-inserts page rows parsed from an Add Pages sheet upload (Page
     Name, URL, Cluster, Category columns) -- mirrors /jobs/category's
     upload flow but for pages, which have no categorization job of their
@@ -1592,9 +1602,10 @@ def create_project_pages(project: str, rows: List[PageRow], user: dict = Depends
     if not rows:
         raise HTTPException(400, "No page rows to import.")
     inserted = db.insert_page_rows(proj["slug"], [r.dict() for r in rows])
+    acting_user = user.get("email") or "system"
     try:
         db.insert_audit_log(
-            user_email="system",
+            user_email=acting_user,
             action=f"Pages Added to Project ({len(rows)} pages): {proj['name']}",
             status="Success",
             project_name=proj["name"],
@@ -1606,24 +1617,27 @@ def create_project_pages(project: str, rows: List[PageRow], user: dict = Depends
 
 
 @app.patch("/pages/{page_id}")
-def update_project_page(page_id: int, payload: PageUpdateRequest):
+def update_project_page(page_id: int, payload: PageUpdateRequest, user: dict = Depends(require_edit_permission)):
     """Updates whichever fields are present on a single page row."""
+    with db.engine.begin() as conn:
+        page = conn.execute(db.text("SELECT project_name, page_name, url FROM pages WHERE id = :id"), {"id": page_id}).mappings().fetchone()
+    if not page:
+        raise HTTPException(404, "Page not found.")
+    project_slug = page.get("project_name")
+    page_name = page.get("page_name") or page.get("url") or f"ID #{page_id}"
+
     updates = {
         "page_name": payload.pageName, "url": payload.url, "cluster": payload.cluster,
         "category": payload.category, "target_category": payload.targetCategory,
         "target_type": payload.targetType,
     }
     updates = {k: v for k, v in updates.items() if v is not None}
-    
-    with db.engine.begin() as conn:
-        page = conn.execute(db.text("SELECT project_name, page_name, url FROM pages WHERE id = :id"), {"id": page_id}).mappings().fetchone()
-    project_slug = page.get("project_name") if page else None
-    page_name = page.get("page_name") or page.get("url") if page else f"ID #{page_id}"
 
     db.update_page_row(page_id, updates)
+    acting_user = user.get("email") or "system"
     try:
         db.insert_audit_log(
-            user_email="system",
+            user_email=acting_user,
             action=f"Page Updated: {page_name}",
             status="Success",
             project_name=project_slug,
@@ -1635,16 +1649,19 @@ def update_project_page(page_id: int, payload: PageUpdateRequest):
 
 
 @app.delete("/pages/{page_id}")
-def delete_project_page(page_id: int):
+def delete_project_page(page_id: int, user: dict = Depends(require_delete_permission)):
     with db.engine.begin() as conn:
         page = conn.execute(db.text("SELECT project_name, page_name, url FROM pages WHERE id = :id"), {"id": page_id}).mappings().fetchone()
-    project_slug = page.get("project_name") if page else None
-    page_name = page.get("page_name") or page.get("url") if page else f"ID #{page_id}"
+    if not page:
+        raise HTTPException(404, "Page not found.")
+    project_slug = page.get("project_name")
+    page_name = page.get("page_name") or page.get("url") or f"ID #{page_id}"
 
     db.delete_page_row(page_id)
+    acting_user = user.get("email") or "system"
     try:
         db.insert_audit_log(
-            user_email="system",
+            user_email=acting_user,
             action=f"Page Deleted: {page_name}",
             status="Warning",
             project_name=project_slug,
@@ -1656,9 +1673,27 @@ def delete_project_page(page_id: int):
 
 
 @app.post("/pages/bulk-delete")
-def bulk_delete_project_pages(payload: BulkDeletePagesRequest):
+def bulk_delete_project_pages(payload: BulkDeletePagesRequest, user: dict = Depends(require_delete_permission)):
+    project_slug = None
+    if payload.ids:
+        with db.engine.begin() as conn:
+            page = conn.execute(db.text("SELECT project_name FROM pages WHERE id = :id"), {"id": payload.ids[0]}).mappings().fetchone()
+        project_slug = page.get("project_name") if page else None
+
     db.bulk_delete_page_rows(payload.ids)
-    return {"deleted": len(payload.ids)}
+    acting_user = user.get("email") or "system"
+    try:
+        db.insert_audit_log(
+            user_email=acting_user,
+            action=f"Bulk Pages Deleted ({len(payload.ids)} pages)",
+            status="Warning",
+            project_name=project_slug,
+            module="pages"
+        )
+    except Exception:
+        pass
+    return {"deleted": len(payload.ids), "deleted_ids": payload.ids}
+
 
 
 @app.get("/projects/{project}/competitor-pages")
@@ -1669,7 +1704,7 @@ def list_project_competitor_pages(project: str, user: dict = Depends(require_pro
 
 
 @app.post("/projects/{project}/competitor-pages")
-def create_project_competitor_pages(project: str, rows: List[PageRow], user: dict = Depends(require_project_access)):
+def create_project_competitor_pages(project: str, rows: List[PageRow], user: dict = Depends(require_edit_permission)):
     """Bulk-inserts competitor page rows for a project."""
     proj = _resolve_project_or_404(project)
     if not rows:
@@ -1679,7 +1714,7 @@ def create_project_competitor_pages(project: str, rows: List[PageRow], user: dic
 
 
 @app.patch("/competitor-pages/{page_id}")
-def update_project_competitor_page(page_id: int, payload: PageUpdateRequest):
+def update_project_competitor_page(page_id: int, payload: PageUpdateRequest, user: dict = Depends(require_edit_permission)):
     """Updates whichever fields are present on a single competitor page row."""
     updates = {
         "page_name": payload.pageName, "url": payload.url, "cluster": payload.cluster,
@@ -1692,15 +1727,16 @@ def update_project_competitor_page(page_id: int, payload: PageUpdateRequest):
 
 
 @app.delete("/competitor-pages/{page_id}")
-def delete_project_competitor_page(page_id: int):
+def delete_project_competitor_page(page_id: int, user: dict = Depends(require_delete_permission)):
     db.delete_competitor_page_row(page_id)
     return {"deleted": page_id}
 
 
 @app.post("/competitor-pages/bulk-delete")
-def bulk_delete_project_competitor_pages(payload: BulkDeletePagesRequest):
+def bulk_delete_project_competitor_pages(payload: BulkDeletePagesRequest, user: dict = Depends(require_delete_permission)):
     db.bulk_delete_competitor_page_rows(payload.ids)
-    return {"deleted": len(payload.ids)}
+    return {"deleted": len(payload.ids), "deleted_ids": payload.ids}
+
 
 
 class CompetitorCreateRequest(BaseModel):
@@ -1797,7 +1833,7 @@ def list_competitors(project: Optional[str] = None, user: dict = Depends(require
 
 
 @app.post("/competitors")
-def create_competitor(payload: CompetitorCreateRequest, user: dict = Depends(require_authenticated_user)):
+def create_competitor(payload: CompetitorCreateRequest, user: dict = Depends(require_edit_permission)):
     domain = payload.domain.strip()
     if not domain:
         raise HTTPException(400, "Domain is required.")
@@ -1824,7 +1860,7 @@ def create_competitor(payload: CompetitorCreateRequest, user: dict = Depends(req
 
 
 @app.patch("/competitors/{competitor_id}")
-def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequest, user: dict = Depends(require_authenticated_user)):
+def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequest, user: dict = Depends(require_edit_permission)):
     updates = {
         "name": payload.name, "domain": payload.domain, "da": payload.da,
         "target_regions": payload.targetRegions, "project_slug": payload.projectSlug,
@@ -1856,7 +1892,7 @@ def update_competitor_endpoint(competitor_id: int, payload: CompetitorUpdateRequ
 
 
 @app.delete("/competitors/{competitor_id}")
-def delete_competitor_endpoint(competitor_id: int, user: dict = Depends(require_authenticated_user)):
+def delete_competitor_endpoint(competitor_id: int, user: dict = Depends(require_delete_permission)):
     with db.engine.begin() as conn:
         comp = conn.execute(db.text("SELECT project_slug, domain FROM competitors WHERE id = :id"), {"id": competitor_id}).mappings().fetchone()
     project_slug = comp.get("project_slug") if comp else None
@@ -1878,11 +1914,12 @@ def delete_competitor_endpoint(competitor_id: int, user: dict = Depends(require_
 
 
 @app.delete("/projects/{project_slug}/competitors")
-def delete_project_competitors_endpoint(project_slug: str, user_email: Optional[str] = None, user: dict = Depends(require_project_access)):
+def delete_project_competitors_endpoint(project_slug: str, user_email: Optional[str] = None, user: dict = Depends(require_delete_permission)):
     db.delete_competitors_by_project(project_slug)
-    acting_user = user_email if user_email else "system"
+    acting_user = user.get("email") or user_email or "system"
     try:
         db.insert_audit_log(
+
             user_email=acting_user,
             action="Competitors dataset cleared",
             status="Warning",
@@ -1936,7 +1973,7 @@ class BulkDeleteKeywordsRequest(BaseModel):
 
 
 @app.delete("/keywords/{kw_id}")
-def delete_keyword_endpoint(kw_id: int, user: dict = Depends(require_authenticated_user)):
+def delete_keyword_endpoint(kw_id: int, user: dict = Depends(require_delete_permission)):
     with db.engine.begin() as conn:
         kw = conn.execute(db.text("SELECT project_name, keyword FROM keyword_categories WHERE id = :id"), {"id": kw_id}).mappings().fetchone()
     project_slug = kw.get("project_name") if kw else None
@@ -1958,7 +1995,7 @@ def delete_keyword_endpoint(kw_id: int, user: dict = Depends(require_authenticat
 
 
 @app.post("/keywords/bulk-delete")
-def bulk_delete_keywords_endpoint(payload: BulkDeleteKeywordsRequest, user: dict = Depends(require_authenticated_user)):
+def bulk_delete_keywords_endpoint(payload: BulkDeleteKeywordsRequest, user: dict = Depends(require_delete_permission)):
     project_slug = None
     if payload.ids:
         with db.engine.begin() as conn:
@@ -1980,64 +2017,11 @@ def bulk_delete_keywords_endpoint(payload: BulkDeleteKeywordsRequest, user: dict
         pass
     return {"deleted_ids": payload.ids}
 
-@app.post("/pages/bulk-delete")
-def bulk_delete_pages_endpoint(payload: BulkDeletePagesRequest, user: dict = Depends(require_authenticated_user)):
-    project_slug = None
-    if payload.ids:
-        with db.engine.begin() as conn:
-            page = conn.execute(db.text("SELECT project_name FROM pages WHERE id = :id"), {"id": payload.ids[0]}).mappings().fetchone()
-        project_slug = page.get("project_name") if page else None
-
-    db.bulk_delete_page_rows(payload.ids)
-    acting_user = user.get("email") or "user"
-    try:
-        db.insert_audit_log(
-            user_email=acting_user,
-            action=f"Bulk Pages Deleted ({len(payload.ids)} pages)",
-            status="Warning",
-            project_name=project_slug,
-            module="pages"
-        )
-    except Exception:
-        pass
-    return {"deleted_ids": payload.ids}
-
-# --- Competitor Pages Endpoints ---
-
-@app.get("/projects/{project_slug}/competitor-pages")
-def get_project_competitor_pages_endpoint(project_slug: str, user: dict = Depends(require_project_access)):
-    rows = db.get_competitor_page_rows(project_slug)
-    return {"pages": [_page_to_json(r) for r in rows]}
-
-@app.post("/projects/{project_slug}/competitor-pages")
-def insert_project_competitor_pages_endpoint(project_slug: str, rows: List[PageItem], user: dict = Depends(require_project_access)):
-    inserted = db.insert_competitor_page_rows(project_slug, [r.dict() for r in rows])
-    return {"pages": [_page_to_json(r) for r in inserted]}
-
-@app.patch("/competitor-pages/{page_id}")
-def update_competitor_page_endpoint(page_id: int, payload: PageUpdateRequest):
-    updates = {
-        "page_name": payload.pageName, "url": payload.url,
-        "cluster": payload.cluster, "category": payload.category,
-        "target_category": payload.targetCategory, "target_type": payload.targetType,
-    }
-    updates = {k: v for k, v in updates.items() if v is not None}
-    db.update_competitor_page_row(page_id, updates)
-    return {"id": page_id}
-
-@app.delete("/competitor-pages/{page_id}")
-def delete_competitor_page_endpoint(page_id: int):
-    db.delete_competitor_page_row(page_id)
-    return {"deleted": page_id}
-
-@app.post("/competitor-pages/bulk-delete")
-def bulk_delete_competitor_pages_endpoint(payload: BulkDeletePagesRequest):
-    db.bulk_delete_competitor_page_rows(payload.ids)
-    return {"deleted_ids": payload.ids}
 
 
 @app.post("/competitors/classify", response_model=CompetitorClassifierResponse)
-def classify_competitors(payload: CompetitorClassifierRequest):
+def classify_competitors(payload: CompetitorClassifierRequest, user: dict = Depends(require_edit_permission)):
+
     """
     Classifies top URLs for a given keyword into website types (Official Entity / Platform)
     and determines whether each URL is a competitor (YES / NO) using OpenAI API.
@@ -2114,7 +2098,8 @@ def _snapshot_to_json(row):
 
 
 @app.post("/projects/{project}/find-competitors")
-def find_competitors_endpoint(project: str, payload: FindCompetitorsRequest):
+def find_competitors_endpoint(project: str, payload: FindCompetitorsRequest, user: dict = Depends(require_action_permission)):
+
     """Runs comp_analysis's SERP-based competitor discovery against this
     project's already rank-checked keywords (filtered by category/cluster if specified)
     and saves competitor rows for the chosen category and cluster."""
@@ -2243,7 +2228,7 @@ class CheckRankRequest(BaseModel):
 
 
 @app.post("/projects/{project}/check-rank")
-def check_rank_for_project(project: str, payload: CheckRankRequest, user: dict = Depends(require_project_access)):
+def check_rank_for_project(project: str, payload: CheckRankRequest, user: dict = Depends(require_action_permission)):
     """Rank-checks every ALREADY-CATEGORIZED keyword in this project, on a
     background thread (scripts/hosted_rank_check.py) -- scoped by
     PROJECT, not by a specific job's job_id like the older
@@ -2278,7 +2263,7 @@ def check_rank_for_project(project: str, payload: CheckRankRequest, user: dict =
 
 
 @app.post("/jobs/{job_id}/check-rank")
-def check_rank_for_job(job_id: str):
+def check_rank_for_job(job_id: str, user: dict = Depends(require_action_permission)):
     """Manual trigger (the "check rank" button) -- runs one rank-check
     per keyword in this job on a background thread (scripts/
     hosted_rank_check.py, a thread pool -- no ordering dependency
@@ -2320,6 +2305,7 @@ def check_rank_for_job(job_id: str):
     run_rank_check_job_in_background(project_slug, rows, country_code)
 
     return {"job_id": job_id, "rank_checks_enqueued": len(rows)}
+
 
 
 @app.get("/jobs/{job_id}/results")
@@ -2375,7 +2361,7 @@ import sys
 from pathlib import Path
 
 @app.post("/projects/{project}/ai-analysis")
-def run_ai_analysis(project: str, req: AiAnalysisRequest):
+def run_ai_analysis(project: str, req: AiAnalysisRequest, user: dict = Depends(require_action_permission)):
     """
     Run the requested AI agent (claude, chatgpt, gemini) against a single keyword.
     Uses the agent modules located in `exp-1/agents`.
@@ -2410,10 +2396,11 @@ def smooth_ai_result(new_res: dict, prev_res: dict) -> dict:
 
 
 @app.post("/projects/{project_slug}/ai-visibility-analysis")
-def run_ai_visibility_analysis_endpoint(project_slug: str, req: AiVisibilityRequest):
+def run_ai_visibility_analysis_endpoint(project_slug: str, req: AiVisibilityRequest, user: dict = Depends(require_action_permission)):
     client_domain = req.domain or ""
     kws = req.keywords or []
     engine = (req.engine or "chatgpt").lower().strip()
+
 
     try:
         if "gemini" in engine:
@@ -2492,7 +2479,8 @@ class KeywordPushPotentialRequest(BaseModel):
 
 
 @app.post("/projects/{project}/keyword-push-potential")
-def keyword_push_potential_endpoint(project: str, payload: KeywordPushPotentialRequest):
+def keyword_push_potential_endpoint(project: str, payload: KeywordPushPotentialRequest, user: dict = Depends(require_action_permission)):
+
     """AI triage of an already-shortlisted keyword list (the caller passes
     keywords the site ranks 5-20 for) into THREE batches by how confidently
     each can be pushed UP toward page 1 / top 3 with an off-page campaign
@@ -2617,7 +2605,8 @@ def keyword_push_potential_endpoint(project: str, payload: KeywordPushPotentialR
 
 
 @app.post("/competitors/classify-urls")
-def classify_competitor_urls_endpoint(req: ClassifyUrlsRequest):
+def classify_competitor_urls_endpoint(req: ClassifyUrlsRequest, user: dict = Depends(require_edit_permission)):
+
     """
     Classify competitor URLs into Official Entity vs Platform using Gemini AI via scripts.competitors_classifier.
     Saves classified website_type directly into database competitors table.
@@ -2683,7 +2672,7 @@ def get_outreach_sites_endpoint(project_slug: str, user: dict = Depends(require_
 
 
 @app.post("/projects/{project_slug}/outreach")
-def add_outreach_site_endpoint(project_slug: str, req: AddOutreachSiteRequest, user: dict = Depends(require_project_access)):
+def add_outreach_site_endpoint(project_slug: str, req: AddOutreachSiteRequest, user: dict = Depends(require_edit_permission)):
     """
     Add a new outreach site for a project. Dynamically fetches DA, PA, SS,
     main traffic, total traffic, and top 3 regions via scripts/domain_checeker.py.
@@ -2729,7 +2718,7 @@ def add_outreach_site_endpoint(project_slug: str, req: AddOutreachSiteRequest, u
 
 
 @app.delete("/projects/{project_slug}/outreach/{site_id}")
-def delete_outreach_site_endpoint(project_slug: str, site_id: int):
+def delete_outreach_site_endpoint(project_slug: str, site_id: int, user: dict = Depends(require_delete_permission)):
     """Delete an outreach site by ID."""
     try:
         db.delete_outreach_site(site_id)
@@ -2743,7 +2732,7 @@ class UpdateOutreachSiteRequest(BaseModel):
 
 @app.patch("/projects/{project_slug}/outreach/{site_id}")
 @app.put("/projects/{project_slug}/outreach/{site_id}")
-def update_outreach_site_endpoint(project_slug: str, site_id: int, req: UpdateOutreachSiteRequest):
+def update_outreach_site_endpoint(project_slug: str, site_id: int, req: UpdateOutreachSiteRequest, user: dict = Depends(require_edit_permission)):
     """Update fields for a specific outreach site."""
     try:
         db.update_outreach_site(site_id, req.updates)
@@ -2757,7 +2746,7 @@ class BulkOutreachRequest(BaseModel):
     updates: Optional[dict] = None
 
 @app.post("/projects/{project_slug}/outreach/bulk-delete")
-def bulk_delete_outreach_endpoint(project_slug: str, req: BulkOutreachRequest):
+def bulk_delete_outreach_endpoint(project_slug: str, req: BulkOutreachRequest, user: dict = Depends(require_delete_permission)):
     """Bulk delete outreach sites."""
     try:
         db.bulk_delete_outreach_sites(req.ids)
@@ -2767,7 +2756,7 @@ def bulk_delete_outreach_endpoint(project_slug: str, req: BulkOutreachRequest):
 
 
 @app.post("/projects/{project_slug}/outreach/bulk-update")
-def bulk_update_outreach_endpoint(project_slug: str, req: BulkOutreachRequest):
+def bulk_update_outreach_endpoint(project_slug: str, req: BulkOutreachRequest, user: dict = Depends(require_edit_permission)):
     """Bulk update outreach sites."""
     try:
         if req.updates:
@@ -2776,6 +2765,7 @@ def bulk_update_outreach_endpoint(project_slug: str, req: BulkOutreachRequest):
         return {"status": "success", "count": len(req.ids)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 class CheckDomainMetricsRequest(BaseModel):
@@ -2849,7 +2839,7 @@ def get_off_page_activities(project: Optional[str] = None, user: dict = Depends(
 
 
 @app.post("/off-page-activities")
-def create_off_page_activity(payload: OffPageActivityPayload):
+def create_off_page_activity(payload: OffPageActivityPayload, user: dict = Depends(require_edit_permission)):
     activity = db.create_off_page_activity(payload.dict())
     return {"activity": activity}
 
@@ -2872,7 +2862,7 @@ def get_off_page_activity(activity_id: str, user: dict = Depends(require_authent
 
 
 @app.patch("/off-page-activities/{activity_id}")
-def update_off_page_activity(activity_id: str, payload: OffPageActivityUpdatePayload):
+def update_off_page_activity(activity_id: str, payload: OffPageActivityUpdatePayload, user: dict = Depends(require_edit_permission)):
     updated = db.update_off_page_activity(activity_id, payload.dict(exclude_unset=True))
     if not updated:
         raise HTTPException(404, "Activity not found")
@@ -2880,7 +2870,7 @@ def update_off_page_activity(activity_id: str, payload: OffPageActivityUpdatePay
 
 
 @app.delete("/off-page-activities/{activity_id}")
-def delete_off_page_activity(activity_id: str):
+def delete_off_page_activity(activity_id: str, user: dict = Depends(require_delete_permission)):
     success = db.delete_off_page_activity(activity_id)
     if not success:
         raise HTTPException(404, "Activity not found")
@@ -2891,8 +2881,10 @@ def delete_off_page_activity(activity_id: str):
 @app.post("/off-page-activities/import")
 async def import_off_page_activities(
     file: UploadFile = File(...),
-    project_name: Optional[str] = Form(None)
+    project_name: Optional[str] = Form(None),
+    user: dict = Depends(require_edit_permission)
 ):
+
     """
     Import Off-Page Activities from an uploaded Excel (.xlsx, .xls) or CSV (.csv) file.
     Flexible column header matching:

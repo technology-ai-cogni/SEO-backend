@@ -47,6 +47,7 @@ def get_user_by_email(email: str, force_refresh: bool = False) -> Optional[Dict[
                 SELECT id, name, email, password_hash, role, 
                        COALESCE(category, 'Internal') as category, 
                        COALESCE(status, 'Active') as status,
+                       COALESCE(failed_login_attempts, 0) as failed_login_attempts,
                        COALESCE(section_access, 'Default') as section_access,
                        COALESCE(permissions, 'Default') as permissions,
                        COALESCE(attendance, 'Not Present') as attendance,
@@ -70,6 +71,79 @@ def get_user_by_email(email: str, force_refresh: bool = False) -> Optional[Dict[
             _user_cache[clean_email] = (now, dict(user_dict))
             return user_dict
         return None
+
+
+def record_failed_login(email: str) -> Dict[str, Any]:
+    """
+    Increment failed login attempts for a user by email.
+    If failed attempts exceed 5 (>= 5), automatically disable the account (status = 'Disabled').
+    Returns dict with updated 'failed_attempts' and 'is_disabled' flag.
+    """
+    clean_email = email.strip().lower()
+    invalidate_user_cache(clean_email)
+    with engine.begin() as conn:
+        # First increment counter
+        conn.execute(
+            text("""
+                UPDATE users
+                SET failed_login_attempts = COALESCE(failed_login_attempts, 0) + 1
+                WHERE LOWER(email) = LOWER(:email)
+            """),
+            {"email": clean_email}
+        )
+        # Check new count and current status
+        row = conn.execute(
+            text("""
+                SELECT id, status, COALESCE(failed_login_attempts, 0) as failed_login_attempts
+                FROM users
+                WHERE LOWER(email) = LOWER(:email)
+            """),
+            {"email": clean_email}
+        ).mappings().first()
+
+        if not row:
+            return {"failed_attempts": 0, "is_disabled": False, "user_id": None}
+
+        failed_count = row["failed_login_attempts"]
+        current_status = row["status"]
+        user_id = row["id"]
+
+        # Lock account if failed attempts reaches or exceeds 5
+        if failed_count >= 5 and current_status != "Disabled":
+            conn.execute(
+                text("""
+                    UPDATE users
+                    SET status = 'Disabled'
+                    WHERE id = :id
+                """),
+                {"id": user_id}
+            )
+            return {"failed_attempts": failed_count, "is_disabled": True, "user_id": user_id, "just_locked": True}
+
+        return {
+            "failed_attempts": failed_count, 
+            "is_disabled": current_status == "Disabled" or failed_count >= 5, 
+            "user_id": user_id, 
+            "just_locked": False
+        }
+
+
+def reset_failed_login(email: str) -> None:
+    """Reset failed login attempts counter to 0 upon successful login."""
+    clean_email = email.strip().lower()
+    invalidate_user_cache(clean_email)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("""
+                    UPDATE users
+                    SET failed_login_attempts = 0
+                    WHERE LOWER(email) = LOWER(:email)
+                """),
+                {"email": clean_email}
+            )
+    except Exception as e:
+        print(f"[Auth DB] Warning: failed to reset failed_login_attempts for {clean_email}: {e}")
 
 
 def create_user(
@@ -99,11 +173,13 @@ def create_user(
             text("""
                 INSERT INTO users (
                     name, email, password_hash, role, category, status, section_access, permissions, attendance, assigned_project,
-                    client_detail_enabled, client_name, client_address, client_gst, poc_name, poc_number, poc_address, created_at
+                    client_detail_enabled, client_name, client_address, client_gst, poc_name, poc_number, poc_address, created_at,
+                    failed_login_attempts
                 )
                 VALUES (
                     :name, LOWER(:email), :password_hash, UPPER(:role), :category, :status, :section_access, :permissions, :attendance, :assigned_project,
-                    :client_detail_enabled, :client_name, :client_address, :client_gst, :poc_name, :poc_number, :poc_address, NOW()
+                    :client_detail_enabled, :client_name, :client_address, :client_gst, :poc_name, :poc_number, :poc_address, NOW(),
+                    0
                 )
                 RETURNING id, name, email, role, category, status, section_access, permissions, attendance, assigned_project,
                           client_detail_enabled, client_name, client_address, client_gst, poc_name, poc_number, poc_address, created_at
@@ -142,6 +218,7 @@ def list_all_users() -> List[Dict[str, Any]]:
                 SELECT id, name, email, role, 
                        COALESCE(category, 'Internal') as category, 
                        COALESCE(status, 'Active') as status,
+                       COALESCE(failed_login_attempts, 0) as failed_login_attempts,
                        COALESCE(section_access, 'Default') as section_access,
                        COALESCE(permissions, 'Default') as permissions,
                        COALESCE(attendance, 'Not Present') as attendance,
@@ -167,15 +244,17 @@ def list_all_users() -> List[Dict[str, Any]]:
 
 
 def update_user_status(user_id: int, new_status: str) -> Optional[Dict[str, Any]]:
-    """Enable or disable user profile status ('Active' vs 'Disabled')."""
+    """Enable or disable user profile status ('Active' vs 'Disabled'). If enabling to 'Active', resets failed_login_attempts to 0."""
     invalidate_user_cache()
     with engine.begin() as conn:
         row = conn.execute(
             text("""
                 UPDATE users
-                SET status = :status
+                SET status = :status,
+                    failed_login_attempts = CASE WHEN :status = 'Active' THEN 0 ELSE failed_login_attempts END
                 WHERE id = :id
                 RETURNING id, name, email, role, category, status, 
+                          COALESCE(failed_login_attempts, 0) as failed_login_attempts,
                           COALESCE(section_access, 'Default') as section_access,
                           COALESCE(permissions, 'Default') as permissions,
                           COALESCE(attendance, 'Not Present') as attendance,

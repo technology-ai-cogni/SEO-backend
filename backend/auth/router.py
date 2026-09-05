@@ -15,7 +15,8 @@ from auth.dependencies import require_authenticated_user, require_admin
 from auth.db import (
     get_user_by_email, create_user, update_user_name, update_user_password,
     list_all_users, update_user_status, update_user_role, delete_user_by_id,
-    update_user_attendance, update_all_users_attendance
+    update_user_attendance, update_all_users_attendance,
+    record_failed_login, reset_failed_login
 )
 from core.db import insert_audit_log
 
@@ -85,11 +86,36 @@ def login(payload: LoginRequest, background_tasks: BackgroundTasks):
         )
 
     if not verify_password(payload.password, user["password_hash"]):
-        background_tasks.add_task(insert_audit_log, user_email=clean_email, action="Failed Login Attempt (Incorrect Password)", status="Warning")
+        # Record failed attempt and check if threshold (>= 5) is reached
+        fail_info = record_failed_login(clean_email)
+        attempts = fail_info.get("failed_attempts", 1)
+
+        if fail_info.get("just_locked") or fail_info.get("is_disabled"):
+            background_tasks.add_task(
+                insert_audit_log, 
+                user_email=clean_email, 
+                action=f"User Account Automatically Disabled (Exceeded {attempts} Failed Logins)", 
+                status="Critical"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your profile has been disabled due to multiple failed login attempts. Please contact your administrator to re-enable your account."
+            )
+
+        background_tasks.add_task(
+            insert_audit_log, 
+            user_email=clean_email, 
+            action=f"Failed Login Attempt (Incorrect Password, attempt {attempts}/5)", 
+            status="Warning"
+        )
+        remaining = max(0, 5 - attempts)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Credentials are wrong. Please try again."
+            detail=f"Credentials are wrong. Please try again. ({remaining} attempt{'s' if remaining != 1 else ''} remaining before account lockout)"
         )
+
+    # Reset failed attempts counter on successful login
+    reset_failed_login(clean_email)
 
     background_tasks.add_task(insert_audit_log, user_email=clean_email, action="User Login", status="Success")
 

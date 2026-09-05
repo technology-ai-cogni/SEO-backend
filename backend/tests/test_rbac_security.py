@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app import app
+from auth import router as auth_router_mod
 from auth.security import create_access_token, JWT_SECRET_KEY, JWT_ALGORITHM
 from auth.dependencies import require_authenticated_user, require_admin, require_project_access
 
@@ -55,8 +56,42 @@ DISABLED_USER = {
     "assigned_project": "All Projects"
 }
 
+READONLY_USER = {
+    "id": 5,
+    "email": "readonly@company.com",
+    "name": "Read Only User",
+    "role": "INTERNAL_ASSOCIATE",
+    "category": "Internal",
+    "status": "Active",
+    "permissions": "View Only",
+    "assigned_project": "All Projects"
+}
+
+EDIT_ONLY_USER = {
+    "id": 6,
+    "email": "editonly@company.com",
+    "name": "Edit Only User",
+    "role": "INTERNAL_ASSOCIATE",
+    "category": "Internal",
+    "status": "Active",
+    "permissions": "View + Edit",
+    "assigned_project": "All Projects"
+}
+
+TEAM_LEAD_USER = {
+    "id": 7,
+    "email": "lead@company.com",
+    "name": "Team Lead User",
+    "role": "INTERNAL_TEAM_LEAD",
+    "category": "Internal",
+    "status": "Active",
+    "permissions": "Default",
+    "assigned_project": "All Projects"
+}
+
 
 # ─── 1. AUTHENTICATION INTEGRITY TESTS ──────────────────────────────────────────
+
 
 def test_unauthenticated_request_rejected():
     """No token provided to protected endpoint must return 401."""
@@ -431,3 +466,276 @@ def test_vendor_project_list_scoped_to_assigned_project(monkeypatch):
     assert "projects" in data
     for p in data["projects"]:
         assert p.get("slug", "").lower() == "euroschoolindia"
+
+
+# ─── 4. DEVTOOLS CLIENT-TAMPERING & SERVER-SIDE RBAC MUTATION TESTS ──────────
+
+def test_readonly_user_cannot_create_pages(monkeypatch):
+    """Read-only user unhiding 'Add Pages' button via DevTools is blocked with 403."""
+    token = create_access_token(READONLY_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: READONLY_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.post("/projects/euroschoolindia/pages", json=[{"pageName": "Hacked", "url": "https://hacked.com"}], headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json().get("detail", "")
+
+
+def test_readonly_user_cannot_update_page(monkeypatch):
+    """Read-only user unhiding edit inputs via DevTools is blocked on PATCH /pages/{id} with 403."""
+    token = create_access_token(READONLY_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: READONLY_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.patch("/pages/1", json={"pageName": "Tampered Name"}, headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json().get("detail", "")
+
+
+def test_readonly_user_cannot_delete_page(monkeypatch):
+    """Read-only user unhiding delete buttons via DevTools is blocked on DELETE /pages/{id} with 403."""
+    token = create_access_token(READONLY_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: READONLY_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.delete("/pages/1", headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json().get("detail", "")
+
+
+def test_readonly_user_cannot_bulk_delete_pages(monkeypatch):
+    """Read-only user sending bulk delete payload is blocked on POST /pages/bulk-delete with 403."""
+    token = create_access_token(READONLY_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: READONLY_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.post("/pages/bulk-delete", json={"ids": [1, 2, 3]}, headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json().get("detail", "")
+
+
+def test_readonly_user_cannot_delete_keyword(monkeypatch):
+    """Read-only user attempting DELETE /keywords/{kw_id} via DevTools receives 403."""
+    token = create_access_token(READONLY_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: READONLY_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.delete("/keywords/1", headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json().get("detail", "")
+
+
+def test_readonly_user_cannot_create_competitor(monkeypatch):
+    """Read-only user attempting POST /competitors receives 403."""
+    token = create_access_token(READONLY_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: READONLY_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.post("/competitors", json={"domain": "rival.com", "projectSlug": "euroschoolindia"}, headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json().get("detail", "")
+
+
+def test_readonly_user_cannot_delete_competitor(monkeypatch):
+    """Read-only user attempting DELETE /competitors/{id} receives 403."""
+    token = create_access_token(READONLY_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: READONLY_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.delete("/competitors/1", headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json().get("detail", "")
+
+
+def test_edit_only_user_cannot_delete_keyword(monkeypatch):
+    """User with View+Edit permissions cannot delete keywords (DELETE rejected with 403)."""
+    token = create_access_token(EDIT_ONLY_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: EDIT_ONLY_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.delete("/keywords/1", headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json().get("detail", "")
+
+
+def test_edit_only_user_cannot_bulk_delete_keywords(monkeypatch):
+    """User with View+Edit permissions cannot bulk-delete keywords (403)."""
+    token = create_access_token(EDIT_ONLY_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: EDIT_ONLY_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.post("/keywords/bulk-delete", json={"ids": [1, 2]}, headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json().get("detail", "")
+
+
+def test_readonly_user_cannot_create_off_page_activity(monkeypatch):
+    """Read-only user attempting POST /off-page-activities receives 403."""
+    token = create_access_token(READONLY_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: READONLY_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.post("/off-page-activities", json={"activity_name": "Test Activity"}, headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json().get("detail", "")
+
+
+def test_readonly_user_cannot_run_clustering(monkeypatch):
+    """Read-only user unhiding AI-Clustering button in DevTools receives 403."""
+    token = create_access_token(READONLY_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: READONLY_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.post("/projects/euroschoolindia/recluster", headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json().get("detail", "")
+
+
+def test_edit_only_user_cannot_run_clustering(monkeypatch):
+    """View+Edit user attempting to trigger AI-Clustering receives 403 Forbidden."""
+    token = create_access_token(EDIT_ONLY_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: EDIT_ONLY_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.post("/projects/euroschoolindia/recluster", headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json().get("detail", "")
+
+
+def test_edit_only_user_cannot_run_ai_visibility(monkeypatch):
+    """View+Edit user attempting to trigger AI visibility analysis receives 403 Forbidden."""
+    token = create_access_token(EDIT_ONLY_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: EDIT_ONLY_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.post("/projects/euroschoolindia/ai-visibility-analysis", json={"engine": "all", "force_refresh": True}, headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json().get("detail", "")
+
+
+def test_edit_only_user_cannot_run_rank_check(monkeypatch):
+    """View+Edit user attempting to trigger rank check receives 403 Forbidden."""
+    token = create_access_token(EDIT_ONLY_USER)
+    monkeypatch.setattr("auth.dependencies.get_user_by_email", lambda e: EDIT_ONLY_USER)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.post("/projects/euroschoolindia/check-rank", json={"keywords": ["test"]}, headers=headers)
+    assert res.status_code == 403
+    assert "Forbidden" in res.json().get("detail", "")
+
+
+# ─── FAILED LOGIN ATTEMPTS & AUTO-LOCKOUT TESTS ─────────────────────────────
+
+def test_login_wrong_password_shows_remaining_attempts(monkeypatch):
+    """Wrong password tracks failed attempts and shows remaining attempts countdown."""
+    from auth.security import hash_password
+    test_user = {
+        "id": 99,
+        "email": "lockout_test@company.com",
+        "name": "Lockout User",
+        "role": "INTERNAL_ASSOCIATE",
+        "category": "Internal",
+        "status": "Active",
+        "password_hash": hash_password("CorrectPass123!"),
+        "failed_login_attempts": 0
+    }
+    
+    attempts = 0
+    def mock_get_user(email, force_refresh=False):
+        return test_user
+
+    def mock_record_failed(email):
+        nonlocal attempts
+        attempts += 1
+        return {"failed_attempts": attempts, "is_disabled": attempts >= 5, "user_id": test_user["id"], "just_locked": attempts == 5}
+
+    monkeypatch.setattr(auth_router_mod, "get_user_by_email", mock_get_user)
+    monkeypatch.setattr(auth_router_mod, "record_failed_login", mock_record_failed)
+    monkeypatch.setattr(auth_router_mod, "insert_audit_log", lambda **kwargs: None)
+
+    # 1st attempt wrong
+    res = client.post("/auth/login", json={"email": "lockout_test@company.com", "password": "WrongPassword"})
+    assert res.status_code == 401
+    assert "4 attempts remaining" in res.json().get("detail", "")
+
+    # 2nd attempt wrong
+    res = client.post("/auth/login", json={"email": "lockout_test@company.com", "password": "WrongPassword"})
+    assert res.status_code == 401
+    assert "3 attempts remaining" in res.json().get("detail", "")
+
+
+def test_login_auto_disabled_on_5th_failed_attempt(monkeypatch):
+    """Entering wrong credentials 5 times automatically disables user account (403 forbidden)."""
+    from auth.security import hash_password
+    test_user = {
+        "id": 100,
+        "email": "autolock@company.com",
+        "name": "Auto Lock User",
+        "role": "INTERNAL_ASSOCIATE",
+        "category": "Internal",
+        "status": "Active",
+        "password_hash": hash_password("SecretPass123!"),
+        "failed_login_attempts": 0
+    }
+
+    attempts = 0
+    def mock_get_user(email, force_refresh=False):
+        return test_user
+
+    def mock_record_failed(email):
+        nonlocal attempts
+        attempts += 1
+        is_locked = attempts >= 5
+        if is_locked:
+            test_user["status"] = "Disabled"
+        return {"failed_attempts": attempts, "is_disabled": is_locked, "user_id": test_user["id"], "just_locked": is_locked}
+
+    monkeypatch.setattr(auth_router_mod, "get_user_by_email", mock_get_user)
+    monkeypatch.setattr(auth_router_mod, "record_failed_login", mock_record_failed)
+    monkeypatch.setattr(auth_router_mod, "insert_audit_log", lambda **kwargs: None)
+
+    # 4 failed attempts
+    for i in range(1, 5):
+        res = client.post("/auth/login", json={"email": "autolock@company.com", "password": "BadPassword"})
+        assert res.status_code == 401
+
+    # 5th failed attempt: Account locks and raises 403
+    res5 = client.post("/auth/login", json={"email": "autolock@company.com", "password": "BadPassword"})
+    assert res5.status_code == 403
+    assert "disabled due to multiple failed login attempts" in res5.json().get("detail", "")
+
+    # 6th attempt with previously locked status: rejected with 403 immediately
+    res6 = client.post("/auth/login", json={"email": "autolock@company.com", "password": "SecretPass123!"})
+    assert res6.status_code == 403
+    assert "disabled" in res6.json().get("detail", "").lower()
+
+
+def test_successful_login_resets_failed_attempts(monkeypatch):
+    """A successful login resets the failed login attempt counter."""
+    from auth.security import hash_password
+    test_user = {
+        "id": 101,
+        "email": "reset_test@company.com",
+        "name": "Reset User",
+        "role": "INTERNAL_ASSOCIATE",
+        "category": "Internal",
+        "status": "Active",
+        "password_hash": hash_password("GoodPassword123!"),
+        "failed_login_attempts": 3
+    }
+
+    reset_called = False
+    def mock_reset_failed(email):
+        nonlocal reset_called
+        reset_called = True
+
+    monkeypatch.setattr(auth_router_mod, "get_user_by_email", lambda e, force_refresh=False: test_user)
+    monkeypatch.setattr(auth_router_mod, "reset_failed_login", mock_reset_failed)
+    monkeypatch.setattr(auth_router_mod, "insert_audit_log", lambda **kwargs: None)
+
+    res = client.post("/auth/login", json={"email": "reset_test@company.com", "password": "GoodPassword123!"})
+    assert res.status_code == 200
+    assert reset_called is True
+    assert "access_token" in res.json()
+
+

@@ -110,8 +110,8 @@ export function hasPermission(user, permission) {
   if (permission === PERMISSIONS.VIEW_LOGS && (userPerms.includes('logs') || userPerms.includes('full control'))) {
     return true;
   }
-  if (permission === PERMISSIONS.RUN_ANALYSIS && canEdit(user)) {
-    return true;
+  if (permission === PERMISSIONS.RUN_ANALYSIS) {
+    return canUpdate(user);
   }
 
   const permissions = ROLE_PERMISSIONS[userRole] || [];
@@ -442,15 +442,10 @@ export function canRunActions(user) {
   // Explicit permission overrides:
   if (permissions === 'view only' || permissions === 'view') return false;
 
-  // If user is read-only by default (e.g. Associate or Vendor on Default permissions):
-  if (isReadOnlyUser(user)) return false;
-
+  // If user has update or full control permission:
   if (
     permissions.includes('full control') ||
-    permissions.includes('edit') ||
-    permissions.includes('update') ||
-    permissions.includes('delete') ||
-    canEdit(user)
+    permissions.includes('update')
   ) return true;
 
   // Role-Based Defaults (when permissions === 'Default'):
@@ -482,8 +477,8 @@ export function isAssociateUser(user) {
  * Determines whether a user can run Brand Discovery analysis.
  * Default Permission Rules:
  * - ADMIN & Team Leads: Full continuous run/re-analyze permission.
- * - Associates: Default allowed ONCE per project. After 1 hit, the Analyze button is removed for them.
- * - View Only override: Cannot run.
+ * - View + Edit + Delete + Update / Full Control: Full run/re-analyze permission.
+ * - View Only / View + Edit / View + Edit + Delete: Cannot run.
  *
  * @param {Object} user - Logged in user context.
  * @param {string} projectSlug - The active project identifier.
@@ -498,14 +493,10 @@ export function canRunBrandDiscovery(user, projectSlug) {
 
   // Explicit permission overrides:
   if (permissions === 'view only' || permissions === 'view') return false;
-  if (isReadOnlyUser(user)) return false;
 
   if (
     permissions.includes('full control') ||
-    permissions.includes('edit') ||
-    permissions.includes('update') ||
-    permissions.includes('delete') ||
-    canEdit(user)
+    permissions.includes('update')
   ) return true;
 
   // Team Leads get multi-use access
@@ -516,10 +507,9 @@ export function canRunBrandDiscovery(user, projectSlug) {
 
 /**
  * Determines whether a user can run/trigger AI model analysis on Brand Discovery or AI Analysis pages.
- * Default Permission Rules for Associates:
- * - Admin, Team Leads, or Full Control: Continuous access to Analyze / Re-analyze anytime.
- * - Associates: Allowed to hit Analyze ONCE per model per project. Once data comes back (hasData === true)
- *   or if analysis was previously run, the button gets HIDDEN.
+ * Default Permission Rules:
+ * - Admin, Team Leads, or Full Control / Update: Continuous access to Analyze / Re-analyze anytime.
+ * - View Only / View + Edit / View + Edit + Delete: Blocked from running analysis.
  *
  * @param {Object} user - Logged in user context.
  * @param {string} projectSlug - The active project identifier.
@@ -533,16 +523,8 @@ export function canRunAiModelAnalysis(user, projectSlug, engineName = 'all', has
   if (role === 'ADMIN' || role === 'INTERNAL_TEAM_LEAD' || role === 'CLIENT_TEAM_LEAD') return true;
 
   const permissions = (user.permissions || 'Default').trim().toLowerCase();
-  if (permissions.includes('full control')) return true;
+  if (permissions.includes('full control') || permissions.includes('update')) return true;
   if (permissions === 'view only' || permissions === 'view') return false;
-  if (isReadOnlyUser(user)) return false;
-
-  if (
-    permissions.includes('edit') ||
-    permissions.includes('update') ||
-    permissions.includes('delete') ||
-    canEdit(user)
-  ) return true;
 
   return false;
 }

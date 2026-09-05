@@ -526,9 +526,9 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   const [projects, setProjects] = useState([]);
   const [selectedSlug, setSelectedSlug] = useState('');
   const [activeProject, setActiveProject] = useState(null);
-  // Base (historical-date) capability: associates get one Brand Discovery run per project.
+  // Base (historical-date) capability: only users with action permissions can run
   const userCanRunActionsHistorical = (canRunActions(user) || canRunBrandDiscovery(user, activeProject?.slug)) && !associateAnalyzed;
-  // Capability that ignores the once-per-project cap -- used only when the calendar is on today.
+  // Capability used on today: strictly checks action permission / update privilege
   const canRunBrandDiscoveryUnlimited = (() => {
     if (!user || !user.role) return false;
     const perms = (user.permissions || 'Default').trim().toLowerCase();
@@ -537,7 +537,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     if (role === 'ADMIN') return true;
     if (canRunActions(user)) return true;
     if (role === 'INTERNAL_TEAM_LEAD' || role === 'CLIENT_TEAM_LEAD') return true;
-    return isAssociateUser(user);
+    return false;
   })();
   const [kwCount, setKwCount] = useState(0);
   const [pageCount, setPageCount] = useState(0);
