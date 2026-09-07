@@ -10,41 +10,9 @@ import { supabase } from '../../lib/supabaseClient';
 import MarkedCalendar, { getLocalTodayStr, tsToLocalDateStr } from '../common/MarkedCalendar';
 import { hasPermission, PERMISSIONS, canRunActions, canRunAiModelAnalysis, recordAiModelAnalysisRun, canDownload } from '../../lib/permissions';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
-
-// Top-level helper function to pick top 2 keywords per category by search volume (SV)
-function getTop2KeywordsPerCategory(kws) {
-  if (!kws || !Array.isArray(kws) || kws.length === 0) return [];
-  const categoryMap = {};
-  kws.forEach(k => {
-    const cat = String(k.category || k.cluster || 'General').trim();
-    if (!categoryMap[cat]) categoryMap[cat] = [];
-    categoryMap[cat].push(k);
-  });
-
-  const selectedKeywords = [];
-  const seenKwText = new Set();
-
-  Object.values(categoryMap).forEach(kwGroup => {
-    const sorted = [...kwGroup].sort((a, b) => {
-      const svA = Number(String(a.sv || a.search_volume || a.kw_volume || 0).replace(/[^0-9.]/g, '')) || 0;
-      const svB = Number(String(b.sv || b.search_volume || b.kw_volume || 0).replace(/[^0-9.]/g, '')) || 0;
-      return svB - svA;
-    });
-
-    let addedInCat = 0;
-    for (const kObj of sorted) {
-      const kwText = String(kObj.kw || kObj.keyword || kObj.name || '').trim().toLowerCase();
-      if (kwText && !seenKwText.has(kwText)) {
-        seenKwText.add(kwText);
-        selectedKeywords.push(kObj);
-        addedInCat++;
-        if (addedInCat >= 2) break;
-      }
-    }
-  });
-
-  return selectedKeywords;
-}
+// Shared "top 2 keywords per category by SV" -- same helper Brand Discovery uses,
+// so the analyzed-keyword / "Total Search Terms" counts match across pages.
+import { getTop2KeywordsPerCategory } from '../../lib/keywordSelection';
 
 
 // MultiSelectField Component for Popover Filters
@@ -722,6 +690,12 @@ export default function AiAnalysisPage({ user }) {
     setTypeFilter('all');
   };
 
+  // The Filter popover's <select> controls are single-value, but columnFilters
+  // holds arrays (shared with the column-header multi-select filters + the
+  // array-based predicates). Bridge between the two: 'all' -> [] (no filter).
+  const colFilterValue = (key) => (Array.isArray(columnFilters[key]) && columnFilters[key].length > 0 ? columnFilters[key][0] : 'all');
+  const setColFilter = (key, val) => setColumnFilters(prev => ({ ...prev, [key]: val === 'all' ? [] : [val] }));
+
   // Apply filters memoized
   const filteredMentions = useMemo(() => {
     return mentionsData.filter(m => {
@@ -769,16 +743,16 @@ export default function AiAnalysisPage({ user }) {
         return (
           <div style={{
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: 16,
+            flexDirection: 'column',
+            gap: 14,
             background: '#ffffff',
             padding: '16px 20px',
             borderRadius: 12,
             border: '1px solid #E4DFEE',
             boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
           }}>
+            {/* Row 1: Project dropdown  ·  Country + Date */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
             {/* Left Side: Dashboard: domain.com v */}
             <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
               <h1 style={{
@@ -1021,6 +995,86 @@ export default function AiAnalysisPage({ user }) {
                 onChange={setSelectedDate}
                 markedDates={analysisDateSet}
               />
+
+              {userCanRunActions && canRunAiModelAnalysis(user, activeProject?.slug, selectedEngine, !!getActiveEngineResult()) && (
+                <button
+                  onClick={handleRunAnalysis}
+                  disabled={analyzing}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    background: 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)',
+                    color: '#ffffff', border: 'none', borderRadius: 8, padding: '9px 18px',
+                    fontSize: 13, fontWeight: 600,
+                    cursor: analyzing ? 'not-allowed' : 'pointer', opacity: analyzing ? 0.75 : 1,
+                    boxShadow: '0 3px 12px rgba(166, 28, 104, 0.28)', transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={e => { if (!analyzing) { e.currentTarget.style.background = 'linear-gradient(135deg, #8032CF 0%, #9E2CA0 35%, #B82276 70%, #CA2265 100%)'; e.currentTarget.style.boxShadow = '0 5px 16px rgba(166, 28, 104, 0.38)'; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
+                  onMouseLeave={e => { if (!analyzing) { e.currentTarget.style.background = 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)'; e.currentTarget.style.boxShadow = '0 3px 12px rgba(166, 28, 104, 0.28)'; e.currentTarget.style.transform = 'translateY(0)'; } }}
+                >
+                  <Sparkles size={14} className={analyzing ? 'animate-spin' : ''} />
+                  <span>{analyzing ? 'Analyzing...' : (getActiveEngineResult() ? 'Re-analyze' : 'Analyze')}</span>
+                </button>
+              )}
+            </div>
+            </div>{/* end Row 1 */}
+
+            {/* Row 2: engine tabs, with Mentions/Citations toggle stacked below */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12, borderTop: '1px solid #F0ECF7', paddingTop: 14 }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', background: '#ffffff', border: '1.5px solid #E4DFEE', borderRadius: 10, overflow: 'hidden' }}>
+                {[
+                  { id: 'chatgpt', label: 'ChatGPT' },
+                  { id: 'gemini', label: 'Gemini' },
+                  { id: 'ai overview', label: 'AI Overview' }
+                ].map((eng, idx, arr) => (
+                  <button
+                    key={eng.id}
+                    onClick={() => setSelectedEngine(eng.id)}
+                    style={{
+                      background: selectedEngine === eng.id ? 'linear-gradient(135deg, #F6EEFD 0%, #FDEBF4 100%)' : '#ffffff',
+                      color: selectedEngine === eng.id ? '#7B2FBE' : '#4E4E61',
+                      fontWeight: selectedEngine === eng.id ? 800 : 600,
+                      border: 'none',
+                      borderRight: idx < arr.length - 1 ? '1.5px solid #E4DFEE' : 'none',
+                      padding: '9px 18px',
+                      fontSize: 13,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {eng.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Mentions vs Citations toggle */}
+              <div style={{ display: 'inline-flex', alignItems: 'center', background: '#F4F1FA', padding: 3, borderRadius: 8 }}>
+                <button
+                  onClick={() => setActiveSubTab('mentions')}
+                  style={{
+                    background: activeSubTab === 'mentions' ? '#ffffff' : 'transparent',
+                    color: activeSubTab === 'mentions' ? '#7B2FBE' : '#64748b',
+                    fontWeight: activeSubTab === 'mentions' ? 700 : 500,
+                    border: activeSubTab === 'mentions' ? '1px solid #E5CCF7' : '1px solid transparent',
+                    borderRadius: 6, padding: '6px 14px', fontSize: 12.5, cursor: 'pointer',
+                    boxShadow: activeSubTab === 'mentions' ? '0 1px 3px rgba(74, 26, 140, 0.08)' : 'none'
+                  }}
+                >
+                  Mentions ({mentionsData.length})
+                </button>
+                <button
+                  onClick={() => setActiveSubTab('citations')}
+                  style={{
+                    background: activeSubTab === 'citations' ? '#ffffff' : 'transparent',
+                    color: activeSubTab === 'citations' ? '#7B2FBE' : '#64748b',
+                    fontWeight: activeSubTab === 'citations' ? 700 : 500,
+                    border: activeSubTab === 'citations' ? '1px solid #E5CCF7' : '1px solid transparent',
+                    borderRadius: 6, padding: '6px 14px', fontSize: 12.5, cursor: 'pointer',
+                    boxShadow: activeSubTab === 'citations' ? '0 1px 3px rgba(74, 26, 140, 0.08)' : 'none'
+                  }}
+                >
+                  Citations ({citationsData.length})
+                </button>
+              </div>
             </div>
           </div>
         );
@@ -1093,143 +1147,6 @@ export default function AiAnalysisPage({ user }) {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* ─── TOP CONTROL BAR: Engine Sub-tabs, Mentions/Citations Toggles ─── */}
-      <div style={{
-        background: '#ffffff',
-        border: '1px solid #E4DFEE',
-        borderRadius: 12,
-        padding: '16px 20px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 16,
-        boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
-      }}>
-        {/* Engine Tabs & Mentions vs Citations Toggle */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-
-          {/* Left Column: Engine Tabs & Mentions vs Citations Sub-tabs */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
-            {/* Segmented Engine Button Group: ChatGPT, Gemini, AI Overview */}
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              background: '#ffffff',
-              border: '1.5px solid #E4DFEE',
-              borderRadius: 10,
-              overflow: 'hidden'
-            }}>
-              {[
-                { id: 'chatgpt', label: 'ChatGPT' },
-                { id: 'gemini', label: 'Gemini' },
-                { id: 'ai overview', label: 'AI Overview' }
-              ].map((eng, idx, arr) => (
-                <button
-                  key={eng.id}
-                  onClick={() => setSelectedEngine(eng.id)}
-                  style={{
-                    background: selectedEngine === eng.id ? 'linear-gradient(135deg, #F6EEFD 0%, #FDEBF4 100%)' : '#ffffff',
-                    color: selectedEngine === eng.id ? '#7B2FBE' : '#4E4E61',
-                    fontWeight: selectedEngine === eng.id ? 800 : 600,
-                    border: 'none',
-                    borderRight: idx < arr.length - 1 ? '1.5px solid #E4DFEE' : 'none',
-                    padding: '9px 18px',
-                    fontSize: 13,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  {eng.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Mentions vs Citations Toggle directly UNDER engine tabs */}
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              background: '#F4F1FA',
-              padding: 3,
-              borderRadius: 8
-            }}>
-              <button
-                onClick={() => setActiveSubTab('mentions')}
-                style={{
-                  background: activeSubTab === 'mentions' ? '#ffffff' : 'transparent',
-                  color: activeSubTab === 'mentions' ? '#7B2FBE' : '#64748b',
-                  fontWeight: activeSubTab === 'mentions' ? 700 : 500,
-                  border: activeSubTab === 'mentions' ? '1px solid #E5CCF7' : '1px solid transparent',
-                  borderRadius: 6,
-                  padding: '6px 14px',
-                  fontSize: 12.5,
-                  cursor: 'pointer',
-                  boxShadow: activeSubTab === 'mentions' ? '0 1px 3px rgba(74, 26, 140, 0.08)' : 'none'
-                }}
-              >
-                Mentions ({mentionsData.length})
-              </button>
-              <button
-                onClick={() => setActiveSubTab('citations')}
-                style={{
-                  background: activeSubTab === 'citations' ? '#ffffff' : 'transparent',
-                  color: activeSubTab === 'citations' ? '#7B2FBE' : '#64748b',
-                  fontWeight: activeSubTab === 'citations' ? 700 : 500,
-                  border: activeSubTab === 'citations' ? '1px solid #E5CCF7' : '1px solid transparent',
-                  borderRadius: 6,
-                  padding: '6px 14px',
-                  fontSize: 12.5,
-                  cursor: 'pointer',
-                  boxShadow: activeSubTab === 'citations' ? '0 1px 3px rgba(74, 26, 140, 0.08)' : 'none'
-                }}
-              >
-                Citations ({citationsData.length})
-              </button>
-            </div>
-          </div>
-
-          {/* Right Side: Analyze / Re-analyze Button */}
-          {userCanRunActions && canRunAiModelAnalysis(user, activeProject?.slug, selectedEngine, !!getActiveEngineResult()) && (
-            <button
-              onClick={handleRunAnalysis}
-              disabled={analyzing}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                background: 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: 8,
-                padding: '9px 18px',
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: analyzing ? 'not-allowed' : 'pointer',
-                opacity: analyzing ? 0.75 : 1,
-                boxShadow: '0 3px 12px rgba(166, 28, 104, 0.28)',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={e => {
-                if (!analyzing) {
-                  e.currentTarget.style.background = 'linear-gradient(135deg, #8032CF 0%, #9E2CA0 35%, #B82276 70%, #CA2265 100%)';
-                  e.currentTarget.style.boxShadow = '0 5px 16px rgba(166, 28, 104, 0.38)';
-                  e.currentTarget.style.transform = 'translateY(-1px)';
-                }
-              }}
-              onMouseLeave={e => {
-                if (!analyzing) {
-                  e.currentTarget.style.background = 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)';
-                  e.currentTarget.style.boxShadow = '0 3px 12px rgba(166, 28, 104, 0.28)';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }
-              }}
-            >
-              <Sparkles size={14} className={analyzing ? 'animate-spin' : ''} />
-              <span>{analyzing ? 'Analyzing...' : (getActiveEngineResult() ? 'Re-analyze' : 'Analyze')}</span>
-            </button>
-          )}
-        </div>
-
       </div>
 
       {/* ─── SEARCH & FILTER BAR (own card, like Top Pages Organic) ─── */}
@@ -1348,8 +1265,8 @@ export default function AiAnalysisPage({ user }) {
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>CLUSTER</label>
                     <select
-                      value={columnFilters.cluster}
-                      onChange={e => setColumnFilters({ ...columnFilters, cluster: e.target.value })}
+                      value={colFilterValue('cluster')}
+                      onChange={e => setColFilter('cluster', e.target.value)}
                       style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
                     >
                       <option value="all">All Clusters</option>
@@ -1361,8 +1278,8 @@ export default function AiAnalysisPage({ user }) {
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>CATEGORY</label>
                     <select
-                      value={columnFilters.category}
-                      onChange={e => setColumnFilters({ ...columnFilters, category: e.target.value })}
+                      value={colFilterValue('category')}
+                      onChange={e => setColFilter('category', e.target.value)}
                       style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
                     >
                       <option value="all">All Categories</option>
@@ -1374,8 +1291,8 @@ export default function AiAnalysisPage({ user }) {
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TYPE</label>
                     <select
-                      value={columnFilters.type}
-                      onChange={e => setColumnFilters({ ...columnFilters, type: e.target.value })}
+                      value={colFilterValue('type')}
+                      onChange={e => setColFilter('type', e.target.value)}
                       style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
                     >
                       <option value="all">All Types</option>
@@ -1387,8 +1304,8 @@ export default function AiAnalysisPage({ user }) {
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET TYPE</label>
                     <select
-                      value={columnFilters.targetType}
-                      onChange={e => setColumnFilters({ ...columnFilters, targetType: e.target.value })}
+                      value={colFilterValue('targetType')}
+                      onChange={e => setColFilter('targetType', e.target.value)}
                       style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
                     >
                       <option value="all">All Target Types</option>
@@ -1400,8 +1317,8 @@ export default function AiAnalysisPage({ user }) {
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET SUBTYPE</label>
                     <select
-                      value={columnFilters.targetSubtype}
-                      onChange={e => setColumnFilters({ ...columnFilters, targetSubtype: e.target.value })}
+                      value={colFilterValue('targetSubtype')}
+                      onChange={e => setColFilter('targetSubtype', e.target.value)}
                       style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
                     >
                       <option value="all">All Subtypes</option>
@@ -1413,8 +1330,8 @@ export default function AiAnalysisPage({ user }) {
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET GEO</label>
                     <select
-                      value={columnFilters.targetGeo}
-                      onChange={e => setColumnFilters({ ...columnFilters, targetGeo: e.target.value })}
+                      value={colFilterValue('targetGeo')}
+                      onChange={e => setColFilter('targetGeo', e.target.value)}
                       style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
                     >
                       <option value="all">All Geos</option>
@@ -1426,8 +1343,8 @@ export default function AiAnalysisPage({ user }) {
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>PRIORITY</label>
                     <select
-                      value={columnFilters.priority}
-                      onChange={e => setColumnFilters({ ...columnFilters, priority: e.target.value })}
+                      value={colFilterValue('priority')}
+                      onChange={e => setColFilter('priority', e.target.value)}
                       style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
                     >
                       <option value="all">All Priorities</option>

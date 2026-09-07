@@ -5,6 +5,8 @@ import { fetchProjectListLite, fetchKeywordRows, fetchPageRows, runAiVisibilityA
 import { hasPermission, PERMISSIONS, isReadOnlyUser, canRunActions, canRunBrandDiscovery, isAssociateUser, canRunAiModelAnalysis, recordAiModelAnalysisRun } from '../../lib/permissions';
 import MarkedCalendar, { getLocalTodayStr, tsToLocalDateStr } from '../common/MarkedCalendar';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
+// Shared "top 2 keywords per category by SV" -- same helper Top Pages AI uses.
+import { getTop2KeywordStrings } from '../../lib/keywordSelection';
 
 const ENGINE_THEMES = {
   chatgpt: {
@@ -307,56 +309,9 @@ function AiVisibilityArcGauge({
   );
 }
 
-function extractTop2PerCategory(kws) {
-  if (!kws || kws.length === 0) return [];
-  const groups = {};
-  kws.forEach(k => {
-    const cat = k.category || k.category_name || k.targetSubtype || k.subtype || k.cluster || '-';
-    if (!groups[cat]) groups[cat] = [];
-    groups[cat].push(k);
-  });
-
-  const selected = [];
-  Object.keys(groups).sort().forEach(cat => {
-    const sortedInCat = [...groups[cat]].sort((a, b) => {
-      const parseNum = (val) => {
-        if (val == null) return null;
-        const n = Number(String(val).replace(/[^0-9.]/g, ''));
-        return isNaN(n) ? null : n;
-      };
-
-      const svA = parseNum(a.sv ?? a.search_volume ?? a.volume ?? a.searchVolume);
-      const svB = parseNum(b.sv ?? b.search_volume ?? b.volume ?? b.searchVolume);
-
-      // 1. If SV is present for both or either, prioritize higher SV
-      if (svA !== null || svB !== null) {
-        const valA = svA ?? -1;
-        const valB = svB ?? -1;
-        if (valA !== valB) return valB - valA;
-      }
-
-      // 2. If SV is not present or equal, sort deterministically by rank (ascending)
-      const rankA = parseNum(a.rank) ?? 999;
-      const rankB = parseNum(b.rank) ?? 999;
-      if (rankA !== rankB) return rankA - rankB;
-
-      // 3. Fallback to alphabetical text sorting
-      const textA = String(a.kw || a.keyword || '');
-      const textB = String(b.kw || b.keyword || '');
-      return textA.localeCompare(textB);
-    });
-
-    const top2 = sortedInCat.slice(0, 2);
-    top2.forEach(item => {
-      const keywordStr = String(item.kw || item.keyword || '').trim();
-      if (keywordStr && !selected.includes(keywordStr)) {
-        selected.push(keywordStr);
-      }
-    });
-  });
-
-  return selected;
-}
+// "Top 2 keywords per category by SV" -> keyword strings. Thin alias over the
+// shared helper so Brand Discovery and Top Pages AI never diverge.
+const extractTop2PerCategory = (kws) => getTop2KeywordStrings(kws);
 
 const COUNTRY_OPTIONS = [
   { code: 'AF', flag: '🇦🇫', name: 'Afghanistan' },
@@ -559,6 +514,9 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
   const [unauthorizedModal, setUnauthorizedModal] = useState({ show: false, message: '' });
   const [showDateModal, setShowDateModal] = useState(false);
   const [isAnalyzingOverlay, setIsAnalyzingOverlay] = useState(false);
+  // True only while a full "analyze all engines" run is in progress -- drives the
+  // header Re-analyze button. A single-engine re-analyze does NOT set this.
+  const [analyzingAll, setAnalyzingAll] = useState(false);
 
   // Raw ai_analysis history rows for this project (drives the day marks + historical view).
   const [aiHistory, setAiHistory] = useState([]);
@@ -1001,12 +959,15 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
 
   // No-op: period history is now read live from Supabase (the ai_analysis table)
   // and rebuilt on every load / analyze -- nothing is persisted client-side.
-  const saveHitToPeriodHistory = () => {};
+  const saveHitToPeriodHistory = () => { };
 
   const handleAiAnalysis = async (e, options = {}) => {
     if (e) e.preventDefault();
-    const analyzeAll = true;
-    const targetEngine = null;
+    // Default to running every engine. A caller can pass { analyzeAll: false } to
+    // re-run only the engine of the tab currently in view, or { targetEngine: 'gemini' }
+    // to re-run one specific engine.
+    const targetEngine = options.targetEngine || null;
+    const analyzeAll = !targetEngine && options.analyzeAll !== false;
 
     if (!activeProject?.slug) return;
 
@@ -1022,11 +983,18 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     const kwList = kwSource.map(k => (typeof k === 'string' ? k : (k.kw || k.keyword || k.name))).filter(Boolean);
     const countryName = activeProject.location || 'India';
 
-    setIsAnalyzingOverlay(true);
+    // Full-screen overlay + header-button spinner only for a full "analyze all" run.
+    // A single-engine re-analyze just shows "Analyzing..." on that engine's own button.
+    if (analyzeAll) {
+      setIsAnalyzingOverlay(true);
+      setAnalyzingAll(true);
+    }
 
     try {
-      // 1. Organic Rank Check Task
+      // 1. Organic Rank Check Task -- only on a full "analyze all" run. A single-engine
+      // AI re-analyze should not trigger a full organic SERP crawl.
       const organicTaskPromise = (async () => {
+        if (!analyzeAll) return;
         const targetRegion = selectedRegion || activeProject.location || 'India';
         try {
           await runOrganicRankCheckApi(activeProject.slug, targetRegion);
@@ -1183,9 +1151,10 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       try {
         const freshHistory = await fetchAiAnalysisHistory(activeProject.slug);
         setAiHistory(Array.isArray(freshHistory) ? freshHistory : []);
-      } catch (_) {}
+      } catch (_) { }
     } finally {
       setIsAnalyzingOverlay(false);
+      setAnalyzingAll(false);
     }
   };
 
@@ -1328,10 +1297,14 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     const itemsToProcess = citedPagesList.length > 0 ? citedPagesList : mentionsList;
 
     if (!itemsToProcess || itemsToProcess.length === 0) {
-      // Fallback to Project Setup keywords if no AI run data is present yet
+      // Fallback to Project Setup keywords if no AI run data is present yet.
+      // When a keyword has no landing page, fall back to THIS project's own
+      // homepage -- never a hardcoded unrelated domain.
+      const projDomain = String(activeProject?.domain || activeProject?.name || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+      const projectHomeUrl = projDomain ? `https://${projDomain}` : '';
       return (projectKeywords || []).map(k => {
-        const finalUrl = k.landingPage || k.landing_page_url || k.page_url || k.url || 'https://euroschoolindia.com';
-        const pageName = finalUrl.split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || (k.kw || k.keyword || 'PAGE');
+        const finalUrl = k.landingPage || k.landing_page_url || k.page_url || k.url || projectHomeUrl;
+        const pageName = String(finalUrl || '').split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || (k.kw || k.keyword || 'PAGE');
         return {
           url: finalUrl,
           pageName: pageName.toUpperCase(),
@@ -1872,7 +1845,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
           {userCanRunActions && canRunAiModelNow('all', Object.values(tabResults).some(r => r && r.length > 0)) && (
             <button
               onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
-              disabled={Object.values(analyzingTabs).some(Boolean)}
+              disabled={analyzingAll}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1884,29 +1857,29 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 padding: '9px 16px',
                 fontSize: 13.5,
                 fontWeight: 600,
-                cursor: Object.values(analyzingTabs).some(Boolean) ? 'not-allowed' : 'pointer',
-                opacity: Object.values(analyzingTabs).some(Boolean) ? 0.7 : 1,
+                cursor: analyzingAll ? 'not-allowed' : 'pointer',
+                opacity: analyzingAll ? 0.7 : 1,
                 boxShadow: '0 3px 12px rgba(166, 28, 104, 0.28)',
                 transition: 'all 0.15s ease'
               }}
               onMouseEnter={e => {
-                if (!Object.values(analyzingTabs).some(Boolean)) {
+                if (!analyzingAll) {
                   e.currentTarget.style.background = 'linear-gradient(135deg, #8032CF 0%, #9E2CA0 35%, #B82276 70%, #CA2265 100%)';
                   e.currentTarget.style.boxShadow = '0 5px 16px rgba(166, 28, 104, 0.38)';
                   e.currentTarget.style.transform = 'translateY(-1px)';
                 }
               }}
               onMouseLeave={e => {
-                if (!Object.values(analyzingTabs).some(Boolean)) {
+                if (!analyzingAll) {
                   e.currentTarget.style.background = 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)';
                   e.currentTarget.style.boxShadow = '0 3px 12px rgba(166, 28, 104, 0.28)';
                   e.currentTarget.style.transform = 'translateY(0)';
                 }
               }}
             >
-              <Sparkles size={14} className={Object.values(analyzingTabs).some(Boolean) ? 'animate-spin' : ''} />
+              <Sparkles size={14} className={analyzingAll ? 'animate-spin' : ''} />
               <span>
-                {Object.values(analyzingTabs).some(Boolean)
+                {analyzingAll
                   ? 'Analyzing...'
                   : (Object.values(tabResults).some(r => r && r.length > 0) ? 'Re-analyze' : 'Analyze')}
               </span>
@@ -1929,13 +1902,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
       }}>
         {[
           { label: 'Authority Score', value: activeProject?.da ?? 'N/A' },
-          { label: 'Spam Score',      value: activeProject?.spam_score || activeProject?.ss || '0%' },
+          { label: 'Spam Score', value: activeProject?.spam_score || activeProject?.ss || '0%' },
           { label: 'Organic Traffic', value: '0' },
-          { label: 'Keywords',        value: (kwCount || activeProject?.keywords || 0).toLocaleString() },
-          { label: 'Total Pages',     value: (pageCount || activeProject?.targetPages || 0).toLocaleString() },
-          { label: 'Total Blogs',     value: (blogCount || activeProject?.blogPages || 0).toLocaleString() },
-          { label: 'Total Clusters',  value: clusterCount.toLocaleString() },
-          { label: 'Net Potential',   value: netPotential ? netPotential.toLocaleString() : '0' },
+          { label: 'Keywords', value: (kwCount || activeProject?.keywords || 0).toLocaleString() },
+          { label: 'Total Pages', value: (pageCount || activeProject?.targetPages || 0).toLocaleString() },
+          { label: 'Total Blogs', value: (blogCount || activeProject?.blogPages || 0).toLocaleString() },
+          { label: 'Total Clusters', value: clusterCount.toLocaleString() },
+          { label: 'Net Potential', value: netPotential ? netPotential.toLocaleString() : '0' },
         ].map((item, idx) => (
           <div
             key={item.label}
@@ -2070,7 +2043,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       {userCanRunActions && canRunAiModelNow(aiTab, currentTabResults.length > 0) && (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
                           <button
-                            onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
+                            onClick={(e) => handleAiAnalysis(e, { analyzeAll: false })}
                             disabled={isCurrentTabAnalyzing || !topKeywords.length}
                             title="Run AI Analysis"
                             style={{
@@ -2172,41 +2145,15 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                           ? visibilityData.cited_pages
                           : cList.length;
 
-                        // Calculate actual deduplicated parsed keywords count (Top 2 per category searched by AI) vs Total Project Keywords
-                        const getParsedKwCount = (kws) => {
-                          if (!kws || !Array.isArray(kws) || kws.length === 0) return 0;
-                          const categoryMap = {};
-                          kws.forEach(k => {
-                            const cat = String(k.category || k.cluster || 'General').trim();
-                            if (!categoryMap[cat]) categoryMap[cat] = [];
-                            categoryMap[cat].push(k);
-                          });
-
-                          const seen = new Set();
-                          Object.values(categoryMap).forEach(kwGroup => {
-                            const sorted = [...kwGroup].sort((a, b) => {
-                              const svA = Number(String(a.sv || a.search_volume || a.kw_volume || 0).replace(/[^0-9.]/g, '')) || 0;
-                              const svB = Number(String(b.sv || b.search_volume || b.kw_volume || 0).replace(/[^0-9.]/g, '')) || 0;
-                              return svB - svA;
-                            });
-
-                            let addedInCat = 0;
-                            for (const kObj of sorted) {
-                              const kwText = String(kObj.kw || kObj.keyword || kObj.name || '').trim().toLowerCase();
-                              if (kwText && !seen.has(kwText)) {
-                                seen.add(kwText);
-                                addedInCat++;
-                                if (addedInCat >= 2) break;
-                              }
-                            }
-                          });
-
-                          return seen.size;
-                        };
-
-                        const totalProjectKws = projectKeywords && projectKeywords.length > 0 ? projectKeywords.length : (kwCount || 0);
-                        const top2ParsedCount = getParsedKwCount(projectKeywords);
-                        const parsedCount = top2ParsedCount > 0 ? top2ParsedCount : (visibilityData.total_keywords || totalProjectKws);
+                        // "Analyzed" numerator = the Top-2-keywords-per-category (by SV) set that
+                        // actually gets sent to the AI -- the SAME `topKeywords` list the Overview
+                        // tab uses, so both gauges show the same number.
+                        const totalProjectKws = (projectKeywords && projectKeywords.length > 0)
+                          ? projectKeywords.length
+                          : (kwCount || activeProject?.keywords || 0);
+                        const parsedCount = topKeywords.length > 0
+                          ? topKeywords.length
+                          : (visibilityData.total_keywords || 0);
 
                         return (
                           <AiVisibilityArcGauge
@@ -2229,7 +2176,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                         return (
                           <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
                             <button
-                              onClick={(e) => handleAiAnalysis(e, { analyzeAll: true })}
+                              onClick={(e) => handleAiAnalysis(e, { analyzeAll: false })}
                               disabled={isAnalyzing}
                               style={{
                                 display: 'flex',
@@ -2300,10 +2247,13 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 ? analyzedPlatforms.reduce((sum, p) => sum + (typeof p.citedPages === 'number' ? p.citedPages : 0), 0)
                 : 'N/A';
 
-              const overviewRunCount = analyzedPlatforms.length > 0
-                ? (topKeywords.length > 0 ? topKeywords.length : (analyzedPlatforms[0].totalKeywords || 0))
-                : 0;
-              const overviewProjectTotal = kwCount || activeProject?.keywords || 0;
+              // Same numerator + denominator as the per-engine tabs: Top-2-per-category (by SV).
+              const overviewRunCount = topKeywords.length > 0
+                ? topKeywords.length
+                : (analyzedPlatforms.length > 0 ? (analyzedPlatforms[0].totalKeywords || 0) : 0);
+              const overviewProjectTotal = (projectKeywords && projectKeywords.length > 0)
+                ? projectKeywords.length
+                : (kwCount || activeProject?.keywords || 0);
               const safeTotal = Math.max(1, overviewProjectTotal || 1);
               const overviewProgressPercent = Math.min(100, Math.max(0, (overviewRunCount / safeTotal) * 100));
               const overviewRatioText = `${overviewRunCount} / ${overviewProjectTotal}`;
@@ -3193,7 +3143,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                 });
                 return {
                   dateStr: run.created_at
-                    ? new Date(run.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                    ? new Date(run.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
                     : `Hit ${idx + 1}`,
                   clusterCounts: counts
                 };

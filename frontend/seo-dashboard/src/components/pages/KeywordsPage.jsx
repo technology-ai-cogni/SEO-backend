@@ -252,6 +252,12 @@ export default function KeywordsPage({ user }) {
     });
   };
 
+  // The Filter popover's <select> controls are single-value, but columnFilters
+  // holds arrays (shared with the column-header multi-select filters + the
+  // array-based predicates). Bridge between the two: 'all' -> [] (no filter).
+  const colFilterValue = (key) => (Array.isArray(columnFilters[key]) && columnFilters[key].length > 0 ? columnFilters[key][0] : 'all');
+  const setColFilter = (key, val) => setColumnFilters(prev => ({ ...prev, [key]: val === 'all' ? [] : [val] }));
+
   // Load active projects on mount
   useEffect(() => {
     let isMounted = true;
@@ -949,8 +955,8 @@ export default function KeywordsPage({ user }) {
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>CLUSTER</label>
                     <select
-                      value={columnFilters.cluster}
-                      onChange={e => setColumnFilters({ ...columnFilters, cluster: e.target.value })}
+                      value={colFilterValue('cluster')}
+                      onChange={e => setColFilter('cluster', e.target.value)}
                       style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
                     >
                       <option value="all">All Clusters</option>
@@ -962,8 +968,8 @@ export default function KeywordsPage({ user }) {
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>CATEGORY</label>
                     <select
-                      value={columnFilters.category}
-                      onChange={e => setColumnFilters({ ...columnFilters, category: e.target.value })}
+                      value={colFilterValue('category')}
+                      onChange={e => setColFilter('category', e.target.value)}
                       style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
                     >
                       <option value="all">All Categories</option>
@@ -975,8 +981,8 @@ export default function KeywordsPage({ user }) {
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TYPE</label>
                     <select
-                      value={columnFilters.type}
-                      onChange={e => setColumnFilters({ ...columnFilters, type: e.target.value })}
+                      value={colFilterValue('type')}
+                      onChange={e => setColFilter('type', e.target.value)}
                       style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
                     >
                       <option value="all">All Types</option>
@@ -988,8 +994,8 @@ export default function KeywordsPage({ user }) {
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET TYPE</label>
                     <select
-                      value={columnFilters.targetType}
-                      onChange={e => setColumnFilters({ ...columnFilters, targetType: e.target.value })}
+                      value={colFilterValue('targetType')}
+                      onChange={e => setColFilter('targetType', e.target.value)}
                       style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
                     >
                       <option value="all">All Target Types</option>
@@ -1001,8 +1007,8 @@ export default function KeywordsPage({ user }) {
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET SUBTYPE</label>
                     <select
-                      value={columnFilters.targetSubtype}
-                      onChange={e => setColumnFilters({ ...columnFilters, targetSubtype: e.target.value })}
+                      value={colFilterValue('targetSubtype')}
+                      onChange={e => setColFilter('targetSubtype', e.target.value)}
                       style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
                     >
                       <option value="all">All Subtypes</option>
@@ -1014,8 +1020,8 @@ export default function KeywordsPage({ user }) {
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET GEO</label>
                     <select
-                      value={columnFilters.targetGeo}
-                      onChange={e => setColumnFilters({ ...columnFilters, targetGeo: e.target.value })}
+                      value={colFilterValue('targetGeo')}
+                      onChange={e => setColFilter('targetGeo', e.target.value)}
                       style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
                     >
                       <option value="all">All Geos</option>
@@ -1027,8 +1033,8 @@ export default function KeywordsPage({ user }) {
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>PRIORITY</label>
                     <select
-                      value={columnFilters.priority}
-                      onChange={e => setColumnFilters({ ...columnFilters, priority: e.target.value })}
+                      value={colFilterValue('priority')}
+                      onChange={e => setColFilter('priority', e.target.value)}
                       style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
                     >
                       <option value="all">All Priorities</option>

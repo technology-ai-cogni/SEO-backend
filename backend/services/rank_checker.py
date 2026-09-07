@@ -23,10 +23,10 @@ state surviving a fork() boundary is a classic native-crash source).
 """
 
 import os
+import json
 import time
 from urllib.parse import quote, urlparse
 import requests
-from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -82,11 +82,16 @@ def get_domain(url):
 
 
 def fetch_serp_page(keyword, start=0, country_code=None, num=None):
-    """Request one page of Google results through the Bright Data zone.
-    Returns HTML or None. `country_code` overrides the .env default
-    SERP_COUNTRY for this search -- pass the SAME region the job's
-    categorization step used, so rank and category are checked against
-    the same Google region."""
+    """Request one page of Google results through the Bright Data SERP zone.
+
+    Appends &brd_json=1 so Bright Data returns its OWN parsed result set
+    ({"organic": [...]}) instead of raw Google HTML. The previous raw-HTML
+    parser (parse_organic_links_from_html) required the result's <h3> to sit
+    INSIDE its <a>, which current Google markup no longer does -- it was
+    extracting 0-9 links per page and reporting genuinely-ranking pages as
+    "not found" (101). Returns the parsed JSON dict, or None.
+
+    `country_code` overrides the .env default SERP_COUNTRY for this search."""
     if not BRIGHTDATA_API_KEY:
         raise RuntimeError("BRIGHTDATA_API_KEY is not set. Fill it in in .env.")
 
@@ -94,7 +99,7 @@ def fetch_serp_page(keyword, start=0, country_code=None, num=None):
     num_param = f"&num={num}" if num else ""
     search_url = (
         f"https://{GOOGLE_DOMAIN}/search?q={quote(keyword)}"
-        f"&gl={gl}&hl={LANGUAGE_CODE}&start={start}{num_param}"
+        f"&gl={gl}&hl={LANGUAGE_CODE}&start={start}{num_param}&brd_json=1"
     )
 
     payload = {
@@ -136,42 +141,52 @@ def fetch_serp_page(keyword, start=0, country_code=None, num=None):
     if last_error is not None or resp is None:
         return None
 
-    brd_error = resp.headers.get("x-brd-err-msg") or resp.headers.get("x-brd-error")
-    if brd_error:
-        print(f"[Bright Data API Error] {brd_error}")
-        return None
-
-    content_type = resp.headers.get("content-type", "")
-    if "application/json" in content_type:
+    # Transient Bright Data SERP errors ("redirect location was rejected",
+    # "recently failed -- wait 15s") come back as HTTP 200 + an error header.
+    # Retry a few times so a real live SERP still lands.
+    for _brd_try in range(1, 4):
+        brd_error = resp.headers.get("x-brd-err-msg") or resp.headers.get("x-brd-error")
+        if not brd_error:
+            break
+        print(f"[Bright Data API Error] (try {_brd_try}/3) {brd_error}")
+        time.sleep(16 if "recently failed" in str(brd_error).lower() else 4)
         try:
-            data = resp.json()
+            resp = requests.post(
+                BRIGHTDATA_REQUEST_URL, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
+            )
+            resp.raise_for_status()
         except Exception:
             return None
-        html = data.get("body", "")
     else:
-        html = resp.text
-
-    if not html or "<html" not in html.lower():
         return None
 
-    return html
+    # With &brd_json=1 the body IS the parsed SERP JSON.
+    try:
+        data = resp.json()
+    except Exception:
+        try:
+            data = json.loads(resp.text or "")
+        except Exception:
+            return None
+
+    if not isinstance(data, dict) or "organic" not in data:
+        return None
+    return data
 
 
-def parse_organic_links_from_html(html):
-    """Extract organic result links from a raw Google SERP HTML page."""
-    soup = BeautifulSoup(html, "html.parser")
+def parse_organic_links_from_html(data):
+    """Extract organic result links (in rank order) from Bright Data's parsed
+    SERP JSON -- data['organic'] = [{'link': ..., 'rank': ...}, ...].
+
+    (Name kept for back-compat; `data` is now the JSON dict fetch_serp_page
+    returns, not an HTML string.)"""
     links = []
     seen = set()
 
-    container = soup.find("div", id="rso") or soup.find("div", id="search")
-    if container is None:
-        return links
-
-    for a in container.find_all("a", href=True):
-        if a.find("h3") is None:
-            continue
-        href = a["href"]
-        if not href.startswith("http"):
+    organic = data.get("organic") if isinstance(data, dict) else None
+    for item in (organic or []):
+        href = item.get("link") or item.get("url") or item.get("href")
+        if not href or not str(href).startswith("http"):
             continue
         if "google." in href or "gstatic." in href or "googleapis." in href:
             continue
