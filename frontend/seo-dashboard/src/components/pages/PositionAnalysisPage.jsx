@@ -1297,22 +1297,11 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
     const itemsToProcess = citedPagesList.length > 0 ? citedPagesList : mentionsList;
 
     if (!itemsToProcess || itemsToProcess.length === 0) {
-      // Fallback to Project Setup keywords if no AI run data is present yet.
-      // When a keyword has no landing page, fall back to THIS project's own
-      // homepage -- never a hardcoded unrelated domain.
-      const projDomain = String(activeProject?.domain || activeProject?.name || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-      const projectHomeUrl = projDomain ? `https://${projDomain}` : '';
-      return (projectKeywords || []).map(k => {
-        const finalUrl = k.landingPage || k.landing_page_url || k.page_url || k.url || projectHomeUrl;
-        const pageName = String(finalUrl || '').split('?')[0].split('#')[0].split('/').filter(Boolean).pop()?.replace(/[-_]/g, ' ') || (k.kw || k.keyword || 'PAGE');
-        return {
-          url: finalUrl,
-          pageName: pageName.toUpperCase(),
-          categoryName: k.category || k.targetSubtype || k.subtype || 'General',
-          clusterName: k.cluster || k.type || 'General',
-          keyword: k.kw || k.keyword || ''
-        };
-      });
+      // No AI-analysis data for this engine yet -> show N/A (the table and the
+      // trend graph both render an "N/A" state when this returns empty).
+      // Deliberately NOT falling back to Project Setup keywords -- that looked
+      // like real citation data when none had been generated.
+      return [];
     }
 
     return itemsToProcess.map(citationStr => {
