@@ -3068,3 +3068,62 @@ export async function fetchCalendarUsersApi() {
   }
   return [];
 }
+
+// ─────────────────────────────────────────────────────────────
+// RAG CATEGORY & CLUSTERING FRONTEND API HELPERS
+// ─────────────────────────────────────────────────────────────
+
+export async function categorizeKeywordRAG(projectSlug, keyword, serpTitles = null) {
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/api/v1/rag/categorize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_slug: projectSlug, keyword, serp_titles: serpTitles }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('[categorizeKeywordRAG] error:', e);
+  }
+  return null;
+}
+
+export async function searchCategoriesVector(projectSlug, queryText, topK = 5) {
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/api/v1/rag/search-categories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_slug: projectSlug, query_text: queryText, top_k: topK }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('[searchCategoriesVector] error:', e);
+  }
+  return { status: 'error', candidates: [] };
+}
+
+export async function submitCategoryFeedback(projectSlug, keyword, newCategory, newCluster = null, rowId = null) {
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/api/v1/rag/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_slug: projectSlug,
+        keyword,
+        new_category: newCategory,
+        new_cluster: newCluster,
+        row_id: rowId,
+      }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('[submitCategoryFeedback] error:', e);
+  }
+  return null;
+}
+

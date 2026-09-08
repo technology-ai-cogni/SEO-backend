@@ -3005,3 +3005,79 @@ try:
 except Exception as err:
     print(f"[app] Error mounting calendar_router: {err}", file=sys.stderr, flush=True)
 
+
+# ─────────────────────────────────────────────────────────────
+# RAG CATEGORY & CLUSTERING ENDPOINTS
+# ─────────────────────────────────────────────────────────────
+
+class RAGCategorizeRequest(BaseModel):
+    project_slug: str
+    keyword: str
+    serp_titles: Optional[List[str]] = None
+
+class RAGCategorySearchRequest(BaseModel):
+    project_slug: str
+    query_text: str
+    top_k: Optional[int] = 5
+
+class RAGFeedbackRequest(BaseModel):
+    project_slug: str
+    keyword: str
+    new_category: str
+    new_cluster: Optional[str] = None
+    row_id: Optional[int] = None
+
+@app.post("/api/v1/rag/categorize")
+def api_rag_categorize(req: RAGCategorizeRequest):
+    """Categorizes a keyword in real-time using 3-Tier RAG & vector clustering."""
+    try:
+        from services.category_rag import categorize_keyword_rag
+        cat, cls, score, tier = categorize_keyword_rag(req.project_slug, req.keyword, req.serp_titles)
+        return {
+            "status": "success",
+            "keyword": req.keyword,
+            "category": cat,
+            "cluster": cls,
+            "similarity_score": score,
+            "match_tier": tier
+        }
+    except Exception as e:
+        raise HTTPException(500, f"RAG categorization failed: {str(e)}")
+
+@app.post("/api/v1/rag/search-categories")
+def api_rag_search_categories(req: RAGCategorySearchRequest):
+    """Vector similarity search against existing categories in pgvector."""
+    try:
+        from services.category_rag import search_similar_categories
+        candidates = search_similar_categories(req.project_slug, req.query_text, top_k=req.top_k or 5)
+        return {
+            "status": "success",
+            "candidates": candidates
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Vector category search failed: {str(e)}")
+
+@app.post("/api/v1/rag/feedback")
+def api_rag_feedback(req: RAGFeedbackRequest):
+    """Human-in-the-loop feedback: updates assignment and re-embeds category in pgvector."""
+    try:
+        from services.category_rag import upsert_category_vector, assign_cluster_rag
+        cluster = req.new_cluster or assign_cluster_rag(req.project_slug, req.new_category)
+        upsert_category_vector(req.project_slug, req.new_category, f"User verified category for {req.keyword}")
+
+        if req.row_id:
+            db.update_keyword_result(
+                req.project_slug, req.row_id, req.new_category, cluster, "processed",
+                meta={"rag_match_tier": "tier_1_exact", "rag_similarity_score": 1.0, "user_override": True}
+            )
+
+        return {
+            "status": "success",
+            "message": "Category updated and vector store updated successfully.",
+            "category": req.new_category,
+            "cluster": cluster
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Feedback submission failed: {str(e)}")
+
+

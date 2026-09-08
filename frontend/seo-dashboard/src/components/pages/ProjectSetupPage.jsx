@@ -5803,6 +5803,7 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
               }}>
                 {clusterGroups.length} {clusterGroups.length === 1 ? 'Cluster' : 'Clusters'}
               </span>
+              
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button

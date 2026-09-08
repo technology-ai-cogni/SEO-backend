@@ -501,7 +501,7 @@ Either way, `_category_lock` also caps this process to one categorize
 job at a time, so two jobs (Selenium or not) never contend for the same
 CPU/Chrome sessions or race on the same project's categories.
 """
-
+import re
 import os
 import threading
 from collections import Counter
@@ -518,7 +518,7 @@ from scripts import intent_classifier
 from scripts.exp_category_pipeline import serp_fetch, category_namer, classifiers, cluster_grouper
 
 # INTENT_WORKERS = 8
-INTENT_WORKERS = 8
+INTENT_WORKERS = 5
 # Only one categorize job runs at a time across this whole process --
 # see module docstring for why both engines need this.
 _category_lock = threading.Lock()
@@ -727,13 +727,40 @@ def _run_categorize_job_bright_data(job_id, domain, rows, country_code):
         chunk_rows = rows[i:i + CHUNK_SIZE]
         print(f"[hosted_categorize/bright_data] Processing batch {chunk_idx} ({len(chunk_rows)} keywords)...")
 
-        # Phase 1: Concurrent Metadata Fetching for current 100 keywords
+        # Phase 0: RAG Instant Pre-Fetch Filter (Check pgvector before SERP fetching)
+        need_fetch_rows = []
+        for row in chunk_rows:
+            kw = row["keyword"]
+            row_id = row["id"]
+            try:
+                from services.category_rag import search_similar_categories, assign_cluster_rag
+                has_bt = bool(re.search(r"\b(best|top)\b", kw, re.IGNORECASE))
+                pre_candidates = search_similar_categories(domain, f"Keyword: {kw}", top_k=1, has_best_top=has_bt)
+                if pre_candidates and pre_candidates[0]["similarity"] >= 0.88:
+                    cat = pre_candidates[0]["name"]
+                    cls = assign_cluster_rag(domain, cat)
+                    db.update_keyword_result(
+                        domain, row_id, cat, cls, "processed",
+                        meta={"pre_fetch_vector_match": True, "rag_match_tier": "tier_1_exact", "rag_similarity_score": pre_candidates[0]["similarity"]}
+                    )
+                    db.increment_job_progress(job_id)
+                    print(f"🟢 [RAG TIER 1 INSTANT PRE-FETCH MATCH] Keyword: '{kw}' -> Category: '{cat}', Cluster: '{cls}' (<10ms, Bypassed SERP Scraping)")
+                    continue
+            except Exception as pre_err:
+                print(f"[RAG Engine] Pre-fetch check notice for {kw}: {pre_err}")
+            need_fetch_rows.append(row)
+
+        if not need_fetch_rows:
+            print(f"[hosted_categorize/bright_data] Batch {chunk_idx}: 100% keywords matched instantly via RAG vector store!")
+            continue
+
+        # Phase 1: Concurrent Metadata Fetching for remaining un-matched keywords
         metadata_map = {}
         missing_rows = []
         with ThreadPoolExecutor(max_workers=INTENT_WORKERS) as pool:
             future_to_row = {
                 pool.submit(_fetch_metadata_for_keyword, row["keyword"], country_code): row
-                for row in chunk_rows
+                for row in need_fetch_rows
             }
             for future in future_to_row:
                 row = future_to_row[future]

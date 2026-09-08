@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Firecrawl credentials -----------------------------------------------
-FIRECRAWL_API_KEY = os.environ.get("FIRECRAWL_API_KEY", "fc-8ae1b67d15f34a7ea388fe67f83a504d")
+FIRECRAWL_API_KEY = os.environ.get("FIRECRAWL_API_KEY", "fc-dfc34d3e32c64588a555fc30a4190740")
 FIRECRAWL_SEARCH_URL = "https://api.firecrawl.dev/v2/search"
 
 DEFAULT_DOMAIN = os.environ.get("DEFAULT_DOMAIN", "")

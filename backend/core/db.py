@@ -428,11 +428,18 @@ def _init_db_inner():
         """))
 
         # --- Shared categories/clusters/category_cluster_map/keyword_categories ---
+        try:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        except Exception as vec_ext_err:
+            print(f"[DB Init] Notice vector extension creation: {vec_ext_err}")
+
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS categories (
                 id BIGSERIAL PRIMARY KEY,
                 project_name TEXT NOT NULL REFERENCES projects(slug),
                 name TEXT NOT NULL,
+                description TEXT,
+                embedding vector(1536),
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 UNIQUE (project_name, name)
             )
@@ -443,6 +450,7 @@ def _init_db_inner():
                 id BIGSERIAL PRIMARY KEY,
                 project_name TEXT NOT NULL REFERENCES projects(slug),
                 name TEXT NOT NULL,
+                embedding vector(1536),
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 UNIQUE (project_name, name)
             )
@@ -466,6 +474,8 @@ def _init_db_inner():
                 keyword TEXT NOT NULL,
                 category TEXT,
                 cluster TEXT,
+                match_tier TEXT,
+                similarity_score DOUBLE PRECISION,
                 status TEXT,
                 error TEXT,
                 meta JSONB,
@@ -484,15 +494,30 @@ def _init_db_inner():
             )
         """))
         for alter_cmd in [
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS description TEXT",
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS embedding vector(1536)",
+            "ALTER TABLE clusters ADD COLUMN IF NOT EXISTS embedding vector(1536)",
             "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank INTEGER",
             "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank_checked_at TIMESTAMPTZ",
             "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank_meta JSONB",
-            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS subtype TEXT"
+            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS subtype TEXT",
+            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS match_tier TEXT",
+            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS similarity_score DOUBLE PRECISION"
         ]:
             try:
                 conn.execute(text(alter_cmd))
             except Exception as alter_err:
                 print(f"[DB Init] Notice skipping table alter: {alter_err}")
+
+        for index_cmd in [
+            "CREATE INDEX IF NOT EXISTS idx_categories_embedding ON categories USING hnsw (embedding vector_cosine_ops)",
+            "CREATE INDEX IF NOT EXISTS idx_clusters_embedding ON clusters USING hnsw (embedding vector_cosine_ops)"
+        ]:
+            try:
+                conn.execute(text(index_cmd))
+            except Exception as idx_err:
+                print(f"[DB Init] Notice skipping index creation: {idx_err}")
+
         try:
             conn.execute(text("UPDATE keyword_categories SET type = 'Google' WHERE type IS NULL OR TRIM(type) = ''"))
             conn.execute(text("ALTER TABLE keyword_categories ALTER COLUMN type SET DEFAULT 'Google'"))
@@ -1380,21 +1405,33 @@ def set_job_status(job_id, status, error=None):
         """), {"id": job_id, "status": status, "error": error})
 
 
-def increment_job_progress(job_id):
-    """Atomically increment processed count; auto-marks completed when done."""
-    with engine.begin() as conn:
-        conn.execute(text("""
-            UPDATE jobs SET processed = processed + 1, updated_at = now()
-            WHERE id = :id
-        """), {"id": job_id})
-        row = conn.execute(text("""
-            SELECT processed, total FROM jobs WHERE id = :id
-        """), {"id": job_id}).fetchone()
-        if row and row.processed >= row.total and row.total > 0:
-            conn.execute(text("""
-                UPDATE jobs SET status = 'completed', completed_at = now()
-                WHERE id = :id AND status != 'completed'
-            """), {"id": job_id})
+def increment_job_progress(job_id, max_retries=5):
+    """Atomically increment processed count; handles concurrent row lock contention with retries."""
+    import time
+    for attempt in range(max_retries):
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    UPDATE jobs SET processed = processed + 1, updated_at = now()
+                    WHERE id = :id
+                """), {"id": job_id})
+                row = conn.execute(text("""
+                    SELECT processed, total FROM jobs WHERE id = :id
+                """), {"id": job_id}).fetchone()
+                if row and row.processed >= row.total and row.total > 0:
+                    conn.execute(text("""
+                        UPDATE jobs SET status = 'completed', completed_at = now()
+                        WHERE id = :id AND status != 'completed'
+                    """), {"id": job_id})
+            return
+        except Exception as e:
+            err_str = str(e).lower()
+            if ("lock" in err_str or "locknotavailable" in err_str or "deadlock" in err_str or "operationalerror" in err_str) and attempt < max_retries - 1:
+                time.sleep(0.15 * (attempt + 1))
+                continue
+            if attempt == max_retries - 1:
+                print(f"[DB Notice] Non-fatal job progress increment lock contention: {e}")
+                return
 
 
 def get_job(job_id):
@@ -1573,35 +1610,28 @@ def insert_keyword_rows(job_id, domain, rows):
 
 
 def update_keyword_result(domain, row_id, category, cluster, status, meta=None, error=None,
-                           computed_target_type=None, computed_region_name=None, computed_subtype=None):
-    """Called by the background worker after processing ONE keyword row
-    (identified by the id returned from insert_keyword_rows at upload
-    time). `row_id` is globally unique (shared table), so no project
-    filter is needed in the WHERE clause -- `domain` is accepted for
-    signature consistency with the rest of this module but unused here.
+                           computed_target_type=None, computed_region_name=None, computed_subtype=None,
+                           match_tier=None, similarity_score=None):
+    """Updates category/cluster/status/meta/error, PLUS match_tier and similarity_score for RAG tracking."""
+    if meta and isinstance(meta, dict):
+        if not match_tier:
+            match_tier = meta.get("rag_match_tier")
+        if similarity_score is None:
+            similarity_score = meta.get("rag_similarity_score")
 
-    Updates category/cluster/status/meta/error, PLUS:
-    - target_type: ALWAYS overwritten with computed_target_type.
-    - subtype: ALWAYS overwritten with computed_subtype (Informational/
-      Commercial, same column scripts/run_pipeline.py's
-      insert_pipeline_result() writes).
-    - target_geo: filled in with computed_region_name ONLY IF the row's
-      target_geo is currently NULL/blank -- never overwrites a target
-      geo the user explicitly supplied in their upload.
-
-    Never touches sv/kw_diff/type/target_subtype/priority/
-    landing_page_url, which remain pure pass-through from the original
-    upload."""
     with engine.begin() as conn:
         conn.execute(text("""
             UPDATE keyword_categories
             SET category = :category, cluster = :cluster, status = :status,
+                match_tier = COALESCE(:match_tier, match_tier),
+                similarity_score = COALESCE(:similarity_score, similarity_score),
                 meta = CAST(:meta AS JSONB), error = :error, checked_at = now(),
                 target_type = :computed_target_type, subtype = :computed_subtype,
                 target_geo = COALESCE(NULLIF(target_geo, ''), :computed_region_name)
             WHERE id = :id
         """), {
             "id": row_id, "category": category, "cluster": cluster, "status": status,
+            "match_tier": match_tier, "similarity_score": similarity_score,
             "meta": json.dumps(meta) if meta is not None else None, "error": error,
             "computed_target_type": computed_target_type, "computed_region_name": computed_region_name,
             "computed_subtype": computed_subtype,

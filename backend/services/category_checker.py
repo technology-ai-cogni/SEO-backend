@@ -1683,6 +1683,29 @@ def categorize_keyword(keyword, domain, country_code=None, pre_fetched_top3=None
     from core import db  # local import to avoid a hard dependency for callers that
                          # only want the pure scraping/naming functions above
 
+    # Pre-Fetch Vector Search Optimization: check pgvector on Keyword before SERP fetch
+    if pre_fetched_top3 is None:
+        try:
+            from services.category_rag import search_similar_categories, assign_cluster_rag
+            has_bt = bool(re.search(r"\b(best|top)\b", keyword, re.IGNORECASE))
+            pre_candidates = search_similar_categories(domain, f"Keyword: {keyword}", top_k=1, has_best_top=has_bt)
+            if pre_candidates and pre_candidates[0]["similarity"] >= 0.88:
+                cat = pre_candidates[0]["name"]
+                cls = assign_cluster_rag(domain, cat)
+                meta = {
+                    "top3": [],
+                    "search_region": country_code or COUNTRY_CODE,
+                    "pre_fetch_vector_match": True,
+                    "rag_match_tier": "tier_1_exact",
+                    "rag_similarity_score": pre_candidates[0]["similarity"],
+                    "computed_cluster": cls,
+                    "matched_existing_category": True
+                }
+                db.add_category(domain, cat)
+                return cat, meta
+        except Exception as pre_err:
+            print(f"[RAG Engine] Pre-fetch vector lookup notice: {pre_err}")
+
     if pre_fetched_top3 is not None:
         top3 = pre_fetched_top3
     else:
@@ -1709,26 +1732,29 @@ def categorize_keyword(keyword, domain, country_code=None, pre_fetched_top3=None
     meta["computed_target_type"] = compute_target_type(top3, has_best_top)
     meta["computed_region_name"] = region_display_name(search_region)
 
+    try:
+        from services.category_rag import categorize_keyword_rag
+        cat, cls, score, tier = categorize_keyword_rag(domain, keyword, titles)
+        meta["rag_match_tier"] = tier
+        meta["rag_similarity_score"] = score
+        meta["computed_cluster"] = cls
+        meta["matched_existing_category"] = (tier in ("tier_1_exact", "tier_2_rag"))
+        db.add_category(domain, cat)
+        return cat, meta
+    except Exception as rag_err:
+        print(f"[RAG Engine] Notice fallback in category_checker: {rag_err}")
+
     raw_candidate = derive_category_name(titles, keyword)
     raw_candidate = _refine_category_name_with_llm(raw_candidate, keyword)
     candidate_name = _apply_best_top_rule(raw_candidate, titles)
     meta["raw_candidate_before_best_top_rule"] = raw_candidate
     meta["best_top_applied"] = candidate_name != raw_candidate
 
-    # Only compare against existing categories that have the SAME Best/Top
-    # status -- otherwise a "Best/Top ..." candidate could get silently
-    # merged into a plain existing category (or vice versa), losing the
-    # Best/Top tag that this specific keyword's titles actually signaled.
     existing_category_names = [
         name for name in db.list_category_names(domain)
         if name.lower().startswith("best/top") == has_best_top
     ]
 
-    # Deterministic singular/plural dedup, tried BEFORE the LLM-based
-    # intent match below -- if this candidate is purely a singular/plural
-    # variant of an already-existing category, use that pairing directly
-    # (standardized on whichever form is plural) instead of letting a
-    # near-duplicate category get created.
     plural_variant = _find_plural_variant(candidate_name, existing_category_names)
     if plural_variant:
         meta["matched_existing_category"] = True
