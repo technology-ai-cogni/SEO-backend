@@ -14,15 +14,18 @@ import json
 import csv
 import io
 from decimal import Decimal
+import re
+from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, HTTPException, Query, Response, status, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 
 # Import database engine from existing core
 from core.db import engine, _clean_for_json
+from auth.router import require_authenticated_user
 
 # Optional OpenAI client for push potential AI triage
 try:
@@ -37,6 +40,100 @@ except Exception as e:
 # 1. DATABASE SETUP & SCHEMA INITIALIZATION
 # ─────────────────────────────────────────────────────────────
 
+MONTH_MAP = {
+    "january": "01", "february": "02", "march": "03", "april": "04",
+    "may": "05", "june": "06", "july": "07", "august": "08",
+    "september": "09", "october": "10", "november": "11", "december": "12",
+    "jan": "01", "feb": "02", "mar": "03", "apr": "04",
+    "jun": "06", "jul": "07", "aug": "08", "sep": "09", "oct": "10", "nov": "11", "dec": "12"
+}
+
+def get_month_code(period: Optional[str]) -> str:
+    """Extract 2-digit month code from period string like 'March 2026' or 'September 2026'."""
+    if period:
+        p_lower = str(period).strip().lower()
+        for m_name, m_code in MONTH_MAP.items():
+            if m_name in p_lower:
+                return m_code
+        digits = re.findall(r'\b(0[1-9]|1[0-2])\b', p_lower)
+        if digits:
+            return digits[0]
+    return f"{datetime.now().month:02d}"
+
+def generate_project_code(project_name: Optional[str]) -> str:
+    """
+    Generate 2-character project code prefix for UID.
+    E.g. 'billabong' or 'billabonghighschool' -> 'BL'
+         'EuroSchool' -> 'ES'
+         'DogSeeChew' -> 'DS'
+    """
+    if not project_name:
+        return "PR"
+    p = str(project_name).strip()
+    p_lower = p.lower()
+    if "billabong" in p_lower:
+        return "BL"
+    if "euroschool" in p_lower:
+        return "ES"
+    # Multi-word: take first letter of first 2 words
+    parts = [w for w in re.split(r'[\s\-_]+', p) if w]
+    if len(parts) >= 2:
+        return (parts[0][0] + parts[1][0]).upper()
+    # CamelCase: check uppercase letters
+    caps = re.findall(r'[A-Z]', p)
+    if len(caps) >= 2:
+        return "".join(caps[:2]).upper()
+    # Single word: first letter + next consonant or second char
+    clean = re.sub(r'[^a-zA-Z0-9]', '', p).upper()
+    if len(clean) >= 2:
+        vowels = set('AEIOU')
+        if clean[1] in vowels and len(clean) > 2:
+            for ch in clean[2:]:
+                if ch not in vowels:
+                    return (clean[0] + ch).upper()
+        return clean[:2].upper()
+    return (clean + "X")[:2].upper()
+
+def generate_activity_uid(conn, project_name: Optional[str], period: Optional[str]) -> str:
+    """
+    Generates a unique sequential Activity UID like 'BL-03-0096'.
+    Format: {PROJECT_CODE}-{MONTH_CODE}-{4_DIGIT_SEQUENCE}
+    Always starts strictly from 0001 for each project and month.
+    """
+    proj_code = generate_project_code(project_name)
+    month_code = get_month_code(period)
+    prefix_pattern = f"{proj_code}-{month_code}-%"
+
+    rows = conn.execute(
+        text("SELECT activity_uid FROM off_page_activities WHERE activity_uid LIKE :pattern"),
+        {"pattern": prefix_pattern}
+    ).fetchall()
+
+    max_seq = 0
+    for r in rows:
+        if r and r[0]:
+            try:
+                parts = str(r[0]).split("-")
+                if len(parts) >= 3 and parts[-1].isdigit():
+                    val = int(parts[-1])
+                    if val > max_seq:
+                        max_seq = val
+            except Exception:
+                pass
+
+    next_seq = max_seq + 1
+    return f"{proj_code}-{month_code}-{next_seq:04d}"
+
+def _ensure_activity_uids(conn):
+    """Backfill activity_uid for any existing rows missing one."""
+    try:
+        rows = conn.execute(text("SELECT id, project_name, period FROM off_page_activities WHERE activity_uid IS NULL OR activity_uid = '' ORDER BY created_at ASC")).fetchall()
+        for r in rows:
+            uid = generate_activity_uid(conn, r[1], r[2])
+            conn.execute(text("UPDATE off_page_activities SET activity_uid = :uid WHERE id = :id"), {"uid": uid, "id": r[0]})
+    except Exception as e:
+        print(f"[Calendar] UID backfill notice: {e}", file=sys.stderr)
+
 def ensure_calendar_tables():
     """Ensure off_page_activities table exists and has all required columns."""
     try:
@@ -44,6 +141,7 @@ def ensure_calendar_tables():
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS off_page_activities (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    activity_uid TEXT,
                     activity_name TEXT NOT NULL,
                     project_name TEXT,
                     main_poc TEXT,
@@ -65,18 +163,21 @@ def ensure_calendar_tables():
                 );
             """))
             # Run column safety additions for existing tables
+            conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS activity_uid TEXT;"))
             conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'saved';"))
             conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS potential_keywords JSONB DEFAULT '[]'::jsonb;"))
             conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS keyword_name TEXT;"))
             conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS category TEXT;"))
             conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS cluster TEXT;"))
             conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS topic_link TEXT;"))
+            _ensure_activity_uids(conn)
     except Exception as err:
         print(f"[calendar_backend] Schema check notice: {err}", file=sys.stderr, flush=True)
 
-
-# Schema is already migrated; avoid synchronous network block on import
-# ensure_calendar_tables()
+try:
+    ensure_calendar_tables()
+except Exception as e:
+    pass
 
 
 # ─────────────────────────────────────────────────────────────
@@ -85,6 +186,7 @@ def ensure_calendar_tables():
 
 class CalendarActivityPayload(BaseModel):
     activity_name: str
+    activity_uid: Optional[str] = None
     project_name: Optional[str] = None
     main_poc: Optional[str] = None
     content_poc: Optional[str] = None
@@ -104,6 +206,7 @@ class CalendarActivityPayload(BaseModel):
 
 class CalendarActivityUpdatePayload(BaseModel):
     activity_name: Optional[str] = None
+    activity_uid: Optional[str] = None
     project_name: Optional[str] = None
     main_poc: Optional[str] = None
     content_poc: Optional[str] = None
@@ -156,33 +259,60 @@ def _classify_url_target_type(url: str) -> str:
     return "Landing Page"
 
 
-def get_potential_keywords_from_db(project_slug_or_name: str) -> List[Dict[str, Any]]:
+def get_potential_keywords_from_db(project_slug_or_name: str) -> Tuple[List[Dict[str, Any]], bool, int]:
     """
     Fetch keywords for project from `keyword_categories`:
-    - Filter 1: target_type has landing page
+    - Strict Landing Page filter: landing_page_url IS NOT NULL AND TRIM(landing_page_url) != ''
     - Filter 2: min rank 5 (rank >= 5)
-    - Filter 3: High search volume (ordered by SV descending)
+    - Prioritization: High search volume (ordered by SV descending) + Historical Ranking delta
     - Deduplicate by keyword text
+    Returns (scored_keywords, has_landing_pages, total_project_keywords_count)
     """
     if not project_slug_or_name:
-        return []
+        return [], True, 0
 
     clean_slug = project_slug_or_name.strip().lower()
     alt_slug = clean_slug.replace(" ", "-").replace("_", "-")
 
     print(f"\n=======================================================", flush=True)
-    print(f"[Calendar AI] Fetching Landing Page candidate keywords for: '{project_slug_or_name}'", flush=True)
-    print(f"[Calendar AI] Filters applied: target_type LIKE '%landing%', rank >= 5, ordered by SV DESC", flush=True)
+    print(f"[Calendar AI] Fetching candidate keywords for: '{project_slug_or_name}'", flush=True)
+    print(f"[Calendar AI] Filters applied: landing_page_url IS NOT NULL, rank >= 5, ordered by SV DESC", flush=True)
 
     scored = []
     seen = set()
+    total_count = 0
+    lp_count = 0
 
-    # Query with target_type landing check and min rank 5, ordered by search volume descending
+    # Step A: Check total project keywords count and landing page URL count
+    check_query = text("""
+        SELECT 
+            COUNT(*) AS total_count,
+            COUNT(CASE WHEN landing_page_url IS NOT NULL AND TRIM(landing_page_url) != '' AND LOWER(TRIM(landing_page_url)) != 'nan' THEN 1 END) AS lp_count
+        FROM keyword_categories
+        WHERE (LOWER(project_name) = :slug OR LOWER(project_name) = :alt_slug)
+    """)
+
+    try:
+        with engine.begin() as conn:
+            c_row = conn.execute(check_query, {"slug": clean_slug, "alt_slug": alt_slug}).fetchone()
+            if c_row:
+                total_count = int(c_row[0] or 0)
+                lp_count = int(c_row[1] or 0)
+    except Exception as e:
+        print(f"[Calendar AI] Error checking keyword landing pages count: {e}", file=sys.stderr)
+
+    if total_count > 0 and lp_count == 0:
+        print(f"[Calendar AI] Notice: Project '{clean_slug}' has {total_count} keywords, but NONE have landing page URLs!", flush=True)
+        return [], False, total_count
+
+    # Step B: Query with strict landing_page_url check and min rank 5, ordered by search volume descending
     query = text("""
         SELECT id, keyword, category, cluster, rank, sv, kw_diff, landing_page_url, target_type, rank_meta
         FROM keyword_categories
         WHERE (LOWER(project_name) = :slug OR LOWER(project_name) = :alt_slug)
-          AND LOWER(COALESCE(target_type, '')) LIKE '%landing%'
+          AND landing_page_url IS NOT NULL
+          AND TRIM(landing_page_url) != ''
+          AND LOWER(TRIM(landing_page_url)) != 'nan'
           AND rank >= 5
         ORDER BY CAST(NULLIF(regexp_replace(sv, '[^0-9]', '', 'g'), '') AS INTEGER) DESC NULLS LAST, id DESC
     """)
@@ -193,12 +323,16 @@ def get_potential_keywords_from_db(project_slug_or_name: str) -> List[Dict[str, 
             rows = [dict(r._mapping) for r in res]
     except Exception as e:
         print(f"[Calendar AI] DB error fetching keywords for '{clean_slug}': {e}", file=sys.stderr, flush=True)
-        return []
+        return [], (lp_count > 0), total_count
 
     for k in rows:
         rank = _parse_num(k.get("rank"), 0)
-        # Rule 1: Min rank is 5 (no upper bound)
+        # Rule 1: Min rank is 5
         if rank < 5:
+            continue
+
+        lp_url = str(k.get("landing_page_url") or "").strip()
+        if not lp_url or lp_url.lower() == "nan":
             continue
 
         kw_text = str(k.get("keyword") or "").strip()
@@ -236,23 +370,23 @@ def get_potential_keywords_from_db(project_slug_or_name: str) -> List[Dict[str, 
             "kd": int(kd),
             "target_type": k.get("target_type") or "Landing Page",
             "potentialScore": sv,
-            "topicLink": k.get("landing_page_url") or "",
-            "landing_page_url": k.get("landing_page_url") or ""
+            "topicLink": lp_url,
+            "landing_page_url": lp_url
         })
 
-    # Rule 2: Order by search volume, highest first
-    scored.sort(key=lambda x: x["sv"], reverse=True)
+    # Prioritize: high search volume first, breaking ties with historical drops
+    scored.sort(key=lambda x: (x["sv"], -x["rank"] if x["delta"] < 0 else 0), reverse=True)
 
-    print(f"[Calendar AI] Found {len(scored)} candidate landing page keywords (Rank >= 5).", flush=True)
+    print(f"[Calendar AI] Found {len(scored)} candidate landing page keywords (Rank >= 5 with Landing Page URL).", flush=True)
     if scored:
         print(f"[Calendar AI] Top candidates preview:", flush=True)
         for i, item in enumerate(scored[:5], 1):
-            print(f"   {i}. \"{item['keyword']}\" | DB Rank: #{item['rank']} | SV: {item['sv']:,} | KD: {item['kd']} | LP: {item['topicLink'] or 'N/A'}", flush=True)
+            print(f"   {i}. \"{item['keyword']}\" | DB Rank: #{item['rank']} | SV: {item['sv']:,} | KD: {item['kd']} | LP: {item['topicLink']}", flush=True)
         if len(scored) > 5:
             print(f"   ... and {len(scored) - 5} more candidate keywords.", flush=True)
     print(f"=======================================================\n", flush=True)
 
-    return scored
+    return scored, (lp_count > 0 or len(scored) > 0), total_count
 
 
 # ─────────────────────────────────────────────────────────────
@@ -356,7 +490,7 @@ def assign_outreach_sites_to_keywords(
             "url": chosen_site.get("url") or f"https://{chosen_site.get('domain', 'site.com')}",
             "da": int(chosen_site.get("da") or 50),
             "ss": str(chosen_site.get("ss") or "1%"),
-            "price": f"${int(price_val)}"
+            "price": f"₹{int(price_val)}"
         }
         total_cost += price_val
         assigned_keywords.append(item)
@@ -1193,15 +1327,20 @@ def create_calendar_activity(data: Dict[str, Any]) -> Dict[str, Any]:
         pk_json = pk
 
     with engine.begin() as conn:
+        # Generate activity_uid if not provided
+        act_uid = str(data.get("activity_uid") or "").strip()
+        if not act_uid:
+            act_uid = generate_activity_uid(conn, data.get("project_name"), data.get("period"))
+
         conn.execute(
             text("""
                 INSERT INTO off_page_activities (
-                    id, activity_name, project_name, main_poc, content_poc,
+                    id, activity_uid, activity_name, project_name, main_poc, content_poc,
                     quantity, budget, "user", period, scheduler, auditor,
                     status, potential_keywords, keyword_name, category, cluster, topic_link,
                     created_at, updated_at
                 ) VALUES (
-                    :id, :activity_name, :project_name, :main_poc, :content_poc,
+                    :id, :activity_uid, :activity_name, :project_name, :main_poc, :content_poc,
                     :quantity, :budget, :user, :period, :scheduler, :auditor,
                     :status, CAST(:potential_keywords AS jsonb), :keyword_name, :category, :cluster, :topic_link,
                     now(), now()
@@ -1209,6 +1348,7 @@ def create_calendar_activity(data: Dict[str, Any]) -> Dict[str, Any]:
             """),
             {
                 "id": activity_id,
+                "activity_uid": act_uid,
                 "activity_name": str(data.get("activity_name") or "New Activity").strip(),
                 "project_name": data.get("project_name"),
                 "main_poc": data.get("main_poc"),
@@ -1228,7 +1368,7 @@ def create_calendar_activity(data: Dict[str, Any]) -> Dict[str, Any]:
             }
         )
         res = conn.execute(text("SELECT * FROM off_page_activities WHERE id = :id"), {"id": activity_id}).first()
-        return _clean_for_json(dict(res._mapping)) if res else {"id": activity_id, **data}
+        return _clean_for_json(dict(res._mapping)) if res else {"id": activity_id, "activity_uid": act_uid, **data}
 
 
 def get_calendar_activity(activity_id: str) -> Optional[Dict[str, Any]]:
@@ -1244,7 +1384,7 @@ def get_calendar_activity(activity_id: str) -> Optional[Dict[str, Any]]:
 def update_calendar_activity(activity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Update fields on an off_page_activities record."""
     allowed = [
-        "activity_name", "project_name", "main_poc", "content_poc",
+        "activity_uid", "activity_name", "project_name", "main_poc", "content_poc",
         "quantity", "budget", "user", "period", "scheduler", "auditor",
         "status", "potential_keywords", "keyword_name", "category", "cluster", "topic_link"
     ]
@@ -1300,7 +1440,7 @@ def generate_calendar_csv(project_name: Optional[str] = None, status_filter: Opt
     writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
 
     headers = [
-        "Activity Name", "Project Name", "Main POC", "Content POC",
+        "Activity UID", "Activity Name", "Project Name", "Main POC", "Content POC",
         "Quantity", "Budget", "User", "Period", "Scheduler", "Auditor",
         "Status", "Keyword Name", "Category", "Cluster", "Topic Link"
     ]
@@ -1308,8 +1448,9 @@ def generate_calendar_csv(project_name: Optional[str] = None, status_filter: Opt
 
     for a in activities:
         b = a.get("budget")
-        budget_str = f"${b}" if b is not None else ""
+        budget_str = f"₹{b}" if b is not None else ""
         writer.writerow([
+            a.get("activity_uid") or "",
             a.get("activity_name") or "",
             a.get("project_name") or "",
             a.get("main_poc") or "",
@@ -1337,6 +1478,27 @@ def generate_calendar_csv(project_name: Optional[str] = None, status_filter: Opt
 router = APIRouter(prefix="/calendar", tags=["Calendar"])
 
 
+@router.get("/users")
+def get_calendar_users_endpoint():
+    """Return active users from users table for Scheduler/POC dropdowns."""
+    try:
+        from auth.db import list_all_users
+        users = list_all_users()
+        return [
+            {
+                "id": u.get("id"),
+                "name": u.get("name") or u.get("email"),
+                "email": u.get("email"),
+                "role": u.get("role")
+            }
+            for u in users
+            if (u.get("status") or "Active").lower() == "active"
+        ]
+    except Exception as e:
+        print(f"[Calendar API] Error fetching users for dropdown: {e}", file=sys.stderr)
+        return []
+
+
 @router.get("/potential-keywords")
 def get_potential_keywords_endpoint(
     project_slug: str = Query(..., description="Project slug or name"),
@@ -1352,15 +1514,30 @@ def get_potential_keywords_endpoint(
     If run_ai=True, performs full LLM evaluation.
     """
     print(f"\n[Calendar API] GET /calendar/potential-keywords: project='{project_slug}', domain='{domain}', run_ai={run_ai}", flush=True)
-    potential = get_potential_keywords_from_db(project_slug)
+    potential, has_landing_pages, total_count = get_potential_keywords_from_db(project_slug)
+    
+    if not has_landing_pages:
+        print(f"[Calendar API] Project '{project_slug}' has {total_count} keywords but NO landing page URLs.", flush=True)
+        return {
+            "project_slug": project_slug,
+            "total_potential": 0,
+            "has_landing_pages": False,
+            "potential_keywords": [],
+            "batches": {"high": [], "medium": [], "low": []},
+            "summary": "Data does not have landing page URLs.",
+            "available_outreach_sites": [],
+            "budget_optimization": None
+        }
+
     if not potential:
         print(f"[Calendar API] No keywords found for project: '{project_slug}'", flush=True)
         return {
             "project_slug": project_slug,
             "total_potential": 0,
+            "has_landing_pages": True,
             "potential_keywords": [],
             "batches": {"high": [], "medium": [], "low": []},
-            "summary": "No rank 5+ keywords found for this project.",
+            "summary": "No rank 5+ keywords with landing page URLs found for this project.",
             "available_outreach_sites": [],
             "budget_optimization": None
         }
@@ -1387,6 +1564,7 @@ def get_potential_keywords_endpoint(
     return {
         "project_slug": project_slug,
         "total_potential": len(potential),
+        "has_landing_pages": True,
         "potential_keywords": potential,
         "batches": batches,
         "summary": summary,
@@ -1402,13 +1580,24 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
     """
     print(f"\n[Calendar API] POST /calendar/analyze-potential: project='{payload.project_slug}', domain='{payload.domain}', keywords_count={len(payload.keywords or [])}", flush=True)
     keywords = payload.keywords
+    has_landing_pages = True
     if not keywords and payload.project_slug:
-        keywords = get_potential_keywords_from_db(payload.project_slug)
+        keywords, has_landing_pages, _ = get_potential_keywords_from_db(payload.project_slug)
+
+    if not has_landing_pages:
+        return {
+            "batches": {"high": [], "medium": [], "low": []},
+            "has_landing_pages": False,
+            "summary": "Data does not have landing page URLs.",
+            "available_outreach_sites": [],
+            "budget_optimization": None
+        }
 
     if not keywords:
         print(f"[Calendar API] No keywords provided for analysis.", flush=True)
         return {
             "batches": {"high": [], "medium": [], "low": []},
+            "has_landing_pages": True,
             "summary": "No keywords provided.",
             "available_outreach_sites": [],
             "budget_optimization": None
@@ -1428,6 +1617,7 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
     ai_res["evaluated_keywords"] = assigned_kws
     ai_res["available_outreach_sites"] = available_sites
     ai_res["budget_optimization"] = budget_summary
+    ai_res["has_landing_pages"] = True
     return ai_res
 
 
@@ -1447,7 +1637,6 @@ def create_activity_endpoint(payload: CalendarActivityPayload):
     print(f"[Calendar API] POST /calendar/activities: Creating activity '{payload.activity_name}' for project='{payload.project_name}' (Keywords count: {len(payload.potential_keywords or [])})", flush=True)
     activity = create_calendar_activity(payload.dict())
     return {"activity": activity}
-
 
 @router.get("/activities/{activity_id}")
 def get_activity_endpoint(activity_id: str):

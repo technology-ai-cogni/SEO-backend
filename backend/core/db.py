@@ -143,6 +143,9 @@ def _slugify_project_name(name):
     return slug
 
 
+slugify = _slugify_project_name
+
+
 def _assert_safe_identifier(identifier):
     """Kept as a general-purpose safety check, still used wherever a
     value derived from user input might end up needing validation."""
@@ -1208,7 +1211,7 @@ def create_domain(domain, project_name=None, target_regions=None, platforms=None
 
     with engine.begin() as conn:
         existing_domain = conn.execute(text("SELECT 1 FROM domains WHERE LOWER(domain) = LOWER(:domain)"), {"domain": domain}).fetchone()
-        existing_project = conn.execute(text("SELECT 1 FROM domains WHERE LOWER(project_name) = LOWER(:project_name) OR project_slug = :slug"), {"project_name": project_name, "slug": slugify(project_name)}).fetchone()
+        existing_project = conn.execute(text("SELECT 1 FROM domains WHERE LOWER(project_name) = LOWER(:project_name) OR project_slug = :slug"), {"project_name": project_name, "slug": project_slug}).fetchone()
         if existing_domain or existing_project:
             raise ValueError("Use different domain or project name, it's already used")
 

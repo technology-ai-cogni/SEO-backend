@@ -21,8 +21,6 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
-  Layers,
-  Eye,
   Sliders,
   ExternalLink,
   HelpCircle,
@@ -40,7 +38,8 @@ import {
   updateCalendarActivityApi,
   deleteCalendarActivityApi,
   fetchCalendarPotentialKeywordsApi,
-  analyzeCalendarAiPushPotentialApi
+  analyzeCalendarAiPushPotentialApi,
+  fetchCalendarUsersApi
 } from '../../lib/projectsApi';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
@@ -206,9 +205,13 @@ function CalendarPage({ user, onNavigate }) {
   const [periodMonth, setPeriodMonth] = useState(MONTH_NAMES[now.getMonth()]);
   const [periodYear, setPeriodYear] = useState(now.getFullYear());
 
+  // Users list from DB for Scheduler dropdown
+  const [usersList, setUsersList] = useState([]);
+  const [landingPageErrorNotice, setLandingPageErrorNotice] = useState(null);
+
   // Multi-activity list in Step 1 modal
   const [activitiesList, setActivitiesList] = useState([
-    { id: 'act-1', activity_name: 'Paid Guest Post', quantity: 1, budget: '$250' }
+    { id: 'act-1', activity_name: 'Paid Guest Post', quantity: 1, budget: '₹250' }
   ]);
 
   // Form POC and metadata state
@@ -283,6 +286,13 @@ function CalendarPage({ user, onNavigate }) {
 
   useEffect(() => {
     loadData();
+    fetchCalendarUsersApi()
+      .then(users => {
+        if (Array.isArray(users) && users.length > 0) {
+          setUsersList(users);
+        }
+      })
+      .catch(err => console.warn('[CalendarPage] Error loading users for scheduler:', err));
   }, []);
 
   const handleSelectProject = (proj) => {
@@ -372,7 +382,7 @@ function CalendarPage({ user, onNavigate }) {
   const handleAddActivityRow = () => {
     setActivitiesList(prev => [
       ...prev,
-      { id: `act-${Date.now()}`, activity_name: 'Forum - Quora', quantity: 1, budget: '$150' }
+      { id: `act-${Date.now()}`, activity_name: 'Forum - Quora', quantity: 1, budget: '₹150' }
     ]);
   };
 
@@ -404,8 +414,9 @@ function CalendarPage({ user, onNavigate }) {
     setAvailableOutreachSites([]);
     setBudgetOptimization(null);
     setSelectedOutreachSites({});
+    setLandingPageErrorNotice(null);
     setActivitiesList([
-      { id: 'act-1', activity_name: 'Paid Guest Post', quantity: 1, budget: '$250' }
+      { id: 'act-1', activity_name: 'Paid Guest Post', quantity: 1, budget: '₹250' }
     ]);
     setFormData({
       project_name: activeProject?.name || activeProject?.domain || (projects[0]?.name || projects[0]?.domain || ''),
@@ -423,8 +434,9 @@ function CalendarPage({ user, onNavigate }) {
     setAiSchedulingEnabled(Boolean(item.is_ai_scheduled || String(item.scheduler || '').toLowerCase().includes('ai')));
     setSavingActivity(false);
     setCreatedActivity(null);
+    setLandingPageErrorNotice(null);
     setActivitiesList([
-      { id: item.id, activity_name: item.activity_name || 'Paid Guest Post', quantity: item.quantity || 1, budget: item.budget || '$250' }
+      { id: item.id, activity_name: item.activity_name || 'Paid Guest Post', quantity: item.quantity || 1, budget: item.budget || '₹250' }
     ]);
     if (item.period) {
       const parts = String(item.period).split(' ');
@@ -515,7 +527,7 @@ function CalendarPage({ user, onNavigate }) {
 
     try {
       const formattedPeriod = `${periodMonth} ${periodYear}`;
-      const primaryAct = activitiesList[0] || { activity_name: 'Paid Guest Post', quantity: 1, budget: '$250' };
+      const primaryAct = activitiesList[0] || { activity_name: 'Paid Guest Post', quantity: 1, budget: '₹250' };
 
       // Calculate total requested quantity and budget across multi-activity batch
       let totalQty = 0;
@@ -581,13 +593,15 @@ function CalendarPage({ user, onNavigate }) {
       });
       setSelectedOutreachSites(initialSites);
 
-      if (kws.length === 0) {
+      if (res.has_landing_pages === false || kws.length === 0) {
         setPotentialKws([]);
         setPushBatches({ high: [], medium: [], low: [] });
         setSelectedKwIds(new Set());
         setLoadingKeywords(false);
+        setLandingPageErrorNotice(res.summary || "Data does not have landing page URLs.");
         return;
       }
+      setLandingPageErrorNotice(null);
 
       const initialTopicLinks = {};
       kws.forEach(k => {
@@ -754,14 +768,15 @@ function CalendarPage({ user, onNavigate }) {
       alert('No data available to export.');
       return;
     }
-    const headers = ['Activity Name', 'Project Name', 'Main POC', 'Content POC', 'Quantity', 'Budget', 'Period', 'Scheduler', 'Auditor', 'Status'];
+    const headers = ['Activity UID', 'Activity Name', 'Project Name', 'Main POC', 'Content POC', 'Quantity', 'Budget (₹)', 'Period', 'Scheduler', 'Auditor', 'Status'];
     const rows = filteredActivities.map(a => [
+      `"${(a.activity_uid || '').replace(/"/g, '""')}"`,
       `"${(a.activity_name || '').replace(/"/g, '""')}"`,
       `"${(a.project_name || '').replace(/"/g, '""')}"`,
       `"${(a.main_poc || '').replace(/"/g, '""')}"`,
       `"${(a.content_poc || '').replace(/"/g, '""')}"`,
       a.quantity || 1,
-      `"${String(a.budget || '').replace(/"/g, '""')}"`,
+      `"${String(a.budget || '').replace(/[$]/g, '₹').replace(/"/g, '""')}"`,
       `"${a.period || ''}"`,
       `"${(a.scheduler || '').replace(/"/g, '""')}"`,
       `"${(a.auditor || '').replace(/"/g, '""')}"`,
@@ -786,7 +801,7 @@ function CalendarPage({ user, onNavigate }) {
   if (isModalOpen && modalStep === 'keywords_prompt') {
     const isPaidGuestPost = String(createdActivity?.activity_name || formData.activity_name || '').toLowerCase().includes('guest');
     const totalAllocatedBudget = activitiesList.reduce((acc, a) => acc + (parseFloat(String(a.budget || '0').replace(/[^0-9.]/g, '')) || 0), 0);
-    const totalAllocatedBudgetFormatted = totalAllocatedBudget > 0 ? `$${totalAllocatedBudget.toLocaleString()}` : '$250';
+    const totalAllocatedBudgetFormatted = totalAllocatedBudget > 0 ? `₹${totalAllocatedBudget.toLocaleString()}` : '₹250';
     const totalRequestedQuantity = activitiesList.reduce((acc, a) => acc + (parseInt(a.quantity, 10) || 1), 0);
 
     return (
@@ -883,51 +898,6 @@ function CalendarPage({ user, onNavigate }) {
             </div>
           </div>
 
-          {/* Right side: View Mode Switch */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f1f5f9', padding: 3, borderRadius: 10 }}>
-            <button
-              type="button"
-              onClick={() => setStep2ViewMode('strategy')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '6px 14px',
-                fontSize: 12.5,
-                fontWeight: step2ViewMode === 'strategy' ? 700 : 600,
-                color: step2ViewMode === 'strategy' ? '#7c3aed' : '#64748b',
-                background: step2ViewMode === 'strategy' ? '#ffffff' : 'transparent',
-                border: 'none',
-                borderRadius: 7,
-                cursor: 'pointer',
-                boxShadow: step2ViewMode === 'strategy' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'
-              }}
-            >
-              <Bot size={14} />
-              <span>Executive Strategy</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setStep2ViewMode('breakdown')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '6px 14px',
-                fontSize: 12.5,
-                fontWeight: step2ViewMode === 'breakdown' ? 700 : 600,
-                color: step2ViewMode === 'breakdown' ? '#7c3aed' : '#64748b',
-                background: step2ViewMode === 'breakdown' ? '#ffffff' : 'transparent',
-                border: 'none',
-                borderRadius: 7,
-                cursor: 'pointer',
-                boxShadow: step2ViewMode === 'breakdown' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'
-              }}
-            >
-              <Layers size={14} />
-              <span>Keyword Breakdown ({potentialKws.length})</span>
-            </button>
-          </div>
         </div>
 
         {/* LOADING STATE */}
@@ -944,6 +914,58 @@ function CalendarPage({ user, onNavigate }) {
             <div style={{ marginTop: 24, fontSize: 13, color: '#64748b', maxWidth: 480, margin: '16px auto 0' }}>
               We are checking live rankings and ensuring 100% Landing Page intent matching before showing recommendations.
             </div>
+          </div>
+        ) : potentialKws.length === 0 ? (
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 16,
+            border: '1px solid #fed7aa',
+            padding: '56px 32px',
+            textAlign: 'center',
+            boxShadow: '0 4px 20px -2px rgba(234, 88, 12, 0.08)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 16
+          }}>
+            <div style={{
+              width: 56,
+              height: 56,
+              borderRadius: '50%',
+              background: '#fff7ed',
+              color: '#ea580c',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: '1px solid #ffedd5'
+            }}>
+              <AlertCircle size={30} />
+            </div>
+            <div>
+              <h3 style={{ fontSize: 19, fontWeight: 800, color: '#9a3412', margin: '0 0 8px 0' }}>
+                {landingPageErrorNotice || "Data does not have landing page URLs."}
+              </h3>
+              
+            </div>
+            <button
+              type="button"
+              onClick={() => { setModalStep('form'); setIsModalOpen(false); }}
+              style={{
+                marginTop: 8,
+                padding: '10px 24px',
+                fontSize: 13.5,
+                fontWeight: 700,
+                background: '#ea580c',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: 10,
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(234, 88, 12, 0.25)'
+              }}
+            >
+              Back to Calendar
+            </button>
           </div>
         ) : (
           <>
@@ -1031,31 +1053,6 @@ function CalendarPage({ user, onNavigate }) {
                       </>
                     )}
                   </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setStep2ViewMode('breakdown')}
-                    style={{
-                      padding: '9px 18px',
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: '#475569',
-                      background: '#ffffff',
-                      border: '1px solid #E4DFEE',
-                      borderRadius: 10,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 6,
-                      transition: 'background-color 0.15s ease'
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-                    onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
-                  >
-                    <Eye size={15} color="#7c3aed" />
-                    <span>View Keyword Breakdown</span>
-                  </button>
                 </div>
               </div>
 
@@ -1101,14 +1098,14 @@ function CalendarPage({ user, onNavigate }) {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                     <span style={{ fontSize: 22, fontWeight: 800, color: '#059669' }}>
-                      {budgetOptimization?.planned_spend !== undefined ? `$${budgetOptimization.planned_spend.toLocaleString()}` : totalAllocatedBudgetFormatted}
+                      {budgetOptimization?.planned_spend !== undefined ? `₹${budgetOptimization.planned_spend.toLocaleString()}` : totalAllocatedBudgetFormatted}
                     </span>
                     <span style={{ fontSize: 12, color: '#059669', fontWeight: 600 }}>
-                      {budgetOptimization?.projected_savings > 0 ? `Saves $${budgetOptimization.projected_savings.toLocaleString()}` : 'Optimized'}
+                      {budgetOptimization?.projected_savings > 0 ? `Saves ₹${budgetOptimization.projected_savings.toLocaleString()}` : 'Optimized'}
                     </span>
                   </div>
                   <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 6 }}>
-                    {budgetOptimization?.total_budget_cap ? `Cap: $${budgetOptimization.total_budget_cap.toLocaleString()}` : 'Direct spend against high-ROI assets'}
+                    {budgetOptimization?.total_budget_cap ? `Cap: ₹${budgetOptimization.total_budget_cap.toLocaleString()}` : 'Direct spend against high-ROI assets'}
                   </div>
                 </div>
 
@@ -1166,16 +1163,16 @@ function CalendarPage({ user, onNavigate }) {
                         padding: '2px 8px',
                         borderRadius: 10
                       }}>
-                        ${budgetOptimization.projected_savings?.toLocaleString()} Projected Savings
+                        ₹{budgetOptimization.projected_savings?.toLocaleString()} Projected Savings
                       </span>
                     </div>
                     <p style={{ fontSize: 12.5, color: '#78350F', margin: '4px 0 0 0', lineHeight: 1.5 }}>
                       {budgetOptimization.anti_waste_advisory}
                     </p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 8, fontSize: 11.5, color: '#92400E', flexWrap: 'wrap' }}>
-                      <span>Requested: <strong>{budgetOptimization.requested_activities} activities</strong> (${budgetOptimization.total_budget_cap?.toLocaleString()})</span>
+                      <span>Requested: <strong>{budgetOptimization.requested_activities} activities</strong> (₹{budgetOptimization.total_budget_cap?.toLocaleString()})</span>
                       <span>•</span>
-                      <span>AI Recommended: <strong>{budgetOptimization.recommended_activities} target keywords</strong> (${budgetOptimization.planned_spend?.toLocaleString()})</span>
+                      <span>AI Recommended: <strong>{budgetOptimization.recommended_activities} target keywords</strong> (₹{budgetOptimization.planned_spend?.toLocaleString()})</span>
                       <span>•</span>
                       <span style={{ color: '#15803d', fontWeight: 700 }}>Strict 3-Domain Backlink Limit Rule Active</span>
                     </div>
@@ -1535,7 +1532,7 @@ function CalendarPage({ user, onNavigate }) {
                                                   <option value="">-- Select Outreach Site --</option>
                                                   {availableOutreachSites.map(site => (
                                                     <option key={site.id || site.domain} value={site.domain}>
-                                                      {site.domain} (DA {site.da} | ${site.price})
+                                                      {site.domain} (DA {site.da} | {String(site.price).startsWith('₹') ? site.price : (String(site.price).startsWith('$') ? site.price.replace('$', '₹') : `₹${site.price}`)})
                                                     </option>
                                                   ))}
                                                 </select>
@@ -1581,7 +1578,7 @@ function CalendarPage({ user, onNavigate }) {
                                                     padding: '1px 5px',
                                                     borderRadius: 4
                                                   }}>
-                                                    ${assignedSite.price}
+                                                    {String(assignedSite.price).startsWith('₹') ? assignedSite.price : (String(assignedSite.price).startsWith('$') ? assignedSite.price.replace('$', '₹') : `₹${assignedSite.price}`)}
                                                   </span>
                                                 </div>
                                               )}
@@ -1886,7 +1883,7 @@ function CalendarPage({ user, onNavigate }) {
               }}
             >
               <Send size={15} color={activeSubTab === 'published' ? '#047857' : '#64748b'} />
-              <span>Published (Live)</span>
+              <span>Published</span>
               <span style={{
                 background: activeSubTab === 'published' ? '#A7F3D0' : '#E2DBEC',
                 color: activeSubTab === 'published' ? '#065F46' : '#475569',
@@ -1944,8 +1941,11 @@ function CalendarPage({ user, onNavigate }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: 1050 }}>
               <thead>
                 <tr style={{ background: '#FAF8FD', borderBottom: '1px solid #E4DFEE' }}>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', width: 280 }}>
-                    Project / Activities
+                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', width: 130 }}>
+                    Activity ID
+                  </th>
+                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', width: 260 }}>
+                    Activities
                   </th>
                   <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', width: 140 }}>
                     Mode
@@ -1957,7 +1957,7 @@ function CalendarPage({ user, onNavigate }) {
                     Qty
                   </th>
                   <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', width: 120 }}>
-                    Total Budget
+                    Total Budget (₹)
                   </th>
                   <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', width: 140 }}>
                     Period
@@ -1968,11 +1968,11 @@ function CalendarPage({ user, onNavigate }) {
                   <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', width: 140 }}>
                     Auditor
                   </th>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'center', width: 140 }}>
-                    Schedule / Move
-                  </th>
-                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'right', width: 90 }}>
+                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'center', width: 90 }}>
                     Actions
+                  </th>
+                  <th style={{ padding: '14px 16px', fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'center', width: 130 }}>
+                    {activeSubTab === 'saved' ? 'Schedule' : (activeSubTab === 'scheduled' ? 'Approve' : (activeSubTab === 'approved' ? 'Publish' : 'Off-Page'))}
                   </th>
                 </tr>
               </thead>
@@ -1980,6 +1980,20 @@ function CalendarPage({ user, onNavigate }) {
                 {groupedProjects.length > 0 ? (
                   groupedProjects.map((group, gIdx) => {
                     const isExpanded = expandedProjects.has(group.projectName);
+                    const overallUid = (() => {
+                      const itemWithUid = group.items.find(it => it.activity_uid);
+                      if (itemWithUid && itemWithUid.activity_uid) {
+                        const parts = itemWithUid.activity_uid.split('-');
+                        if (parts.length >= 2) return `${parts[0]}-${parts[1]}`;
+                      }
+                      const pLower = (group.projectName || '').toLowerCase();
+                      let pCode = 'PR';
+                      if (pLower.includes('billabong')) pCode = 'BL';
+                      else if (pLower.includes('euroschool')) pCode = 'ES';
+                      else if (group.projectName && group.projectName.length >= 2) pCode = group.projectName.substring(0, 2).toUpperCase();
+                      const mCode = '09';
+                      return `${pCode}-${mCode}`;
+                    })();
                     return (
                       <React.Fragment key={group.projectName || gIdx}>
                         {/* PARENT ROW: Project Summary */}
@@ -1988,6 +2002,11 @@ function CalendarPage({ user, onNavigate }) {
                           background: gIdx % 2 === 0 ? '#ffffff' : '#fafafa',
                           fontWeight: 600
                         }}>
+                          {/* Overall Activity ID for Project group (e.g. BL-09) */}
+                          <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', fontSize: 13, fontWeight: 700, color: '#334155' }}>
+                            {overallUid}
+                          </td>
+
                           {/* Project Name + Tree expander */}
                           <td style={{ padding: '14px 16px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -2058,56 +2077,22 @@ function CalendarPage({ user, onNavigate }) {
                             )}
                           </td>
 
-                          {/* Status & Optional Redirect on Published */}
+                          {/* Status */}
                           <td style={{ padding: '14px 16px' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                              {/* Status Tag */}
-                              <span style={{
-                                display: 'inline-block',
-                                fontSize: 10.5,
-                                fontWeight: 800,
-                                textTransform: 'uppercase',
-                                padding: '2px 7px',
-                                borderRadius: 6,
-                                width: 'fit-content',
-                                background: activeSubTab === 'saved' ? '#fef3c7' : (activeSubTab === 'scheduled' ? '#dbeafe' : (activeSubTab === 'approved' ? '#d1fae5' : '#dcfce7')),
-                                color: activeSubTab === 'saved' ? '#b45309' : (activeSubTab === 'scheduled' ? '#1d4ed8' : (activeSubTab === 'approved' ? '#047857' : '#15803d')),
-                                border: `1px solid ${activeSubTab === 'saved' ? '#fde68a' : (activeSubTab === 'scheduled' ? '#bfdbfe' : (activeSubTab === 'approved' ? '#a7f3d0' : '#bbf7d0'))}`
-                              }}>
-                                {activeSubTab === 'saved' ? 'Draft' : (activeSubTab === 'published' ? 'Published (Live)' : activeSubTab)}
-                              </span>
-
-                              {/* Redirect to off-page: Only shown on publish page */}
-                              {activeSubTab === 'published' && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (onNavigate) {
-                                      if (group.channel === 'content') onNavigate('content-engine');
-                                      else onNavigate('search-visibility/off-page');
-                                    }
-                                  }}
-                                  title={`Navigate to ${group.channel || 'off-page'}`}
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 4,
-                                    fontSize: 10.5,
-                                    fontWeight: 700,
-                                    padding: '2px 7px',
-                                    borderRadius: 6,
-                                    width: 'fit-content',
-                                    background: '#f5f3ff',
-                                    color: '#7c3aed',
-                                    border: '1px solid #ddd6fe',
-                                    cursor: 'pointer'
-                                  }}
-                                >
-                                  <span>{group.channel || 'Off-page'}</span>
-                                  <ExternalLink size={10} />
-                                </button>
-                              )}
-                            </div>
+                            <span style={{
+                              display: 'inline-block',
+                              fontSize: 10.5,
+                              fontWeight: 800,
+                              textTransform: 'uppercase',
+                              padding: '2px 7px',
+                              borderRadius: 6,
+                              width: 'fit-content',
+                              background: activeSubTab === 'saved' ? '#fef3c7' : (activeSubTab === 'scheduled' ? '#dbeafe' : (activeSubTab === 'approved' ? '#d1fae5' : '#dcfce7')),
+                              color: activeSubTab === 'saved' ? '#b45309' : (activeSubTab === 'scheduled' ? '#1d4ed8' : (activeSubTab === 'approved' ? '#047857' : '#15803d')),
+                              border: `1px solid ${activeSubTab === 'saved' ? '#fde68a' : (activeSubTab === 'scheduled' ? '#bfdbfe' : (activeSubTab === 'approved' ? '#a7f3d0' : '#bbf7d0'))}`
+                            }}>
+                              {activeSubTab === 'saved' ? 'Draft' : (activeSubTab === 'published' ? 'Published' : activeSubTab)}
+                            </span>
                           </td>
 
                           {/* Total Quantity */}
@@ -2117,7 +2102,7 @@ function CalendarPage({ user, onNavigate }) {
 
                           {/* Total Budget */}
                           <td style={{ padding: '14px 16px', fontWeight: 800, color: '#059669', fontSize: 13.5 }}>
-                            ${group.totalBudget.toLocaleString()}
+                            ₹{group.totalBudget.toLocaleString()}
                           </td>
 
                           {/* Period (Month & Year) */}
@@ -2144,88 +2129,8 @@ function CalendarPage({ user, onNavigate }) {
                             </div>
                           </td>
 
-                          {/* Move Status / Direct Schedule Button */}
+                          {/* Project Actions (Hide / View) */}
                           <td style={{ padding: '14px 16px', textAlign: 'center' }}>
-                            {activeSubTab === 'saved' && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  // Open confirmation to AI schedule or move directly
-                                  const firstItem = group.items[0];
-                                  if (firstItem) {
-                                    handleOpenEditModal(firstItem);
-                                  }
-                                }}
-                                style={{
-                                  background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
-                                  color: '#ffffff',
-                                  border: 'none',
-                                  padding: '5px 12px',
-                                  borderRadius: 6,
-                                  fontSize: 11.5,
-                                  fontWeight: 700,
-                                  cursor: 'pointer',
-                                  boxShadow: '0 2px 6px rgba(124, 58, 237, 0.25)',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: 5
-                                }}
-                              >
-                                <Clock size={12} />
-                                <span>Schedule</span>
-                              </button>
-                            )}
-                            {activeSubTab === 'scheduled' && (
-                              <button
-                                type="button"
-                                onClick={() => group.items.forEach(it => handleMoveStatus(it, 'approved'))}
-                                style={{
-                                  background: '#d1fae5',
-                                  color: '#047857',
-                                  border: '1px solid #a7f3d0',
-                                  padding: '5px 10px',
-                                  borderRadius: 6,
-                                  fontSize: 11,
-                                  fontWeight: 700,
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                Approve All
-                              </button>
-                            )}
-                            {activeSubTab === 'approved' && (
-                              <button
-                                type="button"
-                                onClick={() => group.items.forEach(it => handleMoveStatus(it, 'published'))}
-                                style={{
-                                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                                  color: '#ffffff',
-                                  border: 'none',
-                                  padding: '5px 12px',
-                                  borderRadius: 6,
-                                  fontSize: 11,
-                                  fontWeight: 700,
-                                  cursor: 'pointer',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: 5,
-                                  boxShadow: '0 2px 6px rgba(16, 185, 129, 0.25)'
-                                }}
-                              >
-                                <Send size={12} />
-                                <span>Publish All</span>
-                              </button>
-                            )}
-                            {activeSubTab === 'published' && (
-                              <span style={{ fontSize: 11, fontWeight: 700, color: '#047857', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                <CheckCircle2 size={13} color="#047857" />
-                                <span>Live &amp; Published</span>
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Project Actions */}
-                          <td style={{ padding: '14px 16px', textAlign: 'right' }}>
                             <button
                               type="button"
                               onClick={() => toggleProjectExpand(group.projectName)}
@@ -2241,6 +2146,93 @@ function CalendarPage({ user, onNavigate }) {
                               {isExpanded ? 'Hide' : 'View'} ({group.items.length})
                             </button>
                           </td>
+
+                          {/* Move Status / Action Button - In the end after Actions */}
+                          <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                            {activeSubTab === 'saved' && (
+                              <button
+                                type="button"
+                                onClick={() => group.items.forEach(it => handleMoveStatus(it, 'scheduled'))}
+                                style={{
+                                  background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                                  color: '#ffffff',
+                                  border: 'none',
+                                  padding: '6px 14px',
+                                  borderRadius: 6,
+                                  fontSize: 11.5,
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  boxShadow: '0 2px 6px rgba(124, 58, 237, 0.25)'
+                                }}
+                              >
+                                Schedule All
+                              </button>
+                            )}
+                            {activeSubTab === 'scheduled' && (
+                              <button
+                                type="button"
+                                onClick={() => group.items.forEach(it => handleMoveStatus(it, 'approved'))}
+                                style={{
+                                  background: '#d1fae5',
+                                  color: '#047857',
+                                  border: '1px solid #a7f3d0',
+                                  padding: '6px 14px',
+                                  borderRadius: 6,
+                                  fontSize: 11.5,
+                                  fontWeight: 700,
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                Approve All
+                              </button>
+                            )}
+                            {activeSubTab === 'approved' && (
+                              <button
+                                type="button"
+                                onClick={() => group.items.forEach(it => handleMoveStatus(it, 'published'))}
+                                style={{
+                                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                  color: '#ffffff',
+                                  border: 'none',
+                                  padding: '6px 14px',
+                                  borderRadius: 6,
+                                  fontSize: 11.5,
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  boxShadow: '0 2px 6px rgba(16, 185, 129, 0.25)'
+                                }}
+                              >
+                                Publish All
+                              </button>
+                            )}
+                            {activeSubTab === 'published' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (onNavigate) {
+                                    if (group.channel === 'content') onNavigate('content-engine');
+                                    else onNavigate('search-visibility/off-page');
+                                  }
+                                }}
+                                title={`Navigate to ${group.channel || 'off-page'}`}
+                                style={{
+                                  padding: '6px 14px',
+                                  borderRadius: 6,
+                                  fontSize: 11.5,
+                                  fontWeight: 700,
+                                  background: '#f5f3ff',
+                                  color: '#7c3aed',
+                                  border: '1px solid #ddd6fe',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease'
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.background = '#ede9fe'; }}
+                                onMouseLeave={e => { e.currentTarget.style.background = '#f5f3ff'; }}
+                              >
+                                Off-Page
+                              </button>
+                            )}
+                          </td>
                         </tr>
 
                         {/* CHILD ROWS (Expanded Tree Structure) */}
@@ -2252,8 +2244,13 @@ function CalendarPage({ user, onNavigate }) {
                               background: '#fcfbfe'
                             }}
                           >
+                            {/* Activity ID */}
+                            <td style={{ padding: '10px 16px', whiteSpace: 'nowrap', fontSize: 12.5, fontWeight: 600, color: '#475569' }}>
+                              {item.activity_uid || '—'}
+                            </td>
+
                             {/* Indented Activity Name */}
-                            <td style={{ padding: '10px 16px 10px 36px' }}>
+                            <td style={{ padding: '10px 16px 10px 24px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 <span style={{ color: '#cbd5e1', fontSize: 14 }}>↳</span>
                                 <div>
@@ -2292,55 +2289,22 @@ function CalendarPage({ user, onNavigate }) {
                               {item.scheduler || 'Manual'}
                             </td>
 
-                            {/* Sub Activity Status & Optional Redirect on Published */}
+                            {/* Sub Activity Status */}
                             <td style={{ padding: '10px 16px' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                                <span style={{
-                                  display: 'inline-block',
-                                  fontSize: 10,
-                                  fontWeight: 800,
-                                  textTransform: 'uppercase',
-                                  padding: '2px 6px',
-                                  borderRadius: 5,
-                                  width: 'fit-content',
-                                  background: (item.status || activeSubTab) === 'saved' ? '#fef3c7' : ((item.status || activeSubTab) === 'scheduled' ? '#dbeafe' : ((item.status || activeSubTab) === 'approved' ? '#d1fae5' : '#dcfce7')),
-                                  color: (item.status || activeSubTab) === 'saved' ? '#b45309' : ((item.status || activeSubTab) === 'scheduled' ? '#1d4ed8' : ((item.status || activeSubTab) === 'approved' ? '#047857' : '#15803d')),
-                                  border: `1px solid ${(item.status || activeSubTab) === 'saved' ? '#fde68a' : ((item.status || activeSubTab) === 'scheduled' ? '#bfdbfe' : ((item.status || activeSubTab) === 'approved' ? '#a7f3d0' : '#bbf7d0'))}`
-                                }}>
-                                  {(item.status || activeSubTab) === 'saved' ? 'Draft' : ((item.status || activeSubTab) === 'published' ? 'Live' : (item.status || activeSubTab))}
-                                </span>
-
-                                {/* Redirect only on publish page */}
-                                {activeSubTab === 'published' && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (onNavigate) {
-                                        if (item.channel === 'content') onNavigate('content-engine');
-                                        else onNavigate('search-visibility/off-page');
-                                      }
-                                    }}
-                                    title={`Navigate to ${item.channel || 'off-page'}`}
-                                    style={{
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: 4,
-                                      fontSize: 10,
-                                      fontWeight: 700,
-                                      padding: '2px 6px',
-                                      borderRadius: 5,
-                                      width: 'fit-content',
-                                      background: '#f5f3ff',
-                                      color: '#7c3aed',
-                                      border: '1px solid #ddd6fe',
-                                      cursor: 'pointer'
-                                    }}
-                                  >
-                                    <span>{item.channel || 'Off-page'}</span>
-                                    <ExternalLink size={10} />
-                                  </button>
-                                )}
-                              </div>
+                              <span style={{
+                                display: 'inline-block',
+                                fontSize: 10,
+                                fontWeight: 800,
+                                textTransform: 'uppercase',
+                                padding: '2px 6px',
+                                borderRadius: 5,
+                                width: 'fit-content',
+                                background: (item.status || activeSubTab) === 'saved' ? '#fef3c7' : ((item.status || activeSubTab) === 'scheduled' ? '#dbeafe' : ((item.status || activeSubTab) === 'approved' ? '#d1fae5' : '#dcfce7')),
+                                color: (item.status || activeSubTab) === 'saved' ? '#b45309' : ((item.status || activeSubTab) === 'scheduled' ? '#1d4ed8' : ((item.status || activeSubTab) === 'approved' ? '#047857' : '#15803d')),
+                                border: `1px solid ${(item.status || activeSubTab) === 'saved' ? '#fde68a' : ((item.status || activeSubTab) === 'scheduled' ? '#bfdbfe' : ((item.status || activeSubTab) === 'approved' ? '#a7f3d0' : '#bbf7d0'))}`
+                              }}>
+                                {(item.status || activeSubTab) === 'saved' ? 'Draft' : ((item.status || activeSubTab) === 'published' ? 'Published' : (item.status || activeSubTab))}
+                              </span>
                             </td>
 
                             {/* Individual Quantity */}
@@ -2350,7 +2314,7 @@ function CalendarPage({ user, onNavigate }) {
 
                             {/* Individual Budget */}
                             <td style={{ padding: '10px 16px', fontSize: 12.5, fontWeight: 700, color: '#059669' }}>
-                              {item.budget ? (String(item.budget).startsWith('$') ? item.budget : `$${item.budget}`) : '—'}
+                              {item.budget ? (String(item.budget).startsWith('₹') ? item.budget : (String(item.budget).startsWith('$') ? item.budget.replace('$', '₹') : `₹${item.budget}`)) : '—'}
                             </td>
 
                             {/* Activity Period */}
@@ -2368,137 +2332,9 @@ function CalendarPage({ user, onNavigate }) {
                               <span>{item.auditor || '—'}</span>
                             </td>
 
-                            {/* Move Status Buttons */}
+                            {/* Individual Actions - In front of status column */}
                             <td style={{ padding: '10px 16px', textAlign: 'center' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-                                {/* On Draft: Only show Schedule button (never Approve) */}
-                                {activeSubTab === 'saved' && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleMoveStatus(item, 'scheduled')}
-                                    title="Move to Scheduled"
-                                    style={{
-                                      background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
-                                      color: '#ffffff',
-                                      border: 'none',
-                                      padding: '4px 10px',
-                                      borderRadius: 5,
-                                      fontSize: 11,
-                                      fontWeight: 700,
-                                      cursor: 'pointer',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: 4,
-                                      boxShadow: '0 1px 4px rgba(124, 58, 237, 0.2)'
-                                    }}
-                                  >
-                                    <Clock size={11} />
-                                    <span>Schedule</span>
-                                  </button>
-                                )}
-
-                                {/* On Scheduled: Show Draft (to revert) and Approve (to advance) */}
-                                {activeSubTab === 'scheduled' && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleMoveStatus(item, 'saved')}
-                                      title="Move back to Draft"
-                                      style={{
-                                        background: '#fef3c7',
-                                        color: '#b45309',
-                                        border: '1px solid #fde68a',
-                                        padding: '4px 8px',
-                                        borderRadius: 5,
-                                        fontSize: 10.5,
-                                        fontWeight: 700,
-                                        cursor: 'pointer'
-                                      }}
-                                    >
-                                      Draft
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleMoveStatus(item, 'approved')}
-                                      title="Move to Approved"
-                                      style={{
-                                        background: '#d1fae5',
-                                        color: '#047857',
-                                        border: '1px solid #a7f3d0',
-                                        padding: '4px 9px',
-                                        borderRadius: 5,
-                                        fontSize: 10.5,
-                                        fontWeight: 700,
-                                        cursor: 'pointer',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: 3
-                                      }}
-                                    >
-                                      <Check size={11} />
-                                      <span>Approve</span>
-                                    </button>
-                                  </>
-                                )}
-
-                                {/* On Approved: Show Scheduled (to revert) and Publish (to advance) */}
-                                {activeSubTab === 'approved' && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleMoveStatus(item, 'scheduled')}
-                                      title="Move back to Scheduled"
-                                      style={{
-                                        background: '#dbeafe',
-                                        color: '#1d4ed8',
-                                        border: '1px solid #bfdbfe',
-                                        padding: '4px 8px',
-                                        borderRadius: 5,
-                                        fontSize: 10.5,
-                                        fontWeight: 700,
-                                        cursor: 'pointer'
-                                      }}
-                                    >
-                                      Scheduled
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleMoveStatus(item, 'published')}
-                                      title="Publish Live"
-                                      style={{
-                                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                                        color: '#ffffff',
-                                        border: 'none',
-                                        padding: '4px 10px',
-                                        borderRadius: 5,
-                                        fontSize: 10.5,
-                                        fontWeight: 700,
-                                        cursor: 'pointer',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: 3,
-                                        boxShadow: '0 1px 4px rgba(16, 185, 129, 0.25)'
-                                      }}
-                                    >
-                                      <Send size={10} />
-                                      <span>Publish</span>
-                                    </button>
-                                  </>
-                                )}
-
-                                {/* On Published: Live status */}
-                                {activeSubTab === 'published' && (
-                                  <span style={{ fontSize: 11, fontWeight: 700, color: '#15803d', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                    <CheckCircle2 size={12} color="#15803d" />
-                                    <span>Live</span>
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-
-                            {/* Individual Actions */}
-                            <td style={{ padding: '10px 16px', textAlign: 'right' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                                 <button
                                   onClick={() => handleOpenEditModal(item)}
                                   title="Edit Activity"
@@ -2515,6 +2351,105 @@ function CalendarPage({ user, onNavigate }) {
                                 </button>
                               </div>
                             </td>
+
+                            {/* Move Status Buttons - In the end after Actions without icons */}
+                            <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                                {/* On Draft: Only show Schedule button */}
+                                {activeSubTab === 'saved' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveStatus(item, 'scheduled')}
+                                    title="Schedule Activity"
+                                    style={{
+                                      background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                                      color: '#ffffff',
+                                      border: 'none',
+                                      padding: '4px 12px',
+                                      borderRadius: 5,
+                                      fontSize: 11,
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      boxShadow: '0 1px 4px rgba(124, 58, 237, 0.2)'
+                                    }}
+                                  >
+                                    Schedule
+                                  </button>
+                                )}
+
+                                {/* On Scheduled: Approve only */}
+                                {activeSubTab === 'scheduled' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveStatus(item, 'approved')}
+                                    title="Approve Activity"
+                                    style={{
+                                      background: '#d1fae5',
+                                      color: '#047857',
+                                      border: '1px solid #a7f3d0',
+                                      padding: '4px 12px',
+                                      borderRadius: 5,
+                                      fontSize: 10.5,
+                                      fontWeight: 700,
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    Approve
+                                  </button>
+                                )}
+
+                                {/* On Approved: Publish only */}
+                                {activeSubTab === 'approved' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveStatus(item, 'published')}
+                                    title="Publish Live"
+                                    style={{
+                                      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                      color: '#ffffff',
+                                      border: 'none',
+                                      padding: '4px 12px',
+                                      borderRadius: 5,
+                                      fontSize: 10.5,
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      boxShadow: '0 1px 4px rgba(16, 185, 129, 0.25)'
+                                    }}
+                                  >
+                                    Publish
+                                  </button>
+                                )}
+
+                                {/* On Published: Redirect to off-page */}
+                                {activeSubTab === 'published' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (onNavigate) {
+                                        if (item.channel === 'content') onNavigate('content-engine');
+                                        else onNavigate('search-visibility/off-page');
+                                      }
+                                    }}
+                                    title={`Navigate to ${item.channel || 'off-page'}`}
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: 700,
+                                      padding: '4px 12px',
+                                      borderRadius: 5,
+                                      background: '#f5f3ff',
+                                      color: '#7c3aed',
+                                      border: '1px solid #ddd6fe',
+                                      cursor: 'pointer',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.background = '#ede9fe'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.background = '#f5f3ff'; }}
+                                  >
+                                    Off-Page
+                                  </button>
+                                )}
+                              </div>
+                            </td>
                           </tr>
                         ))}
                       </React.Fragment>
@@ -2522,7 +2457,7 @@ function CalendarPage({ user, onNavigate }) {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={10} style={{ padding: '50px 20px', textAlign: 'center', color: '#94a3b8' }}>
+                    <td colSpan={11} style={{ padding: '50px 20px', textAlign: 'center', color: '#94a3b8' }}>
                       <FileSpreadsheet size={36} color="#cbd5e1" style={{ marginBottom: 8 }} />
                       <div style={{ fontSize: 14, fontWeight: 600, color: '#64748b' }}>
                         No {activeSubTab} activities found in database table
@@ -2795,7 +2730,7 @@ function CalendarPage({ user, onNavigate }) {
                         <div>
                           <input
                             type="text"
-                            placeholder="$250"
+                            placeholder="₹250"
                             value={actItem.budget}
                             onChange={e => handleUpdateActivityRow(actItem.id, 'budget', e.target.value)}
                             style={{
@@ -2878,13 +2813,33 @@ function CalendarPage({ user, onNavigate }) {
                       <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
                         Scheduler (Main POC)
                       </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. John Doe"
+                      <select
                         value={formData.main_poc}
                         onChange={e => setFormData({ ...formData, main_poc: e.target.value })}
-                        style={{ width: '100%', padding: '9px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 8, outline: 'none' }}
-                      />
+                        style={{
+                          width: '100%',
+                          padding: '9px 12px',
+                          fontSize: 13,
+                          border: '1px solid #cbd5e1',
+                          borderRadius: 8,
+                          outline: 'none',
+                          background: '#ffffff',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <option value="">Select Scheduler from users...</option>
+                        {usersList.map(u => {
+                          const displayVal = u.name || u.email;
+                          return (
+                            <option key={u.id || u.email} value={displayVal}>
+                              {u.name ? `${u.name} (${u.email})` : u.email}
+                            </option>
+                          );
+                        })}
+                        {formData.main_poc && !usersList.some(u => (u.name === formData.main_poc || u.email === formData.main_poc)) && (
+                          <option value={formData.main_poc}>{formData.main_poc}</option>
+                        )}
+                      </select>
                     </div>
                   )}
 

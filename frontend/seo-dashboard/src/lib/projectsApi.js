@@ -3056,3 +3056,15 @@ export async function analyzeCalendarAiPushPotentialApi(projectSlug, domain = ''
   return null;
 }
 
+// Fetch registered users for calendar scheduler/POC dropdowns
+export async function fetchCalendarUsersApi() {
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/calendar/users`);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('[fetchCalendarUsersApi] error:', e);
+  }
+  return [];
+}
