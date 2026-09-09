@@ -61,6 +61,8 @@ import os
 import re
 import uuid
 import sys
+import time
+import random
 from decimal import Decimal
 import json
 from typing import Optional, List, Dict, Any
@@ -704,73 +706,101 @@ def list_outreach_sites(project_slug: str = None):
         return [dict(r) for r in res]
 
 
+def _is_db_lock_error(exc: Exception) -> bool:
+    """Detect transient database lock timeouts, deadlocks, or lock contention."""
+    msg = str(exc).lower()
+    return any(p in msg for p in ("locknotavailable", "lock timeout", "deadlockdetected", "could not obtain lock", "55p03", "40p01"))
+
+
 def insert_outreach_site(project_slug: str, site_data: dict):
-    """Insert or return newly inserted outreach site record."""
+    """Insert or return newly inserted outreach site record with automatic lock retry."""
     if not os.environ.get("DATABASE_URL"):
         return site_data
-    with engine.begin() as conn:
-        res = conn.execute(
-            text("""
-                INSERT INTO outreach_sites (
-                    project_slug, url, domain, type, da, pa, ss, traffic,
-                    total_traffic, region1_traffic, region2_traffic, region3_traffic,
-                    sourced_by, agency_name, calculate_sp, sp_percentage, landing_price,
-                    selling_price, country, domain_industry, status, rejected_reason, metrics_json
-                )
-                VALUES (
-                    :project_slug, :url, :domain, :type, :da, :pa, :ss, :traffic,
-                    :total_traffic, :region1_traffic, :region2_traffic, :region3_traffic,
-                    :sourced_by, :agency_name, :calculate_sp, :sp_percentage, :landing_price,
-                    :selling_price, :country, :domain_industry, :status, :rejected_reason, :metrics_json
-                )
-                RETURNING id, created_at
-            """),
-            {
-                "project_slug": project_slug,
-                "url": site_data.get("url"),
-                "domain": site_data.get("domain"),
-                "type": site_data.get("type"),
-                "da": site_data.get("da"),
-                "pa": site_data.get("pa"),
-                "ss": site_data.get("ss"),
-                "traffic": site_data.get("traffic"),
-                "total_traffic": site_data.get("total_traffic") or site_data.get("totalTraffic"),
-                "region1_traffic": site_data.get("region1_traffic") or site_data.get("region1Traffic"),
-                "region2_traffic": site_data.get("region2_traffic") or site_data.get("region2Traffic"),
-                "region3_traffic": site_data.get("region3_traffic") or site_data.get("region3Traffic"),
-                "sourced_by": site_data.get("sourced_by") or site_data.get("sourcedOption"),
-                "agency_name": site_data.get("agency_name") or site_data.get("agencyName"),
-                "calculate_sp": bool(site_data.get("calculate_sp") or site_data.get("calculateSp")),
-                "sp_percentage": site_data.get("sp_percentage") or site_data.get("spPercentage"),
-                "landing_price": site_data.get("landing_price") or site_data.get("landingPrice"),
-                "selling_price": site_data.get("selling_price") or site_data.get("sellingPrice"),
-                "country": site_data.get("country"),
-                "domain_industry": site_data.get("domain_industry") or site_data.get("domainIndustry"),
-                "status": site_data.get("status") or "New site",
-                "rejected_reason": site_data.get("rejected_reason") or site_data.get("rejectedReason"),
-                "metrics_json": json.dumps(site_data.get("metrics_json", {})) if isinstance(site_data.get("metrics_json"), dict) else site_data.get("metrics_json")
-            }
-        ).mappings().first()
-        out = dict(site_data)
-        if res:
-            out["id"] = res["id"]
-        return out
+    
+    max_retries = 4
+    base_delay = 0.25
+    for attempt in range(max_retries):
+        try:
+            with engine.begin() as conn:
+                res = conn.execute(
+                    text("""
+                        INSERT INTO outreach_sites (
+                            project_slug, url, domain, type, da, pa, ss, traffic,
+                            total_traffic, region1_traffic, region2_traffic, region3_traffic,
+                            sourced_by, agency_name, calculate_sp, sp_percentage, landing_price,
+                            selling_price, country, domain_industry, status, rejected_reason, metrics_json
+                        )
+                        VALUES (
+                            :project_slug, :url, :domain, :type, :da, :pa, :ss, :traffic,
+                            :total_traffic, :region1_traffic, :region2_traffic, :region3_traffic,
+                            :sourced_by, :agency_name, :calculate_sp, :sp_percentage, :landing_price,
+                            :selling_price, :country, :domain_industry, :status, :rejected_reason, :metrics_json
+                        )
+                        RETURNING id, created_at
+                    """),
+                    {
+                        "project_slug": project_slug,
+                        "url": site_data.get("url"),
+                        "domain": site_data.get("domain"),
+                        "type": site_data.get("type"),
+                        "da": site_data.get("da"),
+                        "pa": site_data.get("pa"),
+                        "ss": site_data.get("ss"),
+                        "traffic": site_data.get("traffic"),
+                        "total_traffic": site_data.get("total_traffic") or site_data.get("totalTraffic"),
+                        "region1_traffic": site_data.get("region1_traffic") or site_data.get("region1Traffic"),
+                        "region2_traffic": site_data.get("region2_traffic") or site_data.get("region2Traffic"),
+                        "region3_traffic": site_data.get("region3_traffic") or site_data.get("region3Traffic"),
+                        "sourced_by": site_data.get("sourced_by") or site_data.get("sourcedOption"),
+                        "agency_name": site_data.get("agency_name") or site_data.get("agencyName"),
+                        "calculate_sp": bool(site_data.get("calculate_sp") or site_data.get("calculateSp")),
+                        "sp_percentage": site_data.get("sp_percentage") or site_data.get("spPercentage"),
+                        "landing_price": site_data.get("landing_price") or site_data.get("landingPrice"),
+                        "selling_price": site_data.get("selling_price") or site_data.get("sellingPrice"),
+                        "country": site_data.get("country"),
+                        "domain_industry": site_data.get("domain_industry") or site_data.get("domainIndustry"),
+                        "status": site_data.get("status") or "New site",
+                        "rejected_reason": site_data.get("rejected_reason") or site_data.get("rejectedReason"),
+                        "metrics_json": json.dumps(site_data.get("metrics_json", {})) if isinstance(site_data.get("metrics_json"), dict) else site_data.get("metrics_json")
+                    }
+                ).mappings().first()
+                out = dict(site_data)
+                if res:
+                    out["id"] = res["id"]
+                return out
+        except Exception as e:
+            if _is_db_lock_error(e) and attempt < max_retries - 1:
+                sleep_time = (base_delay * (2 ** attempt)) + random.uniform(0.05, 0.25)
+                print(f"[db] Lock contention inserting outreach site (attempt {attempt + 1}/{max_retries}). Retrying in {sleep_time:.2f}s...", flush=True)
+                time.sleep(sleep_time)
+                continue
+            raise
 
 
 def delete_outreach_site(site_id: int):
-    """Delete an outreach site by ID."""
+    """Delete an outreach site by ID with lock retry."""
     if not os.environ.get("DATABASE_URL"):
         return True
-    with engine.begin() as conn:
-        conn.execute(
-            text("DELETE FROM outreach_sites WHERE id = :id"),
-            {"id": site_id}
-        )
-    return True
+    max_retries = 4
+    base_delay = 0.25
+    for attempt in range(max_retries):
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("DELETE FROM outreach_sites WHERE id = :id"),
+                    {"id": site_id}
+                )
+            return True
+        except Exception as e:
+            if _is_db_lock_error(e) and attempt < max_retries - 1:
+                sleep_time = (base_delay * (2 ** attempt)) + random.uniform(0.05, 0.25)
+                time.sleep(sleep_time)
+                continue
+            raise
 
 
 def update_outreach_site(site_id: int, updates: dict):
-    """Update fields for a specific outreach site."""
+    """Update fields for a specific outreach site with lock retry."""
     if not os.environ.get("DATABASE_URL") or not updates:
         return True
     set_clauses = []
@@ -810,9 +840,20 @@ def update_outreach_site(site_id: int, updates: dict):
     if not set_clauses:
         return True
     query = f"UPDATE outreach_sites SET {', '.join(set_clauses)} WHERE id = :id"
-    with engine.begin() as conn:
-        conn.execute(text(query), params)
-    return True
+    
+    max_retries = 4
+    base_delay = 0.25
+    for attempt in range(max_retries):
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(query), params)
+            return True
+        except Exception as e:
+            if _is_db_lock_error(e) and attempt < max_retries - 1:
+                sleep_time = (base_delay * (2 ** attempt)) + random.uniform(0.05, 0.25)
+                time.sleep(sleep_time)
+                continue
+            raise
 
 
 def bulk_delete_outreach_sites(site_ids: list):

@@ -101,8 +101,9 @@ export default function BrandInfinityLoader({
           <div
             style={{
               fontSize: cfg.fontSize,
-              color: '#64748B',
+              color: '#8A8A9A',
               fontWeight: 600,
+              fontFamily: "'Outfit', var(--font-body, system-ui, sans-serif)",
               letterSpacing: '0.015em',
               display: 'inline-flex',
               alignItems: 'center',

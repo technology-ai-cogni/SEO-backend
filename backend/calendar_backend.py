@@ -14,6 +14,7 @@ import json
 import csv
 import io
 from decimal import Decimal
+import math
 import re
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
@@ -170,6 +171,11 @@ def ensure_calendar_tables():
             conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS category TEXT;"))
             conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS cluster TEXT;"))
             conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS topic_link TEXT;"))
+            conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS ai_summary TEXT;"))
+            conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS ai_advisory TEXT;"))
+            conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS budget_summary JSONB;"))
+            conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS outreach_sites JSONB;"))
+            conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS ai_run_id TEXT;"))
             _ensure_activity_uids(conn)
 
             # Full record of every AI-scheduling analysis run: one row per
@@ -246,6 +252,11 @@ class CalendarActivityPayload(BaseModel):
     category: Optional[str] = None
     cluster: Optional[str] = None
     topic_link: Optional[str] = None
+    ai_summary: Optional[str] = None
+    ai_advisory: Optional[str] = None
+    budget_summary: Optional[Any] = None
+    outreach_sites: Optional[Any] = None
+    ai_run_id: Optional[str] = None
 
 
 class CalendarActivityUpdatePayload(BaseModel):
@@ -266,6 +277,11 @@ class CalendarActivityUpdatePayload(BaseModel):
     category: Optional[str] = None
     cluster: Optional[str] = None
     topic_link: Optional[str] = None
+    ai_summary: Optional[str] = None
+    ai_advisory: Optional[str] = None
+    budget_summary: Optional[Any] = None
+    outreach_sites: Optional[Any] = None
+    ai_run_id: Optional[str] = None
 
 
 class PushPotentialRequest(BaseModel):
@@ -276,6 +292,7 @@ class PushPotentialRequest(BaseModel):
     budget: Optional[float] = None
     quantity: Optional[int] = None
     activity_id: Optional[str] = None  # link this analysis run to the activity being scheduled
+    activity_ids: Optional[List[str]] = None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -307,6 +324,7 @@ def _classify_url_target_type(url: str) -> str:
 def get_potential_keywords_from_db(project_slug_or_name: str) -> Tuple[List[Dict[str, Any]], bool, int]:
     """
     Fetch keywords for project from `keyword_categories`:
+    - Strict Target Type filter: target_type IN ('Landing Page', 'Landing') (case-insensitive)
     - Strict Landing Page filter: landing_page_url IS NOT NULL AND TRIM(landing_page_url) != ''
     - Filter 2: min rank 5 (rank >= 5)
     - Prioritization: High search volume (ordered by SV descending) + Historical Ranking delta
@@ -321,18 +339,18 @@ def get_potential_keywords_from_db(project_slug_or_name: str) -> Tuple[List[Dict
 
     print(f"\n=======================================================", flush=True)
     print(f"[Calendar AI] Fetching candidate keywords for: '{project_slug_or_name}'", flush=True)
-    print(f"[Calendar AI] Filters applied: landing_page_url IS NOT NULL, rank >= 5, ordered by SV DESC", flush=True)
+    print(f"[Calendar AI] Filters applied: target_type IN ('Landing Page', 'Landing'), landing_page_url IS NOT NULL, rank >= 5, ordered by SV DESC", flush=True)
 
     scored = []
     seen = set()
     total_count = 0
     lp_count = 0
 
-    # Step A: Check total project keywords count and landing page URL count
+    # Step A: Check total project keywords count and landing page URL count with target_type 'Landing Page' and rank >= 5
     check_query = text("""
         SELECT 
             COUNT(*) AS total_count,
-            COUNT(CASE WHEN landing_page_url IS NOT NULL AND TRIM(landing_page_url) != '' AND LOWER(TRIM(landing_page_url)) != 'nan' THEN 1 END) AS lp_count
+            COUNT(CASE WHEN landing_page_url IS NOT NULL AND TRIM(landing_page_url) != '' AND LOWER(TRIM(landing_page_url)) != 'nan' AND LOWER(TRIM(target_type)) IN ('landing page', 'landing') AND rank >= 5 THEN 1 END) AS lp_count
         FROM keyword_categories
         WHERE (LOWER(project_name) = :slug OR LOWER(project_name) = :alt_slug)
     """)
@@ -347,10 +365,10 @@ def get_potential_keywords_from_db(project_slug_or_name: str) -> Tuple[List[Dict
         print(f"[Calendar AI] Error checking keyword landing pages count: {e}", file=sys.stderr)
 
     if total_count > 0 and lp_count == 0:
-        print(f"[Calendar AI] Notice: Project '{clean_slug}' has {total_count} keywords, but NONE have landing page URLs!", flush=True)
+        print(f"[Calendar AI] Notice: Project '{clean_slug}' has {total_count} keywords, but NONE have target_type 'Landing Page' with landing page URLs!", flush=True)
         return [], False, total_count
 
-    # Step B: Query with strict landing_page_url check and min rank 5, ordered by search volume descending
+    # Step B: Query with strict target_type 'Landing Page', landing_page_url check, and min rank 5, ordered by search volume descending
     query = text("""
         SELECT id, keyword, category, cluster, rank, sv, kw_diff, landing_page_url, target_type, rank_meta
         FROM keyword_categories
@@ -358,6 +376,7 @@ def get_potential_keywords_from_db(project_slug_or_name: str) -> Tuple[List[Dict
           AND landing_page_url IS NOT NULL
           AND TRIM(landing_page_url) != ''
           AND LOWER(TRIM(landing_page_url)) != 'nan'
+          AND LOWER(TRIM(target_type)) IN ('landing page', 'landing')
           AND rank >= 5
         ORDER BY CAST(NULLIF(regexp_replace(sv, '[^0-9]', '', 'g'), '') AS INTEGER) DESC NULLS LAST, id DESC
     """)
@@ -371,6 +390,11 @@ def get_potential_keywords_from_db(project_slug_or_name: str) -> Tuple[List[Dict
         return [], (lp_count > 0), total_count
 
     for k in rows:
+        # Rule 0: Target type must strictly be 'Landing Page'
+        tt = str(k.get("target_type") or "").strip().lower()
+        if tt not in ("landing page", "landing"):
+            continue
+
         rank = _parse_num(k.get("rank"), 0)
         # Rule 1: Min rank is 5
         if rank < 5:
@@ -435,22 +459,275 @@ def get_potential_keywords_from_db(project_slug_or_name: str) -> Tuple[List[Dict
 
 
 # ─────────────────────────────────────────────────────────────
-# 3.0 OUTREACH SITES INTEGRATION & 3-DOMAIN LIMIT ALLOCATOR
+# 3.0 OUTREACH SITES INTEGRATION, MULTI-FACTOR SCORING & BUDGET ALLOCATION
 # ─────────────────────────────────────────────────────────────
+
+COUNTRY_CODE_MAP = {
+    "india": "IN", "in": "IN",
+    "united states": "US", "usa": "US", "us": "US",
+    "united kingdom": "UK", "uk": "UK", "gb": "UK",
+    "canada": "CA", "ca": "CA",
+    "australia": "AU", "au": "AU",
+    "singapore": "SG", "sg": "SG",
+    "uae": "AE", "united arab emirates": "AE", "ae": "AE"
+}
+
+KNOWN_PROJECT_PROFILES = {
+    "chaitanya": {"country": "India", "industry": "Real Estate / Property"},
+    "billabong": {"country": "India", "industry": "Education / Schools"},
+    "billabonghighschool": {"country": "India", "industry": "Education / Schools"},
+    "owis": {"country": "India", "industry": "Education / Schools"},
+    "euroschool": {"country": "India", "industry": "Education / Schools"},
+    "euroschoolindia": {"country": "India", "industry": "Education / Schools"},
+    "socialoffline": {"country": "India", "industry": "Food & Beverage / Entertainment"},
+    "social-offline": {"country": "India", "industry": "Food & Beverage / Entertainment"},
+    "ittisa": {"country": "India", "industry": "Digital Marketing / Technology"},
+    "dogseechew": {"country": "India", "industry": "Pets / Pet Food"},
+    "dogseechew-aitest-m": {"country": "India", "industry": "Pets / Pet Food"},
+    "goodday": {"country": "India", "industry": "FMCG / Food"}
+}
+
+def get_project_target_profile(project_slug: Optional[str] = None, target_domain: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Look up target_regions (country) and industry/industry_type from the `domains` table,
+    with resilience fallback to known project profiles and keyword categories inference.
+    """
+    profile = {
+        "country": "India",
+        "industry": "General",
+        "domain": ""
+    }
+    clean_slug = (project_slug or "").strip().lower()
+    clean_dom = (target_domain or "").strip().lower().replace("https://", "").replace("http://", "").split("/")[0]
+
+    # Check known project cache first
+    for k, v in KNOWN_PROJECT_PROFILES.items():
+        if k in clean_slug or (clean_dom and k in clean_dom):
+            profile["country"] = v["country"]
+            profile["industry"] = v["industry"]
+            break
+
+    try:
+        with engine.connect() as conn:
+            query = """
+                SELECT domain, project_name, project_slug, target_regions, industry, industry_type
+                FROM domains
+                WHERE (LOWER(project_slug) = :slug OR LOWER(project_name) = :slug)
+            """
+            params: Dict[str, Any] = {"slug": clean_slug or "__none__"}
+            if clean_dom:
+                query += " OR LOWER(domain) LIKE :dom"
+                params["dom"] = f"%{clean_dom}%"
+            query += " LIMIT 1"
+
+            res = conn.execute(text(query), params).mappings().first()
+            if res:
+                d = dict(res)
+                profile["domain"] = d.get("domain") or profile["domain"]
+                ind = d.get("industry") or d.get("industry_type")
+                if ind and str(ind).strip():
+                    profile["industry"] = str(ind).strip()
+                tr = d.get("target_regions")
+                if isinstance(tr, list) and len(tr) > 0 and tr[0]:
+                    profile["country"] = str(tr[0]).strip()
+                elif isinstance(tr, str) and tr.strip():
+                    profile["country"] = tr.strip().strip("[]'\"")
+
+            # If industry is still General/unspecified, infer from keyword_categories clusters/categories
+            if profile.get("industry") in ("General", "", None):
+                cat_rows = conn.execute(text("""
+                    SELECT category, cluster
+                    FROM keyword_categories
+                    WHERE LOWER(project_name) = :slug OR LOWER(project_name) = :alt_slug
+                    LIMIT 20
+                """), {"slug": clean_slug, "alt_slug": clean_slug.replace(" ", "-").replace("_", "-")}).fetchall()
+                cat_text = " ".join([f"{r[0] or ''} {r[1] or ''}" for r in cat_rows]).lower()
+                if any(w in cat_text for w in ["school", "education", "cbse", "icse", "kindergarten", "learning", "academy", "college"]):
+                    profile["industry"] = "Education / Schools"
+                elif any(w in cat_text for w in ["property", "real estate", "villa", "apartment", "plot", "housing", "builder"]):
+                    profile["industry"] = "Real Estate / Property"
+                elif any(w in cat_text for w in ["pet", "dog", "cat", "puppy", "chew", "canine"]):
+                    profile["industry"] = "Pets / Pet Food"
+                elif any(w in cat_text for w in ["restaurant", "bar", "cafe", "food", "dining", "cocktail"]):
+                    profile["industry"] = "Food & Beverage / Entertainment"
+                elif any(w in cat_text for w in ["software", "tech", "saas", "digital", "seo"]):
+                    profile["industry"] = "Technology / Digital"
+    except Exception as e:
+        print(f"[Calendar Profile] Notice resolving project profile for '{clean_slug}': {e}", file=sys.stderr)
+
+    return profile
+
+
+def _parse_traffic_num(val) -> float:
+    if not val:
+        return 0.0
+    s = str(val).strip().replace(',', '')
+    m = re.search(r'\((\d+)\)', s)
+    if m:
+        return float(m.group(1))
+    m = re.search(r'([\d.]+)\s*([KkMmBb])?', s)
+    if not m:
+        return 0.0
+    num = float(m.group(1))
+    unit = (m.group(2) or '').upper()
+    if unit == 'K': num *= 1_000
+    elif unit == 'M': num *= 1_000_000
+    elif unit == 'B': num *= 1_000_000_000
+    return num
+
+
+def extract_country_traffic(site: Dict[str, Any], target_country: str) -> Tuple[float, str]:
+    """
+    Extracts organic/total traffic specifically for the target country.
+    Returns (numeric_traffic, formatted_display).
+    """
+    tc_clean = (target_country or "India").strip().lower()
+    tc_code = COUNTRY_CODE_MAP.get(tc_clean, tc_clean.upper() if len(tc_clean) == 2 else "IN")
+
+    # 1. metrics_json.traffic_data
+    mj = site.get("metrics_json")
+    if isinstance(mj, str):
+        try:
+            mj = json.loads(mj)
+        except Exception:
+            mj = None
+    if isinstance(mj, dict):
+        td_list = mj.get("traffic_data") or []
+        for td in td_list:
+            c_name = str(td.get("country") or "").lower()
+            r_code = str(td.get("region_code") or "").upper()
+            if (tc_code and r_code == tc_code) or (tc_clean and tc_clean in c_name):
+                t = float(td.get("total_traffic") or td.get("organic_traffic") or 0.0)
+                if t > 0:
+                    disp = f"{t/1_000_000:.1f}M ({tc_code})" if t >= 1_000_000 else (f"{t/1_000:.1f}K ({tc_code})" if t >= 1_000 else f"{int(t)} ({tc_code})")
+                    return t, disp
+
+    # 2. region1_traffic, region2_traffic, region3_traffic
+    for reg_key in ["region1_traffic", "region2_traffic", "region3_traffic"]:
+        reg_val = str(site.get(reg_key) or "").strip()
+        if reg_val:
+            prefix = reg_val.split(":")[0].strip().upper()
+            if tc_code and prefix == tc_code:
+                t = _parse_traffic_num(reg_val)
+                return t, reg_val
+
+    # 3. site country match
+    sc = str(site.get("country") or "").lower()
+    if tc_clean and (tc_clean in sc or (tc_code and tc_code == sc.upper())):
+        t = _parse_traffic_num(site.get("total_traffic") or site.get("traffic"))
+        if t > 0:
+            disp = f"{t/1_000_000:.1f}M ({tc_code})" if t >= 1_000_000 else (f"{t/1_000:.1f}K ({tc_code})" if t >= 1_000 else f"{int(t)} ({tc_code})")
+            return t, disp
+
+    # 4. Fallback estimated traffic
+    tot = _parse_traffic_num(site.get("total_traffic") or site.get("traffic"))
+    if tot > 0:
+        est = tot * 0.35
+        disp = f"~{est/1000:.0f}K ({tc_code})" if est >= 1000 else f"~{int(est)} ({tc_code})"
+        return est, disp
+
+    return 0.0, f"0 ({tc_code})"
+
+
+def infer_site_industry(site: Dict[str, Any]) -> str:
+    """
+    Infers the industry of an outreach publisher site based on its data or domain.
+    """
+    ind = site.get("domain_industry") or site.get("industry") or site.get("industry_type")
+    if ind and str(ind).strip() and str(ind).lower() not in ("none", "null", "undefined", "general", ""):
+        return str(ind).strip()
+
+    dom = str(site.get("domain") or site.get("url") or "").lower()
+
+    if any(k in dom for k in ["school", "education", "college", "kids", "learn", "academy", "study", "exam", "tutor", "uni"]):
+        return "Education / Schools"
+    if any(k in dom for k in ["acres", "property", "estate", "housing", "realty", "magicbricks", "villa", "apartment", "plot"]):
+        return "Real Estate / Property"
+    if any(k in dom for k in ["pet", "dog", "cat", "animal", "vet", "puppy", "bark"]):
+        return "Pets / Pet Food"
+    if any(k in dom for k in ["tech", "geek", "software", "code", "dev", "cyber", "ai", "hardware", "web", "cloud"]):
+        return "Technology / Digital"
+    if any(k in dom for k in ["business", "finance", "money", "invest", "stock", "corp", "wealth", "tax"]):
+        return "Business / Finance"
+    if any(k in dom for k in ["health", "med", "doctor", "clinic", "pharma", "care", "wellness", "hospital"]):
+        return "Healthcare / Medical"
+    if any(k in dom for k in ["food", "beverage", "restaurant", "cafe", "bar", "dine", "eat", "recipe", "drinks"]):
+        return "Food & Beverage / Entertainment"
+    if any(k in dom for k in ["listing", "directory", "classified", "yellowpages", "freelisting"]):
+        return "Directory / Business Listing"
+    if any(k in dom for k in ["news", "times", "tribune", "post", "gazette", "daily", "chronicle", "herald"]):
+        return "News & Media"
+
+    p_slug = str(site.get("project_slug") or "").lower()
+    for pk, pv in KNOWN_PROJECT_PROFILES.items():
+        if pk in p_slug:
+            return pv["industry"]
+
+    return "General"
+
+
+def calculate_industry_relevance(site_industry: Optional[str], target_industry: Optional[str]) -> Tuple[float, str, bool, bool]:
+    """
+    Checks whether the outreach domain has the same industry type as our project.
+    Returns (score: float, display_label: str, is_same_industry: bool, is_mismatch: bool).
+    """
+    si = (site_industry or "").strip().lower()
+    ti = (target_industry or "General").strip().lower()
+
+    if not si or si in ("general", "unknown", "none"):
+        return 0.45, "General / Multi-Category", False, False
+
+    if ti in ["general", "all", ""]:
+        return 0.75, "Broad Domain Authority", True, False
+
+    # 1. Exact match
+    if si == ti:
+        return 1.0, f"Same Industry Match ({target_industry})", True, False
+
+    ti_words = set(re.findall(r'[a-zA-Z]+', ti)) - {"and", "or", "type", "the", "in", "of"}
+    si_words = set(re.findall(r'[a-zA-Z]+', si)) - {"and", "or", "type", "the", "in", "of"}
+
+    # 2. Token overlap (e.g., 'Education' and 'Education / Schools', or 'Real Estate' and 'Real Estate / Property')
+    common = ti_words.intersection(si_words)
+    if common:
+        return 0.95, f"Same Industry Match ({', '.join(common).title()})", True, False
+
+    # 3. Known industry clusters
+    related_clusters = [
+        {"real estate", "property", "construction", "architecture", "housing", "interior", "villa", "apartment"},
+        {"technology", "tech", "software", "saas", "cloud", "it", "ai", "hardware", "cybersecurity", "web", "digital"},
+        {"education", "school", "schools", "learning", "college", "university", "academy", "training", "kids", "cbse", "icse"},
+        {"business", "finance", "startups", "consulting", "marketing", "corporate", "investment", "money"},
+        {"health", "medical", "fitness", "wellness", "pharma", "lifestyle", "hospital"},
+        {"pets", "pet", "animals", "dog", "dogs", "cat", "cats", "puppy"},
+        {"food", "beverage", "restaurant", "dining", "entertainment"}
+    ]
+    for cluster in related_clusters:
+        if any(w in cluster for w in ti_words) and any(w in cluster for w in si_words):
+            return 0.85, f"Related Industry Niche ({site_industry})", True, False
+
+    # 4. Multi-category / Directories
+    if any(k in si for k in ["directory", "listing", "classified", "news", "media"]):
+        return 0.40, "General / Directory Publisher", False, False
+
+    # 5. Conflicting / Different Industry Mismatch
+    return 0.05, f"Industry Mismatch ({site_industry})", False, True
+
 
 def fetch_available_outreach_sites(project_slug: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Fetch active outreach sites for the project, falling back to all active sites if none exist for project.
-    Filters out rejected sites and sorts by Domain Authority (DA) descending.
+    Fetch active outreach sites with full quality metrics: DA, SS, Country, Industry, and Traffic.
+    Combines project-specific sites and global active DB sites.
     """
     clean_slug = (project_slug or "").strip().lower()
     sites = []
-    with engine.begin() as conn:
+    with engine.connect() as conn:
         if clean_slug:
             try:
                 res = conn.execute(
                     text("""
-                        SELECT id, domain, url, type, da, pa, ss, landing_price, selling_price, country, domain_industry, status
+                        SELECT id, domain, url, type, da, pa, ss, landing_price, selling_price, country, domain_industry, status,
+                               traffic, total_traffic, region1_traffic, region2_traffic, region3_traffic, metrics_json, project_slug
                         FROM outreach_sites
                         WHERE LOWER(project_slug) = :slug AND LOWER(COALESCE(status, '')) != 'rejected'
                         ORDER BY da DESC NULLS LAST, id ASC
@@ -461,99 +738,323 @@ def fetch_available_outreach_sites(project_slug: Optional[str] = None) -> List[D
             except Exception as e:
                 print(f"[Calendar Outreach] Error querying project sites: {e}", file=sys.stderr)
 
-        if not sites:
-            try:
-                res = conn.execute(
-                    text("""
-                        SELECT id, domain, url, type, da, pa, ss, landing_price, selling_price, country, domain_industry, status
-                        FROM outreach_sites
-                        WHERE LOWER(COALESCE(status, '')) != 'rejected'
-                        ORDER BY da DESC NULLS LAST, id ASC
-                        LIMIT 50
-                    """)
-                )
-                sites = [_clean_for_json(dict(r._mapping)) for r in res]
-            except Exception as e:
-                print(f"[Calendar Outreach] Error querying fallback sites: {e}", file=sys.stderr)
+        try:
+            res = conn.execute(
+                text("""
+                    SELECT id, domain, url, type, da, pa, ss, landing_price, selling_price, country, domain_industry, status,
+                           traffic, total_traffic, region1_traffic, region2_traffic, region3_traffic, metrics_json, project_slug
+                    FROM outreach_sites
+                    WHERE LOWER(COALESCE(status, '')) != 'rejected'
+                    ORDER BY da DESC NULLS LAST, id ASC
+                    LIMIT 60
+                """)
+            )
+            general_sites = [_clean_for_json(dict(r._mapping)) for r in res]
+            seen_domains = {str(s.get("domain") or "").strip().lower() for s in sites}
+            for gs in general_sites:
+                d_key = str(gs.get("domain") or "").strip().lower()
+                if d_key and d_key not in seen_domains:
+                    sites.append(gs)
+                    seen_domains.add(d_key)
+        except Exception as e:
+            print(f"[Calendar Outreach] Error querying general sites: {e}", file=sys.stderr)
 
-    # Fallback curated inventory if table is empty in development
-    if not sites:
-        sites = [
-            {"id": 101, "domain": "techbullion.com", "url": "https://techbullion.com", "da": 62, "ss": "1%", "selling_price": "180", "status": "Active"},
-            {"id": 102, "domain": "bignewsnetwork.com", "url": "https://bignewsnetwork.com", "da": 68, "ss": "2%", "selling_price": "220", "status": "Active"},
-            {"id": 103, "domain": "ventsmagazine.com", "url": "https://ventsmagazine.com", "da": 64, "ss": "1%", "selling_price": "160", "status": "Active"},
-            {"id": 104, "domain": "techtimes.com", "url": "https://techtimes.com", "da": 75, "ss": "1%", "selling_price": "290", "status": "Active"},
-            {"id": 105, "domain": "startupguys.net", "url": "https://startupguys.net", "da": 55, "ss": "1%", "selling_price": "130", "status": "Active"},
-            {"id": 106, "domain": "geekflare.com", "url": "https://geekflare.com", "da": 71, "ss": "1%", "selling_price": "250", "status": "Active"},
-            {"id": 107, "domain": "readwrite.com", "url": "https://readwrite.com", "da": 79, "ss": "2%", "selling_price": "350", "status": "Active"}
-        ]
+    # Curated fallback inventory in Indian Rupees (₹) with high DA, clean SS (0-1%), and regional traffic
+    fallback_inventory = []
+
+    existing_domains = {str(s.get("domain") or "").strip().lower() for s in sites}
+    for fb in fallback_inventory:
+        d_key = str(fb.get("domain") or "").strip().lower()
+        if d_key not in existing_domains:
+            sites.append(fb)
+            existing_domains.add(d_key)
+
     return sites
+
+
+def score_and_rank_outreach_sites(
+    available_sites: List[Dict[str, Any]],
+    target_country: str,
+    target_industry: str,
+    budget_ceiling: Optional[float] = None
+) -> List[Dict[str, Any]]:
+    """
+    Scores candidate outreach sites enforcing:
+    - Same Industry Type Match (Primary criteria, 35% weight)
+    - High Domain Authority (DA, 25% weight)
+    - Low Spam Score (SS, 15% weight)
+    - High Country Traffic in project's country (25% weight)
+    And strictly prioritizes same-industry publishers above all else.
+    """
+    scored = []
+
+    for s in available_sites:
+        item = dict(s)
+        da = int(item.get("da") or 40)
+        ss_str = str(item.get("ss") or "0").replace("%", "").strip()
+        ss_num = _parse_num(ss_str, 0.0)
+
+        # Parse selling price in Rupees (selling_price in DB is directly in Indian Rupees)
+        raw_price = _parse_num(item.get("selling_price") or item.get("landing_price") or 0.0, 0.0)
+        calibrated_price = raw_price if raw_price > 0 else 500.0
+
+        resolved_site_industry = infer_site_industry(item)
+        traffic_val, traffic_disp = extract_country_traffic(item, target_country)
+        ind_score, ind_disp, is_same, is_mismatch = calculate_industry_relevance(resolved_site_industry, target_industry)
+
+        # 1. DA Score (25%)
+        da_score = min(1.0, max(0.1, da / 100.0))
+
+        # 2. Spam Score (15% - penalize > 3%)
+        if ss_num <= 1.0: ss_score = 1.0
+        elif ss_num <= 3.0: ss_score = 0.85
+        elif ss_num <= 5.0: ss_score = 0.50
+        elif ss_num <= 10.0: ss_score = 0.20
+        else: ss_score = 0.05
+
+        # 3. Country Traffic Score (25% - logarithmic scale)
+        if traffic_val > 0:
+            traffic_score = min(1.0, max(0.1, math.log10(traffic_val + 1) / 7.0))
+        else:
+            traffic_score = 0.12
+
+        # 4. Industry Score (35% - strong primary weight)
+        quality_score = (
+            0.35 * ind_score +
+            0.25 * da_score +
+            0.15 * ss_score +
+            0.25 * traffic_score
+        )
+
+        # 5. Cost-Efficiency Optimization (spend less, but never sacrifice quality)
+        price_ratio = max(1.0, calibrated_price / 500.0)
+        cost_efficiency = 1.0 / (1.0 + 0.35 * math.log2(price_ratio))
+
+        # Overall Value Score: 70% Quality + 30% Cost Efficiency
+        # Prioritizes high DA, low spam score, same industry, verified traffic, while strongly favoring economical pricing.
+        value_score = (quality_score * 0.70) + (cost_efficiency * 0.30)
+
+        item["_price"] = round(calibrated_price, 2)
+        item["price"] = f"₹{int(calibrated_price):,}"
+        item["_composite_score"] = round(quality_score, 4)
+        item["_quality_score"] = round(quality_score, 4)
+        item["_cost_efficiency"] = round(cost_efficiency, 4)
+        item["_value_score"] = round(value_score, 4)
+        item["_traffic_val"] = traffic_val
+        item["_traffic_disp"] = traffic_disp
+        item["_ind_score"] = ind_score
+        item["_ind_disp"] = ind_disp
+        item["_site_industry"] = resolved_site_industry
+        item["domain_industry"] = resolved_site_industry
+        item["_is_same_industry"] = is_same
+        item["is_same_industry"] = is_same
+        item["_is_mismatch"] = is_mismatch
+        item["_da"] = da
+        item["_ss"] = f"{int(ss_num)}%"
+        item["_spam_num"] = int(ss_num)
+
+        scored.append(item)
+
+    # Sort:
+    # Tier 0: Same industry match strictly prioritized
+    # Tier 1: General / Multi-category
+    # Tier 2: Mismatched industry
+    # Within each tier: Higher value_score DESC (best quality-to-cost ratio), then price ASC
+    scored.sort(key=lambda x: (
+        0 if x["_is_same_industry"] else (2 if x["_is_mismatch"] else 1),
+        -x["_value_score"],
+        x["_price"]
+    ))
+    return scored
 
 
 def assign_outreach_sites_to_keywords(
     keywords: List[Dict[str, Any]],
     available_sites: List[Dict[str, Any]],
     budget_ceiling: Optional[float] = None,
-    requested_quantity: Optional[int] = None
+    requested_quantity: Optional[int] = None,
+    project_slug: Optional[str] = None,
+    target_country: Optional[str] = None,
+    target_domain: Optional[str] = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
-    Assigns outreach sites to candidate keywords enforcing:
-    1. Maximum 3 assignments per domain in a single campaign batch (anti-footprint / diversification).
-    2. Budget optimization (calculates unit price, total spend, savings).
+    Intelligently assigns outreach sites to candidate keywords enforcing:
+    1. Same Industry Type matching: checks whether domain has same industry as our project.
+    2. High DA, Low Spam Score, verified Target Country traffic.
+    3. Exact requested quantity allocation within budget (or less than budget).
+    4. Strict 3-domain backlink limit rule (anti-footprint).
+    5. Executive AI Budget Analysis & Advisory narrative in Indian Rupees (₹).
     """
     if not available_sites:
-        available_sites = fetch_available_outreach_sites(None)
+        available_sites = fetch_available_outreach_sites(project_slug)
 
-    domain_usage_counts = {}
-    assigned_keywords = []
-    total_cost = 0.0
+    # Resolve project target profile (country & industry)
+    profile = get_project_target_profile(project_slug, target_domain)
+    resolved_country = target_country or profile.get("country") or "India"
+    resolved_industry = profile.get("industry") or "General"
 
-    for kw in keywords:
-        item = dict(kw)
-        # Find next available site where domain usage count < 3
-        chosen_site = None
-        for site in available_sites:
-            d = str(site.get("domain") or "").strip().lower()
-            if not d:
-                continue
-            if domain_usage_counts.get(d, 0) < 3:
-                chosen_site = site
-                domain_usage_counts[d] = domain_usage_counts.get(d, 0) + 1
-                break
+    KEYWORDS_PER_SITE = 4
 
-        # Fallback: if all sites reached 3-count limit, pick site with lowest usage
-        if not chosen_site and available_sites:
-            chosen_site = min(available_sites, key=lambda s: domain_usage_counts.get(str(s.get("domain") or "").lower(), 0))
-            d = str(chosen_site.get("domain") or "").lower()
+    # Determine targeted outreach sites count:
+    # If requested_quantity is explicitly provided (e.g. from calendar activity quantity), that's the number of sites requested.
+    # Otherwise, calculate how many sites are needed for keywords (1 site per 4 keywords).
+    if requested_quantity and requested_quantity > 0:
+        target_sites_qty = requested_quantity
+    else:
+        target_sites_qty = max(1, (len(keywords or []) + KEYWORDS_PER_SITE - 1) // KEYWORDS_PER_SITE)
+
+    req_qty = target_sites_qty
+
+    # Multi-factor score all candidate sites
+    scored_sites = score_and_rank_outreach_sites(
+        available_sites,
+        target_country=resolved_country,
+        target_industry=resolved_industry,
+        budget_ceiling=budget_ceiling
+    )
+
+    # Filter eligible pool: prioritize same-industry sites; avoid mismatched industries
+    same_industry_sites = [s for s in scored_sites if s.get("_is_same_industry")]
+    eligible_pool = same_industry_sites if same_industry_sites else [s for s in scored_sites if not s.get("_is_mismatch")]
+    if not eligible_pool:
+        eligible_pool = scored_sites
+
+    # Total budget cap in Indian Rupees (₹)
+    budget_cap = float(budget_ceiling) if (budget_ceiling and float(budget_ceiling) > 0) else float(req_qty * 10000.0)
+
+    # Allot sites respecting 3-domain limit and budget ceiling
+    domain_usage_counts: Dict[str, int] = {}
+    selected_sites: List[Dict[str, Any]] = []
+    current_spend = 0.0
+
+    # Pass 1: Select top quality same-industry / eligible sites where price fits within budget_cap
+    for s in eligible_pool:
+        if len(selected_sites) >= req_qty:
+            break
+        d = str(s.get("domain") or "").strip().lower()
+        if not d or domain_usage_counts.get(d, 0) >= 3:
+            continue
+
+        site_price = s["_price"]
+        if current_spend + site_price <= budget_cap:
+            selected_sites.append(s)
             domain_usage_counts[d] = domain_usage_counts.get(d, 0) + 1
+            current_spend += site_price
 
-        price_val = _parse_num(chosen_site.get("selling_price") or chosen_site.get("landing_price") or 180.0, 180.0)
+    # Pass 2: If we still need sites, see if any remaining sites in eligible pool fit within remaining budget
+    if len(selected_sites) < req_qty:
+        remaining_budget = budget_cap - current_spend
+        for s in sorted(eligible_pool, key=lambda x: (0 if x.get("_is_same_industry") else 1, -x.get("_value_score", 0), x["_price"])):
+            if len(selected_sites) >= req_qty:
+                break
+            d = str(s.get("domain") or "").strip().lower()
+            if not d or domain_usage_counts.get(d, 0) >= 3 or s in selected_sites:
+                continue
+            if s["_price"] <= remaining_budget:
+                selected_sites.append(s)
+                domain_usage_counts[d] = domain_usage_counts.get(d, 0) + 1
+                current_spend += s["_price"]
+                remaining_budget = budget_cap - current_spend
 
-        item["outreach_site"] = {
-            "id": chosen_site.get("id"),
-            "domain": chosen_site.get("domain") or "outreach-partner.com",
-            "url": chosen_site.get("url") or f"https://{chosen_site.get('domain', 'site.com')}",
-            "da": int(chosen_site.get("da") or 50),
-            "ss": str(chosen_site.get("ss") or "1%"),
-            "price": f"₹{int(price_val)}"
-        }
-        total_cost += price_val
+    # Pass 3: If selected_sites is STILL empty, pick the best value site from eligible pool
+    if len(selected_sites) == 0 and eligible_pool:
+        best_value = max(eligible_pool, key=lambda x: (1 if x.get("_is_same_industry") else 0, x.get("_value_score", 0)))
+        selected_sites.append(best_value)
+        current_spend = best_value["_price"]
+
+    # Assign selected sites to keywords: STRICTLY at most 4 keywords per outreach site
+    assigned_keywords = []
+    for idx, kw in enumerate(keywords):
+        item = dict(kw)
+        lp = kw.get("landing_page_url") or kw.get("topicLink") or kw.get("topic_link") or ""
+        item["landing_page_url"] = lp
+        item["topicLink"] = lp
+        item["topic_link"] = lp
+        site_idx = idx // KEYWORDS_PER_SITE
+        if site_idx < len(selected_sites):
+            chosen_site = selected_sites[site_idx]
+            site_price = chosen_site.get("_price") or 500.0
+            is_same = bool(chosen_site.get("_is_same_industry"))
+            site_ind = chosen_site.get("_site_industry") or resolved_industry
+            ind_badge = "Same Industry Verified" if is_same else ("Multi-Category" if not chosen_site.get("_is_mismatch") else "Cross-Niche")
+            ind_match_label = "Same Industry" if is_same else ("General / Multi-Category" if not chosen_site.get("_is_mismatch") else "Cross-Industry")
+
+            item["outreach_site"] = {
+                "id": chosen_site.get("id"),
+                "domain": chosen_site.get("domain") or "outreach-partner.com",
+                "url": chosen_site.get("url") or f"https://{chosen_site.get('domain', 'site.com')}",
+                "da": int(chosen_site.get("_da") or chosen_site.get("da") or 50),
+                "ss": chosen_site.get("_ss") or str(chosen_site.get("ss") or "0%"),
+                "spam_score": int(chosen_site.get("_spam_num") or 0),
+                "price": f"₹{int(site_price):,}",
+                "selling_price": f"₹{int(site_price):,}",
+                "price_num": round(site_price, 2),
+                "country": chosen_site.get("country") or resolved_country,
+                "country_traffic": chosen_site.get("_traffic_disp") or "Verified Traffic",
+                "domain_industry": site_ind,
+                "project_industry": resolved_industry,
+                "is_same_industry": is_same,
+                "industry_match_status": ind_match_label,
+                "match_rationale": f"{ind_badge} (Domain Industry: {site_ind} | Project: {resolved_industry}), DA {int(chosen_site.get('_da') or 50)}, {chosen_site.get('_ss') or '0%'} spam, {chosen_site.get('_traffic_disp') or ''} in {resolved_country}"
+            }
+        else:
+            item["outreach_site"] = None
+
         assigned_keywords.append(item)
 
-    # Budget & Activity anti-waste optimization
-    req_qty = requested_quantity or len(assigned_keywords)
-    budget_cap = budget_ceiling if (budget_ceiling and budget_ceiling > 0) else float(req_qty * 200.0)
-    recommended_qty = len(assigned_keywords)
+    num_sites_used = min(len(selected_sites), max(1, (len(keywords) + KEYWORDS_PER_SITE - 1) // KEYWORDS_PER_SITE))
+    total_cost = sum(s.get("_price", 500.0) for s in selected_sites[:num_sites_used])
+
+    recommended_qty = min(len(selected_sites) * KEYWORDS_PER_SITE, len(keywords)) if keywords else len(selected_sites) * KEYWORDS_PER_SITE
     savings = max(0.0, budget_cap - total_cost)
+
+    # Quality metrics summary
+    da_list = [int(s.get("_da") or s.get("da") or 50) for s in selected_sites] or [50]
+    min_da = min(da_list)
+    max_da = max(da_list)
+    ss_list = [s.get("_ss") or "0%" for s in selected_sites] or ["0%"]
+    min_ss = min(ss_list)
+    max_ss = max(ss_list)
+
+    has_same_ind = any(s.get("_is_same_industry") for s in selected_sites)
+    industry_confirmation = (
+        f"verified same-industry publishers matching your project's '{resolved_industry}' industry"
+        if has_same_ind else
+        f"high-authority publisher domains matching your '{resolved_industry}' niche"
+    )
+
+    # Generate the requested executive AI Budget Analysis Commentary
+    if savings > 0:
+        anti_waste_advisory = (
+            f"I've identified these {recommended_qty} keywords with strong rank-recovery potential (allocated strictly 4 keywords per outreach site). "
+            f"To keep your budget spend minimal without sacrificing quality, I've prioritized publishers with the highest authority-to-cost value: "
+            f"planned spend is just ₹{int(total_cost):,} out of your ₹{int(budget_cap):,} budget (saving ₹{int(savings):,}), "
+            f"while maintaining high Domain Authority (DA {min_da}–{max_da}), clean spam score ({min_ss}–{max_ss}), and verified {resolved_country} audience reach."
+        )
+    else:
+        anti_waste_advisory = (
+            f"I've identified these {recommended_qty} priority keywords and allocated {num_sites_used} {industry_confirmation} "
+            f"(4 keywords per outreach site, DA {min_da}–{max_da}, clean {min_ss}–{max_ss} spam score) with verified {resolved_country} traffic, "
+            f"budget-optimized for highest authority-to-cost value within your ₹{int(budget_cap):,} budget."
+        )
 
     budget_summary = {
         "requested_quantity": req_qty,
+        "requested_activities": req_qty,
         "recommended_quantity": recommended_qty,
+        "recommended_activities": recommended_qty,
         "redundant_posts_saved": max(0, req_qty - recommended_qty),
         "budget_cap": round(budget_cap, 2),
+        "total_budget_cap": round(budget_cap, 2),
         "planned_spend": round(total_cost, 2),
         "projected_savings": round(savings, 2),
-        "avg_cost_per_post": round(total_cost / max(1, recommended_qty), 2)
+        "avg_cost_per_post": round(total_cost / max(1, recommended_qty), 2),
+        "anti_waste_advisory": anti_waste_advisory,
+        "analysis_narrative": anti_waste_advisory,
+        "target_country": resolved_country,
+        "target_industry": resolved_industry,
+        "top_da_range": f"{min_da} - {max_da}" if min_da != max_da else str(min_da),
+        "spam_score_range": f"{min_ss} - {max_ss}" if min_ss != max_ss else str(min_ss)
     }
 
     return assigned_keywords, budget_summary
@@ -983,53 +1484,33 @@ def verify_keyword_drop_with_agent(
     }
 
 
-def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "") -> Dict[str, Any]:
+def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "", country_code: str = "in") -> Dict[str, Any]:
     """
-    Live rank re-check + Top-3 SERP landing page verification for one keyword.
-    Exclusively powered by Bright Data Web Unlocker SERP zone.
+    Live rank check + Top-3 SERP landing page verification for one keyword.
+    Exclusively powered by Firecrawl (strictly 1 hit, no secondary recheck).
     """
     kw_text = str(k.get("keyword") or "").strip()
     lp_url = str(k.get("landing_page_url") or k.get("topicLink") or "").strip()
     prev_rank = int(_parse_num(k.get("rank") or k.get("prev_rank"), 0))
 
-    print(f"[Calendar AI Check] >>> Checking keyword via Bright Data: \"{kw_text}\" | DB Rank: #{prev_rank} | LP URL: {lp_url or 'None'}", flush=True)
+    print(f"[Calendar AI Check] >>> Checking keyword via Firecrawl (single hit): \"{kw_text}\" | DB Rank: #{prev_rank} | LP URL: {lp_url or 'None'}", flush=True)
 
     new_rank = prev_rank
     top_links = []
 
-    # Live Check via Bright Data Web Unlocker
+    # Single Live Check via Firecrawl (strictly 1 hit, no recheck)
     try:
-        from services import rank_checker
-        new_rank, top_links = rank_checker.find_rank(
-            kw_text, lp_url, default_domain=default_domain, country_code="in"
+        from services import rank_checker_fc
+        new_rank, top_links = rank_checker_fc.find_rank(
+            kw_text, lp_url, default_domain=default_domain, country_code=country_code
         )
         top_links = top_links or []
     except Exception as e:
-        print(f"[Calendar AI Check] Bright Data rank check error for \"{kw_text}\": {e}", flush=True)
+        print(f"[Calendar AI Check] Firecrawl rank check error for \"{kw_text}\": {e}", flush=True)
         new_rank = prev_rank
         top_links = []
 
-    # 2. TRIGGER MULTI-ENGINE VERIFICATION AGENT IF PREVIOUSLY RANKED (< 101) AND NOW SHOWS 101
-    if prev_rank < 101 and new_rank == 101:
-        verified_data = verify_keyword_drop_with_agent(
-            k, default_domain=default_domain, country_code="in"
-        )
-        item = dict(k)
-        item["prev_rank"] = prev_rank
-        item["new_rank"] = verified_data["verified_rank"]
-        item["rank"] = verified_data["verified_rank"]
-        item["delta"] = verified_data["delta"]
-        item["top3_is_landing"] = verified_data["top3_is_landing"]
-        item["top3_types"] = verified_data["top3_types"]
-        item["batch"] = verified_data["batch"]
-        item["confidence"] = verified_data["confidence"]
-        item["confidence_breakdown"] = verified_data["confidence_breakdown"]
-        item["reason"] = verified_data["reason"]
-        item["agent_analysis"] = verified_data["agent_analysis"]
-        item["verification_details"] = verified_data
-        return item
-
-    # 3. Standard flow when no 101 anomaly detected
+    # Single-hit evaluation -- no secondary recheck
     top3 = top_links[:3] if top_links else []
     top3_types = []
     for u in top3:
@@ -1058,7 +1539,10 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "") -> D
         batch = "medium"
         confidence = 82
         drop_str = f"{abs(delta)} spots (#{prev_rank} -> #{new_rank})" if new_rank != 101 else f"dropped outside top rankings (#{prev_rank} -> #{new_rank})"
-        reason = f"Rank extremely dropped by {drop_str}. Prime recovery push target; top 3 are Landing Pages."
+        reason = f"Rank dropped by {drop_str}. Prime recovery push target; top 3 are Landing Pages."
+    elif delta <= -2:
+        batch = "medium" if top3_is_landing else "low"
+        reason = f"Rank shifted from #{prev_rank} to #{new_rank}. {'Top 3 are Landing Pages.' if top3_is_landing else 'SERP intent mismatch.'}"
     else:
         batch = "low"
         confidence = 40 if top3_is_landing else 25
@@ -1066,16 +1550,16 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "") -> D
             types_str = ", ".join(top3_types) if top3_types else "Blogs"
             reason = f"Top 3 SERP results shifted away from landing pages ({types_str}). Search intent mismatch."
         else:
-            reason = f"Rank didn't even move (#{prev_rank} -> #{new_rank}, delta: {delta:+d}). Stagnant SERP velocity."
+            reason = f"Rank didn't move (#{prev_rank} -> #{new_rank}, delta: {delta:+d}). Stagnant SERP velocity."
 
-    # Explainable confidence calculation for standard items
+    # Explainable confidence calculation
     conf_calc = {
         "total_score": confidence,
         "source_consensus_pts": 25,
         "match_precision_pts": 25 if new_rank < 101 else 15,
         "intent_alignment_pts": 25 if top3_is_landing else 15,
         "data_depth_pts": 15 if len(top_links) >= 10 else 10,
-        "explanation": f"Confidence Score: {confidence}% (Evaluated via live SERP scan and Top-3 intent classification)."
+        "explanation": f"Confidence Score: {confidence}% (Evaluated via single Firecrawl SERP scan and Top-3 intent classification)."
     }
 
     batch_display = "BATCH 1 (High - Improved)" if batch == "high" else ("BATCH 2 (Medium - Dropped)" if batch == "medium" else "BATCH 3 (Low - Stagnant)")
@@ -1106,8 +1590,8 @@ def calculate_live_serp_batches(
     country: str = "India"
 ) -> Dict[str, Any]:
     """
-    Evaluates candidate landing page keywords against live Google SERP:
-    - Runs parallel live rank checks
+    Evaluates candidate landing page keywords against live Google SERP via Firecrawl:
+    - Runs parallel live rank checks (strictly 1 hit per keyword on Firecrawl)
     - Checks top 3 SERP results for Landing Page intent
     - Places into Batch 1 (improved), Batch 2 (dropped), or Batch 3 (didn't move / non-landing)
     """
@@ -1116,15 +1600,28 @@ def calculate_live_serp_batches(
         return {"batches": {"high": [], "medium": [], "low": []}, "summary": "No keywords supplied.", "evaluated_keywords": []}
 
     print(f"\n=======================================================", flush=True)
-    print(f"[Calendar AI Check] Starting Live Google SERP Verification for {len(potential)} keywords", flush=True)
+    print(f"[Calendar AI Check] Starting Live Google SERP Verification via Firecrawl (single hit) for {len(potential)} keywords", flush=True)
     print(f"[Calendar AI Check] Target Domain: '{domain or 'N/A'}' | Country: '{country}'", flush=True)
     print(f"=======================================================", flush=True)
+
+    # Determine country code for Firecrawl
+    cc = "in"
+    if country:
+        c_lower = country.strip().lower()
+        if c_lower in ("united states", "usa", "us"):
+            cc = "us"
+        elif c_lower in ("india", "in"):
+            cc = "in"
+        elif c_lower in ("united kingdom", "uk", "gb"):
+            cc = "gb"
+        elif len(c_lower) == 2:
+            cc = c_lower
 
     from concurrent.futures import ThreadPoolExecutor
     batches = {"high": [], "medium": [], "low": []}
 
     with ThreadPoolExecutor(max_workers=5) as executor:
-        evaluated = list(executor.map(lambda k: _check_single_keyword_live(k, default_domain=domain), potential))
+        evaluated = list(executor.map(lambda k: _check_single_keyword_live(k, default_domain=domain, country_code=cc), potential))
 
     for item in evaluated:
         b = item.get("batch", "low")
@@ -1311,13 +1808,14 @@ def list_calendar_activities(
         norm_st = _normalize_status(cleaned_row.get("status"))
         cleaned_row["status"] = norm_st
 
-        # Deserialize potential_keywords if stored as string
-        pk = cleaned_row.get("potential_keywords")
-        if isinstance(pk, str):
-            try:
-                cleaned_row["potential_keywords"] = json.loads(pk)
-            except Exception:
-                cleaned_row["potential_keywords"] = []
+        # Deserialize JSONB columns if stored as string
+        for jfield in ("potential_keywords", "budget_summary", "outreach_sites"):
+            jf = cleaned_row.get(jfield)
+            if isinstance(jf, str):
+                try:
+                    cleaned_row[jfield] = json.loads(jf)
+                except Exception:
+                    cleaned_row[jfield] = [] if jfield != "budget_summary" else None
 
         # Count tally
         if norm_st in counts:
@@ -1364,12 +1862,15 @@ def create_calendar_activity(data: Dict[str, Any]) -> Dict[str, Any]:
     budget_raw = data.get("budget")
     budget_num = _parse_num(budget_raw, 0.0)
 
-    # Format potential_keywords JSON
+    # Format JSONB fields
     pk = data.get("potential_keywords") or []
-    if not isinstance(pk, str):
-        pk_json = json.dumps(pk)
-    else:
-        pk_json = pk
+    pk_json = json.dumps(pk) if not isinstance(pk, str) else pk
+
+    bs = data.get("budget_summary")
+    bs_json = json.dumps(bs) if (bs is not None and not isinstance(bs, str)) else bs
+
+    os_val = data.get("outreach_sites")
+    os_json = json.dumps(os_val) if (os_val is not None and not isinstance(os_val, str)) else os_val
 
     with engine.begin() as conn:
         # Generate activity_uid if not provided
@@ -1383,11 +1884,13 @@ def create_calendar_activity(data: Dict[str, Any]) -> Dict[str, Any]:
                     id, activity_uid, activity_name, project_name, main_poc, content_poc,
                     quantity, budget, "user", period, scheduler, auditor,
                     status, potential_keywords, keyword_name, category, cluster, topic_link,
+                    ai_summary, ai_advisory, budget_summary, outreach_sites, ai_run_id,
                     created_at, updated_at
                 ) VALUES (
                     :id, :activity_uid, :activity_name, :project_name, :main_poc, :content_poc,
                     :quantity, :budget, :user, :period, :scheduler, :auditor,
                     :status, CAST(:potential_keywords AS jsonb), :keyword_name, :category, :cluster, :topic_link,
+                    :ai_summary, :ai_advisory, CAST(:budget_summary AS jsonb), CAST(:outreach_sites AS jsonb), :ai_run_id,
                     now(), now()
                 )
             """),
@@ -1409,7 +1912,12 @@ def create_calendar_activity(data: Dict[str, Any]) -> Dict[str, Any]:
                 "keyword_name": data.get("keyword_name"),
                 "category": data.get("category"),
                 "cluster": data.get("cluster"),
-                "topic_link": data.get("topic_link")
+                "topic_link": data.get("topic_link"),
+                "ai_summary": data.get("ai_summary"),
+                "ai_advisory": data.get("ai_advisory"),
+                "budget_summary": bs_json,
+                "outreach_sites": os_json,
+                "ai_run_id": str(data.get("ai_run_id")) if data.get("ai_run_id") else None
             }
         )
         res = conn.execute(text("SELECT * FROM off_page_activities WHERE id = :id"), {"id": activity_id}).first()
@@ -1423,6 +1931,13 @@ def get_calendar_activity(activity_id: str) -> Optional[Dict[str, Any]]:
             return None
         row = _clean_for_json(dict(res._mapping))
         row["status"] = _normalize_status(row.get("status"))
+        for jfield in ("potential_keywords", "budget_summary", "outreach_sites"):
+            jf = row.get(jfield)
+            if isinstance(jf, str):
+                try:
+                    row[jfield] = json.loads(jf)
+                except Exception:
+                    pass
         return row
 
 
@@ -1431,7 +1946,8 @@ def update_calendar_activity(activity_id: str, data: Dict[str, Any]) -> Optional
     allowed = [
         "activity_uid", "activity_name", "project_name", "main_poc", "content_poc",
         "quantity", "budget", "user", "period", "scheduler", "auditor",
-        "status", "potential_keywords", "keyword_name", "category", "cluster", "topic_link"
+        "status", "potential_keywords", "keyword_name", "category", "cluster", "topic_link",
+        "ai_summary", "ai_advisory", "budget_summary", "outreach_sites", "ai_run_id"
     ]
     updates = []
     params = {"id": activity_id}
@@ -1451,9 +1967,9 @@ def update_calendar_activity(activity_id: str, data: Dict[str, Any]) -> Optional
             elif field == "quantity":
                 updates.append("quantity = :quantity")
                 params["quantity"] = int(val or 1)
-            elif field == "potential_keywords":
-                updates.append("potential_keywords = CAST(:potential_keywords AS jsonb)")
-                params["potential_keywords"] = json.dumps(val) if not isinstance(val, str) else val
+            elif field in ("potential_keywords", "budget_summary", "outreach_sites"):
+                updates.append(f"{field} = CAST(:{field} AS jsonb)")
+                params[field] = json.dumps(val) if not isinstance(val, str) else val
             else:
                 updates.append(f"{field} = :{field}")
                 params[field] = str(val) if val is not None else None
@@ -1467,7 +1983,17 @@ def update_calendar_activity(activity_id: str, data: Dict[str, Any]) -> Optional
     with engine.begin() as conn:
         conn.execute(text(query), params)
         res = conn.execute(text("SELECT * FROM off_page_activities WHERE id = :id"), {"id": activity_id}).first()
-        return _clean_for_json(dict(res._mapping)) if res else None
+        if not res:
+            return None
+        row = _clean_for_json(dict(res._mapping))
+        for jfield in ("potential_keywords", "budget_summary", "outreach_sites"):
+            jf = row.get(jfield)
+            if isinstance(jf, str):
+                try:
+                    row[jfield] = json.loads(jf)
+                except Exception:
+                    pass
+        return row
 
 
 def delete_calendar_activity(activity_id: str) -> bool:
@@ -1681,16 +2207,24 @@ def mark_calendar_ai_selected(activity_id: str, selected_keywords: List[str]) ->
         print(f"[Calendar AI] Failed to mark selected keywords: {e}", file=sys.stderr, flush=True)
 
 
-def list_calendar_ai_runs(project_slug: Optional[str] = None, activity_id: Optional[str] = None, limit: int = 20):
+def list_calendar_ai_runs(
+    project_slug: Optional[str] = None,
+    activity_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    limit: int = 20
+):
     """Run-level summary list (one entry per analysis run)."""
     _ensure_ai_analysis_table()
     where, params = [], {"limit": limit}
-    if project_slug:
-        where.append("project_slug = :ps")
-        params["ps"] = project_slug
     if activity_id:
         where.append("activity_id = :aid")
         params["aid"] = str(activity_id)
+    elif run_id:
+        where.append("run_id = :rid")
+        params["rid"] = str(run_id)
+    elif project_slug:
+        where.append("project_slug = :ps")
+        params["ps"] = project_slug
     wsql = ("WHERE " + " AND ".join(where)) if where else ""
     with engine.begin() as conn:
         res = conn.execute(text(f"""
@@ -1699,6 +2233,7 @@ def list_calendar_ai_runs(project_slug: Optional[str] = None, activity_id: Optio
                    MAX(summary) AS summary,
                    MAX(budget_used) AS budget_used,
                    MAX(quantity_requested) AS quantity_requested,
+                   (ARRAY_AGG(budget_summary) FILTER (WHERE budget_summary IS NOT NULL))[1] AS budget_summary,
                    COUNT(*) AS total_keywords,
                    COUNT(*) FILTER (WHERE batch = 'high')   AS batch_high,
                    COUNT(*) FILTER (WHERE batch = 'medium')  AS batch_medium,
@@ -1841,7 +2376,10 @@ def get_potential_keywords_endpoint(
         potential,
         available_sites,
         budget_ceiling=budget,
-        requested_quantity=quantity
+        requested_quantity=quantity,
+        project_slug=project_slug,
+        target_country=country,
+        target_domain=domain
     )
 
     if run_ai:
@@ -1876,7 +2414,25 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
     has_landing_pages = True
     if not keywords and payload.project_slug:
         keywords, has_landing_pages, _ = get_potential_keywords_from_db(payload.project_slug)
-
+    elif keywords:
+        # Enforce all 3 core criteria: target_type is landing page, landing_page_url is present, and rank >= 5
+        filtered_kws = []
+        for k in keywords:
+            tt = str(k.get("target_type") or "").strip().lower()
+            if tt not in ("landing page", "landing"):
+                continue
+            lp = str(k.get("landing_page_url") or k.get("topicLink") or k.get("topic_link") or "").strip()
+            if not lp or lp.lower() == "nan":
+                continue
+            rank = _parse_num(k.get("rank"), 0)
+            if rank < 5:
+                continue
+            k["landing_page_url"] = lp
+            k["topicLink"] = lp
+            k["topic_link"] = lp
+            filtered_kws.append(k)
+        keywords = filtered_kws
+    print('Selected Keywords from intent table\n', keywords)
     if not has_landing_pages:
         return {
             "batches": {"high": [], "medium": [], "low": []},
@@ -1905,12 +2461,32 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
         eval_kws,
         available_sites,
         budget_ceiling=payload.budget,
-        requested_quantity=payload.quantity
+        requested_quantity=payload.quantity,
+        project_slug=payload.project_slug,
+        target_country=payload.country,
+        target_domain=payload.domain
     )
     ai_res["evaluated_keywords"] = assigned_kws
     ai_res["available_outreach_sites"] = available_sites
     ai_res["budget_optimization"] = budget_summary
     ai_res["has_landing_pages"] = True
+
+    # Sync enriched outreach sites and landing page urls back into batches
+    assigned_by_id = {k.get("id"): k for k in assigned_kws}
+    for b_key in ("high", "medium", "low"):
+        batch_items = ai_res.get("batches", {}).get(b_key, [])
+        enriched_batch = []
+        for kw in batch_items:
+            kw_id = kw.get("id")
+            if kw_id in assigned_by_id:
+                enriched_batch.append(assigned_by_id[kw_id])
+            else:
+                kw_copy = dict(kw)
+                kw_copy["landing_page_url"] = kw.get("landing_page_url") or kw.get("topicLink") or kw.get("topic_link") or ""
+                kw_copy["topicLink"] = kw_copy["landing_page_url"]
+                kw_copy["topic_link"] = kw_copy["landing_page_url"]
+                enriched_batch.append(kw_copy)
+        ai_res["batches"][b_key] = enriched_batch
 
     # Persist the whole run (every evaluated keyword, not just the picked ones)
     ai_res["run_id"] = save_calendar_ai_run(
@@ -1931,10 +2507,11 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
 def list_ai_runs_endpoint(
     project_slug: Optional[str] = Query(None),
     activity_id: Optional[str] = Query(None),
+    run_id: Optional[str] = Query(None),
     limit: int = Query(20),
 ):
     """Past AI-scheduling analysis runs (one summary row per run)."""
-    return {"runs": list_calendar_ai_runs(project_slug=project_slug, activity_id=activity_id, limit=limit)}
+    return {"runs": list_calendar_ai_runs(project_slug=project_slug, activity_id=activity_id, run_id=run_id, limit=limit)}
 
 
 @router.get("/ai-runs/{run_id}")
@@ -1943,7 +2520,16 @@ def get_ai_run_endpoint(run_id: str):
     rows = get_calendar_ai_run(run_id)
     if not rows:
         raise HTTPException(status_code=404, detail="Analysis run not found.")
-    return {"run_id": run_id, "keywords": rows, "total": len(rows)}
+    first = rows[0] if rows else {}
+    return {
+        "run_id": run_id,
+        "summary": first.get("summary"),
+        "budget_summary": first.get("budget_summary"),
+        "budget_used": first.get("budget_used"),
+        "quantity_requested": first.get("quantity_requested"),
+        "keywords": rows,
+        "total": len(rows)
+    }
 
 
 @router.get("/activities")
@@ -1977,6 +2563,19 @@ def update_activity_endpoint(activity_id: str, payload: CalendarActivityUpdatePa
     updated = update_calendar_activity(activity_id, data)
     if not updated:
         raise HTTPException(status_code=404, detail="Activity not found")
+
+    # Link activity to AI run in calendar_ai_analysis if ai_run_id was provided
+    run_id = data.get("ai_run_id")
+    if run_id:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    UPDATE calendar_ai_analysis
+                    SET activity_id = :aid
+                    WHERE run_id = :rid AND (activity_id IS NULL OR activity_id = :aid)
+                """), {"aid": str(activity_id), "rid": str(run_id)})
+        except Exception as err:
+            print(f"[Calendar API] Error linking activity to AI run: {err}", file=sys.stderr)
 
     # When keywords are confirmed onto an activity, flag which ones the user
     # actually picked on that activity's latest analysis run.

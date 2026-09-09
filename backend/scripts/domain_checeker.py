@@ -184,9 +184,9 @@ def fetch_seranking_regional_traffic(target_info: dict, regions: list = None, ap
         full_url = f"{url}?domain={quote(domain)}&source={code}&with_subdomains=1"
         req = Request(full_url, headers=headers)
         
-        for attempt in range(3):
+        for attempt in range(2):
             try:
-                with urlopen(req, timeout=6) as resp:
+                with urlopen(req, timeout=4) as resp:
                     data = json.loads(resp.read().decode('utf-8'))
                     raw = data.get("data", data)
                     
@@ -219,11 +219,12 @@ def fetch_seranking_regional_traffic(target_info: dict, regions: list = None, ap
                         }
                     return None
             except Exception:
-                time.sleep(0.3 * (attempt + 1))
+                if attempt < 1:
+                    time.sleep(0.2)
         return None
 
     results = []
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=15) as executor:
         futures = [executor.submit(fetch_single_region, r) for r in regions]
         for future in as_completed(futures):
             res = future.result()
@@ -252,11 +253,15 @@ def check_domain_metrics(link_input: str, rapidapi_key: str = None, regions: lis
     Analyze a URL/domain:
     - DA, PA, DR, Spam Score, AND Total Traffic STRICTLY from RapidAPI.
     - Dynamic Regional Traffic Breakdown strictly from SE Ranking API.
+    Both RapidAPI and SE Ranking run concurrently for maximum speed.
     """
 
     target_info = parse_target(link_input)
-    da_data = fetch_rapidapi_da_metrics(target_info, rapidapi_key=rapidapi_key)
-    regional_data = fetch_seranking_regional_traffic(target_info, regions=regions)
+    with ThreadPoolExecutor(max_workers=2) as parallel_exec:
+        fut_da = parallel_exec.submit(fetch_rapidapi_da_metrics, target_info, rapidapi_key=rapidapi_key)
+        fut_reg = parallel_exec.submit(fetch_seranking_regional_traffic, target_info, regions=regions)
+        da_data = fut_da.result()
+        regional_data = fut_reg.result()
 
     da = da_data.get("da", 0) if isinstance(da_data, dict) else 0
     pa = da_data.get("pa", 0) if isinstance(da_data, dict) else 0
