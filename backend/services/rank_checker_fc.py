@@ -16,7 +16,7 @@ FIRECRAWL_API_KEY = os.environ.get("FIRECRAWL_API_KEY", "fc-dfc34d3e32c64588a555
 FIRECRAWL_SEARCH_URL = "https://api.firecrawl.dev/v2/search"
 
 DEFAULT_DOMAIN = os.environ.get("DEFAULT_DOMAIN", "")
-TOP_N = int(os.environ.get("TOP_N", "30"))
+TOP_N = int(os.environ.get("TOP_N", "40"))
 NOT_FOUND_RANK = 101
 COUNTRY_CODE = os.environ.get("SERP_COUNTRY", "in")
 

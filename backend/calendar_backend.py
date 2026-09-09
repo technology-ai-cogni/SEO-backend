@@ -171,6 +171,50 @@ def ensure_calendar_tables():
             conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS cluster TEXT;"))
             conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS topic_link TEXT;"))
             _ensure_activity_uids(conn)
+
+            # Full record of every AI-scheduling analysis run: one row per
+            # candidate keyword per run (not just the ones the user picks).
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS calendar_ai_analysis (
+                    id BIGSERIAL PRIMARY KEY,
+                    run_id UUID NOT NULL,
+                    activity_id UUID,
+                    project_slug TEXT,
+                    domain TEXT,
+                    country TEXT DEFAULT 'India',
+                    keyword TEXT NOT NULL,
+                    keyword_id TEXT,
+                    category TEXT,
+                    cluster TEXT,
+                    db_rank INTEGER,
+                    prev_rank INTEGER,
+                    live_rank INTEGER,
+                    delta INTEGER,
+                    sv INTEGER,
+                    kd INTEGER,
+                    target_type TEXT,
+                    batch TEXT,
+                    confidence INTEGER,
+                    confidence_breakdown JSONB,
+                    reason TEXT,
+                    top3_types JSONB,
+                    top3_is_landing BOOLEAN,
+                    top_links JSONB,
+                    verification JSONB,
+                    outreach_site JSONB,
+                    landing_page_url TEXT,
+                    selected BOOLEAN DEFAULT FALSE,
+                    budget_used NUMERIC(12, 2),
+                    quantity_requested INTEGER,
+                    summary TEXT,
+                    budget_summary JSONB,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+            """))
+            conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS budget_summary JSONB;"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_run ON calendar_ai_analysis (run_id);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_project ON calendar_ai_analysis (project_slug, created_at DESC);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_activity ON calendar_ai_analysis (activity_id);"))
     except Exception as err:
         print(f"[calendar_backend] Schema check notice: {err}", file=sys.stderr, flush=True)
 
@@ -231,6 +275,7 @@ class PushPotentialRequest(BaseModel):
     keywords: Optional[List[Dict[str, Any]]] = None
     budget: Optional[float] = None
     quantity: Optional[int] = None
+    activity_id: Optional[str] = None  # link this analysis run to the activity being scheduled
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1431,6 +1476,254 @@ def delete_calendar_activity(activity_id: str) -> bool:
         return res.rowcount > 0
 
 
+# ─────────────────────────────────────────────────────────────
+#  AI-scheduling analysis persistence (calendar_ai_analysis)
+# ─────────────────────────────────────────────────────────────
+
+_AI_TABLE_READY = False
+
+
+def _ensure_ai_analysis_table():
+    """Create calendar_ai_analysis on first use (ensure_calendar_tables() is
+    not run on import in this deployment)."""
+    global _AI_TABLE_READY
+    if _AI_TABLE_READY:
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS calendar_ai_analysis (
+                    id BIGSERIAL PRIMARY KEY,
+                    run_id UUID NOT NULL,
+                    activity_id UUID,
+                    project_slug TEXT,
+                    domain TEXT,
+                    country TEXT DEFAULT 'India',
+                    keyword TEXT NOT NULL,
+                    keyword_id TEXT,
+                    category TEXT,
+                    cluster TEXT,
+                    db_rank INTEGER,
+                    prev_rank INTEGER,
+                    live_rank INTEGER,
+                    delta INTEGER,
+                    sv INTEGER,
+                    kd INTEGER,
+                    target_type TEXT,
+                    batch TEXT,
+                    confidence INTEGER,
+                    confidence_breakdown JSONB,
+                    reason TEXT,
+                    top3_types JSONB,
+                    top3_is_landing BOOLEAN,
+                    top_links JSONB,
+                    verification JSONB,
+                    outreach_site JSONB,
+                    landing_page_url TEXT,
+                    selected BOOLEAN DEFAULT FALSE,
+                    budget_used NUMERIC(12, 2),
+                    quantity_requested INTEGER,
+                    summary TEXT,
+                    budget_summary JSONB,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+            """))
+            conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS budget_summary JSONB;"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_run ON calendar_ai_analysis (run_id);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_project ON calendar_ai_analysis (project_slug, created_at DESC);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_activity ON calendar_ai_analysis (activity_id);"))
+        _AI_TABLE_READY = True
+    except Exception as e:
+        print(f"[Calendar AI] calendar_ai_analysis table ensure notice: {e}", file=sys.stderr, flush=True)
+
+
+def _as_int(v, default=None):
+    """Int coercion that PRESERVES the sign (delta/prev_rank can be negative);
+    _parse_num strips minus signs so it can't be used here."""
+    if v is None or v == "":
+        return default
+    try:
+        return int(round(float(v)))
+    except (ValueError, TypeError):
+        s = str(v).strip()
+        neg = s.startswith("-")
+        digits = "".join(c for c in s if c.isdigit() or c == ".")
+        if not digits:
+            return default
+        try:
+            n = float(digits)
+            return int(-n if neg else n)
+        except ValueError:
+            return default
+
+
+def _jsonb(v):
+    if v is None:
+        return None
+    if isinstance(v, str):
+        return v
+    try:
+        return json.dumps(_clean_for_json(v))
+    except Exception:
+        return None
+
+
+def save_calendar_ai_run(
+    evaluated_keywords: List[Dict[str, Any]],
+    project_slug: str = "",
+    domain: str = "",
+    country: str = "India",
+    activity_id: Optional[str] = None,
+    summary: str = "",
+    budget_used: Optional[float] = None,
+    quantity_requested: Optional[int] = None,
+    budget_summary: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Persist a whole AI-scheduling run: one row per evaluated candidate
+    keyword (batch, confidence, live rank, delta, top-3 intent, verification,
+    outreach site, ...). Returns the run_id."""
+    run_id = str(uuid.uuid4())
+    if not evaluated_keywords:
+        return run_id
+
+    _ensure_ai_analysis_table()
+
+    bs_json = _jsonb(budget_summary)
+    act_id = None
+    if activity_id:
+        try:
+            act_id = str(uuid.UUID(str(activity_id)))
+        except Exception:
+            act_id = None
+
+    rows = []
+    for k in evaluated_keywords:
+        vr = k.get("verification_details") or k.get("verification") or None
+        rows.append({
+            "run_id": run_id,
+            "activity_id": act_id,
+            "project_slug": project_slug or "",
+            "domain": domain or "",
+            "country": country or "India",
+            "keyword": str(k.get("keyword") or "").strip(),
+            "keyword_id": str(k.get("id")) if k.get("id") is not None else None,
+            "category": k.get("category") or None,
+            "cluster": k.get("cluster") or None,
+            "db_rank": _as_int(k.get("rank")),
+            "prev_rank": _as_int(k.get("prev_rank")),
+            "live_rank": _as_int(k.get("new_rank") if k.get("new_rank") is not None else k.get("rank")),
+            "delta": _as_int(k.get("delta"), 0),
+            "sv": _as_int(k.get("sv"), 0),
+            "kd": _as_int(k.get("kd"), 0),
+            "target_type": k.get("target_type") or None,
+            "batch": k.get("batch") or None,
+            "confidence": _as_int(k.get("confidence")),
+            "confidence_breakdown": _jsonb(k.get("confidence_breakdown")),
+            "reason": k.get("reason") or None,
+            "top3_types": _jsonb(k.get("top3_types")),
+            "top3_is_landing": bool(k.get("top3_is_landing")) if k.get("top3_is_landing") is not None else None,
+            "top_links": _jsonb(k.get("top_links") or k.get("top3")),
+            "verification": _jsonb(vr),
+            "outreach_site": _jsonb(k.get("outreach_site")),
+            "landing_page_url": k.get("landing_page_url") or k.get("topicLink") or None,
+            "budget_used": budget_used,
+            "quantity_requested": quantity_requested,
+            "summary": summary or None,
+            "budget_summary": bs_json,
+        })
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                INSERT INTO calendar_ai_analysis (
+                    run_id, activity_id, project_slug, domain, country, keyword, keyword_id,
+                    category, cluster, db_rank, prev_rank, live_rank, delta, sv, kd, target_type,
+                    batch, confidence, confidence_breakdown, reason, top3_types, top3_is_landing,
+                    top_links, verification, outreach_site, landing_page_url, budget_used,
+                    quantity_requested, summary, budget_summary
+                ) VALUES (
+                    :run_id, :activity_id, :project_slug, :domain, :country, :keyword, :keyword_id,
+                    :category, :cluster, :db_rank, :prev_rank, :live_rank, :delta, :sv, :kd, :target_type,
+                    :batch, :confidence, CAST(:confidence_breakdown AS JSONB), :reason,
+                    CAST(:top3_types AS JSONB), :top3_is_landing, CAST(:top_links AS JSONB),
+                    CAST(:verification AS JSONB), CAST(:outreach_site AS JSONB), :landing_page_url,
+                    :budget_used, :quantity_requested, :summary, CAST(:budget_summary AS JSONB)
+                )
+            """), rows)
+        print(f"[Calendar AI] Saved analysis run {run_id}: {len(rows)} keyword rows"
+              + (f" (activity {act_id})" if act_id else ""), flush=True)
+    except Exception as e:
+        print(f"[Calendar AI] Failed to save analysis run: {e}", file=sys.stderr, flush=True)
+
+    return run_id
+
+
+def mark_calendar_ai_selected(activity_id: str, selected_keywords: List[str]) -> None:
+    """Flag which keywords the user actually picked, on that activity's most
+    recent analysis run."""
+    _ensure_ai_analysis_table()
+    if not activity_id or not selected_keywords:
+        return
+    kws = [str(k).strip().lower() for k in selected_keywords if str(k or "").strip()]
+    if not kws:
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                UPDATE calendar_ai_analysis SET selected = TRUE
+                WHERE run_id = (
+                    SELECT run_id FROM calendar_ai_analysis
+                    WHERE activity_id = :aid ORDER BY created_at DESC LIMIT 1
+                )
+                AND LOWER(keyword) = ANY(:kws)
+            """), {"aid": str(activity_id), "kws": kws})
+    except Exception as e:
+        print(f"[Calendar AI] Failed to mark selected keywords: {e}", file=sys.stderr, flush=True)
+
+
+def list_calendar_ai_runs(project_slug: Optional[str] = None, activity_id: Optional[str] = None, limit: int = 20):
+    """Run-level summary list (one entry per analysis run)."""
+    _ensure_ai_analysis_table()
+    where, params = [], {"limit": limit}
+    if project_slug:
+        where.append("project_slug = :ps")
+        params["ps"] = project_slug
+    if activity_id:
+        where.append("activity_id = :aid")
+        params["aid"] = str(activity_id)
+    wsql = ("WHERE " + " AND ".join(where)) if where else ""
+    with engine.begin() as conn:
+        res = conn.execute(text(f"""
+            SELECT run_id, activity_id, project_slug, domain,
+                   MIN(created_at) AS created_at,
+                   MAX(summary) AS summary,
+                   MAX(budget_used) AS budget_used,
+                   MAX(quantity_requested) AS quantity_requested,
+                   COUNT(*) AS total_keywords,
+                   COUNT(*) FILTER (WHERE batch = 'high')   AS batch_high,
+                   COUNT(*) FILTER (WHERE batch = 'medium')  AS batch_medium,
+                   COUNT(*) FILTER (WHERE batch = 'low')     AS batch_low,
+                   COUNT(*) FILTER (WHERE selected)          AS selected_count
+            FROM calendar_ai_analysis
+            {wsql}
+            GROUP BY run_id, activity_id, project_slug, domain
+            ORDER BY MIN(created_at) DESC
+            LIMIT :limit
+        """), params)
+        return [_clean_for_json(dict(r._mapping)) for r in res]
+
+
+def get_calendar_ai_run(run_id: str):
+    """Every evaluated keyword for one analysis run."""
+    _ensure_ai_analysis_table()
+    with engine.begin() as conn:
+        res = conn.execute(text("""
+            SELECT * FROM calendar_ai_analysis WHERE run_id = :rid
+            ORDER BY (batch = 'high') DESC, (batch = 'medium') DESC, confidence DESC NULLS LAST, sv DESC
+        """), {"rid": run_id})
+        return [_clean_for_json(dict(r._mapping)) for r in res]
+
+
 def generate_calendar_csv(project_name: Optional[str] = None, status_filter: Optional[str] = None) -> str:
     """Generate CSV string for calendar activities."""
     data = list_calendar_activities(project_name=project_name, status_filter=status_filter)
@@ -1604,7 +1897,7 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
         }
 
     ai_res = calculate_live_serp_batches(keywords, domain=payload.domain or payload.project_slug or "", country=payload.country or "India")
-    
+
     # Enrich with outreach sites & 3-domain rule
     available_sites = fetch_available_outreach_sites(payload.project_slug)
     eval_kws = ai_res.get("evaluated_keywords") or keywords
@@ -1618,7 +1911,39 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
     ai_res["available_outreach_sites"] = available_sites
     ai_res["budget_optimization"] = budget_summary
     ai_res["has_landing_pages"] = True
+
+    # Persist the whole run (every evaluated keyword, not just the picked ones)
+    ai_res["run_id"] = save_calendar_ai_run(
+        assigned_kws,
+        project_slug=payload.project_slug or "",
+        domain=payload.domain or "",
+        country=payload.country or "India",
+        activity_id=payload.activity_id,
+        summary=ai_res.get("summary", ""),
+        budget_used=payload.budget,
+        quantity_requested=payload.quantity,
+        budget_summary=budget_summary,
+    )
     return ai_res
+
+
+@router.get("/ai-runs")
+def list_ai_runs_endpoint(
+    project_slug: Optional[str] = Query(None),
+    activity_id: Optional[str] = Query(None),
+    limit: int = Query(20),
+):
+    """Past AI-scheduling analysis runs (one summary row per run)."""
+    return {"runs": list_calendar_ai_runs(project_slug=project_slug, activity_id=activity_id, limit=limit)}
+
+
+@router.get("/ai-runs/{run_id}")
+def get_ai_run_endpoint(run_id: str):
+    """Every evaluated keyword for one AI-scheduling analysis run."""
+    rows = get_calendar_ai_run(run_id)
+    if not rows:
+        raise HTTPException(status_code=404, detail="Analysis run not found.")
+    return {"run_id": run_id, "keywords": rows, "total": len(rows)}
 
 
 @router.get("/activities")
@@ -1648,9 +1973,18 @@ def get_activity_endpoint(activity_id: str):
 
 @router.patch("/activities/{activity_id}")
 def update_activity_endpoint(activity_id: str, payload: CalendarActivityUpdatePayload):
-    updated = update_calendar_activity(activity_id, payload.dict(exclude_unset=True))
+    data = payload.dict(exclude_unset=True)
+    updated = update_calendar_activity(activity_id, data)
     if not updated:
         raise HTTPException(status_code=404, detail="Activity not found")
+
+    # When keywords are confirmed onto an activity, flag which ones the user
+    # actually picked on that activity's latest analysis run.
+    pk = data.get("potential_keywords")
+    if isinstance(pk, list) and pk:
+        picked = [k.get("keyword") for k in pk if isinstance(k, dict) and k.get("keyword")]
+        mark_calendar_ai_selected(activity_id, picked)
+
     return {"activity": updated}
 
 

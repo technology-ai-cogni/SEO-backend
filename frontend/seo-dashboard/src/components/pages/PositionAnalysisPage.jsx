@@ -1867,11 +1867,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               }}
             >
               <Sparkles size={14} className={analyzingAll ? 'animate-spin' : ''} />
-              <span>
-                {analyzingAll
-                  ? 'Analyzing...'
-                  : (Object.values(tabResults).some(r => r && r.length > 0) ? 'Re-analyze' : 'Analyze')}
-              </span>
+              <span>{analyzingAll ? 'AI Analyzing...' : 'AI Analyze'}</span>
             </button>
           )}
         </div>
@@ -2067,7 +2063,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                             }}
                           >
                             <RefreshCw size={14} className={isCurrentTabAnalyzing ? 'animate-spin' : ''} />
-                            <span>{isCurrentTabAnalyzing ? 'Analyzing...' : (currentTabResults.length > 0 ? 'Re-analyze' : 'Analyze')}</span>
+                            <span>{isCurrentTabAnalyzing ? 'AI Analyzing...' : 'AI Analyze'}</span>
                           </button>
                         </div>
                       )}
@@ -2194,11 +2190,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                               }}
                             >
                               <Sparkles size={13} className={isAnalyzing ? 'animate-spin' : ''} />
-                              <span>
-                                {isAnalyzing
-                                  ? 'Analyzing...'
-                                  : ((tabResults[aiTab.toLowerCase()] || []).length > 0 ? 'Re-analyze' : 'Analyze')}
-                              </span>
+                              <span>{isAnalyzing ? 'AI Analyzing...' : 'AI Analyze'}</span>
                             </button>
                           </div>
                         );
@@ -3564,7 +3556,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
               Switch to Current Date
             </h2>
             <p style={{ fontSize: 14, color: '#475569', margin: '0 0 26px 0', lineHeight: 1.6 }}>
-              The calendar is set to <strong style={{ color: '#0f172a' }}>{selectedDate}</strong>. Brand Discovery can only be analyzed for the current date ({todayStr}). Switch to the current date to run Analyze / Re-analyze.
+              The calendar is set to <strong style={{ color: '#0f172a' }}>{selectedDate}</strong>. Brand Discovery can only be analyzed for the current date ({todayStr}). Switch to the current date to run AI Analyze.
             </p>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
               <button

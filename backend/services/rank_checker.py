@@ -37,7 +37,7 @@ BRIGHTDATA_SERP_ZONE = os.environ.get("BRIGHTDATA_SERP_ZONE", "serp_api1")
 BRIGHTDATA_REQUEST_URL = "https://api.brightdata.com/request"
 
 DEFAULT_DOMAIN = os.environ.get("DEFAULT_DOMAIN", "")
-TOP_N = int(os.environ.get("TOP_N", "30"))
+TOP_N = int(os.environ.get("TOP_N", "40"))
 NOT_FOUND_RANK = 101
 RESULTS_PER_PAGE = 10
 

@@ -3039,13 +3039,38 @@ export async function fetchCalendarPotentialKeywordsApi(projectSlug, domain = ''
   return { potential_keywords: [], batches: { high: [], medium: [], low: [] }, total_potential: 0 };
 }
 
+// Past AI-scheduling analysis runs (persisted in calendar_ai_analysis)
+export async function listCalendarAiRunsApi(projectSlug = null, activityId = null, limit = 30) {
+  try {
+    const params = new URLSearchParams();
+    if (projectSlug) params.set('project_slug', projectSlug);
+    if (activityId) params.set('activity_id', activityId);
+    if (limit) params.set('limit', String(limit));
+    const res = await fetch(`${CATEGORY_API_BASE}/calendar/ai-runs?${params.toString()}`);
+    if (res.ok) return await res.json();
+  } catch (e) {
+    console.warn('[listCalendarAiRunsApi] error:', e);
+  }
+  return { runs: [] };
+}
+
+export async function getCalendarAiRunApi(runId) {
+  try {
+    const res = await fetch(`${CATEGORY_API_BASE}/calendar/ai-runs/${encodeURIComponent(runId)}`);
+    if (res.ok) return await res.json();
+  } catch (e) {
+    console.warn('[getCalendarAiRunApi] error:', e);
+  }
+  return null;
+}
+
 // Run AI push-potential triage via Python backend
-export async function analyzeCalendarAiPushPotentialApi(projectSlug, domain = '', keywords = [], country = 'India', budget = null, quantity = null) {
+export async function analyzeCalendarAiPushPotentialApi(projectSlug, domain = '', keywords = [], country = 'India', budget = null, quantity = null, activityId = null) {
   try {
     const res = await fetch(`${CATEGORY_API_BASE}/calendar/analyze-potential`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_slug: projectSlug, domain, country, keywords, budget, quantity })
+      body: JSON.stringify({ project_slug: projectSlug, domain, country, keywords, budget, quantity, activity_id: activityId })
     });
     if (res.ok) {
       return await res.json();

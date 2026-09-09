@@ -29,7 +29,8 @@ import {
   Globe,
   Bot,
   DollarSign,
-  Send
+  Send,
+  Eye
 } from 'lucide-react';
 import {
   fetchDomainRows,
@@ -39,7 +40,9 @@ import {
   deleteCalendarActivityApi,
   fetchCalendarPotentialKeywordsApi,
   analyzeCalendarAiPushPotentialApi,
-  fetchCalendarUsersApi
+  fetchCalendarUsersApi,
+  listCalendarAiRunsApi,
+  getCalendarAiRunApi
 } from '../../lib/projectsApi';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
@@ -49,6 +52,30 @@ const MONTH_NAMES = [
 ];
 
 const PERIOD_YEARS = [2025, 2026, 2027, 2028];
+
+// Lightweight hover tooltip (instant, styled) — used for the Manual mode POC name
+function HoverTip({ label, tip }) {
+  const [show, setShow] = useState(false);
+  return (
+    <span
+      style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      {label}
+      {show && tip && (
+        <span style={{
+          position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, zIndex: 1200,
+          background: '#0f172a', color: '#ffffff', fontSize: 11.5, fontWeight: 600,
+          padding: '5px 9px', borderRadius: 6, whiteSpace: 'nowrap',
+          boxShadow: '0 6px 18px rgba(15,23,42,0.28)', pointerEvents: 'none'
+        }}>
+          {tip}
+        </span>
+      )}
+    </span>
+  );
+}
 
 // Custom single-select whose option list always opens BELOW the control
 function PlainSelect({ value, onChange, options, placeholder = 'Select...', required }) {
@@ -192,6 +219,67 @@ function CalendarPage({ user, onNavigate }) {
   const [availableOutreachSites, setAvailableOutreachSites] = useState([]);
   const [budgetOptimization, setBudgetOptimization] = useState(null);
   const [selectedOutreachSites, setSelectedOutreachSites] = useState({});
+
+  // ─── Saved AI-run viewer (read-only popup) ───
+  const [aiRunModalOpen, setAiRunModalOpen] = useState(false);
+  const [aiRunModalProject, setAiRunModalProject] = useState(null);
+  const [aiRunList, setAiRunList] = useState([]);
+  const [aiRunActiveId, setAiRunActiveId] = useState(null);
+  const [aiRunKeywords, setAiRunKeywords] = useState([]);
+  const [aiRunLoading, setAiRunLoading] = useState(false);
+
+  const loadAiRunKeywords = async (runId) => {
+    setAiRunActiveId(runId);
+    setAiRunLoading(true);
+    try {
+      const data = await getCalendarAiRunApi(runId);
+      setAiRunKeywords(Array.isArray(data?.keywords) ? data.keywords : []);
+    } catch (e) {
+      console.warn('[CalendarPage] loadAiRunKeywords error:', e);
+      setAiRunKeywords([]);
+    } finally {
+      setAiRunLoading(false);
+    }
+  };
+
+  const openAiRunModal = async ({ projectName, activityId = null, activityName = '' }) => {
+    const proj = (projects || []).find(p => p.name === projectName || p.domain === projectName) || null;
+    const slug = proj?.slug || String(projectName || '').toLowerCase().replace(/\s+/g, '');
+    setAiRunModalProject({ name: projectName, slug, activityId, activityName });
+    setAiRunModalOpen(true);
+    setAiRunLoading(true);
+    setAiRunList([]);
+    setAiRunKeywords([]);
+    setAiRunActiveId(null);
+    try {
+      // Prefer runs tied to THIS activity; fall back to the project's latest runs.
+      let runs = [];
+      if (activityId) {
+        const r = await listCalendarAiRunsApi(slug, activityId, 30);
+        runs = Array.isArray(r?.runs) ? r.runs : [];
+      }
+      if (runs.length === 0) {
+        const r2 = await listCalendarAiRunsApi(slug, null, 30);
+        runs = Array.isArray(r2?.runs) ? r2.runs : [];
+      }
+      setAiRunList(runs);
+      if (runs.length > 0) {
+        await loadAiRunKeywords(runs[0].run_id);
+      }
+    } catch (e) {
+      console.warn('[CalendarPage] openAiRunModal error:', e);
+    } finally {
+      setAiRunLoading(false);
+    }
+  };
+
+  const closeAiRunModal = () => {
+    setAiRunModalOpen(false);
+    setAiRunModalProject(null);
+    setAiRunList([]);
+    setAiRunKeywords([]);
+    setAiRunActiveId(null);
+  };
 
   const handleSelectSiteForKeyword = (kwId, site) => {
     setSelectedOutreachSites(prev => ({
@@ -616,7 +704,7 @@ function CalendarPage({ user, onNavigate }) {
       setAnalyzingPotential(true);
 
       try {
-        const aiRes = await analyzeCalendarAiPushPotentialApi(slug, domain, kws, 'India', totalBudget, totalQty);
+        const aiRes = await analyzeCalendarAiPushPotentialApi(slug, domain, kws, 'India', totalBudget, totalQty, primaryCreated?.id);
         if (aiRes?.batches) {
           setPushBatches(aiRes.batches);
           const evaluated = (aiRes.evaluated_keywords && aiRes.evaluated_keywords.length > 0)
@@ -2002,16 +2090,12 @@ function CalendarPage({ user, onNavigate }) {
                           background: gIdx % 2 === 0 ? '#ffffff' : '#fafafa',
                           fontWeight: 600
                         }}>
-                          {/* Overall Activity ID for Project group (e.g. BL-09) */}
-                          <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', fontSize: 13, fontWeight: 700, color: '#334155' }}>
-                            {overallUid}
-                          </td>
-
-                          {/* Project Name + Tree expander */}
-                          <td style={{ padding: '14px 16px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {/* Col 1: expander chevron + project group ID (e.g. BL-09) */}
+                          <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                               <button
                                 type="button"
+                                title={isExpanded ? 'Collapse activities' : 'Expand activities'}
                                 onClick={() => toggleProjectExpand(group.projectName)}
                                 style={{
                                   background: '#f1f5f9',
@@ -2023,20 +2107,24 @@ function CalendarPage({ user, onNavigate }) {
                                   alignItems: 'center',
                                   justifyContent: 'center',
                                   cursor: 'pointer',
-                                  color: '#475569'
+                                  color: '#475569',
+                                  flexShrink: 0
                                 }}
                               >
                                 {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                               </button>
-                              <div>
-                                <div style={{ fontSize: 13.5, fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  <FolderOpen size={15} color="#7c3aed" />
-                                  <span>{group.projectName}</span>
-                                </div>
-                                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                                  {group.items.length} activit{group.items.length === 1 ? 'y' : 'ies'} scheduled
-                                </div>
-                              </div>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: '#334155' }}>{overallUid}</span>
+                            </div>
+                          </td>
+
+                          {/* Col 2: Project name */}
+                          <td style={{ padding: '14px 16px' }}>
+                            <div style={{ fontSize: 13.5, fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <FolderOpen size={15} color="#7c3aed" />
+                              <span>{group.projectName}</span>
+                            </div>
+                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                              {group.items.length} activit{group.items.length === 1 ? 'y' : 'ies'} scheduled
                             </div>
                           </td>
 
@@ -2129,22 +2217,9 @@ function CalendarPage({ user, onNavigate }) {
                             </div>
                           </td>
 
-                          {/* Project Actions (Hide / View) */}
+                          {/* Project Actions (per-activity — see child rows) */}
                           <td style={{ padding: '14px 16px', textAlign: 'center' }}>
-                            <button
-                              type="button"
-                              onClick={() => toggleProjectExpand(group.projectName)}
-                              style={{
-                                background: 'transparent',
-                                border: 'none',
-                                color: '#7c3aed',
-                                fontSize: 11.5,
-                                fontWeight: 700,
-                                cursor: 'pointer'
-                              }}
-                            >
-                              {isExpanded ? 'Hide' : 'View'} ({group.items.length})
-                            </button>
+                            <span style={{ color: '#cbd5e1', fontSize: 12 }}>—</span>
                           </td>
 
                           {/* Move Status / Action Button - In the end after Actions */}
@@ -2236,7 +2311,14 @@ function CalendarPage({ user, onNavigate }) {
                         </tr>
 
                         {/* CHILD ROWS (Expanded Tree Structure) */}
-                        {isExpanded && group.items.map((item, idx) => (
+                        {isExpanded && group.items.map((item, idx) => {
+                          let _pk = [];
+                          if (Array.isArray(item.potential_keywords)) _pk = item.potential_keywords;
+                          else if (typeof item.potential_keywords === 'string') { try { _pk = JSON.parse(item.potential_keywords); } catch (_) {} }
+                          const isAiActivity = Boolean(item.is_ai_scheduled)
+                            || /ai/i.test(String(item.scheduler || ''))
+                            || (Array.isArray(_pk) && _pk.length > 0);
+                          return (
                           <tr
                             key={item.id || idx}
                             style={{
@@ -2244,15 +2326,17 @@ function CalendarPage({ user, onNavigate }) {
                               background: '#fcfbfe'
                             }}
                           >
-                            {/* Activity ID */}
-                            <td style={{ padding: '10px 16px', whiteSpace: 'nowrap', fontSize: 12.5, fontWeight: 600, color: '#475569' }}>
-                              {item.activity_uid || '—'}
+                            {/* Col 1: sub-arrow + activity ID */}
+                            <td style={{ padding: '10px 16px 10px 28px', whiteSpace: 'nowrap', fontSize: 12.5, fontWeight: 600, color: '#475569' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ color: '#cbd5e1', fontSize: 14 }}>↳</span>
+                                <span>{item.activity_uid || '—'}</span>
+                              </span>
                             </td>
 
-                            {/* Indented Activity Name */}
-                            <td style={{ padding: '10px 16px 10px 24px' }}>
+                            {/* Col 2: Activity Name */}
+                            <td style={{ padding: '10px 16px 10px 32px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ color: '#cbd5e1', fontSize: 14 }}>↳</span>
                                 <div>
                                   <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>
                                     {item.activity_name}
@@ -2286,7 +2370,11 @@ function CalendarPage({ user, onNavigate }) {
 
                             {/* Activity Mode */}
                             <td style={{ padding: '10px 16px', fontSize: 12, color: '#64748b' }}>
-                              {item.scheduler || 'Manual'}
+                              {isAiActivity ? (
+                                'AI Auto-Scheduler'
+                              ) : (
+                                <HoverTip label="Manual" tip={`Main POC: ${item.main_poc || item.scheduler || '—'}`} />
+                              )}
                             </td>
 
                             {/* Sub Activity Status */}
@@ -2335,6 +2423,22 @@ function CalendarPage({ user, onNavigate }) {
                             {/* Individual Actions - In front of status column */}
                             <td style={{ padding: '10px 16px', textAlign: 'center' }}>
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                                {isAiActivity && (
+                                  <button
+                                    onClick={() => openAiRunModal({ projectName: group.projectName, activityId: item.id, activityName: item.activity_name })}
+                                    title="View AI analysis for this activity"
+                                    style={{
+                                      display: 'inline-flex', alignItems: 'center', gap: 5,
+                                      background: '#F5F3FF', border: '1px solid #DDD6FE', color: '#7c3aed',
+                                      fontSize: 11, fontWeight: 700, borderRadius: 6, padding: '4px 8px', cursor: 'pointer'
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.background = '#EDE9FE'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.background = '#F5F3FF'; }}
+                                  >
+                                    <Eye size={13} />
+                                    <span>AI</span>
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => handleOpenEditModal(item)}
                                   title="Edit Activity"
@@ -2451,7 +2555,8 @@ function CalendarPage({ user, onNavigate }) {
                               </div>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </React.Fragment>
                     );
                   })
@@ -2992,6 +3097,294 @@ function CalendarPage({ user, onNavigate }) {
               >
                 Yes, Run AI Schedule
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          SAVED AI-RUN VIEWER (read-only popup — cross to close only)
+      ───────────────────────────────────────────────────────────── */}
+      {aiRunModalOpen && (
+        <div
+          onClick={closeAiRunModal}
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 1100, padding: 24
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: 'min(1240px, 96vw)', maxHeight: '92vh', display: 'flex', flexDirection: 'column',
+              background: '#ffffff', borderRadius: 16, overflow: 'hidden',
+              boxShadow: '0 24px 70px -12px rgba(15, 23, 42, 0.4)'
+            }}
+          >
+            {/* Header */}
+            <div style={{
+              padding: '16px 22px', borderBottom: '1px solid #EEE9F7',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+              background: 'linear-gradient(135deg, #ffffff 0%, #faf8ff 100%)', flexShrink: 0
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+                  background: 'linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                  <Sparkles size={18} color="#7c3aed" />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 15.5, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
+                    AI Scheduling Analysis — {aiRunModalProject?.activityName || aiRunModalProject?.name || ''}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 1 }}>
+                    {aiRunModalProject?.activityName
+                      ? `${aiRunModalProject?.name || ''} · read-only snapshot of what the AI evaluated for this activity`
+                      : 'Read-only snapshot of what the AI evaluated for this project'}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                {aiRunList.length > 1 && (
+                  <select
+                    value={aiRunActiveId || ''}
+                    onChange={e => loadAiRunKeywords(e.target.value)}
+                    style={{
+                      fontSize: 12, fontWeight: 600, color: '#334155', background: '#ffffff',
+                      border: '1px solid #cbd5e1', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', maxWidth: 260
+                    }}
+                  >
+                    {aiRunList.map(r => (
+                      <option key={r.run_id} value={r.run_id}>
+                        {r.created_at ? new Date(r.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : r.run_id.slice(0, 8)}
+                        {'  ·  '}{r.total_keywords || 0} kw
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  type="button"
+                  onClick={closeAiRunModal}
+                  title="Close"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 34, height: 34, borderRadius: 9, background: '#f1f5f9',
+                    border: '1px solid #e2e8f0', color: '#475569', cursor: 'pointer'
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div style={{ overflowY: 'auto', padding: '20px 22px', background: 'var(--bg)' }}>
+              {aiRunLoading ? (
+                <div style={{ padding: '48px 20px', textAlign: 'center' }}>
+                  <BrandInfinityLoader label="Loading saved analysis…" size="md" minHeight="200px" />
+                </div>
+              ) : aiRunList.length === 0 ? (
+                <div style={{ padding: '52px 20px', textAlign: 'center' }}>
+                  <Sparkles size={34} color="#cbd5e1" style={{ marginBottom: 8 }} />
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#64748b' }}>No saved AI analysis for this project</div>
+                  <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
+                    An analysis is saved automatically each time an AI schedule is launched for this project.
+                  </div>
+                </div>
+              ) : (() => {
+                const activeRunMeta = aiRunList.find(r => r.run_id === aiRunActiveId) || aiRunList[0];
+                const runBatches = { high: [], medium: [], low: [] };
+                aiRunKeywords.forEach(k => { if (runBatches[k.batch]) runBatches[k.batch].push(k); });
+                const selCount = aiRunKeywords.filter(k => k.selected).length;
+                const fmtRank = (v) => (v == null ? '—' : (Number(v) >= 101 ? '#101' : `#${v}`));
+                const money = (v) => (v == null ? '—' : `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+                let bSum = aiRunKeywords.find(k => k.budget_summary)?.budget_summary || null;
+                if (typeof bSum === 'string') { try { bSum = JSON.parse(bSum); } catch (_) { bSum = null; } }
+                return (
+                  <>
+                    {/* Summary strip */}
+                    <div style={{
+                      display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 16
+                    }}>
+                      {[
+                        { label: 'Keywords Analyzed', value: aiRunKeywords.length, color: '#0f172a' },
+                        { label: 'Batch 1 · Gains', value: runBatches.high.length, color: '#16a34a' },
+                        { label: 'Batch 2 · Drops', value: runBatches.medium.length, color: '#d97706' },
+                        { label: 'Batch 3 · Stagnant', value: runBatches.low.length, color: '#64748b' },
+                        { label: 'Selected & Scheduled', value: selCount, color: '#7c3aed' },
+                        { label: 'Budget', value: activeRunMeta?.budget_used != null ? `$${Number(activeRunMeta.budget_used).toLocaleString()}` : '—', color: '#059669' }
+                      ].map((c, i) => (
+                        <div key={i} style={{ background: '#ffffff', border: '1px solid #E4DFEE', borderRadius: 12, padding: '12px 14px' }}>
+                          <div style={{ fontSize: 10.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{c.label}</div>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: c.color }}>{c.value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* AI Executive Summary */}
+                    <div style={{
+                      background: 'linear-gradient(135deg, #ffffff 0%, #faf8ff 100%)',
+                      border: '1px solid #E4DFEE', borderRadius: 12, padding: '14px 16px', marginBottom: 16
+                    }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 800, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Sparkles size={12} /> AI Analysis Summary
+                      </div>
+                      <div style={{ fontSize: 13, color: '#334155', lineHeight: 1.6 }}>
+                        {activeRunMeta?.summary
+                          || `Analyzed ${aiRunKeywords.length} keywords: ${runBatches.high.length} improved (Batch 1), ${runBatches.medium.length} dropped (Batch 2), ${runBatches.low.length} stagnant / non-landing (Batch 3).`}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 6 }}>
+                        Run on {activeRunMeta?.created_at ? new Date(activeRunMeta.created_at).toLocaleString() : '—'}
+                        {activeRunMeta?.quantity_requested != null ? `  ·  ${activeRunMeta.quantity_requested} activities requested` : ''}
+                      </div>
+                    </div>
+
+                    {/* Budget Optimization Summary */}
+                    {bSum && (
+                      <div style={{
+                        background: '#ffffff', border: '1px solid #E4DFEE', borderRadius: 12, padding: '14px 16px', marginBottom: 16
+                      }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 800, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <DollarSign size={12} /> Budget Optimization Summary
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+                          {[
+                            { label: 'Budget Cap', value: money(bSum.budget_cap), color: '#0f172a' },
+                            { label: 'Planned Spend', value: money(bSum.planned_spend), color: '#059669' },
+                            { label: 'Projected Savings', value: money(bSum.projected_savings), color: '#16a34a' },
+                            { label: 'Avg Cost / Post', value: money(bSum.avg_cost_per_post), color: '#334155' },
+                            { label: 'Requested Posts', value: bSum.requested_quantity ?? '—', color: '#334155' },
+                            { label: 'AI Recommended', value: bSum.recommended_quantity ?? '—', color: '#7c3aed' },
+                            { label: 'Redundant Posts Saved', value: bSum.redundant_posts_saved ?? 0, color: '#d97706' }
+                          ].map((c, i) => (
+                            <div key={i}>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 3 }}>{c.label}</div>
+                              <div style={{ fontSize: 16, fontWeight: 800, color: c.color }}>{c.value}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {(bSum.projected_savings > 0 || bSum.redundant_posts_saved > 0) && (
+                          <div style={{ fontSize: 12, color: '#166534', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '8px 10px', marginTop: 10 }}>
+                            AI avoided redundant spend: {bSum.redundant_posts_saved > 0 ? `${bSum.redundant_posts_saved} fewer posts, ` : ''}{money(bSum.projected_savings)} kept under the cap.
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Batch tables */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {['high', 'medium', 'low'].map(bk => {
+                        const meta = PUSH_BATCH_META[bk];
+                        const rows = runBatches[bk];
+                        return (
+                          <div key={bk} style={{ background: '#ffffff', borderRadius: 14, border: `1px solid ${meta.border}`, overflow: 'hidden' }}>
+                            <div style={{ padding: '10px 18px', background: meta.bg, borderBottom: `1px solid ${meta.border}`, display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <meta.Icon size={15} color={meta.tint} />
+                              <span style={{ fontSize: 13.5, fontWeight: 800, color: '#0f172a' }}>{meta.label}</span>
+                              <span style={{ fontSize: 11, fontWeight: 800, color: meta.tint, background: '#ffffff', border: `1px solid ${meta.border}`, borderRadius: 10, padding: '1px 8px' }}>
+                                {rows.length}
+                              </span>
+                            </div>
+                            {rows.length === 0 ? (
+                              <div style={{ fontSize: 12.5, color: '#94a3b8', fontStyle: 'italic', padding: '14px 18px' }}>
+                                No keywords categorized into this batch.
+                              </div>
+                            ) : (
+                              <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, textAlign: 'left', minWidth: 900 }}>
+                                  <thead>
+                                    <tr style={{ color: '#64748b', fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                      <th style={{ padding: '8px 12px', width: 40, textAlign: 'center' }}></th>
+                                      <th style={{ padding: '8px 14px', minWidth: 220 }}>Keyword &amp; Intent</th>
+                                      <th style={{ padding: '8px 14px', width: 150 }}>Rank Shift</th>
+                                      <th style={{ padding: '8px 14px', width: 70 }}>SV</th>
+                                      <th style={{ padding: '8px 14px', width: 55 }}>KD</th>
+                                      <th style={{ padding: '8px 14px', width: 60 }}>Conf</th>
+                                      <th style={{ padding: '8px 14px', minWidth: 240 }}>Live AI Status &amp; Rationale</th>
+                                      <th style={{ padding: '8px 14px', minWidth: 180 }}>Target Outreach Site</th>
+                                      <th style={{ padding: '8px 14px', minWidth: 180 }}>Landing Page</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {rows.map((k, ri) => {
+                                      const site = k.outreach_site || null;
+                                      const delta = k.delta;
+                                      return (
+                                        <tr key={ri} style={{ borderTop: '1px solid #f1f5f9', background: k.selected ? '#f5f3ff' : 'transparent' }}>
+                                          <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                            {k.selected ? (
+                                              <span title="Selected & scheduled in this run" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: 5, background: '#7c3aed' }}>
+                                                <Check size={12} color="#ffffff" />
+                                              </span>
+                                            ) : (
+                                              <span style={{ display: 'inline-block', width: 15, height: 15, borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc' }} />
+                                            )}
+                                          </td>
+                                          <td style={{ padding: '8px 14px' }}>
+                                            <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 12.5 }}>{k.keyword}</div>
+                                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>
+                                              {[k.category, k.cluster].filter(Boolean).join(' · ') || '—'}
+                                              {k.top3_is_landing ? <span style={{ marginLeft: 6, color: '#15803d', fontWeight: 700 }}>Top 3: Landing ✓</span> : null}
+                                            </div>
+                                          </td>
+                                          <td style={{ padding: '8px 14px' }}>
+                                            <span style={{ color: '#334155' }}>{fmtRank(k.prev_rank)} → <strong>{fmtRank(k.live_rank)}</strong></span>
+                                            {delta != null && delta !== 0 && (
+                                              <span style={{ marginLeft: 6, fontWeight: 700, color: delta > 0 ? '#16a34a' : '#dc2626' }}>
+                                                {delta > 0 ? `▲ ${delta}` : `▼ ${Math.abs(delta)}`}
+                                              </span>
+                                            )}
+                                          </td>
+                                          <td style={{ padding: '8px 14px', fontWeight: 600, color: '#334155' }}>{k.sv ? Number(k.sv).toLocaleString() : '—'}</td>
+                                          <td style={{ padding: '8px 14px', color: '#64748b' }}>{k.kd ?? '—'}</td>
+                                          <td style={{ padding: '8px 14px', fontWeight: 700, color: (k.confidence ?? 0) >= 80 ? '#16a34a' : ((k.confidence ?? 0) >= 60 ? '#d97706' : '#64748b') }}>
+                                            {k.confidence != null ? `${k.confidence}%` : '—'}
+                                          </td>
+                                          <td style={{ padding: '8px 14px', color: '#334155', lineHeight: 1.45, fontSize: 12 }}>
+                                            {k.reason || '—'}
+                                          </td>
+                                          <td style={{ padding: '8px 14px' }}>
+                                            {site?.domain ? (
+                                              <div>
+                                                <div style={{ fontWeight: 700, color: '#1e1b4b', fontSize: 12 }}>{site.domain}</div>
+                                                <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 1 }}>
+                                                  {site.da != null ? `DA ${site.da}` : ''}{(site.price != null || site.selling_price != null) ? `  ·  $${site.price ?? site.selling_price}` : ''}
+                                                </div>
+                                              </div>
+                                            ) : (
+                                              <span style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>—</span>
+                                            )}
+                                          </td>
+                                          <td style={{ padding: '8px 14px' }}>
+                                            {k.landing_page_url ? (
+                                              <a href={k.landing_page_url} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: '#7c3aed', wordBreak: 'break-all' }}>
+                                                {k.landing_page_url}
+                                              </a>
+                                            ) : (
+                                              <span style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>—</span>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>
