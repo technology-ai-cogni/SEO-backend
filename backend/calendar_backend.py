@@ -1938,7 +1938,177 @@ def get_calendar_activity(activity_id: str) -> Optional[Dict[str, Any]]:
                     row[jfield] = json.loads(jf)
                 except Exception:
                     pass
+
+        # If activity was moved to published status, sync to monthly_operations (Off-Page)
+        if params.get("status") == "published":
+            try:
+                synced_uids = sync_activity_to_monthly_operations(activity_id)
+                row["synced_uids"] = synced_uids
+                row["first_uid"] = synced_uids[0] if synced_uids else None
+            except Exception as err:
+                print(f"[Calendar API] Error syncing to monthly_operations: {err}", file=sys.stderr)
+
         return row
+
+
+def sync_activity_to_monthly_operations(activity_id: str) -> List[str]:
+    """
+    Sync keywords from a published calendar activity into monthly_operations (Off-Page).
+    Creates rows with: uid, period, keyword1, cluster, landing_page, kw_category,
+    activity_name, content_spoc, publisher (POC), pg_site_domain (outreach sites).
+    """
+    with engine.begin() as conn:
+        res = conn.execute(text("SELECT * FROM off_page_activities WHERE id = :id"), {"id": str(activity_id)}).first()
+        if not res:
+            return []
+
+        act = dict(res._mapping)
+        p_name = act.get("project_name") or "Default"
+        p_slug = p_name.lower().replace(" ", "").strip()
+        period = act.get("period") or datetime.now().strftime("%B %Y")
+        act_name = act.get("activity_name") or "Off-Page Activity"
+        act_uid = act.get("activity_uid") or f"ACT-{str(activity_id)[:6].upper()}"
+        content_spoc = act.get("content_poc") or act.get("main_poc") or ""
+        publisher = act.get("main_poc") or ""
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+        # Reuse existing filename for this project if exists
+        fn_res = conn.execute(
+            text("SELECT filename FROM monthly_operations WHERE LOWER(TRIM(project_name)) = LOWER(TRIM(:p)) AND filename IS NOT NULL LIMIT 1"),
+            {"p": p_name}
+        ).first()
+        filename = fn_res[0] if fn_res and fn_res[0] else f"{p_slug}_dataset.csv"
+
+        kws = act.get("potential_keywords")
+        if isinstance(kws, str):
+            try:
+                kws = json.loads(kws)
+            except Exception:
+                kws = []
+
+        kw_list = []
+        if isinstance(kws, list) and len(kws) > 0:
+            kw_list = kws
+        elif act.get("keyword_name"):
+            names = [x.strip() for x in str(act.get("keyword_name")).split(",") if x.strip()]
+            for n in names:
+                kw_list.append({
+                    "keyword": n,
+                    "landing_page_url": act.get("topic_link"),
+                    "category": act.get("category"),
+                    "cluster": act.get("cluster")
+                })
+        else:
+            kw_list = [{
+                "keyword": act_name,
+                "landing_page_url": act.get("topic_link"),
+                "category": act.get("category"),
+                "cluster": act.get("cluster")
+            }]
+
+        outreach_sites = act.get("outreach_sites")
+        if isinstance(outreach_sites, str):
+            try:
+                outreach_sites = json.loads(outreach_sites)
+            except Exception:
+                outreach_sites = []
+
+        synced_uids = []
+        for idx, k in enumerate(kw_list):
+            kw_name = k.get("keyword") or ""
+            lp = k.get("landing_page_url") or k.get("topic_link") or k.get("topicLink") or act.get("topic_link") or ""
+            cluster = k.get("cluster") or act.get("cluster") or ""
+            kw_cat = k.get("category") or act.get("category") or ""
+
+            site = k.get("outreach_site")
+            site_domain = ""
+            if isinstance(site, dict):
+                site_domain = site.get("domain") or ""
+            elif isinstance(site, str):
+                site_domain = site
+            elif isinstance(outreach_sites, list) and len(outreach_sites) > 0:
+                os_item = outreach_sites[min(idx, len(outreach_sites) - 1)]
+                site_domain = os_item.get("domain") if isinstance(os_item, dict) else str(os_item)
+
+            row_uid = f"{act_uid}-KW{idx + 1}"
+            synced_uids.append(row_uid)
+
+            existing = conn.execute(text("""
+                SELECT id FROM monthly_operations
+                WHERE uid = :uid OR (
+                    LOWER(TRIM(project_name)) = LOWER(TRIM(:p))
+                    AND LOWER(TRIM(activity_name)) = LOWER(TRIM(:act))
+                    AND LOWER(TRIM(keyword1)) = LOWER(TRIM(:kw))
+                    AND LOWER(TRIM(period)) = LOWER(TRIM(:per))
+                )
+                LIMIT 1
+            """), {"uid": row_uid, "p": p_name, "act": act_name, "kw": kw_name, "per": period}).first()
+
+            if existing:
+                row_id = existing[0]
+                conn.execute(text("""
+                    UPDATE monthly_operations SET
+                        uid = :uid,
+                        period = :period,
+                        keyword1 = :keyword1,
+                        landing_page = :landing_page,
+                        cluster = :cluster,
+                        kw_category = :kw_category,
+                        activity_name = :activity_name,
+                        content_spoc = :content_spoc,
+                        publisher = :publisher,
+                        pg_site_domain = :pg_site_domain,
+                        updated_date = :updated_date,
+                        updated_at = now()
+                    WHERE id = :id
+                """), {
+                    "uid": row_uid,
+                    "period": period,
+                    "keyword1": kw_name,
+                    "landing_page": lp,
+                    "cluster": cluster,
+                    "kw_category": kw_cat,
+                    "activity_name": act_name,
+                    "content_spoc": content_spoc,
+                    "publisher": publisher,
+                    "pg_site_domain": site_domain,
+                    "updated_date": today_str,
+                    "id": row_id
+                })
+            else:
+                conn.execute(text("""
+                    INSERT INTO monthly_operations (
+                        uid, filename, project_name, project_slug, period, scheduled_date,
+                        keyword1, keyword2, landing_page, cluster, kw_category,
+                        activity_name, word_count, content_spoc, topic, content_doc,
+                        status, publisher, pg_site_domain, live_link, remarks, solution,
+                        verified, last_activity, updated_date, created_at, updated_at
+                    ) VALUES (
+                        :uid, :filename, :project_name, :project_slug, :period, :scheduled_date,
+                        :keyword1, '', :landing_page, :cluster, :kw_category,
+                        :activity_name, '1000', :content_spoc, '', '',
+                        'In Progress', :publisher, :pg_site_domain, '', '', '',
+                        false, :activity_name, :updated_date, now(), now()
+                    )
+                """), {
+                    "uid": row_uid,
+                    "filename": filename,
+                    "project_name": p_name,
+                    "project_slug": p_slug,
+                    "period": period,
+                    "scheduled_date": today_str,
+                    "keyword1": kw_name,
+                    "landing_page": lp,
+                    "cluster": cluster,
+                    "kw_category": kw_cat,
+                    "activity_name": act_name,
+                    "content_spoc": content_spoc,
+                    "publisher": publisher,
+                    "pg_site_domain": site_domain,
+                    "updated_date": today_str
+                })
+
+        return synced_uids
 
 
 def update_calendar_activity(activity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -1993,6 +2163,16 @@ def update_calendar_activity(activity_id: str, data: Dict[str, Any]) -> Optional
                     row[jfield] = json.loads(jf)
                 except Exception:
                     pass
+
+        # If activity was moved to published status, sync to monthly_operations (Off-Page)
+        if params.get("status") == "published":
+            try:
+                synced_uids = sync_activity_to_monthly_operations(activity_id)
+                row["synced_uids"] = synced_uids
+                row["first_uid"] = synced_uids[0] if synced_uids else None
+            except Exception as err:
+                print(f"[Calendar API] Error syncing to monthly_operations: {err}", file=sys.stderr)
+
         return row
 
 
@@ -2585,6 +2765,22 @@ def update_activity_endpoint(activity_id: str, payload: CalendarActivityUpdatePa
         mark_calendar_ai_selected(activity_id, picked)
 
     return {"activity": updated}
+
+
+@router.post("/activities/{activity_id}/approve-publish")
+def approve_publish_activity_endpoint(activity_id: str):
+    """Approve and publish activity, automatically syncing rows to Off-Page (monthly_operations)."""
+    updated = update_calendar_activity(activity_id, {"status": "published"})
+    if not updated:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    synced_uids = sync_activity_to_monthly_operations(activity_id)
+    return {
+        "status": "success",
+        "activity": updated,
+        "synced_uids": synced_uids,
+        "first_uid": synced_uids[0] if synced_uids else None,
+        "project_name": updated.get("project_name")
+    }
 
 
 @router.delete("/activities/{activity_id}")

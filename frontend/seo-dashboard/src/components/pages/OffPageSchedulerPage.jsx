@@ -758,6 +758,52 @@ export default function OffPageSchedulerPage({ user }) {
     }
   }, [isVendor, hasMultipleProjects, filteredImports, selectedDataset]);
 
+  // Auto-redirect from Calendar Page to specific project & row
+  const [highlightedRowUid, setHighlightedRowUid] = useState(null);
+
+  useEffect(() => {
+    if (!filteredImports || filteredImports.length === 0) return;
+    try {
+      const targetProj = sessionStorage.getItem('offpage_target_project');
+      const targetUid = sessionStorage.getItem('offpage_target_row_uid');
+      if (targetProj) {
+        const normTarget = targetProj.toLowerCase().replace(/[\s_\-]/g, '');
+        const matched = filteredImports.find(imp => {
+          const p = String(imp.project || imp.project_name || imp.domain || '').toLowerCase().replace(/[\s_\-]/g, '');
+          return p.includes(normTarget) || normTarget.includes(p);
+        });
+        if (matched) {
+          setSelectedDataset(matched);
+          setActiveTab('import');
+          if (targetUid) {
+            setHighlightedRowUid(targetUid);
+            sessionStorage.removeItem('offpage_target_row_uid');
+          }
+          sessionStorage.removeItem('offpage_target_project');
+        }
+      }
+    } catch (e) {
+      console.warn('Error processing offpage redirect:', e);
+    }
+  }, [filteredImports]);
+
+  // Scroll to and flash highlighted row
+  useEffect(() => {
+    if (highlightedRowUid && activeDataset) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById(`offpage-row-${highlightedRowUid}`) ||
+          document.querySelector(`[id^="offpage-row-${highlightedRowUid.split('-KW')[0]}"]`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 400);
+      const clearTimer = setTimeout(() => {
+        setHighlightedRowUid(null);
+      }, 4500);
+      return () => { clearTimeout(timer); clearTimeout(clearTimer); };
+    }
+  }, [highlightedRowUid, activeDataset]);
+
   const handleDownloadMonthlyOperations = async () => {
     try {
       const allRows = [];
@@ -2183,10 +2229,27 @@ export default function OffPageSchedulerPage({ user }) {
                     </td>
                   </tr>
                 ) : (
-                  filteredRows.map((row, rIdx) => (
-                    <tr key={rIdx} style={{ borderBottom: '1px solid var(--border)', background: selectedRowIndices.includes(rIdx) ? '#f0f9ff' : 'transparent' }}
-                      onMouseEnter={e => e.currentTarget.style.background = selectedRowIndices.includes(rIdx) ? '#e0f2fe' : '#fafbfc'}
-                      onMouseLeave={e => e.currentTarget.style.background = selectedRowIndices.includes(rIdx) ? '#f0f9ff' : 'transparent'}>
+                  filteredRows.map((row, rIdx) => {
+                    const isTargetHighlighted = Boolean(
+                      highlightedRowUid && (
+                        row.uid === highlightedRowUid ||
+                        (row.uid && highlightedRowUid && row.uid.startsWith(highlightedRowUid)) ||
+                        (row.uid && highlightedRowUid && highlightedRowUid.startsWith(row.uid))
+                      )
+                    );
+                    return (
+                    <tr key={rIdx}
+                      id={row.uid ? `offpage-row-${row.uid}` : undefined}
+                      style={{
+                        borderBottom: isTargetHighlighted ? '2px solid #7B2FBE' : '1px solid var(--border)',
+                        background: isTargetHighlighted
+                          ? '#F6EEFD'
+                          : (selectedRowIndices.includes(rIdx) ? '#f0f9ff' : 'transparent'),
+                        boxShadow: isTargetHighlighted ? 'inset 0 0 0 1px #7B2FBE, 0 0 12px rgba(123, 47, 190, 0.25)' : 'none',
+                        transition: 'all 0.25s ease'
+                      }}
+                      onMouseEnter={e => { if (!isTargetHighlighted) e.currentTarget.style.background = selectedRowIndices.includes(rIdx) ? '#e0f2fe' : '#fafbfc'; }}
+                      onMouseLeave={e => { if (!isTargetHighlighted) e.currentTarget.style.background = selectedRowIndices.includes(rIdx) ? '#f0f9ff' : 'transparent'; }}>
                       {(userCanEdit || userCanDelete || userCanUpdate) && (
                         <td style={{ padding: '16px 18px', textAlign: 'center' }}>
                           <input
@@ -2423,7 +2486,8 @@ export default function OffPageSchedulerPage({ user }) {
                       <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{row.lastActivity || 'N/A'}</td>
                       <td style={{ padding: '14px 16px', fontSize: 13.5, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{row.updatedDate || 'N/A'}</td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>

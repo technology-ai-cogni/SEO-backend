@@ -297,6 +297,7 @@ const PAGE_TITLES = {
   'search-visibility/top-pages': { title: 'Top Pages (Organic)', subtitle: 'Best performing pages by organic traffic' },
   'search-visibility/outreach': { title: 'Outreach', subtitle: 'Manage guest posts, classified ads, brand mentions, and business listings' },
   'search-visibility/link-outreach': { title: 'Link Outreach', subtitle: 'Manage backlink acquisition campaigns' },
+  'search-visibility/off-page': { title: 'Off-Page', subtitle: 'Schedule off-page SEO activities' },
   'search-visibility/off-page-scheduler': { title: 'Off-Page', subtitle: 'Schedule off-page SEO activities' },
   'search-visibility/calendar': { title: 'Calendar', subtitle: 'Operations planning across Saved, Scheduled, and Approved activities' },
   'search-visibility/activity-table': { title: 'Agency', subtitle: 'Manage vendor activities, agreements, and invoice PDFs' },
@@ -357,6 +358,7 @@ const PATH_TO_URL_MAP = {
   'search-visibility/top-pages': '/top-pages',
   'search-visibility/competitors': '/competitors',
   'search-visibility/outreach': '/outreach',
+  'search-visibility/off-page': '/off-page',
   'search-visibility/off-page-scheduler': '/off-page',
   'search-visibility/calendar': '/calendar',
   'search-visibility/activity-table': '/agency',
@@ -551,6 +553,7 @@ function renderPage(path, onNavigate, user, onLoginSuccess, onLogout) {
     case 'ai-visibility/brand-performance':
     case 'ai-visibility/competitor-insights': return <AIVisibilityPage />;
     case 'search-visibility/outreach': return <ProjectSetupPage user={user} tab="Outreach" isStandaloneOutreach={true} />;
+    case 'search-visibility/off-page':
     case 'search-visibility/off-page-scheduler': {
       if (!canAccessRoute(user, 'search-visibility/off-page-scheduler')) {
         return (

@@ -12,7 +12,7 @@ RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "9d27d2418bmsh49f11b032161487p1fb7c7jsn
 RAPIDAPI_HOST = "bulk-da-pa-checker2.p.rapidapi.com"
 
 # SE Ranking API Key from project .env (used ONLY for regional breakdown)
-SERANKING_API_KEY = os.getenv("SERANKING_API_KEY", "7fc83a7d-807e-43f9-4789-c0e22bf6c072")
+SERANKING_API_KEY = os.getenv("SERANKING_API_KEY", "9cf61a10-db93-90c3-b490-be2fd2e5c340")
 SERANKING_BASE_URL = "https://api.seranking.com/v1"
 
 COUNTRY_NAMES = {
@@ -224,7 +224,7 @@ def fetch_seranking_regional_traffic(target_info: dict, regions: list = None, ap
         return None
 
     results = []
-    with ThreadPoolExecutor(max_workers=15) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(fetch_single_region, r) for r in regions]
         for future in as_completed(futures):
             res = future.result()

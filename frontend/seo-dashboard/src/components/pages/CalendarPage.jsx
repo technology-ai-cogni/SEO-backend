@@ -30,7 +30,8 @@ import {
   Bot,
   DollarSign,
   Send,
-  Eye
+  Eye,
+  Layers
 } from 'lucide-react';
 import {
   fetchDomainRows,
@@ -628,6 +629,23 @@ function CalendarPage({ user, onNavigate }) {
     setActivitiesList(prev => prev.filter(a => a.id !== id));
   };
 
+  const handleDivideBudgetAndQuantityEvenly = () => {
+    if (activitiesList.length <= 1) return;
+    const totalB = activitiesList.reduce((acc, a) => acc + (parseFloat(String(a.budget || '0').replace(/[^0-9.]/g, '')) || 0), 0) || 500;
+    const totalQ = activitiesList.reduce((acc, a) => acc + (parseInt(a.quantity, 10) || 1), 0) || activitiesList.length;
+    
+    const count = activitiesList.length;
+    const perActBudget = Math.round(totalB / count);
+    const baseQty = Math.floor(totalQ / count) || 1;
+    const remQty = totalQ % count;
+
+    setActivitiesList(prev => prev.map((a, idx) => ({
+      ...a,
+      quantity: baseQty + (idx < remQty ? 1 : 0),
+      budget: `₹${perActBudget.toLocaleString()}`
+    })));
+  };
+
   // Form Handlers
   const handleOpenAddModal = () => {
     setEditingItem(null);
@@ -986,17 +1004,31 @@ function CalendarPage({ user, onNavigate }) {
         ? createdActivitiesList
         : [createdActivity];
 
+      const totalPlannedSpend = (budgetOptimization?.planned_spend !== undefined && budgetOptimization.planned_spend > 0)
+        ? budgetOptimization.planned_spend
+        : activitiesList.reduce((acc, a) => acc + (parseFloat(String(a.budget || '0').replace(/[^0-9.]/g, '')) || 0), 0) || 250;
+
+      const totalAllocatedBudget = activitiesList.reduce((acc, a) => acc + (parseFloat(String(a.budget || '0').replace(/[^0-9.]/g, '')) || 0), 0);
+
       let kwCursor = 0;
       const updatedTargets = [];
-      for (const tgt of targets) {
-        const tgtQty = parseInt(tgt.quantity, 10) || 1;
-        const tgtMaxKws = tgtQty * 4;
+      for (let i = 0; i < targets.length; i++) {
+        const tgt = targets[i];
+        const actSpec = activitiesList[i] || activitiesList[0] || {};
+        const actReqQty = parseInt(actSpec.quantity || tgt.quantity, 10) || 1;
+        const actReqBudget = parseFloat(String(actSpec.budget || tgt.budget || '0').replace(/[^0-9.]/g, '')) || (totalAllocatedBudget / (activitiesList.length || 1));
+        const budgetWeight = totalAllocatedBudget > 0 ? (actReqBudget / totalAllocatedBudget) : (1 / (activitiesList.length || 1));
+        const tgtBudget = Math.round(totalPlannedSpend * budgetWeight) || Math.round(totalPlannedSpend / (activitiesList.length || 1));
+
+        const tgtMaxKws = actReqQty * 4;
         const tgtKws = selectedPotential.slice(kwCursor, kwCursor + tgtMaxKws);
         kwCursor += tgtMaxKws;
 
         const effectiveKws = tgtKws.length > 0 ? tgtKws : selectedPotential.slice(0, tgtMaxKws);
         const tgtPayload = {
           ...updatePayload,
+          quantity: actReqQty,
+          budget: `₹${tgtBudget.toLocaleString()}`,
           potential_keywords: effectiveKws,
           outreach_sites: effectiveKws.map(k => k.outreach_site).filter(Boolean)
         };
@@ -1024,8 +1056,16 @@ function CalendarPage({ user, onNavigate }) {
 
   const handleMoveStatus = async (item, newStatus) => {
     try {
-      await updateCalendarActivityApi(item.id, { status: newStatus });
-      setActivities(prev => prev.map(a => a.id === item.id ? { ...a, status: newStatus } : a));
+      const res = await updateCalendarActivityApi(item.id, { status: newStatus });
+      const updatedAct = res?.activity || {};
+      const firstUid = updatedAct.first_uid || (updatedAct.synced_uids && updatedAct.synced_uids[0]) || `${item.activity_uid || 'ACT'}-KW1`;
+
+      setActivities(prev => prev.map(a => a.id === item.id ? {
+        ...a,
+        status: newStatus,
+        first_uid: firstUid,
+        synced_uids: updatedAct.synced_uids || a.synced_uids
+      } : a));
     } catch (err) {
       console.error('[CalendarPage] Error moving status:', err);
     }
@@ -1082,6 +1122,50 @@ function CalendarPage({ user, onNavigate }) {
     const totalAllocatedBudget = activitiesList.reduce((acc, a) => acc + (parseFloat(String(a.budget || '0').replace(/[^0-9.]/g, '')) || 0), 0);
     const totalAllocatedBudgetFormatted = totalAllocatedBudget > 0 ? `₹${totalAllocatedBudget.toLocaleString()}` : '₹250';
     const totalRequestedQuantity = activitiesList.reduce((acc, a) => acc + (parseInt(a.quantity, 10) || 1), 0);
+
+    const totalPlannedSpend = (budgetOptimization?.planned_spend !== undefined && budgetOptimization.planned_spend > 0)
+      ? budgetOptimization.planned_spend
+      : totalAllocatedBudget;
+
+    const selectedPotential = potentialKws.filter(k => selectedKwIds.has(k.id));
+
+    // Multi-activity division calculations
+    let divKwCursor = 0;
+    const activityDivisions = activitiesList.map((act, idx) => {
+      const actReqQty = parseInt(act.quantity, 10) || 1;
+      const actReqBudget = parseFloat(String(act.budget || '0').replace(/[^0-9.]/g, '')) || (totalAllocatedBudget / (activitiesList.length || 1));
+      const budgetWeight = totalAllocatedBudget > 0 ? (actReqBudget / totalAllocatedBudget) : (1 / (activitiesList.length || 1));
+      const allocatedBudget = Math.round(totalPlannedSpend * budgetWeight) || Math.round(totalPlannedSpend / (activitiesList.length || 1));
+
+      const actKwsCapacity = actReqQty * 4;
+      const assignedKeywords = selectedPotential.slice(divKwCursor, divKwCursor + actKwsCapacity);
+      divKwCursor += actKwsCapacity;
+
+      const assignedSites = assignedKeywords.map(k => selectedOutreachSites[k.id] || k.outreach_site).filter(Boolean);
+      const uniqueSites = Array.from(new Map(assignedSites.map(s => [s.domain, s])).values());
+
+      return {
+        id: act.id,
+        activity_name: act.activity_name,
+        allocatedQuantity: actReqQty,
+        allocatedBudget,
+        allocatedBudgetFormatted: `₹${allocatedBudget.toLocaleString()}`,
+        assignedKeywords,
+        assignedSites,
+        uniqueSites,
+        keywordCount: assignedKeywords.length,
+        kwsCapacity: actKwsCapacity
+      };
+    });
+
+    const keywordToActivityMap = {};
+    if (activitiesList.length > 1) {
+      activityDivisions.forEach(div => {
+        div.assignedKeywords.forEach(k => {
+          keywordToActivityMap[k.id] = div.activity_name;
+        });
+      });
+    }
 
     return (
       <div style={{ padding: '24px 32px', minHeight: '100%', background: '#F5F5F5', display: 'flex', flexDirection: 'column', gap: 20, fontFamily: "'Outfit', sans-serif" }}>
@@ -1159,20 +1243,36 @@ function CalendarPage({ user, onNavigate }) {
                     {createdActivity.project_name}
                   </span>
                 )}
-                <span style={{
-                  fontSize: 11.5,
-                  fontWeight: 700,
-                  color: '#7B2FBE',
-                  background: '#F6EEFD',
-                  border: '1px solid #E5CCF7',
-                  padding: '2px 8px',
-                  borderRadius: 6
-                }}>
-                  {createdActivity?.activity_name || 'Campaign'}
-                </span>
+                {activitiesList.length > 1 ? (
+                  activitiesList.map((act, i) => (
+                    <span key={act.id || i} style={{
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      color: '#7B2FBE',
+                      background: '#F6EEFD',
+                      border: '1px solid #E5CCF7',
+                      padding: '2px 8px',
+                      borderRadius: 6
+                    }}>
+                      {act.activity_name} ({act.quantity} qty · {activityDivisions[i]?.allocatedBudgetFormatted || act.budget})
+                    </span>
+                  ))
+                ) : (
+                  <span style={{
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    color: '#7B2FBE',
+                    background: '#F6EEFD',
+                    border: '1px solid #E5CCF7',
+                    padding: '2px 8px',
+                    borderRadius: 6
+                  }}>
+                    {createdActivity?.activity_name || 'Campaign'}
+                  </span>
+                )}
               </div>
               <p style={{ fontSize: 12.5, color: '#8A8A9A', margin: '3px 0 0 0' }}>
-                AI evaluated keyword intent, verified landing page SERPs, and generated optimal resource allocation.
+                AI evaluated keyword intent, verified landing page SERPs, and divided optimal budget &amp; quantity across activities.
               </p>
             </div>
           </div>
@@ -1190,8 +1290,12 @@ function CalendarPage({ user, onNavigate }) {
             boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06)'
           }}>
             <BrandInfinityLoader label={loadingStepText} size="lg" minHeight="240px" />
-            <div style={{ marginTop: 24, fontSize: 13, color: '#8A8A9A', maxWidth: 480, margin: '16px auto 0' }}>
-              We are checking live rankings before showing recommendations.
+            <div style={{ marginTop: 24, fontSize: 13, color: '#8A8A9A', maxWidth: 520, margin: '16px auto 0' }}>
+              {activitiesList.length > 1 ? (
+                <>Scanning database and dividing <strong>₹{totalAllocatedBudgetFormatted}</strong> budget and <strong>{totalRequestedQuantity} activities</strong> across <strong>{activitiesList.length} activity channels</strong>...</>
+              ) : (
+                <>We are checking live rankings before showing recommendations.</>
+              )}
             </div>
           </div>
         ) : potentialKws.length === 0 ? (
@@ -1290,7 +1394,13 @@ function CalendarPage({ user, onNavigate }) {
                     For <strong>{createdActivity?.project_name || formData.project_name}</strong>, AI scanned{' '}
                     <strong>{potentialKws.length}</strong> candidate keywords and shortlisted{' '}
                     <strong style={{ color: '#7B2FBE' }}>{selectedKwIds.size} high-impact landing page targets</strong> across{' '}
-                    <strong>{uniqueLandingPagesCount} unique landing pages</strong>. 
+                    <strong>{uniqueLandingPagesCount} unique landing pages</strong>.
+                    {activitiesList.length > 1 ? (
+                      <>
+                        {' '}Budget and target volume are divided across <strong>{activitiesList.length} activities</strong>:{' '}
+                        {activityDivisions.map(d => `${d.activity_name} (${d.allocatedQuantity} qty · ${d.allocatedBudgetFormatted} · ${d.keywordCount} kws)`).join(', ')}.
+                      </>
+                    ) : null}{' '}
                     Based on your requested <strong>{totalRequestedQuantity} activities</strong> and budget of{' '}
                     <strong>{totalAllocatedBudgetFormatted}</strong>, AI has prioritized{' '}
                     <strong style={{ color: '#D4007A' }}>{selectedByBatch.medium} dropped keywords (red alert recovery targets)</strong> and{' '}
@@ -1366,8 +1476,17 @@ function CalendarPage({ user, onNavigate }) {
                     <span style={{ fontSize: 22, fontWeight: 800, color: '#7B2FBE' }}>{totalRequestedQuantity}</span>
                     <span style={{ fontSize: 13, color: '#8A8A9A' }}>across {activitiesList.length} types</span>
                   </div>
-                  <div style={{ fontSize: 11.5, color: '#8A8A9A', marginTop: 6 }}>
-                    Optimal activity pacing
+                  <div style={{ fontSize: 11.5, color: '#8A8A9A', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                    {activitiesList.length > 1 ? (
+                      activityDivisions.map((d, i) => (
+                        <span key={i} style={{ color: '#4A1A8C', fontWeight: 600 }}>
+                          {d.activity_name}: {d.allocatedQuantity}
+                          {i < activityDivisions.length - 1 ? ' • ' : ''}
+                        </span>
+                      ))
+                    ) : (
+                      'Optimal activity pacing'
+                    )}
                   </div>
                 </div>
 
@@ -1385,7 +1504,11 @@ function CalendarPage({ user, onNavigate }) {
                     </span>
                   </div>
                   <div style={{ fontSize: 11.5, color: '#8A8A9A', marginTop: 6 }}>
-                    {budgetOptimization?.total_budget_cap ? `Cap: ₹${budgetOptimization.total_budget_cap.toLocaleString()}` : 'Direct spend against high-ROI assets'}
+                    {activitiesList.length > 1 ? (
+                      `Divided: ₹${Math.round(totalPlannedSpend / activitiesList.length).toLocaleString()} avg / activity`
+                    ) : (
+                      budgetOptimization?.total_budget_cap ? `Cap: ₹${budgetOptimization.total_budget_cap.toLocaleString()}` : 'Direct spend against high-ROI assets'
+                    )}
                   </div>
                 </div>
 
@@ -1522,6 +1645,168 @@ function CalendarPage({ user, onNavigate }) {
                         </div>
                       )}
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* DEDICATED MULTI-ACTIVITY BUDGET & QUANTITY DIVISION PANEL */}
+              {activitiesList.length > 1 && (
+                <div style={{
+                  marginTop: 18,
+                  background: '#FFFFFF',
+                  border: '1px solid #E2DBEC',
+                  borderRadius: 14,
+                  padding: '18px 22px',
+                  boxShadow: '0 2px 10px rgba(74, 26, 140, 0.04)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 8,
+                        background: '#F6EEFD',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: '1px solid #E5CCF7'
+                      }}>
+                        <Layers size={17} color="#7B2FBE" />
+                      </div>
+                      <div>
+                        <h3 style={{ fontSize: 15, fontWeight: 800, color: '#1A1A1A', margin: 0, letterSpacing: '-0.01em' }}>
+                          Multi-Activity Budget &amp; Quantity Division
+                        </h3>
+                        <p style={{ fontSize: 12, color: '#8A8A9A', margin: '2px 0 0 0' }}>
+                          AI divided total budget ({budgetOptimization?.planned_spend ? `₹${budgetOptimization.planned_spend.toLocaleString()}` : totalAllocatedBudgetFormatted}) and volume across {activitiesList.length} activity tracks (strictly 4 keywords per outreach site).
+                        </p>
+                      </div>
+                    </div>
+                    <span style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: '#00BFA2',
+                      background: '#E6FAF6',
+                      border: '1px solid #A7F3D0',
+                      padding: '3px 10px',
+                      borderRadius: 20
+                    }}>
+                      {activitiesList.length} Tracks Balanced
+                    </span>
+                  </div>
+
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: `repeat(auto-fit, minmax(280px, 1fr))`,
+                    gap: 14
+                  }}>
+                    {activityDivisions.map((div, idx) => (
+                      <div
+                        key={div.id || idx}
+                        style={{
+                          background: '#F5F5F5',
+                          border: '1px solid #E2DBEC',
+                          borderRadius: 12,
+                          padding: 16,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 10
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                            <span style={{
+                              fontSize: 10.5,
+                              fontWeight: 800,
+                              background: '#4A1A8C',
+                              color: '#FFFFFF',
+                              padding: '2px 7px',
+                              borderRadius: 6
+                            }}>
+                              Track {idx + 1}
+                            </span>
+                            <strong style={{ fontSize: 14, color: '#1A1A1A', fontWeight: 800 }}>
+                              {div.activity_name}
+                            </strong>
+                          </div>
+                          <span style={{
+                            fontSize: 11,
+                            fontWeight: 800,
+                            color: '#7B2FBE',
+                            background: '#F6EEFD',
+                            border: '1px solid #E5CCF7',
+                            padding: '2px 8px',
+                            borderRadius: 6
+                          }}>
+                            {div.keywordCount} / {div.kwsCapacity} kws
+                          </span>
+                        </div>
+
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: '1fr 1fr',
+                          gap: 8,
+                          background: '#FFFFFF',
+                          border: '1px solid #E2DBEC',
+                          borderRadius: 8,
+                          padding: '10px 12px'
+                        }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: '#8A8A9A', fontWeight: 600 }}>Divided Budget</div>
+                            <div style={{ fontSize: 16, fontWeight: 800, color: '#00BFA2', marginTop: 2 }}>
+                              {div.allocatedBudgetFormatted}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: '#8A8A9A', fontWeight: 600 }}>Divided Quantity</div>
+                            <div style={{ fontSize: 16, fontWeight: 800, color: '#7B2FBE', marginTop: 2 }}>
+                              {div.allocatedQuantity} <span style={{ fontSize: 12, fontWeight: 600, color: '#8A8A9A' }}>act ({div.allocatedQuantity * 4} kws)</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {div.uniqueSites.length > 0 && (
+                          <div style={{ fontSize: 11.5, color: '#2D2D44' }}>
+                            <span style={{ color: '#8A8A9A' }}>Outreach Partner: </span>
+                            <strong>{div.uniqueSites.map(s => s.domain).join(', ')}</strong>
+                            <span style={{ color: '#00BFA2', marginLeft: 5, fontWeight: 700 }}>
+                              (DA {div.uniqueSites[0].da} · {div.uniqueSites[0].price})
+                            </span>
+                          </div>
+                        )}
+
+                        {div.assignedKeywords.length > 0 && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                            {div.assignedKeywords.slice(0, 3).map(ak => (
+                              <span
+                                key={ak.id}
+                                style={{
+                                  fontSize: 10.5,
+                                  fontWeight: 600,
+                                  color: '#2D2D44',
+                                  background: '#FFFFFF',
+                                  border: '1px solid #E2DBEC',
+                                  padding: '2px 7px',
+                                  borderRadius: 5,
+                                  maxWidth: 160,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap'
+                                }}
+                                title={ak.keyword}
+                              >
+                                {ak.keyword}
+                              </span>
+                            ))}
+                            {div.assignedKeywords.length > 3 && (
+                              <span style={{ fontSize: 10.5, color: '#8A8A9A' }}>
+                                +{div.assignedKeywords.length - 3} more
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -1697,8 +1982,25 @@ function CalendarPage({ user, onNavigate }) {
                                         />
                                       </td>
                                       <td style={{ padding: '8px 14px', position: 'relative' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                                           <div style={{ fontWeight: 700, color: '#1A1A1A', fontSize: 13 }}>{item.keyword}</div>
+                                          {activitiesList.length > 1 && keywordToActivityMap[item.id] && (
+                                            <span style={{
+                                              fontSize: 10,
+                                              fontWeight: 700,
+                                              color: '#7B2FBE',
+                                              background: '#F6EEFD',
+                                              border: '1px solid #E5CCF7',
+                                              padding: '1px 6px',
+                                              borderRadius: 4,
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: 3
+                                            }}>
+                                              <Layers size={10} />
+                                              <span>{keywordToActivityMap[item.id]}</span>
+                                            </span>
+                                          )}
                                           {/* Info (i) button with rationale explanation */}
                                           <button
                                             type="button"
@@ -2028,6 +2330,33 @@ function CalendarPage({ user, onNavigate }) {
                     <span style={{ fontSize: 11, fontWeight: 700, color: '#8A8A9A', background: '#F5F5F5', border: '1px solid #E2DBEC', padding: '2px 8px', borderRadius: 10 }}>
                       {selectedByBatch.low} Stagnant
                     </span>
+                  </div>
+                )}
+                {activitiesList.length > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, color: '#8A8A9A' }}>•</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: '#4A1A8C' }}>Division:</span>
+                    {activityDivisions.map(d => (
+                      <span
+                        key={d.id}
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: '#7B2FBE',
+                          background: '#F6EEFD',
+                          border: '1px solid #E5CCF7',
+                          padding: '2px 8px',
+                          borderRadius: 8,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}
+                      >
+                        <span>{d.activity_name}:</span>
+                        <span style={{ color: '#00BFA2' }}>{d.allocatedBudgetFormatted}</span>
+                        <span style={{ color: '#8A8A9A' }}>({d.keywordCount} kws)</span>
+                      </span>
+                    ))}
                   </div>
                 )}
               </div>
@@ -2573,27 +2902,36 @@ function CalendarPage({ user, onNavigate }) {
                               <button
                                 type="button"
                                 onClick={() => {
+                                  sessionStorage.setItem('offpage_target_project', group.projectName);
+                                  const firstItem = group.items.find(it => it.first_uid || it.activity_uid);
+                                  if (firstItem) {
+                                    sessionStorage.setItem('offpage_target_row_uid', firstItem.first_uid || `${firstItem.activity_uid}-KW1`);
+                                  }
                                   if (onNavigate) {
                                     if (group.channel === 'content') onNavigate('content-engine');
-                                    else onNavigate('search-visibility/off-page');
+                                    else onNavigate('search-visibility/off-page-scheduler');
                                   }
                                 }}
-                                title={`Navigate to ${group.channel || 'off-page'}`}
+                                title="Redirect to Off-Page under this project"
                                 style={{
                                   padding: '6px 14px',
                                   borderRadius: 6,
                                   fontSize: 11.5,
                                   fontWeight: 700,
-                                  background: '#f5f3ff',
-                                  color: '#7c3aed',
-                                  border: '1px solid #ddd6fe',
+                                  background: '#F6EEFD',
+                                  color: '#7B2FBE',
+                                  border: '1px solid #E5CCF7',
                                   cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 5,
                                   transition: 'all 0.15s ease'
                                 }}
-                                onMouseEnter={e => { e.currentTarget.style.background = '#ede9fe'; }}
-                                onMouseLeave={e => { e.currentTarget.style.background = '#f5f3ff'; }}
+                                onMouseEnter={e => { e.currentTarget.style.background = '#EDE1F9'; }}
+                                onMouseLeave={e => { e.currentTarget.style.background = '#F6EEFD'; }}
                               >
-                                Off-Page
+                                <ExternalLink size={12} />
+                                <span>Off-Page</span>
                               </button>
                             )}
                           </td>
@@ -2795,27 +3133,33 @@ function CalendarPage({ user, onNavigate }) {
                                   <button
                                     type="button"
                                     onClick={() => {
+                                      sessionStorage.setItem('offpage_target_project', item.project_name);
+                                      sessionStorage.setItem('offpage_target_row_uid', item.first_uid || `${item.activity_uid || 'ACT'}-KW1`);
                                       if (onNavigate) {
                                         if (item.channel === 'content') onNavigate('content-engine');
-                                        else onNavigate('search-visibility/off-page');
+                                        else onNavigate('search-visibility/off-page-scheduler');
                                       }
                                     }}
-                                    title={`Navigate to ${item.channel || 'off-page'}`}
+                                    title={`Redirect to Off-Page under ${item.project_name} for this row`}
                                     style={{
                                       fontSize: 11,
                                       fontWeight: 700,
                                       padding: '4px 12px',
                                       borderRadius: 5,
-                                      background: '#f5f3ff',
-                                      color: '#7c3aed',
-                                      border: '1px solid #ddd6fe',
+                                      background: '#F6EEFD',
+                                      color: '#7B2FBE',
+                                      border: '1px solid #E5CCF7',
                                       cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 4,
                                       transition: 'all 0.15s ease'
                                     }}
-                                    onMouseEnter={e => { e.currentTarget.style.background = '#ede9fe'; }}
-                                    onMouseLeave={e => { e.currentTarget.style.background = '#f5f3ff'; }}
+                                    onMouseEnter={e => { e.currentTarget.style.background = '#EDE1F9'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.background = '#F6EEFD'; }}
                                   >
-                                    Off-Page
+                                    <ExternalLink size={11} />
+                                    <span>Off-Page</span>
                                   </button>
                                 )}
                               </div>
@@ -3162,6 +3506,49 @@ function CalendarPage({ user, onNavigate }) {
                     ))}
                   </div>
 
+                  {/* Batch Summary & Divide Evenly (if multiple activities) */}
+                  {activitiesList.length > 1 && !editingItem && (
+                    <div style={{
+                      marginTop: 10,
+                      padding: '9px 14px',
+                      background: '#F6EEFD',
+                      border: '1px solid #E5CCF7',
+                      borderRadius: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: 8
+                    }}>
+                      <div style={{ fontSize: 12, color: '#4A1A8C' }}>
+                        <strong>Batch Total:</strong> {activitiesList.reduce((acc, a) => acc + (parseInt(a.quantity, 10) || 1), 0)} activities · <strong>₹{activitiesList.reduce((acc, a) => acc + (parseFloat(String(a.budget || '0').replace(/[^0-9.]/g, '')) || 0), 0).toLocaleString()}</strong> budget
+                        <span style={{ marginLeft: 6, color: '#7B2FBE', fontSize: 11.5 }}>
+                          (AI will divide budget &amp; keywords across all {activitiesList.length} activities)
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleDivideBudgetAndQuantityEvenly}
+                        style={{
+                          padding: '4px 10px',
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          color: '#7B2FBE',
+                          background: '#FFFFFF',
+                          border: '1px solid #E5CCF7',
+                          borderRadius: 6,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}
+                      >
+                        <Sliders size={12} />
+                        <span>Divide Evenly</span>
+                      </button>
+                    </div>
+                  )}
+
                   {/* Centered "+ Add Another Activity" Button */}
                   {!editingItem && (
                     <div style={{ textAlign: 'center', marginTop: 12 }}>
@@ -3175,15 +3562,15 @@ function CalendarPage({ user, onNavigate }) {
                           padding: '7px 16px',
                           fontSize: 12.5,
                           fontWeight: 700,
-                          color: '#7c3aed',
-                          background: '#ffffff',
-                          border: '1px dashed #c4b5fd',
+                          color: '#7B2FBE',
+                          background: '#FFFFFF',
+                          border: '1px dashed #E5CCF7',
                           borderRadius: 8,
                           cursor: 'pointer',
                           transition: 'all 0.15s ease'
                         }}
-                        onMouseEnter={e => { e.currentTarget.style.background = '#f5f3ff'; e.currentTarget.style.borderColor = '#7c3aed'; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.borderColor = '#c4b5fd'; }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#F6EEFD'; e.currentTarget.style.borderColor = '#7B2FBE'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = '#FFFFFF'; e.currentTarget.style.borderColor = '#E5CCF7'; }}
                       >
                         <Plus size={14} />
                         <span>Add Another Activity</span>
