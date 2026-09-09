@@ -122,56 +122,88 @@ function MultiSelectField({ label, options, selectedValues = [], onChange }) {
   );
 }
 
-// ColumnHeaderFilter Component for Pill-Style Single Select Header Dropdown
+// ColumnHeaderFilter Component -- pill trigger with a menu that always opens BELOW it
 function ColumnHeaderFilter({ title, options = [], selectedValues, onChange }) {
   const currentValue = Array.isArray(selectedValues)
-    ? (selectedValues.length === 1 ? selectedValues[0] : (selectedValues.length > 1 ? selectedValues[0] : 'all'))
+    ? (selectedValues.length >= 1 ? selectedValues[0] : 'all')
     : (selectedValues || 'all');
+  const active = currentValue !== 'all';
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef(null);
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = btnRef.current && btnRef.current.getBoundingClientRect();
+      if (r) setPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    place();
+    const onDown = (e) => { if (btnRef.current && !btnRef.current.contains(e.target)) setOpen(false); };
+    const onMove = () => setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('scroll', onMove, true);
+      window.removeEventListener('resize', onMove);
+    };
+  }, [open]);
+
+  const pick = (val) => { onChange(val === 'all' ? [] : [val]); setOpen(false); };
+  const items = [{ value: 'all', label: title }, ...options.map((o) => ({ value: o, label: o }))];
 
   return (
     <th style={{ padding: '8px 12px', fontWeight: 600 }}>
-      <div style={{ position: 'relative', display: 'inline-block' }}>
-        <select
-          value={currentValue}
-          onChange={(e) => {
-            const val = e.target.value;
-            onChange(val === 'all' ? [] : [val]);
-          }}
-          style={{
-            padding: '6px 28px 6px 12px',
-            borderRadius: 10,
-            border: currentValue !== 'all' ? '1px solid #7c3aed' : '1px solid #e2e8f0',
-            background: currentValue !== 'all' ? '#f5f3ff' : '#ffffff',
-            color: currentValue !== 'all' ? '#7c3aed' : '#64748b',
-            fontSize: 12,
-            fontWeight: 600,
-            outline: 'none',
-            cursor: 'pointer',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
-            appearance: 'none',
-            WebkitAppearance: 'none',
-            MozAppearance: 'none'
-          }}
-        >
-          <option value="all">{title}</option>
-          {options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
-        <ChevronDown
-          size={13}
-          color={currentValue !== 'all' ? '#7c3aed' : '#94a3b8'}
-          style={{
-            position: 'absolute',
-            right: 10,
-            top: '50%',
-            transform: 'translateY(-50%)',
-            pointerEvents: 'none'
-          }}
-        />
-      </div>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+          padding: '6px 10px', borderRadius: 10, textTransform: 'none',
+          border: active ? '1px solid #7c3aed' : '1px solid #e2e8f0',
+          background: active ? '#f5f3ff' : '#ffffff',
+          color: active ? '#7c3aed' : '#64748b',
+          fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+        }}
+      >
+        <span>{active ? currentValue : title}</span>
+        <ChevronDown size={13} color={active ? '#7c3aed' : '#94a3b8'}
+          style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }} />
+      </button>
+      {open && (
+        <div style={{
+          position: 'fixed', top: pos.top, left: pos.left, minWidth: Math.max(pos.width, 160),
+          background: '#ffffff', border: '1px solid #E4DFEE', borderRadius: 10,
+          boxShadow: '0 12px 28px rgba(15,23,42,0.16)', zIndex: 5000,
+          maxHeight: 280, overflowY: 'auto', padding: 4, textTransform: 'none'
+        }}>
+          {items.map((opt) => {
+            const sel = opt.value === currentValue;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => pick(opt.value)}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '7px 10px', fontSize: 12.5, border: 'none',
+                  background: sel ? '#f5f3ff' : 'transparent',
+                  color: sel ? '#7c3aed' : '#0f172a', fontWeight: sel ? 700 : 500,
+                  borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap'
+                }}
+                onMouseEnter={(e) => { if (!sel) e.currentTarget.style.background = '#f8fafc'; }}
+                onMouseLeave={(e) => { if (!sel) e.currentTarget.style.background = 'transparent'; }}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </th>
   );
 }
@@ -268,9 +300,7 @@ export default function KeywordsPage({ user }) {
         if (isMounted && domains && domains.length > 0) {
           setProjects(domains);
           const savedSlug = localStorage.getItem('bd_selected_project');
-          const target = savedSlug === 'all'
-            ? { slug: 'all', name: 'All Projects', domain: 'All Projects', isAllProjects: true }
-            : (savedSlug && domains.find(p => p.slug === savedSlug)) || domains[0];
+          const target = (savedSlug && savedSlug !== 'all' && domains.find(p => p.slug === savedSlug)) || domains[0];
           setActiveProject(target);
           await loadKeywordDataForProject(target, domains);
         }
@@ -533,27 +563,6 @@ export default function KeywordsPage({ user }) {
                       display: 'flex',
                       flexDirection: 'column'
                     }}>
-                      <button
-                        key="all-projects"
-                        onClick={() => handleSelectProject({ slug: 'all', name: 'All Projects', domain: 'All Projects', isAllProjects: true })}
-                        style={{
-                          padding: '8px 14px',
-                          fontSize: 13.5,
-                          fontWeight: (activeProject?.slug === 'all' || activeProject?.isAllProjects) ? 700 : 500,
-                          color: (activeProject?.slug === 'all' || activeProject?.isAllProjects) ? '#7c3aed' : '#1e293b',
-                          backgroundColor: (activeProject?.slug === 'all' || activeProject?.isAllProjects) ? '#f5f3ff' : 'transparent',
-                          border: 'none',
-                          borderBottom: '1px solid #f1f5f9',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          transition: 'background 0.12s'
-                        }}
-                      >
-                        All Projects
-                      </button>
                       {projects.map(p => (
                         <button
                           key={p.slug}
@@ -1101,8 +1110,9 @@ export default function KeywordsPage({ user }) {
         overflow: 'hidden',
         boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
       }}>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 12.5 }}>
+        <style>{`.kwp-sticky thead th{position:sticky;top:0;z-index:4;background:#FAF8FD;box-shadow:inset 0 -1px 0 #E4DFEE;}`}</style>
+        <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 230px)' }}>
+          <table className="kwp-sticky" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: '#FAF8FD', borderBottom: '1px solid #E4DFEE', color: '#4E4E61', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.03em', whiteSpace: 'nowrap' }}>
 

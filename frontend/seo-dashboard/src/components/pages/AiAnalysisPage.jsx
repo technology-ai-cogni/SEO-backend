@@ -3,6 +3,7 @@ import { Search, ChevronDown, ExternalLink, Sparkles, RefreshCw, Filter, Downloa
 import {
   fetchDomainRows,
   fetchKeywordRows,
+  fetchKeywordRowsByKeywords,
   fetchAiAnalysisHistory,
   runAiVisibilityAnalysis
 } from '../../lib/projectsApi';
@@ -13,6 +14,21 @@ import BrandInfinityLoader from '../common/BrandInfinityLoader';
 // Shared "top 2 keywords per category by SV" -- same helper Brand Discovery uses,
 // so the analyzed-keyword / "Total Search Terms" counts match across pages.
 import { getTop2KeywordsPerCategory } from '../../lib/keywordSelection';
+
+
+// Short-lived promise cache for AI-analysis history so it can be started while
+// the project list is still loading (and reused across quick re-renders).
+const _histCache = new Map(); // slug -> { ts, promise }
+const HIST_TTL_MS = 60_000;
+function getHistoryCached(slug, { fresh = false } = {}) {
+  if (!slug) return Promise.resolve([]);
+  const now = Date.now();
+  const hit = _histCache.get(slug);
+  if (!fresh && hit && (now - hit.ts) < HIST_TTL_MS) return hit.promise;
+  const promise = fetchAiAnalysisHistory(slug).catch(() => []);
+  _histCache.set(slug, { ts: now, promise });
+  return promise;
+}
 
 
 // MultiSelectField Component for Popover Filters
@@ -127,56 +143,88 @@ function MultiSelectField({ label, options, selectedValues = [], onChange }) {
   );
 }
 
-// ColumnHeaderFilter Component for Pill-Style Single Select Header Dropdown
+// ColumnHeaderFilter Component — pill trigger with a menu that always opens BELOW it
 function ColumnHeaderFilter({ title, options = [], selectedValues, onChange }) {
   const currentValue = Array.isArray(selectedValues)
-    ? (selectedValues.length === 1 ? selectedValues[0] : (selectedValues.length > 1 ? selectedValues[0] : 'all'))
+    ? (selectedValues.length >= 1 ? selectedValues[0] : 'all')
     : (selectedValues || 'all');
+  const active = currentValue !== 'all';
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef(null);
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = btnRef.current && btnRef.current.getBoundingClientRect();
+      if (r) setPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    place();
+    const onDown = (e) => { if (btnRef.current && !btnRef.current.contains(e.target)) setOpen(false); };
+    const onMove = () => setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('scroll', onMove, true);
+      window.removeEventListener('resize', onMove);
+    };
+  }, [open]);
+
+  const pick = (val) => { onChange(val === 'all' ? [] : [val]); setOpen(false); };
+  const items = [{ value: 'all', label: title }, ...options.map((o) => ({ value: o, label: o }))];
 
   return (
     <th style={{ padding: '8px 12px', fontWeight: 600 }}>
-      <div style={{ position: 'relative', display: 'inline-block' }}>
-        <select
-          value={currentValue}
-          onChange={(e) => {
-            const val = e.target.value;
-            onChange(val === 'all' ? [] : [val]);
-          }}
-          style={{
-            padding: '6px 28px 6px 12px',
-            borderRadius: 10,
-            border: currentValue !== 'all' ? '1px solid #7c3aed' : '1px solid #e2e8f0',
-            background: currentValue !== 'all' ? '#f5f3ff' : '#ffffff',
-            color: currentValue !== 'all' ? '#7c3aed' : '#64748b',
-            fontSize: 12,
-            fontWeight: 600,
-            outline: 'none',
-            cursor: 'pointer',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
-            appearance: 'none',
-            WebkitAppearance: 'none',
-            MozAppearance: 'none'
-          }}
-        >
-          <option value="all">{title}</option>
-          {options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
-        <ChevronDown
-          size={13}
-          color={currentValue !== 'all' ? '#7c3aed' : '#94a3b8'}
-          style={{
-            position: 'absolute',
-            right: 10,
-            top: '50%',
-            transform: 'translateY(-50%)',
-            pointerEvents: 'none'
-          }}
-        />
-      </div>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+          padding: '6px 10px', borderRadius: 10, textTransform: 'none',
+          border: active ? '1px solid #7c3aed' : '1px solid #e2e8f0',
+          background: active ? '#f5f3ff' : '#ffffff',
+          color: active ? '#7c3aed' : '#64748b',
+          fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+        }}
+      >
+        <span>{active ? currentValue : title}</span>
+        <ChevronDown size={13} color={active ? '#7c3aed' : '#94a3b8'}
+          style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }} />
+      </button>
+      {open && (
+        <div style={{
+          position: 'fixed', top: pos.top, left: pos.left, minWidth: Math.max(pos.width, 160),
+          background: '#ffffff', border: '1px solid #E4DFEE', borderRadius: 10,
+          boxShadow: '0 12px 28px rgba(15,23,42,0.16)', zIndex: 5000,
+          maxHeight: 280, overflowY: 'auto', padding: 4, textTransform: 'none'
+        }}>
+          {items.map((opt) => {
+            const sel = opt.value === currentValue;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => pick(opt.value)}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '7px 10px', fontSize: 12.5, border: 'none',
+                  background: sel ? '#f5f3ff' : 'transparent',
+                  color: sel ? '#7c3aed' : '#0f172a', fontWeight: sel ? 700 : 500,
+                  borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap'
+                }}
+                onMouseEnter={(e) => { if (!sel) e.currentTarget.style.background = '#f8fafc'; }}
+                onMouseLeave={(e) => { if (!sel) e.currentTarget.style.background = 'transparent'; }}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </th>
   );
 }
@@ -188,9 +236,13 @@ export default function AiAnalysisPage({ user }) {
   const [activeProject, setActiveProject] = useState(null);
   const [loading, setLoading] = useState(true);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
-  const [projectKeywords, setProjectKeywords] = useState([]);
+  const [projectKeywords, setProjectKeywords] = useState([]); // only the ~30-100 mentioned/cited rows, enriched
+  const [kwEnriching, setKwEnriching] = useState(false);
+  const [allKwLite, setAllKwLite] = useState([]); // keyword/sv/category/cluster only -- feeds "Total Search Terms"
+  const [countLoading, setCountLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [analyzing, setAnalyzing] = useState(false);
+  const loadSeqRef = useRef(0);
   const handleOpenAnalyzeModal = () => {
     handleRunAnalysis();
   };
@@ -257,19 +309,21 @@ export default function AiAnalysisPage({ user }) {
     let isMounted = true;
     async function loadData() {
       setLoading(true);
+      // Kick the history fetch off IMMEDIATELY for the likely target project
+      // (from localStorage) -- don't wait for the domain list to resolve first.
+      const savedSlug = localStorage.getItem('bd_selected_project');
+      if (savedSlug && savedSlug !== 'all') getHistoryCached(savedSlug);
       try {
         const domains = await fetchDomainRows();
         if (isMounted && domains && domains.length > 0) {
           setProjects(domains);
-          const savedSlug = localStorage.getItem('bd_selected_project');
-          const target = savedSlug === 'all'
-            ? { slug: 'all', name: 'All Projects', domain: 'All Projects', isAllProjects: true }
-            : (savedSlug && domains.find(p => p.slug === savedSlug)) || domains[0];
-          setActiveProject(target);
+          const target = (savedSlug && savedSlug !== 'all' && domains.find(p => p.slug === savedSlug)) || domains[0];
+          setActiveProject(target); // -> triggers the activeProject effect below
+        } else if (isMounted) {
+          setLoading(false);
         }
       } catch (err) {
         console.error('[AiAnalysisPage] Error loading projects:', err);
-      } finally {
         if (isMounted) setLoading(false);
       }
     }
@@ -284,37 +338,62 @@ export default function AiAnalysisPage({ user }) {
     }
   }, [activeProject?.slug]);
 
-  const loadProjectData = async (slug, allProjectsList = projects) => {
-    if (!slug) return;
-    setLoading(true);
-    try {
-      if (slug === 'all') {
-        const validProjects = (allProjectsList || []).filter(p => p && p.slug && p.slug !== 'all');
-        const results = await Promise.all(
-          validProjects.map(async p => {
-            const [kws, hist] = await Promise.all([
-              fetchKeywordRows(p.slug).catch(() => []),
-              fetchAiAnalysisHistory(p.slug).catch(() => [])
-            ]);
-            return { kws: kws || [], hist: hist || [] };
-          })
-        );
-        setProjectKeywords(results.flatMap(r => r.kws));
-        setHistory(results.flatMap(r => r.hist));
-        return;
-      }
+  // Pull the plain keyword strings out of every run's mentioned / cited lists.
+  const keywordNamesFromHistory = (hist) => {
+    const out = new Set();
+    (hist || []).forEach(h => {
+      (h.mentioned_keywords || []).forEach(k => {
+        const s = String(k || '').trim();
+        if (s) out.add(s);
+      });
+      (h.cited_pages_list || []).forEach(item => {
+        let s = String(item || '').trim();
+        if (s.includes(' - ')) s = s.split(' - ')[0].trim();
+        if (s) out.add(s);
+      });
+    });
+    return Array.from(out);
+  };
 
-      const [kws, hist] = await Promise.all([
-        fetchKeywordRows(slug),
-        fetchAiAnalysisHistory(slug)
-      ]);
-      setProjectKeywords(kws || []);
+  // History is the critical-path fetch (the tables render from it). We then
+  // enrich ONLY the mentioned / cited keywords (~30-100 rows, minimal columns),
+  // never the project's whole keyword table.
+  const loadProjectData = async (slug, { fresh = false } = {}) => {
+    if (!slug) return;
+    const seq = ++loadSeqRef.current;
+    setLoading(true);
+    setProjectKeywords([]);
+    setAllKwLite([]);
+
+    let hist = [];
+    try {
+      hist = await getHistoryCached(slug, { fresh });
+      if (seq !== loadSeqRef.current) return;
       setHistory(hist || []);
     } catch (e) {
-      console.error('[AiAnalysisPage] Error loading project data:', e);
+      if (seq !== loadSeqRef.current) return;
+      console.error('[AiAnalysisPage] Error loading history:', e);
+      setHistory([]);
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
+
+    // (1) Enrich the mentioned/cited keywords only -- exact rows, few columns.
+    const names = keywordNamesFromHistory(hist);
+    if (names.length > 0) {
+      setKwEnriching(true);
+      fetchKeywordRowsByKeywords(slug, names)
+        .then(kws => { if (seq === loadSeqRef.current) setProjectKeywords(kws || []); })
+        .catch(() => { if (seq === loadSeqRef.current) setProjectKeywords([]); })
+        .finally(() => { if (seq === loadSeqRef.current) setKwEnriching(false); });
+    }
+
+    // (2) "Total Search Terms" needs every keyword, but only 4 tiny columns.
+    setCountLoading(true);
+    fetchKeywordRows(slug, { columns: 'keyword,sv,category,cluster' })
+      .then(kws => { if (seq === loadSeqRef.current) setAllKwLite(kws || []); })
+      .catch(() => { if (seq === loadSeqRef.current) setAllKwLite([]); })
+      .finally(() => { if (seq === loadSeqRef.current) setCountLoading(false); });
   };
 
 
@@ -376,11 +455,10 @@ export default function AiAnalysisPage({ user }) {
     document.body.removeChild(link);
   };
 
-  const handleSelectProject = async (proj) => {
-    setActiveProject(proj);
+  const handleSelectProject = (proj) => {
     localStorage.setItem('bd_selected_project', proj.slug);
     setProjectMenuOpen(false);
-    await loadProjectData(proj.slug);
+    setActiveProject(proj); // the activeProject effect runs loadProjectData
   };
 
   const saveHitToPeriodHistory = (projectSlug, engineKey, visibilityResult) => {
@@ -447,8 +525,15 @@ export default function AiAnalysisPage({ user }) {
     setAnalyzing(true);
     try {
       const domain = activeProject?.domain || activeProject?.name || '';
-      const top2KwObjects = getTop2KeywordsPerCategory(projectKeywords);
-      const kwList = (top2KwObjects.length > 0 ? top2KwObjects : projectKeywords)
+      // The analysis needs the top-2 keywords per category across the WHOLE
+      // project. allKwLite (keyword/sv/category/cluster) normally has it; if it
+      // hasn't finished loading, fetch that light set now.
+      let allKw = allKwLite;
+      if (!allKw || allKw.length === 0) {
+        allKw = await fetchKeywordRows(activeProject.slug, { columns: 'keyword,sv,category,cluster' }).catch(() => []);
+      }
+      const top2KwObjects = getTop2KeywordsPerCategory(allKw);
+      const kwList = (top2KwObjects.length > 0 ? top2KwObjects : allKw)
         .map(k => (typeof k === 'string' ? k : (k.kw || k.keyword || k.name)))
         .filter(Boolean);
 
@@ -478,7 +563,8 @@ export default function AiAnalysisPage({ user }) {
                   cited_pages: resObj.cited_pages || 0,
                   total_keywords: resObj.total_keywords || kwList.length,
                   mentioned_keywords: resObj.mentioned_keywords || [],
-                  cited_pages_list: resObj.cited_pages_list || []
+                  cited_pages_list: resObj.cited_pages_list || [],
+                  keyword_ai_ranks: resObj.keyword_ai_ranks || {}
                 }]);
               } catch (sbErr) {
                 console.warn('[AiAnalysisPage] Supabase insert warning:', sbErr);
@@ -491,7 +577,7 @@ export default function AiAnalysisPage({ user }) {
       );
 
       recordAiModelAnalysisRun(user, activeProject.slug, 'all');
-      await loadProjectData(activeProject.slug);
+      await loadProjectData(activeProject.slug, { fresh: true });
     } catch (err) {
       console.error('[AiAnalysisPage] Analysis run error:', err);
     } finally {
@@ -532,11 +618,12 @@ export default function AiAnalysisPage({ user }) {
       cited_pages: run.cited_pages || 0,
       mentioned_keywords: run.mentioned_keywords || [],
       cited_pages_list: run.cited_pages_list || [],
+      keyword_ai_ranks: run.keyword_ai_ranks || {},
       total_keywords: run.total_keywords || projectKeywords.length
     };
   };
 
-    // Get Mentions Data for selected engine: Top 2 keywords per category mapped with Project Setup
+  // Get Mentions Data for selected engine: Top 2 keywords per category mapped with Project Setup
   const getEngineMentions = () => {
     const activeRes = getActiveEngineResult();
     if (!activeRes || !Array.isArray(activeRes.mentioned_keywords) || activeRes.mentioned_keywords.length === 0) {
@@ -565,8 +652,11 @@ export default function AiAnalysisPage({ user }) {
         displaySv = !isNaN(parsed) && parsed > 0 ? parsed.toLocaleString() : String(rawSv);
       }
 
-      // Tentative rank fetched directly from AI LLM output
-      const aiRankVal = aiRanks[cleanKwStr] || aiRanks[kwLower] || matchInKws?.rank || (idx % 5) + 1;
+      // Tentative Rank = the AI-recommendation position returned by the LLM
+      // agent (ChatGPT / Gemini / AI Overview), stored in ai_analysis.keyword_ai_ranks.
+      // NOT the Google/SERP rank from keyword_categories.
+      const aiRankRaw = aiRanks[kwLower] ?? aiRanks[cleanKwStr];
+      const aiRankVal = (aiRankRaw !== undefined && aiRankRaw !== null && aiRankRaw !== '') ? aiRankRaw : null;
 
       // Real landing page URL from Project Setup
       const cleanDomain = activeProject?.domain ? `https://www.${activeProject.domain.replace(/^https?:\/\//i, '').replace(/^www\./i, '')}` : '';
@@ -591,7 +681,7 @@ export default function AiAnalysisPage({ user }) {
     });
   };
 
-    // Get Citations Data for selected engine: Top 2 keywords per category mapped with Project Setup
+  // Get Citations Data for selected engine: Top 2 keywords per category mapped with Project Setup
   const getEngineCitations = () => {
     const activeRes = getActiveEngineResult();
     if (!activeRes || (!Array.isArray(activeRes.cited_pages_list) && !Array.isArray(activeRes.mentioned_keywords))) {
@@ -659,7 +749,7 @@ export default function AiAnalysisPage({ user }) {
   const citationsData = useMemo(() => getEngineCitations(), [selectedEngine, selectedDate, activeProject?.slug, projectKeywords, history]);
 
   // Total Search Terms = count of the top-2 keywords per category (same set shown on Top Pages Organic)
-  const totalSearchTerms = useMemo(() => getTop2KeywordsPerCategory(projectKeywords).length, [projectKeywords]);
+  const totalSearchTerms = useMemo(() => getTop2KeywordsPerCategory(allKwLite).length, [allKwLite]);
 
   // Unique filter values memoized
   const { uniqueClusters, uniqueCategories, uniqueTypes, uniqueTargetTypes, uniqueTargetSubtypes, uniqueTargetGeos, uniquePriorities } = useMemo(() => {
@@ -753,269 +843,248 @@ export default function AiAnalysisPage({ user }) {
           }}>
             {/* Row 1: Project dropdown  ·  Country + Date */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-            {/* Left Side: Dashboard: domain.com v */}
-            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-              <h1 style={{
-                display: 'flex',
+              {/* Left Side: Dashboard: domain.com v */}
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                <h1 style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: 8,
+                  fontSize: 20,
+                  fontWeight: 800,
+                  color: '#1A1A1A',
+                  margin: 0
+                }}>
+                  <span>Project:</span>
+                  <div ref={projectMenuRef} style={{ position: 'relative', display: 'inline-block' }}>
+                    <button
+                      onClick={() => setProjectMenuOpen(!projectMenuOpen)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        padding: 0,
+                        fontSize: 20,
+                        fontWeight: 800,
+                        color: 'var(--accent)',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }}
+                    >
+                      {currentDomainDisplay}
+                      <ChevronDown size={18} style={{ transform: projectMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+                    </button>
+
+                    {projectMenuOpen && (
+                      <div style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        marginTop: 6,
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: 8,
+                        boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)',
+                        zIndex: 1000,
+                        minWidth: 200,
+                        padding: '4px 0',
+                        display: 'flex',
+                        flexDirection: 'column'
+                      }}>
+                        {projects.map(p => (
+                          <button
+                            key={p.slug}
+                            onClick={() => handleSelectProject(p)}
+                            style={{
+                              padding: '8px 14px',
+                              fontSize: 13.5,
+                              fontWeight: (activeProject?.slug === p.slug && !activeProject?.isAllProjects) ? 700 : 500,
+                              color: (activeProject?.slug === p.slug && !activeProject?.isAllProjects) ? '#7c3aed' : '#1e293b',
+                              backgroundColor: (activeProject?.slug === p.slug && !activeProject?.isAllProjects) ? '#f5f3ff' : 'transparent',
+                              border: 'none',
+                              textAlign: 'left',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              transition: 'background 0.12s'
+                            }}
+                          >
+                            {p.domain || p.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {currentDomainDisplay !== 'Select Domain' && currentDomainDisplay !== 'All Projects' && (
+                    <a
+                      href={`https://${currentDomainDisplay}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: '#2563eb', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
+                    >
+                      <ExternalLink size={16} />
+                    </a>
+                  )}
+                </h1>
+              </div>
+
+              {/* Right Side: Country Selector & Date Picker */}
+              <div style={{
+                display: 'inline-flex',
                 alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: 8,
-                fontSize: 20,
-                fontWeight: 800,
-                color: '#1A1A1A',
-                margin: 0
+                gap: 12,
+                fontSize: 13,
+                color: '#64748b',
+                fontWeight: 500
               }}>
-                <span>Project:</span>
-                <div ref={projectMenuRef} style={{ position: 'relative', display: 'inline-block' }}>
+                {/* Country Selector */}
+                <div ref={countryMenuRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                   <button
-                    onClick={() => setProjectMenuOpen(!projectMenuOpen)}
+                    onClick={() => {
+                      setCountryMenuOpen(!countryMenuOpen);
+                      setCountrySearch('');
+                    }}
                     style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
                       background: 'transparent',
                       border: 'none',
                       padding: 0,
-                      fontSize: 20,
-                      fontWeight: 800,
-                      color: 'var(--accent)',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: '#2563eb',
                       cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4
+                      outline: 'none',
+                      whiteSpace: 'nowrap'
                     }}
                   >
-                    {currentDomainDisplay}
-                    <ChevronDown size={18} style={{ transform: projectMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+                    <img
+                      src={`https://flagcdn.com/16x12/${activeCountry.code.toLowerCase()}.png`}
+                      width="16"
+                      height="12"
+                      alt={activeCountry.name}
+                      style={{ borderRadius: 1.5, objectFit: 'cover' }}
+                    />
+                    <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>{activeCountry.name}</span>
+                    <ChevronDown size={14} style={{ color: '#2563eb', transform: countryMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
                   </button>
 
-                  {projectMenuOpen && (
+                  {countryMenuOpen && (
                     <div style={{
                       position: 'absolute',
                       top: '100%',
-                      left: 0,
+                      right: 0,
                       marginTop: 6,
                       backgroundColor: '#ffffff',
                       border: '1px solid #cbd5e1',
-                      borderRadius: 8,
-                      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)',
+                      borderRadius: 10,
+                      boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
                       zIndex: 1000,
-                      minWidth: 200,
-                      padding: '4px 0',
+                      width: 220,
                       display: 'flex',
-                      flexDirection: 'column'
+                      flexDirection: 'column',
+                      overflow: 'hidden'
                     }}>
-                      <button
-                        key="all-projects"
-                        onClick={() => handleSelectProject({ slug: 'all', name: 'All Projects', domain: 'All Projects', isAllProjects: true })}
-                        style={{
-                          padding: '8px 14px',
-                          fontSize: 13.5,
-                          fontWeight: (activeProject?.slug === 'all' || activeProject?.isAllProjects) ? 700 : 500,
-                          color: (activeProject?.slug === 'all' || activeProject?.isAllProjects) ? '#7c3aed' : '#1e293b',
-                          backgroundColor: (activeProject?.slug === 'all' || activeProject?.isAllProjects) ? '#f5f3ff' : 'transparent',
-                          border: 'none',
-                          borderBottom: '1px solid #f1f5f9',
-                          textAlign: 'left',
-                          cursor: 'pointer',
+                      <div style={{ padding: '8px 8px 6px 8px', borderBottom: '1px solid #f1f5f9' }}>
+                        <div style={{
                           display: 'flex',
                           alignItems: 'center',
-                          justifyContent: 'space-between',
-                          transition: 'background 0.12s'
-                        }}
-                      >
-                        All Projects
-                      </button>
-                      {projects.map(p => (
-                        <button
-                          key={p.slug}
-                          onClick={() => handleSelectProject(p)}
-                          style={{
-                            padding: '8px 14px',
-                            fontSize: 13.5,
-                            fontWeight: (activeProject?.slug === p.slug && !activeProject?.isAllProjects) ? 700 : 500,
-                            color: (activeProject?.slug === p.slug && !activeProject?.isAllProjects) ? '#7c3aed' : '#1e293b',
-                            backgroundColor: (activeProject?.slug === p.slug && !activeProject?.isAllProjects) ? '#f5f3ff' : 'transparent',
-                            border: 'none',
-                            textAlign: 'left',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            transition: 'background 0.12s'
-                          }}
-                        >
-                          {p.domain || p.name}
-                        </button>
-                      ))}
+                          gap: 6,
+                          background: '#ffffff',
+                          border: '1.5px solid #818cf8',
+                          borderRadius: 8,
+                          padding: '4px 8px'
+                        }}>
+                          <Search size={14} style={{ color: '#64748b' }} />
+                          <input
+                            type="text"
+                            placeholder="Search"
+                            value={countrySearch}
+                            onChange={e => setCountrySearch(e.target.value)}
+                            autoFocus
+                            style={{
+                              border: 'none',
+                              outline: 'none',
+                              background: 'transparent',
+                              fontSize: 12.5,
+                              fontWeight: 500,
+                              color: '#0f172a',
+                              width: '100%'
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ overflowY: 'auto', maxHeight: 210, padding: '4px 0' }}>
+                        {filteredCountries.map((c) => (
+                          <button
+                            key={c.code}
+                            onClick={() => {
+                              setSelectedRegion(c.code);
+                              setCountryMenuOpen(false);
+                            }}
+                            style={{
+                              width: '100%',
+                              padding: '7px 12px',
+                              fontSize: 13,
+                              fontWeight: c.code === selectedRegion ? 700 : 500,
+                              color: '#0f172a',
+                              backgroundColor: c.code === selectedRegion ? '#eff6ff' : 'transparent',
+                              border: 'none',
+                              textAlign: 'left',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 10
+                            }}
+                          >
+                            <img
+                              src={`https://flagcdn.com/16x12/${c.code.toLowerCase()}.png`}
+                              width="16"
+                              height="12"
+                              alt={c.name}
+                              style={{ borderRadius: 1.5, objectFit: 'cover' }}
+                            />
+                            <span>{c.name}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
 
-                {currentDomainDisplay !== 'Select Domain' && currentDomainDisplay !== 'All Projects' && (
-                  <a
-                    href={`https://${currentDomainDisplay}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: '#2563eb', display: 'inline-flex', alignItems: 'center', marginLeft: 4 }}
+                {/* Calendar -- green dot = today, red dot = a day that has a stored analysis.
+                  Pick a past red day to view that day's mentions / citations. */}
+                <MarkedCalendar
+                  value={selectedDate}
+                  onChange={setSelectedDate}
+                  markedDates={analysisDateSet}
+                />
+
+                {userCanRunActions && canRunAiModelAnalysis(user, activeProject?.slug, selectedEngine, !!getActiveEngineResult()) && (
+                  <button
+                    onClick={handleRunAnalysis}
+                    disabled={analyzing}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      background: 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)',
+                      color: '#ffffff', border: 'none', borderRadius: 8, padding: '9px 18px',
+                      fontSize: 13, fontWeight: 600,
+                      cursor: analyzing ? 'not-allowed' : 'pointer', opacity: analyzing ? 0.75 : 1,
+                      boxShadow: '0 3px 12px rgba(166, 28, 104, 0.28)', transition: 'all 0.15s ease'
+                    }}
+                    onMouseEnter={e => { if (!analyzing) { e.currentTarget.style.background = 'linear-gradient(135deg, #8032CF 0%, #9E2CA0 35%, #B82276 70%, #CA2265 100%)'; e.currentTarget.style.boxShadow = '0 5px 16px rgba(166, 28, 104, 0.38)'; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
+                    onMouseLeave={e => { if (!analyzing) { e.currentTarget.style.background = 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)'; e.currentTarget.style.boxShadow = '0 3px 12px rgba(166, 28, 104, 0.28)'; e.currentTarget.style.transform = 'translateY(0)'; } }}
                   >
-                    <ExternalLink size={16} />
-                  </a>
-                )}
-              </h1>
-            </div>
-
-            {/* Right Side: Country Selector & Date Picker */}
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 12,
-              fontSize: 13,
-              color: '#64748b',
-              fontWeight: 500
-            }}>
-              {/* Country Selector */}
-              <div ref={countryMenuRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-                <button
-                  onClick={() => {
-                    setCountryMenuOpen(!countryMenuOpen);
-                    setCountrySearch('');
-                  }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    background: 'transparent',
-                    border: 'none',
-                    padding: 0,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: '#2563eb',
-                    cursor: 'pointer',
-                    outline: 'none',
-                    whiteSpace: 'nowrap'
-                  }}
-                >
-                  <img
-                    src={`https://flagcdn.com/16x12/${activeCountry.code.toLowerCase()}.png`}
-                    width="16"
-                    height="12"
-                    alt={activeCountry.name}
-                    style={{ borderRadius: 1.5, objectFit: 'cover' }}
-                  />
-                  <span style={{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>{activeCountry.name}</span>
-                  <ChevronDown size={14} style={{ color: '#2563eb', transform: countryMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
-                </button>
-
-                {countryMenuOpen && (
-                  <div style={{
-                    position: 'absolute',
-                    top: '100%',
-                    right: 0,
-                    marginTop: 6,
-                    backgroundColor: '#ffffff',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 10,
-                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
-                    zIndex: 1000,
-                    width: 220,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    overflow: 'hidden'
-                  }}>
-                    <div style={{ padding: '8px 8px 6px 8px', borderBottom: '1px solid #f1f5f9' }}>
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        background: '#ffffff',
-                        border: '1.5px solid #818cf8',
-                        borderRadius: 8,
-                        padding: '4px 8px'
-                      }}>
-                        <Search size={14} style={{ color: '#64748b' }} />
-                        <input
-                          type="text"
-                          placeholder="Search"
-                          value={countrySearch}
-                          onChange={e => setCountrySearch(e.target.value)}
-                          autoFocus
-                          style={{
-                            border: 'none',
-                            outline: 'none',
-                            background: 'transparent',
-                            fontSize: 12.5,
-                            fontWeight: 500,
-                            color: '#0f172a',
-                            width: '100%'
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    <div style={{ overflowY: 'auto', maxHeight: 210, padding: '4px 0' }}>
-                      {filteredCountries.map((c) => (
-                        <button
-                          key={c.code}
-                          onClick={() => {
-                            setSelectedRegion(c.code);
-                            setCountryMenuOpen(false);
-                          }}
-                          style={{
-                            width: '100%',
-                            padding: '7px 12px',
-                            fontSize: 13,
-                            fontWeight: c.code === selectedRegion ? 700 : 500,
-                            color: '#0f172a',
-                            backgroundColor: c.code === selectedRegion ? '#eff6ff' : 'transparent',
-                            border: 'none',
-                            textAlign: 'left',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10
-                          }}
-                        >
-                          <img
-                            src={`https://flagcdn.com/16x12/${c.code.toLowerCase()}.png`}
-                            width="16"
-                            height="12"
-                            alt={c.name}
-                            style={{ borderRadius: 1.5, objectFit: 'cover' }}
-                          />
-                          <span>{c.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                    <Sparkles size={14} className={analyzing ? 'animate-spin' : ''} />
+                    <span>{analyzing ? 'Analyzing...' : 'Analyze'}</span>
+                  </button>
                 )}
               </div>
-
-              {/* Calendar -- green dot = today, red dot = a day that has a stored analysis.
-                  Pick a past red day to view that day's mentions / citations. */}
-              <MarkedCalendar
-                value={selectedDate}
-                onChange={setSelectedDate}
-                markedDates={analysisDateSet}
-              />
-
-              {userCanRunActions && canRunAiModelAnalysis(user, activeProject?.slug, selectedEngine, !!getActiveEngineResult()) && (
-                <button
-                  onClick={handleRunAnalysis}
-                  disabled={analyzing}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    background: 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)',
-                    color: '#ffffff', border: 'none', borderRadius: 8, padding: '9px 18px',
-                    fontSize: 13, fontWeight: 600,
-                    cursor: analyzing ? 'not-allowed' : 'pointer', opacity: analyzing ? 0.75 : 1,
-                    boxShadow: '0 3px 12px rgba(166, 28, 104, 0.28)', transition: 'all 0.15s ease'
-                  }}
-                  onMouseEnter={e => { if (!analyzing) { e.currentTarget.style.background = 'linear-gradient(135deg, #8032CF 0%, #9E2CA0 35%, #B82276 70%, #CA2265 100%)'; e.currentTarget.style.boxShadow = '0 5px 16px rgba(166, 28, 104, 0.38)'; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
-                  onMouseLeave={e => { if (!analyzing) { e.currentTarget.style.background = 'linear-gradient(135deg, #7026B9 0%, #8E248E 35%, #A61C68 70%, #B81958 100%)'; e.currentTarget.style.boxShadow = '0 3px 12px rgba(166, 28, 104, 0.28)'; e.currentTarget.style.transform = 'translateY(0)'; } }}
-                >
-                  <Sparkles size={14} className={analyzing ? 'animate-spin' : ''} />
-                  <span>{analyzing ? 'Analyzing...' : (getActiveEngineResult() ? 'Re-analyze' : 'Analyze')}</span>
-                </button>
-              )}
-            </div>
             </div>{/* end Row 1 */}
 
             {/* Row 2: engine tabs, with Mentions/Citations toggle stacked below */}
@@ -1113,7 +1182,7 @@ export default function AiAnalysisPage({ user }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1px 1fr', gap: 14, alignItems: 'center' }}>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: 11, color: '#6B677E', fontWeight: 700 }}>Total Search Terms</span>
-              <span style={{ fontSize: 20, fontWeight: 800, color: '#7B2FBE' }}>{totalSearchTerms}</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#7B2FBE' }}>{countLoading && totalSearchTerms === 0 ? '…' : totalSearchTerms}</span>
             </div>
             <div style={{ alignSelf: 'stretch', width: 1, background: '#E4DFEE' }} />
             <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1138,7 +1207,7 @@ export default function AiAnalysisPage({ user }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1px 1fr', gap: 14, alignItems: 'center' }}>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: 11, color: '#6B677E', fontWeight: 700 }}>Total Search Terms</span>
-              <span style={{ fontSize: 20, fontWeight: 800, color: '#C8196B' }}>{totalSearchTerms}</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#C8196B' }}>{countLoading && totalSearchTerms === 0 ? '…' : totalSearchTerms}</span>
             </div>
             <div style={{ alignSelf: 'stretch', width: 1, background: '#E4DFEE' }} />
             <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1161,246 +1230,246 @@ export default function AiAnalysisPage({ user }) {
         flexWrap: 'wrap',
         boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
       }}>
-          <div style={{ width: 280, maxWidth: '100%', position: 'relative' }}>
-            <Search size={16} color="#94a3b8" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder={activeSubTab === 'mentions' ? "Filter mentioned keywords..." : "Search citations..."}
-              style={{
-                width: '100%',
-                padding: '9px 16px 9px 40px',
-                fontSize: 13.5,
-                borderRadius: 12,
-                border: '1.5px solid #e2e8f0',
-                outline: 'none',
-                background: '#f8fafc',
-                color: '#334155',
-                transition: 'all 0.15s ease'
-              }}
-            />
-          </div>
+        <div style={{ width: 280, maxWidth: '100%', position: 'relative' }}>
+          <Search size={16} color="#94a3b8" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder={activeSubTab === 'mentions' ? "Filter mentioned keywords..." : "Search citations..."}
+            style={{
+              width: '100%',
+              padding: '9px 16px 9px 40px',
+              fontSize: 13.5,
+              borderRadius: 12,
+              border: '1.5px solid #e2e8f0',
+              outline: 'none',
+              background: '#f8fafc',
+              color: '#334155',
+              transition: 'all 0.15s ease'
+            }}
+          />
+        </div>
 
-          {/* Filter Trigger Button & Popover */}
-          <div ref={filterRef} style={{ position: 'relative' }}>
-            <button
-              onClick={() => setFilterMenuOpen(!filterMenuOpen)}
-              title="Filter options"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                position: 'relative',
-                background: hasActiveFilters ? '#f5f3ff' : '#f1f5f9',
-                color: hasActiveFilters ? '#7c3aed' : '#334155',
-                border: hasActiveFilters ? '1.5px solid #7c3aed' : '1px solid #e2e8f0',
-                borderRadius: 8,
-                padding: '7px 10px',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={e => {
-                if (!hasActiveFilters) { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }
-              }}
-              onMouseLeave={e => {
-                if (!hasActiveFilters) { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }
-              }}
-            >
-              <Filter size={14} />
-              {hasActiveFilters && (
-                <span style={{
-                  position: 'absolute',
-                  top: -4,
-                  right: -4,
-                  background: '#7c3aed',
-                  color: '#ffffff',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  borderRadius: '50%',
-                  width: 16,
-                  height: 16,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}>
-                  {Object.values(columnFilters).reduce((acc, v) => acc + (Array.isArray(v) ? v.length : (v !== 'all' ? 1 : 0)), 0) + (intentFilter !== 'all' ? 1 : 0) + (typeFilter !== 'all' ? 1 : 0)}
-                </span>
-              )}
-            </button>
-
-
-            {filterMenuOpen && (
-              <div style={{
+        {/* Filter Trigger Button & Popover */}
+        <div ref={filterRef} style={{ position: 'relative' }}>
+          <button
+            onClick={() => setFilterMenuOpen(!filterMenuOpen)}
+            title="Filter options"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              position: 'relative',
+              background: hasActiveFilters ? '#f5f3ff' : '#f1f5f9',
+              color: hasActiveFilters ? '#7c3aed' : '#334155',
+              border: hasActiveFilters ? '1.5px solid #7c3aed' : '1px solid #e2e8f0',
+              borderRadius: 8,
+              padding: '7px 10px',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={e => {
+              if (!hasActiveFilters) { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }
+            }}
+            onMouseLeave={e => {
+              if (!hasActiveFilters) { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }
+            }}
+          >
+            <Filter size={14} />
+            {hasActiveFilters && (
+              <span style={{
                 position: 'absolute',
-                right: 0,
-                top: '110%',
-                background: '#ffffff',
-                border: '1px solid #e2e8f0',
-                borderRadius: 10,
-                boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
-                zIndex: 100,
-                padding: 16,
-                width: 320,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Filter Keywords</span>
-                  {hasActiveFilters && (
-                    <button
-                      onClick={resetAllFilters}
-                      style={{ fontSize: 11, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
-                    >
-                      Reset All
-                    </button>
-                  )}
-                </div>
-
-                {/* Filter Options Grid */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 320, overflowY: 'auto', paddingRight: 4 }}>
-                  {/* Cluster */}
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>CLUSTER</label>
-                    <select
-                      value={colFilterValue('cluster')}
-                      onChange={e => setColFilter('cluster', e.target.value)}
-                      style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
-                    >
-                      <option value="all">All Clusters</option>
-                      {uniqueClusters.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-
-                  {/* Category */}
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>CATEGORY</label>
-                    <select
-                      value={colFilterValue('category')}
-                      onChange={e => setColFilter('category', e.target.value)}
-                      style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
-                    >
-                      <option value="all">All Categories</option>
-                      {uniqueCategories.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-
-                  {/* Type */}
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TYPE</label>
-                    <select
-                      value={colFilterValue('type')}
-                      onChange={e => setColFilter('type', e.target.value)}
-                      style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
-                    >
-                      <option value="all">All Types</option>
-                      {uniqueTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-
-                  {/* Target Type */}
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET TYPE</label>
-                    <select
-                      value={colFilterValue('targetType')}
-                      onChange={e => setColFilter('targetType', e.target.value)}
-                      style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
-                    >
-                      <option value="all">All Target Types</option>
-                      {uniqueTargetTypes.map(tt => <option key={tt} value={tt}>{tt}</option>)}
-                    </select>
-                  </div>
-
-                  {/* Target Subtype */}
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET SUBTYPE</label>
-                    <select
-                      value={colFilterValue('targetSubtype')}
-                      onChange={e => setColFilter('targetSubtype', e.target.value)}
-                      style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
-                    >
-                      <option value="all">All Subtypes</option>
-                      {uniqueTargetSubtypes.map(ts => <option key={ts} value={ts}>{ts}</option>)}
-                    </select>
-                  </div>
-
-                  {/* Target Geo */}
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET GEO</label>
-                    <select
-                      value={colFilterValue('targetGeo')}
-                      onChange={e => setColFilter('targetGeo', e.target.value)}
-                      style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
-                    >
-                      <option value="all">All Geos</option>
-                      {uniqueTargetGeos.map(g => <option key={g} value={g}>{g}</option>)}
-                    </select>
-                  </div>
-
-                  {/* Priority */}
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>PRIORITY</label>
-                    <select
-                      value={colFilterValue('priority')}
-                      onChange={e => setColFilter('priority', e.target.value)}
-                      style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
-                    >
-                      <option value="all">All Priorities</option>
-                      {uniquePriorities.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setFilterMenuOpen(false)}
-                  style={{
-                    width: '100%',
-                    padding: '7px',
-                    fontSize: 12.5,
-                    fontWeight: 700,
-                    color: '#ffffff',
-                    background: '#2D2D44',
-                    border: '1px solid #2D2D44',
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                    marginTop: 4,
-                    boxShadow: '0 2px 6px rgba(45, 45, 68, 0.25)'
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = '#1F1F30'}
-                  onMouseLeave={e => e.currentTarget.style.background = '#2D2D44'}
-                >
-                  Close
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Download CSV Button */}
-          {userCanDownload && (
-            <button
-              onClick={handleDownloadCsv}
-              title="Download CSV"
-              style={{
-                display: 'flex',
+                top: -4,
+                right: -4,
+                background: '#7c3aed',
+                color: '#ffffff',
+                fontSize: 10,
+                fontWeight: 700,
+                borderRadius: '50%',
+                width: 16,
+                height: 16,
+                display: 'inline-flex',
                 alignItems: 'center',
-                justifyContent: 'center',
-                background: '#f1f5f9',
-                color: '#334155',
-                border: '1px solid #e2e8f0',
-                borderRadius: 8,
-                padding: '7px 10px',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                transition: 'opacity 0.15s, background 0.15s'
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
-            >
-              <Download size={14} />
-            </button>
+                justifyContent: 'center'
+              }}>
+                {Object.values(columnFilters).reduce((acc, v) => acc + (Array.isArray(v) ? v.length : (v !== 'all' ? 1 : 0)), 0) + (intentFilter !== 'all' ? 1 : 0) + (typeFilter !== 'all' ? 1 : 0)}
+              </span>
+            )}
+          </button>
+
+
+          {filterMenuOpen && (
+            <div style={{
+              position: 'absolute',
+              right: 0,
+              top: '110%',
+              background: '#ffffff',
+              border: '1px solid #e2e8f0',
+              borderRadius: 10,
+              boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
+              zIndex: 100,
+              padding: 16,
+              width: 320,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Filter Keywords</span>
+                {hasActiveFilters && (
+                  <button
+                    onClick={resetAllFilters}
+                    style={{ fontSize: 11, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                  >
+                    Reset All
+                  </button>
+                )}
+              </div>
+
+              {/* Filter Options Grid */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 320, overflowY: 'auto', paddingRight: 4 }}>
+                {/* Cluster */}
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>CLUSTER</label>
+                  <select
+                    value={colFilterValue('cluster')}
+                    onChange={e => setColFilter('cluster', e.target.value)}
+                    style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
+                  >
+                    <option value="all">All Clusters</option>
+                    {uniqueClusters.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+
+                {/* Category */}
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>CATEGORY</label>
+                  <select
+                    value={colFilterValue('category')}
+                    onChange={e => setColFilter('category', e.target.value)}
+                    style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
+                  >
+                    <option value="all">All Categories</option>
+                    {uniqueCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+
+                {/* Type */}
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TYPE</label>
+                  <select
+                    value={colFilterValue('type')}
+                    onChange={e => setColFilter('type', e.target.value)}
+                    style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
+                  >
+                    <option value="all">All Types</option>
+                    {uniqueTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+
+                {/* Target Type */}
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET TYPE</label>
+                  <select
+                    value={colFilterValue('targetType')}
+                    onChange={e => setColFilter('targetType', e.target.value)}
+                    style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
+                  >
+                    <option value="all">All Target Types</option>
+                    {uniqueTargetTypes.map(tt => <option key={tt} value={tt}>{tt}</option>)}
+                  </select>
+                </div>
+
+                {/* Target Subtype */}
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET SUBTYPE</label>
+                  <select
+                    value={colFilterValue('targetSubtype')}
+                    onChange={e => setColFilter('targetSubtype', e.target.value)}
+                    style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
+                  >
+                    <option value="all">All Subtypes</option>
+                    {uniqueTargetSubtypes.map(ts => <option key={ts} value={ts}>{ts}</option>)}
+                  </select>
+                </div>
+
+                {/* Target Geo */}
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>TARGET GEO</label>
+                  <select
+                    value={colFilterValue('targetGeo')}
+                    onChange={e => setColFilter('targetGeo', e.target.value)}
+                    style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
+                  >
+                    <option value="all">All Geos</option>
+                    {uniqueTargetGeos.map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                </div>
+
+                {/* Priority */}
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>PRIORITY</label>
+                  <select
+                    value={colFilterValue('priority')}
+                    onChange={e => setColFilter('priority', e.target.value)}
+                    style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', outline: 'none' }}
+                  >
+                    <option value="all">All Priorities</option>
+                    {uniquePriorities.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setFilterMenuOpen(false)}
+                style={{
+                  width: '100%',
+                  padding: '7px',
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  color: '#ffffff',
+                  background: '#2D2D44',
+                  border: '1px solid #2D2D44',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  marginTop: 4,
+                  boxShadow: '0 2px 6px rgba(45, 45, 68, 0.25)'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#1F1F30'}
+                onMouseLeave={e => e.currentTarget.style.background = '#2D2D44'}
+              >
+                Close
+              </button>
+            </div>
           )}
+        </div>
+
+        {/* Download CSV Button */}
+        {userCanDownload && (
+          <button
+            onClick={handleDownloadCsv}
+            title="Download CSV"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: '#f1f5f9',
+              color: '#334155',
+              border: '1px solid #e2e8f0',
+              borderRadius: 8,
+              padding: '7px 10px',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              transition: 'opacity 0.15s, background 0.15s'
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
+          >
+            <Download size={14} />
+          </button>
+        )}
       </div>
 
       {/* ─── DATA TABLE: Mentions or Citations ─────────────────────────── */}
@@ -1411,13 +1480,14 @@ export default function AiAnalysisPage({ user }) {
         overflow: 'hidden',
         boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
       }}>
+        <style>{`.aiap-sticky thead th{position:sticky;top:0;z-index:4;background:#FAF8FD;box-shadow:inset 0 -1px 0 #E4DFEE;}`}</style>
         {activeSubTab === 'mentions' ? (
           /* ── MENTIONS TABLE ── */
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
+          <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 230px)' }}>
+            <table className="aiap-sticky" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: '#FAF8FD', borderBottom: '1px solid #E4DFEE', color: '#4E4E61', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Mentions (Keyword)</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Mentions</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>SV</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Tentative Rank</th>
                   <ColumnHeaderFilter
@@ -1494,8 +1564,8 @@ export default function AiAnalysisPage({ user }) {
           </div>
         ) : (
           /* ── CITATIONS TABLE ── */
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
+          <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 230px)' }}>
+            <table className="aiap-sticky" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Keyword</th>

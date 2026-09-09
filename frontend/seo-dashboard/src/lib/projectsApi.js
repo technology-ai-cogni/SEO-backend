@@ -393,46 +393,32 @@ export async function fetchDomainRows() {
       .map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
   }
 
-  let allKwRows = [];
-  try {
-    let page = 0;
-    const pageSize = 1000;
-    let hasMore = true;
-
-    while (hasMore) {
-      const { data: kwRows, error: kwError } = await supabase
-        .from('keyword_categories')
-        .select('project_name, subtype, target_type')
-        .range(page * pageSize, (page + 1) * pageSize - 1);
-
-      if (kwError) break;
-      if (kwRows && kwRows.length > 0) {
-        allKwRows = allKwRows.concat(kwRows);
-        if (kwRows.length < pageSize) hasMore = false;
-        else page++;
-      } else {
-        hasMore = false;
-      }
-    }
-  } catch (e) {
-    console.warn('[fetchDomainRows] Kw count query skipped:', e);
-  }
-
-  const counts = aggregateKwCounts(allKwRows);
   const domainMap = new Map();
+  const countsMap = new Map(); // slug -> { total, commercial, landingPages, blogPages }
+  const num = (v) => Number(v) || 0;
 
-  // 1. Fetch from FastAPI backend /domains (PostgreSQL)
+  // 1. Fetch from FastAPI backend /domains (PostgreSQL). Each row now carries a
+  //    live per-project keyword-count breakdown (kw_total / kw_commercial /
+  //    kw_landing / kw_blog) computed by a single GROUP BY on the server, so the
+  //    browser no longer paginates the entire keyword_categories table here.
   try {
     const res = await fetch(`${CATEGORY_API_BASE}/domains`);
     if (res.ok) {
       const json = await res.json();
       (json.domains || []).forEach(d => {
         const slug = d.project_slug || slugify(d.project_name || d.domain);
-        if (slug) {
-          domainMap.set(slug, {
-            ...d,
-            project_slug: slug,
-            project_name: d.project_name || d.domain
+        if (!slug) return;
+        domainMap.set(slug, {
+          ...d,
+          project_slug: slug,
+          project_name: d.project_name || d.domain
+        });
+        if (d.kw_total != null || d.kw_landing != null || d.kw_blog != null) {
+          countsMap.set(slug, {
+            total: num(d.kw_total),
+            commercial: num(d.kw_commercial),
+            landingPages: num(d.kw_landing),
+            blogPages: num(d.kw_blog),
           });
         }
       });
@@ -462,7 +448,7 @@ export async function fetchDomainRows() {
   }
 
   const mergedDomains = Array.from(domainMap.values());
-  return mergedDomains.map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
+  return mergedDomains.map(d => domainRowToProject(d, countsMap.get(d.project_slug) || EMPTY_KW_COUNTS));
 }
 
 // Lightweight project list for pages that only need the dropdown (name / slug /
@@ -967,41 +953,61 @@ export async function insertKeywordRows(projectSlug, rows) {
   return (data || []).map(kwRowToUi);
 }
 
-export async function fetchKeywordRows(projectSlug) {
+// Default column set -- every field kwRowToUi can surface. Callers that only
+// render a few of these (e.g. Top Pages AI) pass a trimmed `columns` string so
+// we never transfer the JSONB `rank_meta` blob or unused columns for thousands
+// of rows.
+const KW_COLS_FULL = 'id,keyword,sv,kw_diff,cluster,category,type,target_type,subtype,target_geo,priority,landing_page_url,rank,rank_checked_at,rank_meta';
+
+export async function fetchKeywordRows(projectSlug, { columns } = {}) {
   if (!projectSlug) return [];
 
   // 1. Try querying Supabase if available
   if (!isLocalMode) {
     try {
-      let allRows = [];
-      let page = 0;
       const pageSize = 1000;
-      let hasMore = true;
+      const KW_COLS = columns || KW_COLS_FULL;
+      const pageQuery = (from) => supabase
+        .from('keyword_categories')
+        .select(KW_COLS)
+        .eq('project_name', projectSlug)
+        .order('id')
+        .range(from, from + pageSize - 1);
 
-      while (hasMore) {
-        const { data, error } = await supabase
-          .from('keyword_categories')
-          .select('*')
-          .eq('project_name', projectSlug)
-          .order('id')
-          .range(page * pageSize, (page + 1) * pageSize - 1);
+      // First page also asks for an exact count so the remaining pages can be
+      // fetched in PARALLEL instead of one-at-a-time.
+      const { data: first, error, count } = await supabase
+        .from('keyword_categories')
+        .select(KW_COLS, { count: 'exact' })
+        .eq('project_name', projectSlug)
+        .order('id')
+        .range(0, pageSize - 1);
 
-        if (error) {
-          console.warn('[fetchKeywordRows] Supabase error:', error);
-          break;
+      if (error) {
+        console.warn('[fetchKeywordRows] Supabase error:', error);
+      } else {
+        let allRows = first || [];
+        if (typeof count === 'number' && count > pageSize) {
+          // Known total -> fetch every remaining page at once.
+          const pageCount = Math.ceil(count / pageSize);
+          const rest = await Promise.all(
+            Array.from({ length: pageCount - 1 }, (_, i) => pageQuery((i + 1) * pageSize))
+          );
+          rest.forEach(r => { if (r && r.data && r.data.length) allRows = allRows.concat(r.data); });
+        } else if (typeof count !== 'number' && allRows.length === pageSize) {
+          // Count unavailable -> fall back to sequential paging so no rows are missed.
+          let from = pageSize;
+          for (;;) {
+            const { data } = await pageQuery(from);
+            if (!data || data.length === 0) break;
+            allRows = allRows.concat(data);
+            if (data.length < pageSize) break;
+            from += pageSize;
+          }
         }
-
-        if (data && data.length > 0) {
-          allRows = allRows.concat(data);
-          if (data.length < pageSize) hasMore = false;
-          else page++;
-        } else {
-          hasMore = false;
+        if (allRows.length > 0) {
+          return allRows.map(kwRowToUi);
         }
-      }
-
-      if (allRows.length > 0) {
-        return allRows.map(kwRowToUi);
       }
     } catch (e) {
       console.warn('[fetchKeywordRows] Supabase query failed:', e);
@@ -1029,6 +1035,48 @@ export async function fetchKeywordRows(projectSlug) {
   const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
   const filtered = kwRows.filter(r => r.project_name === projectSlug);
   return filtered.map(kwRowToUi);
+}
+
+// Fetch ONLY the keyword rows whose text is in `keywords` (exact match on the
+// `keyword` column). Used by Top Pages AI, which enriches ~30-100 mentioned /
+// cited keywords -- not the project's whole keyword table.
+export async function fetchKeywordRowsByKeywords(projectSlug, keywords, { columns } = {}) {
+  if (!projectSlug || !Array.isArray(keywords)) return [];
+  const uniq = Array.from(new Set(
+    keywords.map(k => String(k == null ? '' : k).trim()).filter(Boolean)
+  )).slice(0, 800);
+  if (uniq.length === 0) return [];
+
+  const cols = columns || 'id,keyword,sv,cluster,category,type,target_type,subtype,target_geo,priority,landing_page_url,rank';
+
+  if (!isLocalMode && supabase) {
+    try {
+      // Supabase caps .in() lists; chunk to stay well under URL limits.
+      const chunks = [];
+      for (let i = 0; i < uniq.length; i += 150) chunks.push(uniq.slice(i, i + 150));
+      const results = await Promise.all(chunks.map(chunk =>
+        supabase
+          .from('keyword_categories')
+          .select(cols)
+          .eq('project_name', projectSlug)
+          .in('keyword', chunk)
+      ));
+      let rows = [];
+      let sawError = false;
+      results.forEach(r => {
+        if (r.error) sawError = true;
+        else if (Array.isArray(r.data)) rows = rows.concat(r.data);
+      });
+      if (!sawError) return rows.map(kwRowToUi);
+    } catch (e) {
+      console.warn('[fetchKeywordRowsByKeywords] Supabase query failed:', e);
+    }
+  }
+
+  // Fallback: whatever fetchKeywordRows can get, filtered client-side.
+  const all = await fetchKeywordRows(projectSlug, { columns: cols });
+  const want = new Set(uniq.map(k => k.toLowerCase()));
+  return all.filter(r => want.has(String(r.kw || r.keyword || '').toLowerCase().trim()));
 }
 
 const KW_FIELD_TO_COLUMN = {
@@ -2331,19 +2379,42 @@ export async function runAiVisibilityAnalysis(projectSlug, domain, country, keyw
 export async function fetchAiAnalysisHistory(projectSlug, engine = '') {
   if (supabase) {
     try {
-      let query = supabase
+      const orFilter = `project_slug.eq.${projectSlug},project_name.eq.${projectSlug}`;
+
+      // Query A: the recent runs WITH their heavy JSONB payload columns
+      // (mentioned_keywords / cited_pages_list). The page only ever reads one
+      // of these at a time (latest-per-engine, or the selected past date's
+      // run), so a small window is enough.
+      let fullQuery = supabase
         .from('ai_analysis')
         .select('*')
-        .or(`project_slug.eq.${projectSlug},project_name.eq.${projectSlug}`)
+        .or(orFilter)
         .order('created_at', { ascending: false });
-
       if (engine && engine.trim()) {
-        query = query.ilike('engine', `%${engine.trim()}%`);
+        fullQuery = fullQuery.ilike('engine', `%${engine.trim()}%`);
       }
+      fullQuery = fullQuery.limit(12);
 
-      const { data, error } = await query.limit(50);
-      if (!error && data && data.length > 0) {
-        return data;
+      // Query B: just the timestamps of every run, for the calendar "this day
+      // has an analysis" dots -- no JSONB, so it's tiny.
+      const datesQuery = supabase
+        .from('ai_analysis')
+        .select('created_at')
+        .or(orFilter)
+        .order('created_at', { ascending: false })
+        .limit(400);
+
+      const [{ data: full, error: fullErr }, { data: dates }] = await Promise.all([fullQuery, datesQuery]);
+
+      if (!fullErr && Array.isArray(full)) {
+        const hasAny = full.length > 0 || (Array.isArray(dates) && dates.length > 0);
+        if (hasAny) {
+          const seenTs = new Set(full.map(r => r.created_at));
+          const stubs = (dates || [])
+            .filter(d => d && d.created_at && !seenTs.has(d.created_at))
+            .map(d => ({ created_at: d.created_at }));
+          return [...full, ...stubs];
+        }
       }
     } catch (sbErr) {
       console.warn('[fetchAiAnalysisHistory] Supabase query warning:', sbErr);

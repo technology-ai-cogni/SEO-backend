@@ -1,9 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Search, ChevronDown, ExternalLink, FileText, Filter, Download, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
 import { canDownload, canRunActions } from '../../lib/permissions';
 import { fetchDomainRows, fetchPageRows, fetchKeywordRows, runOrganicRankCheckApi } from '../../lib/projectsApi';
 import MarkedCalendar, { getLocalTodayStr, tsToLocalDateStr } from '../common/MarkedCalendar';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
+
+// Only the columns the Organic table + its filters render (no rank_meta JSONB blob).
+const KW_COLS_ORGANIC = 'id,keyword,sv,kw_diff,cluster,category,type,target_type,subtype,target_geo,priority,landing_page_url,rank,rank_checked_at';
 
 // MultiSelectField Component for Popover Filters
 function MultiSelectField({ label, options, selectedValues = [], onChange }) {
@@ -117,56 +120,88 @@ function MultiSelectField({ label, options, selectedValues = [], onChange }) {
   );
 }
 
-// ColumnHeaderFilter Component for Pill-Style Single Select Header Dropdown
+// ColumnHeaderFilter Component -- pill trigger with a menu that always opens BELOW it
 function ColumnHeaderFilter({ title, options = [], selectedValues, onChange }) {
   const currentValue = Array.isArray(selectedValues)
-    ? (selectedValues.length === 1 ? selectedValues[0] : (selectedValues.length > 1 ? selectedValues[0] : 'all'))
+    ? (selectedValues.length >= 1 ? selectedValues[0] : 'all')
     : (selectedValues || 'all');
+  const active = currentValue !== 'all';
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef(null);
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = btnRef.current && btnRef.current.getBoundingClientRect();
+      if (r) setPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    place();
+    const onDown = (e) => { if (btnRef.current && !btnRef.current.contains(e.target)) setOpen(false); };
+    const onMove = () => setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('scroll', onMove, true);
+      window.removeEventListener('resize', onMove);
+    };
+  }, [open]);
+
+  const pick = (val) => { onChange(val === 'all' ? [] : [val]); setOpen(false); };
+  const items = [{ value: 'all', label: title }, ...options.map((o) => ({ value: o, label: o }))];
 
   return (
     <th style={{ padding: '8px 12px', fontWeight: 600 }}>
-      <div style={{ position: 'relative', display: 'inline-block' }}>
-        <select
-          value={currentValue}
-          onChange={(e) => {
-            const val = e.target.value;
-            onChange(val === 'all' ? [] : [val]);
-          }}
-          style={{
-            padding: '6px 28px 6px 12px',
-            borderRadius: 10,
-            border: currentValue !== 'all' ? '1px solid #7c3aed' : '1px solid #e2e8f0',
-            background: currentValue !== 'all' ? '#f5f3ff' : '#ffffff',
-            color: currentValue !== 'all' ? '#7c3aed' : '#64748b',
-            fontSize: 12,
-            fontWeight: 600,
-            outline: 'none',
-            cursor: 'pointer',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
-            appearance: 'none',
-            WebkitAppearance: 'none',
-            MozAppearance: 'none'
-          }}
-        >
-          <option value="all">{title}</option>
-          {options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
-        <ChevronDown
-          size={13}
-          color={currentValue !== 'all' ? '#7c3aed' : '#94a3b8'}
-          style={{
-            position: 'absolute',
-            right: 10,
-            top: '50%',
-            transform: 'translateY(-50%)',
-            pointerEvents: 'none'
-          }}
-        />
-      </div>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+          padding: '6px 10px', borderRadius: 10, textTransform: 'none',
+          border: active ? '1px solid #7c3aed' : '1px solid #e2e8f0',
+          background: active ? '#f5f3ff' : '#ffffff',
+          color: active ? '#7c3aed' : '#64748b',
+          fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+        }}
+      >
+        <span>{active ? currentValue : title}</span>
+        <ChevronDown size={13} color={active ? '#7c3aed' : '#94a3b8'}
+          style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }} />
+      </button>
+      {open && (
+        <div style={{
+          position: 'fixed', top: pos.top, left: pos.left, minWidth: Math.max(pos.width, 160),
+          background: '#ffffff', border: '1px solid #E4DFEE', borderRadius: 10,
+          boxShadow: '0 12px 28px rgba(15,23,42,0.16)', zIndex: 5000,
+          maxHeight: 280, overflowY: 'auto', padding: 4, textTransform: 'none'
+        }}>
+          {items.map((opt) => {
+            const sel = opt.value === currentValue;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => pick(opt.value)}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '7px 10px', fontSize: 12.5, border: 'none',
+                  background: sel ? '#f5f3ff' : 'transparent',
+                  color: sel ? '#7c3aed' : '#0f172a', fontWeight: sel ? 700 : 500,
+                  borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap'
+                }}
+                onMouseEnter={(e) => { if (!sel) e.currentTarget.style.background = '#f8fafc'; }}
+                onMouseLeave={(e) => { if (!sel) e.currentTarget.style.background = 'transparent'; }}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </th>
   );
 }
@@ -211,7 +246,9 @@ export default function TopPagesPage({ user }) {
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);   // project list / page shell
+  const [rowsLoading, setRowsLoading] = useState(false); // keyword rows for the table
+  const loadSeqRef = useRef(0);
   const [liveDomainTraffic, setLiveDomainTraffic] = useState(null);
 
   const [activeTooltip, setActiveTooltip] = useState(null);
@@ -316,10 +353,7 @@ export default function TopPagesPage({ user }) {
     try {
       const targetRegion = selectedRegion || activeProject?.location || 'India';
       await runOrganicRankCheckApi(activeProject.slug, targetRegion);
-      const updatedKws = await fetchKeywordRows(activeProject.slug);
-      if (updatedKws && updatedKws.length > 0) {
-        setProjectKeywords(updatedKws);
-      }
+      await loadPageDataForProject(activeProject); // refresh rows + metrics with new ranks
     } catch (err) {
       console.warn('[TopPagesPage] Organic rank check error:', err);
     } finally {
@@ -348,18 +382,21 @@ export default function TopPagesPage({ user }) {
       try {
         setLoading(true);
         const domains = await fetchDomainRows();
-        if (isMounted && domains && domains.length > 0) {
+        if (!isMounted) return;
+        if (domains && domains.length > 0) {
           setProjects(domains);
           const savedSlug = localStorage.getItem('bd_selected_project');
           const target = (savedSlug && savedSlug !== 'all' && domains.find(p => p.slug === savedSlug)) || domains[0];
           setActiveProject(target);
-          await loadPageDataForProject(target);
+          // Page shell renders now; the table rows stream in via rowsLoading.
+          setLoading(false);
+          loadPageDataForProject(target);
+          return;
         }
       } catch (err) {
         console.error('[TopPagesPage] Error loading projects:', err);
-      } finally {
-        if (isMounted) setLoading(false);
       }
+      if (isMounted) setLoading(false);
     }
     loadProjects();
     return () => { isMounted = false; };
@@ -378,22 +415,26 @@ export default function TopPagesPage({ user }) {
   // Fetch page and keyword data for selected project strictly from Project Setup
   const loadPageDataForProject = async (proj) => {
     if (!proj?.slug) return;
+    const seq = ++loadSeqRef.current;
+    setRowsLoading(true);
+    setPagesData([]);
+    setProjectKeywords([]);
     try {
-      setLoading(true);
-
-      const [fetchedPages, fetchedKws] = await Promise.all([
-        fetchPageRows(proj.slug).catch(() => []),
-        fetchKeywordRows(proj.slug).catch(() => [])
-      ]);
-
-      const pages = fetchedPages || [];
-      const kws = fetchedKws || [];
+      // Keywords are the primary source. Only hit /pages when there are none.
+      const kws = await fetchKeywordRows(proj.slug, { columns: KW_COLS_ORGANIC }).catch(() => []);
+      if (seq !== loadSeqRef.current) return;
       setProjectKeywords(kws);
+
+      let pages = [];
+      if (!kws || kws.length === 0) {
+        pages = await fetchPageRows(proj.slug).catch(() => []);
+        if (seq !== loadSeqRef.current) return;
+      }
 
       // Map data directly from keywords section (and pages section fallback)
       let combinedPages = [];
 
-      if (kws.length > 0) {
+      if (kws && kws.length > 0) {
         combinedPages = kws.map((k, idx) => {
           const svStr = String(k.sv ?? k.search_volume ?? k.volume ?? '').replace(/[^0-9.]/g, '');
           const rawSv = svStr !== '' ? (Number(svStr) || 0) : null;
@@ -449,11 +490,11 @@ export default function TopPagesPage({ user }) {
         }).filter(Boolean);
       }
 
-      setPagesData(combinedPages);
+      if (seq === loadSeqRef.current) setPagesData(combinedPages);
     } catch (err) {
       console.error('[TopPagesPage] Error loading page data:', err);
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setRowsLoading(false);
     }
   };
 
@@ -465,14 +506,22 @@ export default function TopPagesPage({ user }) {
     await loadPageDataForProject(proj, projects);
   };
 
-  // Unique filter values
-  const uniqueClusters = Array.from(new Set(pagesData.map(p => p.cluster).filter(Boolean))).sort();
-  const uniqueCategories = Array.from(new Set(pagesData.map(p => p.category).filter(Boolean))).sort();
-  const uniqueTypes = Array.from(new Set(pagesData.map(p => p.type).filter(Boolean))).sort();
-  const uniqueTargetTypes = Array.from(new Set(pagesData.map(p => p.targetType).filter(Boolean))).sort();
-  const uniqueTargetSubtypes = Array.from(new Set(pagesData.map(p => p.targetSubtype || p.targetCategory).filter(Boolean))).sort();
-  const uniqueTargetGeos = Array.from(new Set(pagesData.map(p => p.targetGeo).filter(Boolean))).sort();
-  const uniquePriorities = Array.from(new Set(pagesData.map(p => p.priority).filter(Boolean))).sort();
+  // Unique filter values (recomputed only when the loaded rows change)
+  const {
+    uniqueClusters, uniqueCategories, uniqueTypes, uniqueTargetTypes,
+    uniqueTargetSubtypes, uniqueTargetGeos, uniquePriorities
+  } = useMemo(() => {
+    const uniq = (fn) => Array.from(new Set(pagesData.map(fn).filter(Boolean))).sort();
+    return {
+      uniqueClusters: uniq(p => p.cluster),
+      uniqueCategories: uniq(p => p.category),
+      uniqueTypes: uniq(p => p.type),
+      uniqueTargetTypes: uniq(p => p.targetType),
+      uniqueTargetSubtypes: uniq(p => p.targetSubtype || p.targetCategory),
+      uniqueTargetGeos: uniq(p => p.targetGeo),
+      uniquePriorities: uniq(p => p.priority),
+    };
+  }, [pagesData]);
 
   const hasActiveFilters = Object.values(columnFilters).some(v => Array.isArray(v) ? v.length > 0 : v !== 'all') || intentFilter !== 'all' || typeFilter !== 'all';
   const resetAllFilters = () => {
@@ -490,123 +539,117 @@ export default function TopPagesPage({ user }) {
   };
 
   // Days a rank check ran (from keyword_categories.rank_checked_at) -> red dots
-  const rankCheckDateSet = (() => {
+  const rankCheckDateSet = useMemo(() => {
     const s = new Set();
     (pagesData || []).forEach(p => { const ds = tsToLocalDateStr(p.rankCheckedAt); if (ds) s.add(ds); });
     return s;
-  })();
+  }, [pagesData]);
   const isPastDate = selectedDate && selectedDate !== getLocalTodayStr();
 
   // Filtered pages based on search, column filters, and (past date) rank-check day
-  const filteredPages = pagesData.filter(p => {
-    const matchDate = !isPastDate || tsToLocalDateStr(p.rankCheckedAt) === selectedDate;
-    if (!matchDate) return false;
-    const matchSearch = searchQuery === '' ||
-      (p.kw && p.kw.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (p.pageName && p.pageName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (p.url && p.url.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (p.cluster && p.cluster.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredPages = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    return pagesData.filter(p => {
+      const matchDate = !isPastDate || tsToLocalDateStr(p.rankCheckedAt) === selectedDate;
+      if (!matchDate) return false;
+      const matchSearch = q === '' ||
+        (p.kw && p.kw.toLowerCase().includes(q)) ||
+        (p.pageName && p.pageName.toLowerCase().includes(q)) ||
+        (p.url && p.url.toLowerCase().includes(q)) ||
+        (p.category && p.category.toLowerCase().includes(q)) ||
+        (p.cluster && p.cluster.toLowerCase().includes(q));
 
-    const matchCluster = !columnFilters.cluster || columnFilters.cluster.length === 0 || columnFilters.cluster.includes(p.cluster);
-    const matchCategory = !columnFilters.category || columnFilters.category.length === 0 || columnFilters.category.includes(p.category);
-    const matchType = !columnFilters.type || columnFilters.type.length === 0 || columnFilters.type.includes(p.type);
-    const matchTargetType = (!columnFilters.targetType || columnFilters.targetType.length === 0) ? (typeFilter === 'all' ? true : (typeFilter === 'landing' ? p.targetType.toLowerCase().includes('landing') : p.targetType.toLowerCase().includes('blog'))) : columnFilters.targetType.includes(p.targetType);
-    const matchTargetSubtype = (!columnFilters.targetSubtype || columnFilters.targetSubtype.length === 0) ? (intentFilter === 'all' ? true : p.targetCategory.toLowerCase().includes(intentFilter.toLowerCase())) : (columnFilters.targetSubtype.includes(p.targetSubtype) || columnFilters.targetSubtype.includes(p.targetCategory));
-    const matchTargetGeo = !columnFilters.targetGeo || columnFilters.targetGeo.length === 0 || columnFilters.targetGeo.includes(p.targetGeo);
-    const matchPriority = !columnFilters.priority || columnFilters.priority.length === 0 || columnFilters.priority.includes(p.priority);
+      const matchCluster = !columnFilters.cluster || columnFilters.cluster.length === 0 || columnFilters.cluster.includes(p.cluster);
+      const matchCategory = !columnFilters.category || columnFilters.category.length === 0 || columnFilters.category.includes(p.category);
+      const matchType = !columnFilters.type || columnFilters.type.length === 0 || columnFilters.type.includes(p.type);
+      const matchTargetType = (!columnFilters.targetType || columnFilters.targetType.length === 0) ? (typeFilter === 'all' ? true : (typeFilter === 'landing' ? p.targetType.toLowerCase().includes('landing') : p.targetType.toLowerCase().includes('blog'))) : columnFilters.targetType.includes(p.targetType);
+      const matchTargetSubtype = (!columnFilters.targetSubtype || columnFilters.targetSubtype.length === 0) ? (intentFilter === 'all' ? true : p.targetCategory.toLowerCase().includes(intentFilter.toLowerCase())) : (columnFilters.targetSubtype.includes(p.targetSubtype) || columnFilters.targetSubtype.includes(p.targetCategory));
+      const matchTargetGeo = !columnFilters.targetGeo || columnFilters.targetGeo.length === 0 || columnFilters.targetGeo.includes(p.targetGeo);
+      const matchPriority = !columnFilters.priority || columnFilters.priority.length === 0 || columnFilters.priority.includes(p.priority);
 
-    return matchSearch && matchCluster && matchCategory && matchType && matchTargetType && matchTargetSubtype && matchTargetGeo && matchPriority;
-  });
+      return matchSearch && matchCluster && matchCategory && matchType && matchTargetType && matchTargetSubtype && matchTargetGeo && matchPriority;
+    });
+  }, [pagesData, isPastDate, selectedDate, searchQuery, columnFilters, typeFilter, intentFilter]);
 
   const pageCount = Math.max(1, Math.ceil(filteredPages.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
-  const pagedPages = filteredPages.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const pagedPages = useMemo(
+    () => filteredPages.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [filteredPages, safePage]
+  );
 
-  // Calculate metrics
-  const totalPagesCount = pagesData.length;
-  const totalKwsSum = pagesData.reduce((acc, p) => acc + p.totalKws, 0);
-
-  // Read stored Moz / RapidAPI domain metrics from localStorage (saved on Brand Analysis page)
-  let storedMetrics = null;
-  if (activeProject?.slug) {
-    try {
-      const raw = localStorage.getItem(`bd_domain_metrics_${activeProject.slug}`);
-      if (raw) storedMetrics = JSON.parse(raw);
-    } catch (e) { }
-  }
-
-  const liveTraffic = storedMetrics?.traffic ?? activeProject?.traffic ?? activeProject?.organic_traffic;
-
-  // Calculate Organic Traffic & Avg Traffic across pages (0 fallback)
-  const totalOrganicTraffic = pagesData.reduce((acc, p) => acc + (Number(p.traffic) || Number(p.organic_traffic) || 0), 0) || Number(liveTraffic) || 0;
-  const avgTraffic = totalPagesCount > 0 ? Math.round(totalOrganicTraffic / totalPagesCount) : 0;
-
-  // Calculate Avg Position: (total keyword position / number of keywords) from intent, excluding rank 101
-  const intentRanks = (projectKeywords || [])
-    .map(k => {
-      const raw = k.rank ?? k.position ?? k.rankVal ?? k.rank_meta?.rank;
-      const val = Number(raw);
-      return raw != null && !isNaN(val) && val > 0 && val < 101 ? val : null;
-    })
-    .filter(r => r !== null);
-
-  const pageRanksList = pagesData.flatMap(p => p.ranks || []).filter(r => typeof r === 'number' && r > 0 && r < 101);
-  const activeRanks = intentRanks.length > 0 ? intentRanks : pageRanksList;
-
-  const totalKeywordPosition = activeRanks.reduce((acc, r) => acc + r, 0);
-  const numberOfKeywords = activeRanks.length;
-  const avgPosition = numberOfKeywords > 0
-    ? (totalKeywordPosition / numberOfKeywords).toFixed(1)
-    : 0;
-
-  // Calculate Top Pages (Top 1, Top 3, Top 10) count & list of unique URLs using best (upper/lowest numeric) rank
-  const bestPageRankMap = {};
-  const bestPageUrlMap = {};
-
-  (projectKeywords || []).forEach(k => {
-    const rawUrl = (k.landingPage || k.url || k.page_url || k.landing_page || k.page || '').trim();
-    if (!rawUrl) return;
-    const cleanUrl = rawUrl.toLowerCase();
-
-    const rawRank = k.rank ?? k.position ?? k.rankVal ?? k.rank_meta?.rank;
-    const rankVal = Number(rawRank);
-    if (rawRank != null && !isNaN(rankVal) && rankVal > 0 && rankVal <= 10) {
-      if (bestPageRankMap[cleanUrl] == null || rankVal < bestPageRankMap[cleanUrl]) {
-        bestPageRankMap[cleanUrl] = rankVal;
-        bestPageUrlMap[cleanUrl] = rawUrl;
-      }
+  // Stored Moz / RapidAPI domain metrics (saved on Brand Analysis page)
+  const liveTraffic = useMemo(() => {
+    let sm = null;
+    if (activeProject?.slug) {
+      try {
+        const raw = localStorage.getItem(`bd_domain_metrics_${activeProject.slug}`);
+        if (raw) sm = JSON.parse(raw);
+      } catch (e) { /* ignore */ }
     }
-  });
+    return sm?.traffic ?? activeProject?.traffic ?? activeProject?.organic_traffic;
+  }, [activeProject?.slug, activeProject?.traffic, activeProject?.organic_traffic]);
 
-  (pagesData || []).forEach(p => {
-    const cleanUrl = (p.url || '').trim().toLowerCase();
-    if (!cleanUrl) return;
+  // All page-level metrics + the Top 1 / 3 / 10 lists -- one pass over the rows.
+  const {
+    totalPagesCount, totalKwsSum, totalOrganicTraffic, avgTraffic,
+    avgPosition, top1PagesList, top3PagesList, top10PagesList
+  } = useMemo(() => {
+    const totalPages = pagesData.length;
+    const kwsSum = pagesData.reduce((acc, p) => acc + p.totalKws, 0);
 
-    (p.ranks || []).forEach(r => {
-      if (typeof r === 'number' && r > 0 && r <= 10) {
-        if (bestPageRankMap[cleanUrl] == null || r < bestPageRankMap[cleanUrl]) {
-          bestPageRankMap[cleanUrl] = r;
-          bestPageUrlMap[cleanUrl] = p.url;
-        }
+    const orgTraffic = pagesData.reduce((acc, p) => acc + (Number(p.traffic) || Number(p.organic_traffic) || 0), 0) || Number(liveTraffic) || 0;
+    const avgTr = totalPages > 0 ? Math.round(orgTraffic / totalPages) : 0;
+
+    const intentRanks = (projectKeywords || [])
+      .map(k => {
+        const val = Number(k.rank ?? k.position ?? k.rankVal);
+        return !isNaN(val) && val > 0 && val < 101 ? val : null;
+      })
+      .filter(r => r !== null);
+    const pageRanksList = pagesData.flatMap(p => p.ranks || []).filter(r => typeof r === 'number' && r > 0 && r < 101);
+    const activeRanks = intentRanks.length > 0 ? intentRanks : pageRanksList;
+    const avgPos = activeRanks.length > 0
+      ? (activeRanks.reduce((a, r) => a + r, 0) / activeRanks.length).toFixed(1)
+      : 0;
+
+    const bestRank = {};
+    const bestUrl = {};
+    (projectKeywords || []).forEach(k => {
+      const rawUrl = (k.landingPage || k.url || k.page_url || k.landing_page || k.page || '').trim();
+      if (!rawUrl) return;
+      const cu = rawUrl.toLowerCase();
+      const rv = Number(k.rank ?? k.position ?? k.rankVal);
+      if (!isNaN(rv) && rv > 0 && rv <= 10 && (bestRank[cu] == null || rv < bestRank[cu])) {
+        bestRank[cu] = rv;
+        bestUrl[cu] = rawUrl;
       }
     });
-  });
+    (pagesData || []).forEach(p => {
+      const cu = (p.url || '').trim().toLowerCase();
+      if (!cu) return;
+      (p.ranks || []).forEach(r => {
+        if (typeof r === 'number' && r > 0 && r <= 10 && (bestRank[cu] == null || r < bestRank[cu])) {
+          bestRank[cu] = r;
+          bestUrl[cu] = p.url;
+        }
+      });
+    });
 
-  const top1PagesList = [];
-  const top3PagesList = [];
-  const top10PagesList = [];
+    const t1 = [], t3 = [], t10 = [];
+    Object.entries(bestRank).forEach(([cu, rank]) => {
+      const item = { url: bestUrl[cu] || cu, rank };
+      if (rank === 1) t1.push(item);
+      else if (rank <= 3) t3.push(item);
+      else t10.push(item);
+    });
 
-  Object.entries(bestPageRankMap).forEach(([cleanUrl, rank]) => {
-    const item = { url: bestPageUrlMap[cleanUrl] || cleanUrl, rank };
-    if (rank === 1) {
-      top1PagesList.push(item);
-    } else if (rank >= 2 && rank <= 3) {
-      top3PagesList.push(item);
-    } else if (rank >= 4 && rank <= 10) {
-      top10PagesList.push(item);
-    }
-  });
+    return {
+      totalPagesCount: totalPages, totalKwsSum: kwsSum,
+      totalOrganicTraffic: orgTraffic, avgTraffic: avgTr,
+      avgPosition: avgPos, top1PagesList: t1, top3PagesList: t3, top10PagesList: t10
+    };
+  }, [pagesData, projectKeywords, liveTraffic]);
 
   return (
     <div style={{ position: 'relative', padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: 'var(--bg)', minHeight: '100vh' }}>
@@ -894,7 +937,7 @@ export default function TopPagesPage({ user }) {
                     }}
                   >
                     <Sparkles size={14} className={isAnalyzing ? 'animate-spin' : ''} />
-                    <span>{isAnalyzing ? 'Analyzing...' : 'Re-analyze'}</span>
+                    <span>{isAnalyzing ? 'Analyzing...' : 'Analyze'}</span>
                   </button>
                 </div>
               )}
@@ -1337,8 +1380,9 @@ export default function TopPagesPage({ user }) {
         overflow: 'hidden',
         boxShadow: '0 4px 20px -2px rgba(74, 26, 140, 0.06), 0 2px 6px -1px rgba(45, 45, 68, 0.03)'
       }}>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
+        <style>{`.tpp-sticky thead th{position:sticky;top:0;z-index:4;background:#FAF8FD;box-shadow:inset 0 -1px 0 #E4DFEE;}`}</style>
+        <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 230px)' }}>
+          <table className="tpp-sticky" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#FAF8FD', borderBottom: '1px solid #E4DFEE', color: '#4E4E61', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
                 <th style={{ padding: '12px 16px', fontWeight: 700 }}>PAGE URL</th>
@@ -1371,7 +1415,7 @@ export default function TopPagesPage({ user }) {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
+              {(loading || rowsLoading) ? (
                 <tr>
                   <td colSpan={12} style={{ padding: '48px 16px', textAlign: 'center' }}>
                     <BrandInfinityLoader

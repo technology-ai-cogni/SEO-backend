@@ -2426,6 +2426,7 @@ def run_ai_visibility_analysis_endpoint(project_slug: str, req: AiVisibilityRequ
                 total_keywords=result.get("total_keywords", len(kws)),
                 mentioned_keywords=result.get("mentioned_keywords", []),
                 cited_pages_list=result.get("cited_pages_list", []),
+                keyword_ai_ranks=result.get("keyword_ai_ranks", {}),
                 domain=client_domain,
                 country=req.country or "India"
             )

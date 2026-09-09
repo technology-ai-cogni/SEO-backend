@@ -144,8 +144,6 @@ def _slugify_project_name(name):
 
 
 slugify = _slugify_project_name
-
-
 def _assert_safe_identifier(identifier):
     """Kept as a general-purpose safety check, still used wherever a
     value derived from user input might end up needing validation."""
@@ -317,9 +315,13 @@ def _init_db_inner():
                 total_keywords INT DEFAULT 0,
                 mentioned_keywords JSONB DEFAULT '[]'::jsonb,
                 cited_pages_list JSONB DEFAULT '[]'::jsonb,
+                keyword_ai_ranks JSONB DEFAULT '{}'::jsonb,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
+        # AI-recommendation rank per mentioned keyword (from the LLM agent) --
+        # this is what "Tentative Rank" on Top Pages (AI) shows, NOT the SERP rank.
+        _add_column_if_not_exists(conn, "ai_analysis", "keyword_ai_ranks", "JSONB DEFAULT '{}'::jsonb")
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS projects (
@@ -428,18 +430,11 @@ def _init_db_inner():
         """))
 
         # --- Shared categories/clusters/category_cluster_map/keyword_categories ---
-        try:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        except Exception as vec_ext_err:
-            print(f"[DB Init] Notice vector extension creation: {vec_ext_err}")
-
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS categories (
                 id BIGSERIAL PRIMARY KEY,
                 project_name TEXT NOT NULL REFERENCES projects(slug),
                 name TEXT NOT NULL,
-                description TEXT,
-                embedding vector(1536),
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 UNIQUE (project_name, name)
             )
@@ -450,7 +445,6 @@ def _init_db_inner():
                 id BIGSERIAL PRIMARY KEY,
                 project_name TEXT NOT NULL REFERENCES projects(slug),
                 name TEXT NOT NULL,
-                embedding vector(1536),
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 UNIQUE (project_name, name)
             )
@@ -474,8 +468,6 @@ def _init_db_inner():
                 keyword TEXT NOT NULL,
                 category TEXT,
                 cluster TEXT,
-                match_tier TEXT,
-                similarity_score DOUBLE PRECISION,
                 status TEXT,
                 error TEXT,
                 meta JSONB,
@@ -494,30 +486,15 @@ def _init_db_inner():
             )
         """))
         for alter_cmd in [
-            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS description TEXT",
-            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS embedding vector(1536)",
-            "ALTER TABLE clusters ADD COLUMN IF NOT EXISTS embedding vector(1536)",
             "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank INTEGER",
             "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank_checked_at TIMESTAMPTZ",
             "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank_meta JSONB",
-            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS subtype TEXT",
-            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS match_tier TEXT",
-            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS similarity_score DOUBLE PRECISION"
+            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS subtype TEXT"
         ]:
             try:
                 conn.execute(text(alter_cmd))
             except Exception as alter_err:
                 print(f"[DB Init] Notice skipping table alter: {alter_err}")
-
-        for index_cmd in [
-            "CREATE INDEX IF NOT EXISTS idx_categories_embedding ON categories USING hnsw (embedding vector_cosine_ops)",
-            "CREATE INDEX IF NOT EXISTS idx_clusters_embedding ON clusters USING hnsw (embedding vector_cosine_ops)"
-        ]:
-            try:
-                conn.execute(text(index_cmd))
-            except Exception as idx_err:
-                print(f"[DB Init] Notice skipping index creation: {idx_err}")
-
         try:
             conn.execute(text("UPDATE keyword_categories SET type = 'Google' WHERE type IS NULL OR TRIM(type) = ''"))
             conn.execute(text("ALTER TABLE keyword_categories ALTER COLUMN type SET DEFAULT 'Google'"))
@@ -1236,7 +1213,7 @@ def create_domain(domain, project_name=None, target_regions=None, platforms=None
 
     with engine.begin() as conn:
         existing_domain = conn.execute(text("SELECT 1 FROM domains WHERE LOWER(domain) = LOWER(:domain)"), {"domain": domain}).fetchone()
-        existing_project = conn.execute(text("SELECT 1 FROM domains WHERE LOWER(project_name) = LOWER(:project_name) OR project_slug = :slug"), {"project_name": project_name, "slug": project_slug}).fetchone()
+        existing_project = conn.execute(text("SELECT 1 FROM domains WHERE LOWER(project_name) = LOWER(:project_name) OR project_slug = :slug"), {"project_name": project_name, "slug": slugify(project_name)}).fetchone()
         if existing_domain or existing_project:
             raise ValueError("Use different domain or project name, it's already used")
 
@@ -1405,33 +1382,21 @@ def set_job_status(job_id, status, error=None):
         """), {"id": job_id, "status": status, "error": error})
 
 
-def increment_job_progress(job_id, max_retries=5):
-    """Atomically increment processed count; handles concurrent row lock contention with retries."""
-    import time
-    for attempt in range(max_retries):
-        try:
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    UPDATE jobs SET processed = processed + 1, updated_at = now()
-                    WHERE id = :id
-                """), {"id": job_id})
-                row = conn.execute(text("""
-                    SELECT processed, total FROM jobs WHERE id = :id
-                """), {"id": job_id}).fetchone()
-                if row and row.processed >= row.total and row.total > 0:
-                    conn.execute(text("""
-                        UPDATE jobs SET status = 'completed', completed_at = now()
-                        WHERE id = :id AND status != 'completed'
-                    """), {"id": job_id})
-            return
-        except Exception as e:
-            err_str = str(e).lower()
-            if ("lock" in err_str or "locknotavailable" in err_str or "deadlock" in err_str or "operationalerror" in err_str) and attempt < max_retries - 1:
-                time.sleep(0.15 * (attempt + 1))
-                continue
-            if attempt == max_retries - 1:
-                print(f"[DB Notice] Non-fatal job progress increment lock contention: {e}")
-                return
+def increment_job_progress(job_id):
+    """Atomically increment processed count; auto-marks completed when done."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE jobs SET processed = processed + 1, updated_at = now()
+            WHERE id = :id
+        """), {"id": job_id})
+        row = conn.execute(text("""
+            SELECT processed, total FROM jobs WHERE id = :id
+        """), {"id": job_id}).fetchone()
+        if row and row.processed >= row.total and row.total > 0:
+            conn.execute(text("""
+                UPDATE jobs SET status = 'completed', completed_at = now()
+                WHERE id = :id AND status != 'completed'
+            """), {"id": job_id})
 
 
 def get_job(job_id):
@@ -1610,28 +1575,35 @@ def insert_keyword_rows(job_id, domain, rows):
 
 
 def update_keyword_result(domain, row_id, category, cluster, status, meta=None, error=None,
-                           computed_target_type=None, computed_region_name=None, computed_subtype=None,
-                           match_tier=None, similarity_score=None):
-    """Updates category/cluster/status/meta/error, PLUS match_tier and similarity_score for RAG tracking."""
-    if meta and isinstance(meta, dict):
-        if not match_tier:
-            match_tier = meta.get("rag_match_tier")
-        if similarity_score is None:
-            similarity_score = meta.get("rag_similarity_score")
+                           computed_target_type=None, computed_region_name=None, computed_subtype=None):
+    """Called by the background worker after processing ONE keyword row
+    (identified by the id returned from insert_keyword_rows at upload
+    time). `row_id` is globally unique (shared table), so no project
+    filter is needed in the WHERE clause -- `domain` is accepted for
+    signature consistency with the rest of this module but unused here.
 
+    Updates category/cluster/status/meta/error, PLUS:
+    - target_type: ALWAYS overwritten with computed_target_type.
+    - subtype: ALWAYS overwritten with computed_subtype (Informational/
+      Commercial, same column scripts/run_pipeline.py's
+      insert_pipeline_result() writes).
+    - target_geo: filled in with computed_region_name ONLY IF the row's
+      target_geo is currently NULL/blank -- never overwrites a target
+      geo the user explicitly supplied in their upload.
+
+    Never touches sv/kw_diff/type/target_subtype/priority/
+    landing_page_url, which remain pure pass-through from the original
+    upload."""
     with engine.begin() as conn:
         conn.execute(text("""
             UPDATE keyword_categories
             SET category = :category, cluster = :cluster, status = :status,
-                match_tier = COALESCE(:match_tier, match_tier),
-                similarity_score = COALESCE(:similarity_score, similarity_score),
                 meta = CAST(:meta AS JSONB), error = :error, checked_at = now(),
                 target_type = :computed_target_type, subtype = :computed_subtype,
                 target_geo = COALESCE(NULLIF(target_geo, ''), :computed_region_name)
             WHERE id = :id
         """), {
             "id": row_id, "category": category, "cluster": cluster, "status": status,
-            "match_tier": match_tier, "similarity_score": similarity_score,
             "meta": json.dumps(meta) if meta is not None else None, "error": error,
             "computed_target_type": computed_target_type, "computed_region_name": computed_region_name,
             "computed_subtype": computed_subtype,
@@ -2768,7 +2740,8 @@ def save_ai_analysis_run(
     mentioned_keywords: list,
     cited_pages_list: list,
     domain: str = "",
-    country: str = "India"
+    country: str = "India",
+    keyword_ai_ranks: dict = None
 ):
     import json
     with engine.begin() as conn:
@@ -2776,11 +2749,12 @@ def save_ai_analysis_run(
             INSERT INTO ai_analysis (
                 project_slug, project_name, domain, country, engine,
                 ai_visibility, mentions, cited_pages, total_keywords,
-                mentioned_keywords, cited_pages_list, created_at
+                mentioned_keywords, cited_pages_list, keyword_ai_ranks, created_at
             ) VALUES (
                 :project_slug, :project_name, :domain, :country, :engine,
                 :ai_visibility, :mentions, :cited_pages, :total_keywords,
-                CAST(:mentioned_keywords AS JSONB), CAST(:cited_pages_list AS JSONB), NOW()
+                CAST(:mentioned_keywords AS JSONB), CAST(:cited_pages_list AS JSONB),
+                CAST(:keyword_ai_ranks AS JSONB), NOW()
             )
         """), {
             "project_slug": project_slug,
@@ -2793,7 +2767,8 @@ def save_ai_analysis_run(
             "cited_pages": cited_pages or 0,
             "total_keywords": total_keywords or 0,
             "mentioned_keywords": json.dumps(mentioned_keywords or []),
-            "cited_pages_list": json.dumps(cited_pages_list or [])
+            "cited_pages_list": json.dumps(cited_pages_list or []),
+            "keyword_ai_ranks": json.dumps(keyword_ai_ranks or {})
         })
 
 
@@ -3365,7 +3340,7 @@ def get_ai_analysis_history(project_slug: str, engine_name: str = None, limit: i
             res = conn.execute(text("""
                 SELECT id, project_slug, project_name, domain, country, engine,
                        ai_visibility, mentions, cited_pages, total_keywords,
-                       mentioned_keywords, cited_pages_list, created_at
+                       mentioned_keywords, cited_pages_list, keyword_ai_ranks, created_at
                 FROM ai_analysis
                 WHERE (project_slug = :slug OR project_name ILIKE :slug_like)
                   AND LOWER(engine) LIKE :eng_like
@@ -3381,7 +3356,7 @@ def get_ai_analysis_history(project_slug: str, engine_name: str = None, limit: i
             res = conn.execute(text("""
                 SELECT id, project_slug, project_name, domain, country, engine,
                        ai_visibility, mentions, cited_pages, total_keywords,
-                       mentioned_keywords, cited_pages_list, created_at
+                       mentioned_keywords, cited_pages_list, keyword_ai_ranks, created_at
                 FROM ai_analysis
                 WHERE project_slug = :slug OR project_name ILIKE :slug_like
                 ORDER BY created_at DESC
@@ -3396,6 +3371,12 @@ def get_ai_analysis_history(project_slug: str, engine_name: str = None, limit: i
         for r in res:
             m_kws = r.mentioned_keywords if isinstance(r.mentioned_keywords, list) else (json.loads(r.mentioned_keywords) if r.mentioned_keywords else [])
             c_list = r.cited_pages_list if isinstance(r.cited_pages_list, list) else (json.loads(r.cited_pages_list) if r.cited_pages_list else [])
+            kw_ranks = getattr(r, "keyword_ai_ranks", None)
+            if isinstance(kw_ranks, str):
+                try:
+                    kw_ranks = json.loads(kw_ranks)
+                except Exception:
+                    kw_ranks = {}
             history.append({
                 "id": r.id,
                 "project_slug": r.project_slug,
@@ -3409,6 +3390,7 @@ def get_ai_analysis_history(project_slug: str, engine_name: str = None, limit: i
                 "total_keywords": r.total_keywords,
                 "mentioned_keywords": m_kws,
                 "cited_pages_list": c_list,
+                "keyword_ai_ranks": kw_ranks if isinstance(kw_ranks, dict) else {},
                 "created_at": r.created_at.isoformat() if hasattr(r.created_at, 'isoformat') else str(r.created_at)
             })
         return history
