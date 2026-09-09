@@ -3,6 +3,7 @@ import { Search, ChevronDown, ExternalLink, Download, KeyRound, Filter, ChevronL
 import { fetchDomainRows, fetchKeywordRows } from '../../lib/projectsApi';
 import { canDownload } from '../../lib/permissions';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
+import ScrollToTopFab from '../common/ScrollToTopFab';
 
 const hasValidLandingPage = (lp) => {
   if (!lp || typeof lp !== 'string') return false;
@@ -1385,6 +1386,7 @@ export default function KeywordsPage({ user }) {
           )}
       </div>
 
+      <ScrollToTopFab />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { canDownload, canRunActions } from '../../lib/permissions';
 import { fetchDomainRows, fetchPageRows, fetchKeywordRows, runOrganicRankCheckApi } from '../../lib/projectsApi';
 import MarkedCalendar, { getLocalTodayStr, tsToLocalDateStr } from '../common/MarkedCalendar';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
+import ScrollToTopFab from '../common/ScrollToTopFab';
 
 // Only the columns the Organic table + its filters render (no rank_meta JSONB blob).
 const KW_COLS_ORGANIC = 'id,keyword,sv,kw_diff,cluster,category,type,target_type,subtype,target_geo,priority,landing_page_url,rank,rank_checked_at';
@@ -1688,6 +1689,7 @@ export default function TopPagesPage({ user }) {
         </div>
       )}
 
+      <ScrollToTopFab />
     </div>
   );
 }

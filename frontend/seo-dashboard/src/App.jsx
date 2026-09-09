@@ -24,7 +24,7 @@ import LogsPage from './components/pages/LogsPage';
 import RecycleBinPage from './components/pages/RecycleBinPage';
 import UsersPage from './components/pages/UsersPage';
 import { Lock, ShieldAlert, ShieldCheck } from 'lucide-react';
-import { totalKeywordCount, topKeywords } from './data/mockData';
+import { topKeywords } from './data/mockData';
 import { fetchUsersApi, fetchCurrentAuthUserApi } from './lib/projectsApi';
 import { canAccessRoute } from './lib/permissions';
 
@@ -293,7 +293,7 @@ const PAGE_TITLES = {
   'project-setup/connectors': { title: 'Project Setup · Connectors', subtitle: 'Connect data sources' },
   'search-visibility/position-analysis': { title: 'Brand Discovery', subtitle: `` },
   'search-visibility/ai-analysis': { title: 'Top Pages (AI)', subtitle: 'Mentions and Citations analytics across AI Search Engines' },
-  'search-visibility/keywords': { title: 'Keywords', subtitle: `${totalKeywordCount.toLocaleString()} tracked keywords` },
+  'search-visibility/keywords': { title: 'Keywords', subtitle: `` },
   'search-visibility/top-pages': { title: 'Top Pages (Organic)', subtitle: 'Best performing pages by organic traffic' },
   'search-visibility/outreach': { title: 'Outreach', subtitle: 'Manage guest posts, classified ads, brand mentions, and business listings' },
   'search-visibility/link-outreach': { title: 'Link Outreach', subtitle: 'Manage backlink acquisition campaigns' },
@@ -709,7 +709,7 @@ export default function App() {
       let token = null;
       try {
         token = sessionStorage.getItem('seo_token');
-      } catch (_) {}
+      } catch (_) { }
 
       if (!token) return;
 
@@ -824,7 +824,7 @@ export default function App() {
     try {
       sessionStorage.removeItem('seo_dashboard_user');
       sessionStorage.removeItem('seo_token');
-    } catch (e) {}
+    } catch (e) { }
     setActivePath('landing');
     window.history.pushState(null, '', '/');
   };

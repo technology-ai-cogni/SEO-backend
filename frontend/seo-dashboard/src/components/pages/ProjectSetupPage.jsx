@@ -19,6 +19,7 @@ import {
 } from '../../lib/projectsApi';
 import { isReadOnlyUser, canEdit, canDelete, canDownload, canUpdate } from '../../lib/permissions';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
+import ScrollToTopFab from '../common/ScrollToTopFab';
 
 const fetch = authFetch;
 
@@ -2574,7 +2575,7 @@ function DomainTab({ projects, filter, domainFilters, onUpdateProject, onDeleteP
 
   return (
     <>
-      <div style={{ overflowX: 'auto' }}>
+      <div className="ps-sticky-wrap" style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
           <thead>
             <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
@@ -2803,7 +2804,7 @@ function PagesTab({ pages, onSelectProject, onDeleteProject, loading, error, tot
         scopeLabel={deleteScopeLabel}
         onConfirm={handleConfirmDelete}
       />
-      <div style={{ overflowX: 'auto' }}>
+      <div className="ps-sticky-wrap" style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
@@ -3433,7 +3434,7 @@ function PageDetailView({ project, onBack, onUpdatePages, search, user }) {
       <BulkEditModal open={showBulkEdit} onClose={() => setShowBulkEdit(false)} count={selectedRows.size} onApply={handleBulkEditApply} fields={PAGE_BULK_FIELDS} />
       <BulkDeleteModal open={showBulkDelete} onClose={() => setShowBulkDelete(false)} count={selectedRows.size} onConfirm={handleBulkDelete} />
 
-      <div style={{ overflowX: 'auto' }}>
+      <div className="ps-sticky-wrap" style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
           <thead>
             <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
@@ -4464,7 +4465,7 @@ function KwClusterDetailView({ project, onBack, onUpdateKeywords, search, user }
       <BulkDeleteModal open={showBulkDelete} onClose={() => setShowBulkDelete(false)} count={selectedRows.size} onConfirm={handleBulkDelete} />
       <RecclusterConfirmModal open={showReclusterConfirm} onClose={() => setShowReclusterConfirm(false)} onConfirm={() => runClusteringJob(true)} />
 
-      <div style={{ overflowX: 'auto' }}>
+      <div className="ps-sticky-wrap" style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1500 }}>
           <thead>
             <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
@@ -4775,7 +4776,7 @@ function CompetitorDetailView({ competitor, onBack, user }) {
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{details.length} entr{details.length !== 1 ? 'ies' : 'y'}</span>
       </div>
 
-      <div style={{ overflowX: 'auto' }}>
+      <div className="ps-sticky-wrap" style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1200 }}>
           <thead>
             <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
@@ -4837,7 +4838,7 @@ function CompetitorDetailView({ competitor, onBack, user }) {
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{rankingKeywordRows.length} keyword{rankingKeywordRows.length !== 1 ? 's' : ''}</span>
       </div>
-      <div style={{ overflowX: 'auto' }}>
+      <div className="ps-sticky-wrap" style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 400 }}>
           <thead>
             <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
@@ -5187,7 +5188,7 @@ function CompetitorProjectsTab({ projects, competitors, onSelectProject, onDelet
 
   return (
     <>
-      <div style={{ overflowX: 'auto' }}>
+      <div className="ps-sticky-wrap" style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 750 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
@@ -5303,7 +5304,7 @@ function Top3KeywordsByCategorySection({ top3Map, loading, selectedKw, onSelectK
   });
 
   return (
-    <div style={{ overflowX: 'auto', borderBottom: '1px solid var(--border)' }}>
+    <div className="ps-sticky-wrap" style={{ overflowX: 'auto', borderBottom: '1px solid var(--border)' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
           <tr style={{ background: 'var(--surface-2, #f8fafc)', borderBottom: '1px solid var(--border)' }}>
@@ -5589,7 +5590,7 @@ function KeywordDetailView({ keyword, kwObj, competitors, scopedProject, onBack 
         )}
       </div>
 
-      <div style={{ overflowX: 'auto' }}>
+      <div className="ps-sticky-wrap" style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1000 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface-2, #f8fafc)' }}>
@@ -5839,7 +5840,7 @@ function CategoryBasedCompetitorsTable({ rows, loading, scopedProject, onViewCom
             </div>
           </div>
 
-          <div style={{ overflowX: 'auto' }}>
+          <div className="ps-sticky-wrap" style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 850 }}>
               <thead>
                 <tr style={{ background: 'var(--surface-2, #f8fafc)', borderBottom: '1px solid var(--border)' }}>
@@ -6589,7 +6590,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
       )}
 
       {subView === 'pages' ? (
-        <div style={{ overflowX: 'auto' }}>
+        <div className="ps-sticky-wrap" style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
             <thead>
               <tr style={{ background: '#f8f9fb', borderBottom: '1px solid var(--border)' }}>
@@ -6771,7 +6772,7 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
             })()}
           </div>
 
-          <div style={{ overflowX: 'auto' }}>
+          <div className="ps-sticky-wrap" style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1000 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface-2, #f8fafc)' }}>
@@ -9863,13 +9864,6 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
 
       </div>
 
-      {/* Help button */}
-      <div style={{ position: 'fixed', bottom: 28, right: 28 }}>
-        <button style={{ width: 44, height: 44, borderRadius: '50%', background: '#2D2D44', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 14px rgba(0,0,0,0.25)' }}>
-          <HelpCircle size={20} color="#fff" />
-        </button>
-      </div>
-
       {/* Modals */}
       <CreateProjectModal open={showCreate} onClose={() => setShowCreate(false)} onCreateProject={handleCreateProject} />
       <AddPagesModal
@@ -10438,6 +10432,7 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
           </p>
         </Modal>
       )}
+      <ScrollToTopFab />
     </div>
   );
 }

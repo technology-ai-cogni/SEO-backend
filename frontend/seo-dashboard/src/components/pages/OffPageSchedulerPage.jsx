@@ -17,6 +17,7 @@ import {
   fetchUsersApi
 } from '../../lib/projectsApi';
 import { isReadOnlyUser, canDownload, canEdit, canUpdate, canDelete } from '../../lib/permissions';
+import ScrollToTopFab from '../common/ScrollToTopFab';
 
 // Reusable Modal Component matching Project Setup style
 function Modal({ open, onClose, title, children, footer }) {
@@ -2133,10 +2134,11 @@ export default function OffPageSchedulerPage({ user }) {
           boxShadow: 'var(--shadow-sm)',
           overflow: 'hidden'
         }}>
-          <div style={{ overflowX: 'auto', maxHeight: '75vh' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 2800 }}>
+          <style>{`.ops-sticky thead th{position:sticky;top:0;z-index:11;background:inherit;}`}</style>
+          <div style={{ overflow: 'auto', maxHeight: '75vh' }}>
+            <table className="ops-sticky" style={{ width: '100%', borderCollapse: 'collapse', minWidth: 2800 }}>
               <thead>
-                <tr style={{ background: '#f8f9fb', borderBottom: '1.5px solid var(--border)', position: 'sticky', top: 0, zIndex: 10 }}>
+                <tr style={{ background: '#f8f9fb', borderBottom: '1.5px solid var(--border)' }}>
                   {(userCanEdit || userCanDelete || userCanUpdate) && (
                     <th style={{ padding: '14px 18px', width: 48, textAlign: 'center' }}>
                       <input
@@ -3686,6 +3688,7 @@ export default function OffPageSchedulerPage({ user }) {
           </div>
         </div>
       </Modal>
+      <ScrollToTopFab />
     </div>
   );
 }

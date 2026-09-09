@@ -327,3 +327,22 @@ button.delete-action:hover,
   color: #b91c1c !important;
 }
 
+/* Project Setup data tables: table body scrolls inside the card, header stays put.
+   The header keeps whatever background each table's own <tr> already sets. */
+.ps-sticky-wrap {
+  overflow-y: auto;
+  max-height: calc(100vh - 300px);
+}
+/* Default opaque header background; tables that set their own <tr> background
+   inline keep it (inline wins over this class). The <th> then inherits whatever
+   the row ended up with, so the pinned header never shows rows through it. */
+.ps-sticky-wrap thead tr {
+  background: var(--surface, #ffffff);
+}
+.ps-sticky-wrap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: inherit;
+}
+

@@ -11,6 +11,7 @@ import { supabase } from '../../lib/supabaseClient';
 import MarkedCalendar, { getLocalTodayStr, tsToLocalDateStr } from '../common/MarkedCalendar';
 import { hasPermission, PERMISSIONS, canRunActions, canRunAiModelAnalysis, recordAiModelAnalysisRun, canDownload } from '../../lib/permissions';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
+import ScrollToTopFab from '../common/ScrollToTopFab';
 // Shared "top 2 keywords per category by SV" -- same helper Brand Discovery uses,
 // so the analyzed-keyword / "Total Search Terms" counts match across pages.
 import { getTop2KeywordsPerCategory } from '../../lib/keywordSelection';
@@ -1709,6 +1710,7 @@ export default function AiAnalysisPage({ user }) {
         </div>
       )}
 
+      <ScrollToTopFab />
     </div>
   );
 }
