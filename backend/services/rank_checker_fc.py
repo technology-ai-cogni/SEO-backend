@@ -143,3 +143,29 @@ def find_rank(keyword, landing_page, default_domain=None, country_code=None):
             return rank, links
 
     return NOT_FOUND_RANK, links
+
+
+def normalize_domain(value):
+    if not value:
+        return ""
+    v = str(value).strip().lower()
+    if "://" not in v:
+        v = "https://" + v
+    return get_domain(v)
+
+
+def find_rank_by_domain(keyword, target_domain, country_code=None):
+    """Firecrawl version of rank_checker.find_rank_by_domain -- returns the
+    project domain's rank for `keyword` plus the REAL full ranking URL
+    (Firecrawl gives true URLs, not Google's encrypted redirect).
+
+    Returns (rank:int, page_url:str, all_urls:list[str])."""
+    td = normalize_domain(target_domain)
+    all_urls = get_top_n_organic_links(keyword, TOP_N, country_code=country_code)
+    if not td:
+        return NOT_FOUND_RANK, "", all_urls
+    for rank, href in enumerate(all_urls, start=1):
+        rd = get_domain(href)
+        if rd == td or rd.endswith("." + td) or td.endswith("." + rd):
+            return rank, href, all_urls
+    return NOT_FOUND_RANK, "", all_urls

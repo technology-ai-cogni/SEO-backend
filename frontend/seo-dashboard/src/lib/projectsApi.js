@@ -914,6 +914,7 @@ function kwRowToUi(row) {
     rank: row.rank,
     rankCheckedAt: row.rank_checked_at,
     rankMeta: row.rank_meta,
+    pageUrlFetched: row.page_url_fetched,
   };
 }
 
@@ -957,7 +958,7 @@ export async function insertKeywordRows(projectSlug, rows) {
 // render a few of these (e.g. Top Pages AI) pass a trimmed `columns` string so
 // we never transfer the JSONB `rank_meta` blob or unused columns for thousands
 // of rows.
-const KW_COLS_FULL = 'id,keyword,sv,kw_diff,cluster,category,type,target_type,subtype,target_geo,priority,landing_page_url,rank,rank_checked_at,rank_meta';
+const KW_COLS_FULL = 'id,keyword,sv,kw_diff,cluster,category,type,target_type,subtype,target_geo,priority,landing_page_url,rank,rank_checked_at,rank_meta,page_url_fetched';
 
 export async function fetchKeywordRows(projectSlug, { columns } = {}) {
   if (!projectSlug) return [];

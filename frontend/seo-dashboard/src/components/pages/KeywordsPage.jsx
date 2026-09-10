@@ -344,6 +344,7 @@ export default function KeywordsPage({ user }) {
                 targetGeo: k.targetGeo || k.geo || k.country || p.country || 'India',
                 priority: k.priority || k.prio || 'Medium',
                 landingPage: k.landingPage || k.url || k.landing_page || '',
+                pageUrlFetched: k.pageUrlFetched || k.page_url_fetched || '',
                 rank: rawRank
               };
             });
@@ -375,6 +376,7 @@ export default function KeywordsPage({ user }) {
           targetGeo: k.targetGeo || k.geo || k.country || proj.country || 'India',
           priority: k.priority || k.prio || 'Medium',
           landingPage: k.landingPage || k.url || k.landing_page || '',
+          pageUrlFetched: k.pageUrlFetched || k.page_url_fetched || '',
           rank: rawRank
         };
       });
@@ -1154,12 +1156,13 @@ export default function KeywordsPage({ user }) {
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>TARGET GEO</th>
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>PRIORITY</th>
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>LANDING PAGE</th>
+                <th style={{ padding: '12px 14px', fontWeight: 700 }}>PAGE URL FETCHED</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={13} style={{ padding: '48px 16px', textAlign: 'center' }}>
+                  <td colSpan={14} style={{ padding: '48px 16px', textAlign: 'center' }}>
                     <BrandInfinityLoader
                       label={`Loading keywords for ${activeProject?.domain || activeProject?.name || 'project'}…`}
                       size="md"
@@ -1169,7 +1172,7 @@ export default function KeywordsPage({ user }) {
                 </tr>
               ) : filteredKeywords.length === 0 ? (
                 <tr>
-                  <td colSpan={13} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
+                  <td colSpan={14} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
                     No matching keywords found under Project Setup for {activeProject?.domain || activeProject?.name}.
                   </td>
                 </tr>
@@ -1196,7 +1199,9 @@ export default function KeywordsPage({ user }) {
                     <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
                       {(() => {
                         const num = Number(row.rank);
-                        if (!hasValidLandingPage(row.landingPage) || !row.rank || isNaN(num) || num <= 0) {
+                        // Rank is now a domain-level match (rank_checker.find_rank_by_domain),
+                        // so it no longer depends on a declared landing page. 101 = not found.
+                        if (!row.rank || isNaN(num) || num <= 0 || num >= 101) {
                           return <span style={{ color: '#94a3b8', fontWeight: 400 }}>—</span>;
                         }
                         const isTop3 = num <= 3;
@@ -1290,6 +1295,26 @@ export default function KeywordsPage({ user }) {
                         >
                           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {row.landingPage}
+                          </span>
+                          <ExternalLink size={12} style={{ flexShrink: 0 }} />
+                        </a>
+                      ) : (
+                        <span style={{ color: '#94a3b8' }}>—</span>
+                      )}
+                    </td>
+
+                    {/* PAGE URL FETCHED (domain-match result from rank checking) */}
+                    <td style={{ padding: '12px 14px', color: '#2563eb', maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {row.pageUrlFetched ? (
+                        <a
+                          href={row.pageUrlFetched.startsWith('http') ? row.pageUrlFetched : `https://${row.pageUrlFetched}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={row.pageUrlFetched}
+                          style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600, maxWidth: '100%' }}
+                        >
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {row.pageUrlFetched}
                           </span>
                           <ExternalLink size={12} style={{ flexShrink: 0 }} />
                         </a>

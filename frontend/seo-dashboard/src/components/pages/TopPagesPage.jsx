@@ -1437,19 +1437,23 @@ export default function TopPagesPage({ user }) {
                   <tr key={row.id} style={{ borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' }}>
 
                     {/* PAGE URL */}
-                    <td style={{ padding: '12px 16px', color: '#2563eb', maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      <a
-                        href={row.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={row.url}
-                        style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600, maxWidth: '100%' }}
-                      >
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {row.url}
-                        </span>
-                        <ExternalLink size={12} style={{ flexShrink: 0 }} />
-                      </a>
+                    <td style={{ padding: '12px 16px', maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {/^https?:\/\//i.test(String(row.url || '').trim()) ? (
+                        <a
+                          href={row.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={row.url}
+                          style={{ color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600, maxWidth: '100%' }}
+                        >
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {row.url}
+                          </span>
+                          <ExternalLink size={12} style={{ flexShrink: 0 }} />
+                        </a>
+                      ) : (
+                        <span style={{ color: '#94a3b8', fontWeight: 600 }}>NA</span>
+                      )}
                     </td>
 
                     {/* SV */}

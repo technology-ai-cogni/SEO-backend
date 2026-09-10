@@ -484,6 +484,7 @@ def _init_db_inner():
                 rank INTEGER,
                 rank_checked_at TIMESTAMPTZ,
                 rank_meta JSONB,
+                page_url_fetched TEXT,
                 checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
@@ -491,6 +492,10 @@ def _init_db_inner():
             "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank INTEGER",
             "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank_checked_at TIMESTAMPTZ",
             "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS rank_meta JSONB",
+            # page_url_fetched: the actual Google result URL that matched the
+            # project's own domain during rank-checking (domain-based match,
+            # not the pre-declared landing_page_url).
+            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS page_url_fetched TEXT",
             "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS subtype TEXT"
         ]:
             try:
@@ -1651,19 +1656,25 @@ def update_keyword_result(domain, row_id, category, cluster, status, meta=None, 
         })
 
 
-def update_keyword_rank(row_id, rank, rank_meta=None):
+def update_keyword_rank(row_id, rank, rank_meta=None, page_url_fetched=None):
     """Called by the rank-checking worker after checking ONE keyword row.
-    Only ever touches rank/rank_checked_at/rank_meta -- never category,
-    cluster, or any of the pass-through upload columns."""
+    Only ever touches rank/rank_checked_at/rank_meta/page_url_fetched --
+    never category, cluster, or any of the pass-through upload columns.
+
+    page_url_fetched: the real SERP URL that matched the project domain
+    (pass None to leave whatever's already stored untouched; pass "" to
+    clear it, e.g. when the domain wasn't found)."""
+    sets = ["rank = :rank", "rank_checked_at = now()",
+            "rank_meta = CAST(:rank_meta AS JSONB)"]
+    params = {
+        "id": row_id, "rank": rank,
+        "rank_meta": json.dumps(rank_meta) if rank_meta is not None else None,
+    }
+    if page_url_fetched is not None:
+        sets.append("page_url_fetched = :page_url_fetched")
+        params["page_url_fetched"] = page_url_fetched or None
     with engine.begin() as conn:
-        conn.execute(text("""
-            UPDATE keyword_categories
-            SET rank = :rank, rank_checked_at = now(), rank_meta = CAST(:rank_meta AS JSONB)
-            WHERE id = :id
-        """), {
-            "id": row_id, "rank": rank,
-            "rank_meta": json.dumps(rank_meta) if rank_meta is not None else None,
-        })
+        conn.execute(text(f"UPDATE keyword_categories SET {', '.join(sets)} WHERE id = :id"), params)
 
 
 def get_job_keyword_rows_for_rank_check(job_id):
@@ -2276,7 +2287,7 @@ def get_job_category_results(job_id):
         rows = conn.execute(text("""
             SELECT keyword, category, cluster, status, error, meta, checked_at,
                    sv, kw_diff, type, target_type, target_subtype, target_geo, priority, landing_page_url,
-                   rank, rank_checked_at, rank_meta
+                   rank, rank_checked_at, rank_meta, page_url_fetched
             FROM keyword_categories WHERE job_id = :job_id ORDER BY id
         """), {"job_id": job_id}).mappings().fetchall()
         return [dict(r) for r in rows]
@@ -2294,7 +2305,7 @@ def get_domain_results(domain):
         rows = conn.execute(text("""
             SELECT id, keyword, category, cluster, status, error, meta, checked_at, job_id,
                    sv, kw_diff, type, target_type, target_subtype, target_geo, priority, landing_page_url,
-                   rank, rank_checked_at, rank_meta
+                   rank, rank_checked_at, rank_meta, page_url_fetched
             FROM keyword_categories WHERE project_name = :project_name ORDER BY checked_at DESC
         """), {"project_name": domain}).mappings().fetchall()
         return [dict(r) for r in rows]

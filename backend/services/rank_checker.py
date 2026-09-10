@@ -23,6 +23,7 @@ state surviving a fork() boundary is a classic native-crash source).
 """
 
 import os
+import re
 import json
 import time
 from urllib.parse import quote, urlparse
@@ -174,29 +175,65 @@ def fetch_serp_page(keyword, start=0, country_code=None, num=None):
     return data
 
 
-def parse_organic_links_from_html(data):
-    """Extract organic result links (in rank order) from Bright Data's parsed
-    SERP JSON -- data['organic'] = [{'link': ..., 'rank': ...}, ...].
+def _display_link_to_url(display_link):
+    """Bright Data's `display_link` is Google's *shown* URL, e.g.
+        'https://www.euroschoolindia.com › Thane'  ->  'https://www.euroschoolindia.com/Thane'
+    Google no longer exposes the true href for organic results (the real
+    <a href> is an encrypted /goto?url=... redirect), so this breadcrumb
+    is the best URL available. Domain is always clean; deep path may be
+    truncated with '...'. Returns '' if unusable."""
+    if not display_link or not isinstance(display_link, str):
+        return ""
+    parts = [p.strip() for p in re.split(r"[›>»]", display_link) if p.strip()]
+    base = parts[0] if parts else ""
+    if not base:
+        return ""
+    host = base[base.index("://") + 3:] if "://" in base else base
+    host = host.split("/")[0]
+    # base must actually look like a hostname, not snippet text
+    # ("140+ comments · 3 years ago", "30+ answers", etc.)
+    if " " in host or "." not in host or not re.match(r"^[a-z0-9.-]+$", host, re.I):
+        return ""
+    if not base.startswith("http"):
+        base = "https://" + base
+    tail = [p.strip("/") for p in parts[1:] if p and "..." not in p and " " not in p]
+    return base.rstrip("/") + ("/" + "/".join(tail) if tail else "")
 
-    (Name kept for back-compat; `data` is now the JSON dict fetch_serp_page
-    returns, not an HTML string.)"""
-    links = []
+
+def parse_organic_results(data):
+    """Extract organic results (in rank order) from Bright Data's parsed SERP
+    JSON as a list of {"url": <best-available URL>, "domain": <bare domain>}.
+
+    Prefers a real http `link`; falls back to the `display_link` breadcrumb
+    (Full JSON only -- Light JSON returns display_link=null, in which case the
+    only field is the encrypted /goto link and the result is skipped)."""
+    out = []
     seen = set()
-
     organic = data.get("organic") if isinstance(data, dict) else None
     for item in (organic or []):
-        href = item.get("link") or item.get("url") or item.get("href")
-        if not href or not str(href).startswith("http"):
+        href = item.get("link") or item.get("url") or item.get("href") or ""
+        if href.startswith("http") and "/goto?url=" not in href and "google." not in href \
+                and "gstatic." not in href and "googleapis." not in href:
+            url = href
+        else:
+            url = _display_link_to_url(item.get("display_link"))
+        if not url:
             continue
-        if "google." in href or "gstatic." in href or "googleapis." in href:
+        dom = get_domain(url)
+        if not dom or "google." in dom:
             continue
-        cleaned = clean_url(href)
+        cleaned = clean_url(url)
         if not cleaned or cleaned in seen:
             continue
         seen.add(cleaned)
-        links.append(href)
+        out.append({"url": url, "domain": dom})
+    return out
 
-    return links
+
+def parse_organic_links_from_html(data):
+    """Back-compat shim: same as parse_organic_results but returns just the
+    list of URL strings (used by calendar_backend's potential-keyword gate)."""
+    return [r["url"] for r in parse_organic_results(data)]
 
 
 def get_top_n_organic_links(keyword, n=TOP_N, country_code=None):
@@ -295,3 +332,76 @@ def find_rank(keyword, landing_page, default_domain=None, country_code=None):
             return rank, links
 
     return NOT_FOUND_RANK, links
+
+
+def normalize_domain(value):
+    """'https://www.EuroSchoolIndia.com/foo' -> 'euroschoolindia.com'."""
+    if not value:
+        return ""
+    v = str(value).strip().lower()
+    if "://" not in v:
+        v = "https://" + v
+    return get_domain(v)
+
+
+def _domain_matches(result_domain, target_domain):
+    rd, td = (result_domain or "").lower(), (target_domain or "").lower()
+    if not rd or not td:
+        return False
+    return rd == td or rd.endswith("." + td) or td.endswith("." + rd)
+
+
+def get_top_n_organic_results(keyword, n=TOP_N, country_code=None):
+    """Like get_top_n_organic_links but keeps EVERY organic result in SERP
+    order (only exact-URL repeats are dropped) so positions map 1:1 to
+    Google rank. Returns a list of {"url", "domain"} dicts."""
+    results, seen = [], set()
+    max_pages = max(5, (n // 10) + 2)
+    empty = 0
+    for page_idx in range(max_pages):
+        if len(results) >= n:
+            break
+        start = page_idx * RESULTS_PER_PAGE
+        num = max(n, 40) if start == 0 else None
+        data = fetch_serp_page(keyword, start=start, country_code=country_code, num=num)
+        if not data:
+            empty += 1
+            if empty >= 2:
+                break
+            continue
+        added = 0
+        for r in parse_organic_results(data):
+            key = clean_url(r["url"])
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(r)
+            added += 1
+            if len(results) >= n:
+                break
+        empty = 0 if added else empty + 1
+        if empty >= 2:
+            break
+        time.sleep(SLEEP_BETWEEN_REQUESTS)
+    return results[:n]
+
+
+def find_rank_by_domain(keyword, target_domain, country_code=None):
+    """Rank of the project's OWN DOMAIN for `keyword` (ignores any
+    pre-declared landing page). Matches the first organic result whose
+    domain is `target_domain` (or a sub-domain of it).
+
+    Returns (rank:int, page_url:str, all_urls:list[str]).
+      - rank      = NOT_FOUND_RANK if the domain isn't in the top TOP_N
+      - page_url  = the actual Google result URL that matched ('' if none)
+      - all_urls  = every organic URL fetched, in rank order
+    """
+    td = normalize_domain(target_domain)
+    results = get_top_n_organic_results(keyword, TOP_N, country_code=country_code)
+    all_urls = [r["url"] for r in results]
+    if not td:
+        return NOT_FOUND_RANK, "", all_urls
+    for rank, r in enumerate(results, start=1):
+        if _domain_matches(r["domain"], td):
+            return rank, r["url"], all_urls
+    return NOT_FOUND_RANK, "", all_urls
