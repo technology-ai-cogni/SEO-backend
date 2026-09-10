@@ -670,6 +670,7 @@ export default function UsersPage({ user, onNavigate }) {
 
   // Client Detail State & Modal Tab
   const [modalTab, setModalTab] = useState('client_detail'); // 'client_detail' | 'user_credential'
+  const [clientDetailEnabled, setClientDetailEnabled] = useState(false);
   const [clientData, setClientData] = useState({
     name: '',
     address: '',

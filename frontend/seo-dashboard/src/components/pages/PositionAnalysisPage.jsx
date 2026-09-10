@@ -1565,33 +1565,6 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                       display: 'flex',
                       flexDirection: 'column'
                     }}>
-                    {(!user?.assigned_project || user.assigned_project === 'All Projects') && (
-                      <button
-                        key="all-projects"
-                        onClick={() => {
-                          handleSelectProject('all');
-                          setProjectMenuOpen(false);
-                        }}
-                        style={{
-                          padding: '8px 14px',
-                          fontSize: 13.5,
-                          fontWeight: selectedSlug === 'all' ? 700 : 500,
-                          color: selectedSlug === 'all' ? '#7c3aed' : '#1e293b',
-                          backgroundColor: selectedSlug === 'all' ? '#f5f3ff' : 'transparent',
-                          border: 'none',
-                          borderBottom: '1px solid #f1f5f9',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          transition: 'background 0.12s'
-                        }}
-                      >
-                        All Projects
-                        {selectedSlug === 'all' && <CheckCircle size={14} style={{ color: '#7c3aed' }} />}
-                      </button>
-                    )}
                     {projects.map(p => (
                       <button
                         key={p.slug}

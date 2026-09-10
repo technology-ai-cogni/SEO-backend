@@ -138,7 +138,7 @@ function PlainSelect({ value, onChange, options, placeholder = 'Select...', requ
       )}
 
       {required && (
-        <input tabIndex={-1} aria-hidden required value={value || ''} onChange={() => {}}
+        <input tabIndex={-1} aria-hidden required value={value || ''} onChange={() => { }}
           style={{ position: 'absolute', bottom: 0, left: 12, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />
       )}
     </div>
@@ -205,7 +205,7 @@ function CalendarPage({ user, onNavigate }) {
   const [savingActivity, setSavingActivity] = useState(false);
   const [loadingKeywords, setLoadingKeywords] = useState(false);
   const [loadingStepText, setLoadingStepText] = useState('Scanning database & checking live rankings…');
-  
+
   // Step 2 view state
   const [step2ViewMode, setStep2ViewMode] = useState('strategy'); // 'strategy' | 'breakdown'
   const [activeInfoKwId, setActiveInfoKwId] = useState(null);
@@ -213,6 +213,7 @@ function CalendarPage({ user, onNavigate }) {
   const [pushBatches, setPushBatches] = useState({ high: [], medium: [], low: [] });
   const [analyzingPotential, setAnalyzingPotential] = useState(false);
   const [selectedKwIds, setSelectedKwIds] = useState(new Set());
+  const [keywordSearch, setKeywordSearch] = useState(''); // manual keyword-picker search
   const [topicLinks, setTopicLinks] = useState({});
   const [collapsedBatches, setCollapsedBatches] = useState({ high: false, medium: false, low: false });
 
@@ -320,12 +321,12 @@ function CalendarPage({ user, onNavigate }) {
         if (Array.isArray(activityItem.potential_keywords)) {
           kws = activityItem.potential_keywords;
         } else if (typeof activityItem.potential_keywords === 'string') {
-          try { kws = JSON.parse(activityItem.potential_keywords); } catch (_) {}
+          try { kws = JSON.parse(activityItem.potential_keywords); } catch (_) { }
         }
 
         let bSum = activityItem.budget_summary;
         if (typeof bSum === 'string') {
-          try { bSum = JSON.parse(bSum); } catch (_) {}
+          try { bSum = JSON.parse(bSum); } catch (_) { }
         }
 
         const pickedKws = new Set(kws.map(k => String(k.keyword || '').trim().toLowerCase()));
@@ -956,7 +957,7 @@ function CalendarPage({ user, onNavigate }) {
       const isPaidGuestPost = String(createdActivity?.activity_name || '').toLowerCase().includes('guest');
       const batchById = new Map();
       ['high', 'medium', 'low'].forEach(b => (pushBatches[b] || []).forEach(r => batchById.set(r.id, r)));
-      
+
       const selectedPotential = potentialKws.filter(k => selectedKwIds.has(k.id)).map(k => {
         const info = batchById.get(k.id) || {};
         const chosenSite = selectedOutreachSites[k.id] || k.outreach_site || null;
@@ -1046,6 +1047,135 @@ function CalendarPage({ user, onNavigate }) {
         return found ? { ...a, ...found.payload } : a;
       }));
       setIsModalOpen(false);
+      setActiveSubTab('scheduled');
+    } catch (err) {
+      alert(`Error scheduling keywords: ${err.message}`);
+    } finally {
+      setSavingActivity(false);
+    }
+  };
+
+  // ─── MANUAL SCHEDULING: same hard gates as AI (Landing Page + rank 5+),
+  //     then the user picks keywords themselves (no AI analysis) ───
+  const handleManualChooseKeywords = async (e) => {
+    if (e) e.preventDefault();
+    if (!formData.project_name) { alert('Please select a Project Name'); return; }
+    setSavingActivity(true);
+    try {
+      const formattedPeriod = `${periodMonth} ${periodYear}`;
+      let totalQty = 0;
+      let totalBudget = 0;
+      for (const act of activitiesList) {
+        totalQty += parseInt(act.quantity, 10) || 1;
+        totalBudget += parseFloat(String(act.budget || '0').replace(/[^0-9.]/g, '')) || 0;
+      }
+
+      const newCreatedList = [];
+      for (const act of activitiesList) {
+        const payload = {
+          activity_name: act.activity_name,
+          project_name: formData.project_name,
+          main_poc: formData.main_poc,
+          content_poc: formData.content_poc,
+          auditor: formData.auditor,
+          quantity: parseInt(act.quantity, 10) || 1,
+          budget: act.budget,
+          period: formattedPeriod,
+          channel: formData.channel || 'off-page',
+          scheduler: formData.main_poc || 'Manual Scheduler',
+          status: 'saved'
+        };
+        const res = await createCalendarActivityApi(payload);
+        newCreatedList.push(res);
+      }
+      setActivities(prev => [...newCreatedList, ...prev]);
+      setCreatedActivitiesList(newCreatedList);
+      setCreatedActivity(newCreatedList[0]);
+
+      setModalStep('manual_keywords');
+      setSavingActivity(false);
+      setLoadingKeywords(true);
+      setKeywordSearch('');
+      setLoadingStepText('Scanning for keywords...');
+
+      const matchedProj = projects.find(p => (p.name || p.domain) === formData.project_name);
+      const slug = matchedProj?.slug || formData.project_name.toLowerCase().replace(/\s+/g, '');
+      const domain = matchedProj?.domain || '';
+
+      const res = await fetchCalendarPotentialKeywordsApi(slug, domain, false, totalBudget, totalQty);
+      const kws = res.potential_keywords || [];
+      if (res.has_landing_pages === false) {
+        setPotentialKws([]);
+        setLandingPageErrorNotice(res.summary || 'Data does not have landing page URLs.');
+      } else {
+        setLandingPageErrorNotice(null);
+        setPotentialKws(kws);
+      }
+      setSelectedKwIds(new Set());
+      const links = {};
+      kws.forEach(k => {
+        const lp = k.landing_page_url || k.topic_link || k.topicLink;
+        if (lp) links[k.id] = lp;
+      });
+      setTopicLinks(links);
+      setLoadingKeywords(false);
+    } catch (err) {
+      alert(`Error loading keywords: ${err.message}`);
+      setSavingActivity(false);
+      setLoadingKeywords(false);
+    }
+  };
+
+  const handleConfirmManualKeywords = async () => {
+    const targets = (createdActivitiesList && createdActivitiesList.length > 0)
+      ? createdActivitiesList
+      : (createdActivity ? [createdActivity] : []);
+    if (targets.length === 0) { setIsModalOpen(false); setModalStep('form'); return; }
+
+    setSavingActivity(true);
+    try {
+      const selected = potentialKws.filter(k => selectedKwIds.has(k.id)).map(k => {
+        const lp = (topicLinks[k.id] !== undefined && topicLinks[k.id] !== '')
+          ? topicLinks[k.id]
+          : (k.landing_page_url || k.topic_link || k.topicLink || '');
+        return {
+          keyword: k.keyword,
+          category: k.category,
+          cluster: k.cluster,
+          rank: k.rank,
+          prev_rank: k.prev_rank ?? k.rank,
+          new_rank: k.new_rank ?? k.rank,
+          delta: k.delta ?? 0,
+          sv: k.sv,
+          kd: k.kd,
+          target_type: k.target_type || 'Landing Page',
+          topic_link: lp,
+          landing_page_url: lp,
+          outreach_site: k.outreach_site || null
+        };
+      });
+
+      const per = Math.max(1, Math.ceil(selected.length / targets.length));
+      const updated = [];
+      for (let i = 0; i < targets.length; i++) {
+        const tgt = targets[i];
+        const eff = targets.length === 1 ? selected : selected.slice(i * per, (i + 1) * per);
+        const payload = { potential_keywords: eff, status: 'scheduled' };
+        if (eff.length > 0) {
+          payload.keyword_name = eff.map(k => k.keyword).join(', ');
+          payload.category = eff[0].category;
+          payload.cluster = eff[0].cluster;
+          payload.topic_link = eff.map(k => k.topic_link || k.landing_page_url).filter(Boolean).join(' | ');
+        }
+        await updateCalendarActivityApi(tgt.id, payload);
+        updated.push({ id: tgt.id, payload });
+      }
+      setActivities(prev => prev.map(a => {
+        const f = updated.find(t => t.id === a.id);
+        return f ? { ...a, ...f.payload } : a;
+      }));
+      setIsModalOpen(false);
+      setModalStep('form');
       setActiveSubTab('scheduled');
     } catch (err) {
       alert(`Error scheduling keywords: ${err.message}`);
@@ -1329,7 +1459,7 @@ function CalendarPage({ user, onNavigate }) {
               <h3 style={{ fontSize: 19, fontWeight: 800, color: '#D4007A', margin: '0 0 8px 0' }}>
                 {landingPageErrorNotice || "Data does not have landing page URLs."}
               </h3>
-              
+
             </div>
             <button
               type="button"
@@ -2419,6 +2549,164 @@ function CalendarPage({ user, onNavigate }) {
   }
 
   // ─────────────────────────────────────────────────────────────
+  //  MANUAL KEYWORD PICKER (hard-gated list, user chooses)
+  // ─────────────────────────────────────────────────────────────
+  if (isModalOpen && modalStep === 'manual_keywords') {
+    const q = (keywordSearch || '').toLowerCase().trim();
+    const rows = (potentialKws || []).filter(k => {
+      if (!q) return true;
+      return String(k.keyword || '').toLowerCase().includes(q)
+        || String(k.category || '').toLowerCase().includes(q)
+        || String(k.cluster || '').toLowerCase().includes(q)
+        || String(k.landing_page_url || '').toLowerCase().includes(q);
+    });
+    const allShownSelected = rows.length > 0 && rows.every(k => selectedKwIds.has(k.id));
+
+    return (
+      <div style={{ padding: '24px 32px', minHeight: '100%', background: 'var(--bg)', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        {/* Header */}
+        <div style={{ background: '#ffffff', borderRadius: 14, border: '1px solid #E4DFEE', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <button
+              type="button"
+              onClick={() => { setModalStep('form'); setIsModalOpen(false); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#F6EEFD', border: '1px solid #E5CCF7', color: '#7B2FBE', borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+            >
+              <ArrowLeft size={16} />
+              <span>Back to Calendar</span>
+            </button>
+            <div style={{ width: 1, height: 28, background: '#E4DFEE' }} />
+            <div>
+              <h1 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0 }}>Choose Keywords · {createdActivity?.project_name || formData.project_name}</h1>
+              <p style={{ fontSize: 12.5, color: '#64748b', margin: '3px 0 0 0' }}>
+                Only Landing Page keywords ranking #5 or worse are shown. Pick the ones to schedule.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {loadingKeywords ? (
+          <div style={{ background: '#ffffff', borderRadius: 14, border: '1px solid #E4DFEE', padding: '64px 32px', textAlign: 'center' }}>
+            <BrandInfinityLoader label={loadingStepText} size="lg" minHeight="200px" />
+          </div>
+        ) : landingPageErrorNotice ? (
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 14, padding: '20px 24px', color: '#92400e', fontSize: 13.5 }}>
+            {landingPageErrorNotice}
+          </div>
+        ) : (
+          <>
+            <div style={{ background: '#ffffff', borderRadius: 14, border: '1px solid #E4DFEE', overflow: 'hidden' }}>
+              {/* Toolbar */}
+              <div style={{ padding: '12px 18px', borderBottom: '1px solid #EEE9F7', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative', flex: '1 1 260px', maxWidth: 360 }}>
+                  <Search size={14} color="#94a3b8" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search keywords…"
+                    value={keywordSearch}
+                    onChange={e => setKeywordSearch(e.target.value)}
+                    style={{ width: '100%', padding: '7px 10px 7px 32px', fontSize: 12.5, border: '1px solid #E4DFEE', borderRadius: 8, outline: 'none' }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = new Set(selectedKwIds);
+                    if (allShownSelected) rows.forEach(k => next.delete(k.id));
+                    else rows.forEach(k => next.add(k.id));
+                    setSelectedKwIds(next);
+                  }}
+                  style={{ fontSize: 12, fontWeight: 700, color: '#7c3aed', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}
+                >
+                  {allShownSelected ? 'Deselect all shown' : 'Select all shown'}
+                </button>
+                <span style={{ fontSize: 12, color: '#64748b', marginLeft: 'auto' }}>
+                  {rows.length} keyword{rows.length === 1 ? '' : 's'} · {selectedKwIds.size} selected
+                </span>
+              </div>
+
+              <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 340px)' }}>
+                <table className="ps-sticky-wrap" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, textAlign: 'left', minWidth: 900 }}>
+                  <thead>
+                    <tr style={{ background: '#FAF8FD', color: '#64748b', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', borderBottom: '1px solid #e2e8f0' }}>
+                      <th style={{ padding: '10px 12px', width: 42, textAlign: 'center' }}></th>
+                      <th style={{ padding: '10px 14px', minWidth: 220 }}>Keyword</th>
+                      <th style={{ padding: '10px 14px', width: 80 }}>SV</th>
+                      <th style={{ padding: '10px 14px', width: 60 }}>KD</th>
+                      <th style={{ padding: '10px 14px', width: 70 }}>Rank</th>
+                      <th style={{ padding: '10px 14px', minWidth: 150 }}>Category</th>
+                      <th style={{ padding: '10px 14px', minWidth: 130 }}>Cluster</th>
+                      <th style={{ padding: '10px 14px', minWidth: 220 }}>Landing Page</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.length === 0 ? (
+                      <tr><td colSpan={8} style={{ padding: '28px 16px', textAlign: 'center', color: '#94a3b8', fontStyle: 'italic' }}>No Landing Page keywords (Rank 5+) for this project.</td></tr>
+                    ) : rows.map(k => {
+                      const checked = selectedKwIds.has(k.id);
+                      return (
+                        <tr key={k.id} style={{ borderTop: '1px solid #f1f5f9', background: checked ? '#f5f3ff' : 'transparent' }}>
+                          <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                const next = new Set(selectedKwIds);
+                                if (e.target.checked) next.add(k.id); else next.delete(k.id);
+                                setSelectedKwIds(next);
+                              }}
+                              style={{ cursor: 'pointer', width: 15, height: 15, accentColor: '#7c3aed' }}
+                            />
+                          </td>
+                          <td style={{ padding: '8px 14px', fontWeight: 700, color: '#0f172a' }}>{k.keyword}</td>
+                          <td style={{ padding: '8px 14px', color: '#334155' }}>{k.sv ? Number(k.sv).toLocaleString() : '—'}</td>
+                          <td style={{ padding: '8px 14px', color: '#64748b' }}>{k.kd ?? '—'}</td>
+                          <td style={{ padding: '8px 14px', color: '#334155' }}>{k.rank != null ? `#${k.rank}` : '—'}</td>
+                          <td style={{ padding: '8px 14px', color: '#475569' }}>{k.category || '—'}</td>
+                          <td style={{ padding: '8px 14px', color: '#475569' }}>{k.cluster || '—'}</td>
+                          <td style={{ padding: '8px 14px' }}>
+                            {k.landing_page_url
+                              ? <a href={k.landing_page_url} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: '#7c3aed', wordBreak: 'break-all' }}>{k.landing_page_url}</a>
+                              : <span style={{ fontSize: 11, color: '#94a3b8' }}>—</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Sticky action bar */}
+            <div style={{ position: 'sticky', bottom: 16, zIndex: 30, background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(8px)', border: '1px solid #E4DFEE', borderRadius: 12, padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, boxShadow: '0 4px 20px -2px rgba(74,26,140,0.08)' }}>
+              <div style={{ fontSize: 13, color: '#475569' }}>
+                <strong style={{ color: '#0f172a', fontSize: 14 }}>{selectedKwIds.size}</strong> of {potentialKws.length} keywords selected
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => { setModalStep('form'); setIsModalOpen(false); setActiveSubTab('saved'); }}
+                  style={{ padding: '8px 16px', fontSize: 13, fontWeight: 600, color: '#64748b', background: '#ffffff', border: '1px solid #E4DFEE', borderRadius: 8, cursor: 'pointer' }}
+                >
+                  Skip (keep as draft)
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedKwIds.size === 0 || savingActivity}
+                  onClick={handleConfirmManualKeywords}
+                  style={{ padding: '9px 24px', fontSize: 13, fontWeight: 700, color: '#ffffff', background: (selectedKwIds.size === 0 || savingActivity) ? '#cbd5e1' : 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)', border: 'none', borderRadius: 8, cursor: (selectedKwIds.size === 0 || savingActivity) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                >
+                  {savingActivity ? <span>Scheduling…</span> : <><Check size={16} /><span>Confirm &amp; Schedule ({selectedKwIds.size})</span></>}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
   // MAIN CALENDAR DASHBOARD (Tree Structure)
   // ─────────────────────────────────────────────────────────────
   return (
@@ -2941,230 +3229,230 @@ function CalendarPage({ user, onNavigate }) {
                         {isExpanded && group.items.map((item, idx) => {
                           let _pk = [];
                           if (Array.isArray(item.potential_keywords)) _pk = item.potential_keywords;
-                          else if (typeof item.potential_keywords === 'string') { try { _pk = JSON.parse(item.potential_keywords); } catch (_) {} }
+                          else if (typeof item.potential_keywords === 'string') { try { _pk = JSON.parse(item.potential_keywords); } catch (_) { } }
                           const isAiActivity = Boolean(item.is_ai_scheduled)
                             || /ai/i.test(String(item.scheduler || ''))
                             || (Array.isArray(_pk) && _pk.length > 0);
                           return (
-                          <tr
-                            key={item.id || idx}
-                            style={{
-                              borderBottom: '1px solid #f1f5f9',
-                              background: '#fcfbfe'
-                            }}
-                          >
-                            {/* Col 1: sub-arrow + activity ID */}
-                            <td style={{ padding: '10px 16px 10px 28px', whiteSpace: 'nowrap', fontSize: 12.5, fontWeight: 600, color: '#475569' }}>
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ color: '#cbd5e1', fontSize: 14 }}>↳</span>
-                                <span>{item.activity_uid || '—'}</span>
-                              </span>
-                            </td>
+                            <tr
+                              key={item.id || idx}
+                              style={{
+                                borderBottom: '1px solid #f1f5f9',
+                                background: '#fcfbfe'
+                              }}
+                            >
+                              {/* Col 1: sub-arrow + activity ID */}
+                              <td style={{ padding: '10px 16px 10px 28px', whiteSpace: 'nowrap', fontSize: 12.5, fontWeight: 600, color: '#475569' }}>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                  <span style={{ color: '#cbd5e1', fontSize: 14 }}>↳</span>
+                                  <span>{item.activity_uid || '—'}</span>
+                                </span>
+                              </td>
 
-                            {/* Col 2: Activity Name */}
-                            <td style={{ padding: '10px 16px 10px 32px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <div>
-                                  <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>
-                                    {item.activity_name}
+                              {/* Col 2: Activity Name */}
+                              <td style={{ padding: '10px 16px 10px 32px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>
+                                      {item.activity_name}
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            </td>
+                              </td>
 
-                            {/* Activity Mode */}
-                            <td style={{ padding: '10px 16px', fontSize: 12, color: '#64748b' }}>
-                              {isAiActivity ? (
-                                'AI Auto-Scheduler'
-                              ) : (
-                                <HoverTip label="Manual" tip={`Main POC: ${item.main_poc || item.scheduler || '—'}`} />
-                              )}
-                            </td>
-
-                            {/* Sub Activity Status */}
-                            <td style={{ padding: '10px 16px' }}>
-                              <span style={{
-                                display: 'inline-block',
-                                fontSize: 10,
-                                fontWeight: 800,
-                                textTransform: 'uppercase',
-                                padding: '2px 6px',
-                                borderRadius: 5,
-                                width: 'fit-content',
-                                background: (item.status || activeSubTab) === 'saved' ? '#fef3c7' : ((item.status || activeSubTab) === 'scheduled' ? '#dbeafe' : ((item.status || activeSubTab) === 'approved' ? '#d1fae5' : '#dcfce7')),
-                                color: (item.status || activeSubTab) === 'saved' ? '#b45309' : ((item.status || activeSubTab) === 'scheduled' ? '#1d4ed8' : ((item.status || activeSubTab) === 'approved' ? '#047857' : '#15803d')),
-                                border: `1px solid ${(item.status || activeSubTab) === 'saved' ? '#fde68a' : ((item.status || activeSubTab) === 'scheduled' ? '#bfdbfe' : ((item.status || activeSubTab) === 'approved' ? '#a7f3d0' : '#bbf7d0'))}`
-                              }}>
-                                {(item.status || activeSubTab) === 'saved' ? 'Draft' : ((item.status || activeSubTab) === 'published' ? 'Published' : (item.status || activeSubTab))}
-                              </span>
-                            </td>
-
-                            {/* Individual Quantity */}
-                            <td style={{ padding: '10px 16px', textAlign: 'center', fontSize: 12.5, fontWeight: 600, color: '#334155' }}>
-                              {item.quantity || 1}
-                            </td>
-
-                            {/* Individual Budget */}
-                            <td style={{ padding: '10px 16px', fontSize: 12.5, fontWeight: 700, color: '#059669' }}>
-                              {item.budget ? (String(item.budget).startsWith('₹') ? item.budget : (String(item.budget).startsWith('$') ? item.budget.replace('$', '₹') : `₹${item.budget}`)) : '—'}
-                            </td>
-
-                            {/* Activity Period */}
-                            <td style={{ padding: '10px 16px', fontSize: 12, color: '#64748b' }}>
-                              {item.period || group.period}
-                            </td>
-
-                            {/* Content POC */}
-                            <td style={{ padding: '10px 16px', fontSize: 12, color: '#475569' }}>
-                              <span>{item.content_poc || '—'}</span>
-                            </td>
-
-                            {/* Auditor */}
-                            <td style={{ padding: '10px 16px', fontSize: 12, color: '#475569' }}>
-                              <span>{item.auditor || '—'}</span>
-                            </td>
-
-                            {/* Individual Actions - In front of status column */}
-                            <td style={{ padding: '10px 16px', textAlign: 'center' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                                {(isAiActivity || item.keyword_name || (Array.isArray(_pk) && _pk.length > 0) || item.ai_summary || item.ai_advisory) && (
-                                  <button
-                                    onClick={() => openAiRunModal({ projectName: group.projectName, activityId: item.id, activityName: item.activity_name, activityItem: item })}
-                                    title="View AI analysis and outreach data"
-                                    style={{
-                                      display: 'inline-flex', alignItems: 'center', gap: 5,
-                                      background: '#F5F3FF', border: '1px solid #DDD6FE', color: '#7c3aed',
-                                      fontSize: 11, fontWeight: 700, borderRadius: 6, padding: '4px 8px', cursor: 'pointer'
-                                    }}
-                                    onMouseEnter={e => { e.currentTarget.style.background = '#EDE9FE'; }}
-                                    onMouseLeave={e => { e.currentTarget.style.background = '#F5F3FF'; }}
-                                  >
-                                    <Eye size={13} />
-                                    <span>View</span>
-                                  </button>
+                              {/* Activity Mode */}
+                              <td style={{ padding: '10px 16px', fontSize: 12, color: '#64748b' }}>
+                                {isAiActivity ? (
+                                  'AI Auto-Scheduler'
+                                ) : (
+                                  <HoverTip label="Manual" tip={`Main POC: ${item.main_poc || item.scheduler || '—'}`} />
                                 )}
-                                <button
-                                  onClick={() => handleOpenEditModal(item)}
-                                  title="Edit Activity"
-                                  style={{ background: 'transparent', border: 'none', color: '#6366f1', cursor: 'pointer', padding: 4 }}
-                                >
-                                  <Edit3 size={14} />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteItem(item)}
-                                  title="Delete Activity"
-                                  style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', padding: 4 }}
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </div>
-                            </td>
+                              </td>
 
-                            {/* Move Status Buttons - In the end after Actions without icons */}
-                            <td style={{ padding: '10px 16px', textAlign: 'center' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-                                {/* On Draft: Only show Schedule button */}
-                                {activeSubTab === 'saved' && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleMoveStatus(item, 'scheduled')}
-                                    title="Schedule Activity"
-                                    style={{
-                                      background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
-                                      color: '#ffffff',
-                                      border: 'none',
-                                      padding: '4px 12px',
-                                      borderRadius: 5,
-                                      fontSize: 11,
-                                      fontWeight: 700,
-                                      cursor: 'pointer',
-                                      boxShadow: '0 1px 4px rgba(124, 58, 237, 0.2)'
-                                    }}
-                                  >
-                                    Schedule
-                                  </button>
-                                )}
+                              {/* Sub Activity Status */}
+                              <td style={{ padding: '10px 16px' }}>
+                                <span style={{
+                                  display: 'inline-block',
+                                  fontSize: 10,
+                                  fontWeight: 800,
+                                  textTransform: 'uppercase',
+                                  padding: '2px 6px',
+                                  borderRadius: 5,
+                                  width: 'fit-content',
+                                  background: (item.status || activeSubTab) === 'saved' ? '#fef3c7' : ((item.status || activeSubTab) === 'scheduled' ? '#dbeafe' : ((item.status || activeSubTab) === 'approved' ? '#d1fae5' : '#dcfce7')),
+                                  color: (item.status || activeSubTab) === 'saved' ? '#b45309' : ((item.status || activeSubTab) === 'scheduled' ? '#1d4ed8' : ((item.status || activeSubTab) === 'approved' ? '#047857' : '#15803d')),
+                                  border: `1px solid ${(item.status || activeSubTab) === 'saved' ? '#fde68a' : ((item.status || activeSubTab) === 'scheduled' ? '#bfdbfe' : ((item.status || activeSubTab) === 'approved' ? '#a7f3d0' : '#bbf7d0'))}`
+                                }}>
+                                  {(item.status || activeSubTab) === 'saved' ? 'Draft' : ((item.status || activeSubTab) === 'published' ? 'Published' : (item.status || activeSubTab))}
+                                </span>
+                              </td>
 
-                                {/* On Scheduled: Approve only */}
-                                {activeSubTab === 'scheduled' && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleMoveStatus(item, 'approved')}
-                                    title="Approve Activity"
-                                    style={{
-                                      background: '#d1fae5',
-                                      color: '#047857',
-                                      border: '1px solid #a7f3d0',
-                                      padding: '4px 12px',
-                                      borderRadius: 5,
-                                      fontSize: 10.5,
-                                      fontWeight: 700,
-                                      cursor: 'pointer'
-                                    }}
-                                  >
-                                    Approve
-                                  </button>
-                                )}
+                              {/* Individual Quantity */}
+                              <td style={{ padding: '10px 16px', textAlign: 'center', fontSize: 12.5, fontWeight: 600, color: '#334155' }}>
+                                {item.quantity || 1}
+                              </td>
 
-                                {/* On Approved: Publish only */}
-                                {activeSubTab === 'approved' && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleMoveStatus(item, 'published')}
-                                    title="Publish Live"
-                                    style={{
-                                      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                                      color: '#ffffff',
-                                      border: 'none',
-                                      padding: '4px 12px',
-                                      borderRadius: 5,
-                                      fontSize: 10.5,
-                                      fontWeight: 700,
-                                      cursor: 'pointer',
-                                      boxShadow: '0 1px 4px rgba(16, 185, 129, 0.25)'
-                                    }}
-                                  >
-                                    Publish
-                                  </button>
-                                )}
+                              {/* Individual Budget */}
+                              <td style={{ padding: '10px 16px', fontSize: 12.5, fontWeight: 700, color: '#059669' }}>
+                                {item.budget ? (String(item.budget).startsWith('₹') ? item.budget : (String(item.budget).startsWith('$') ? item.budget.replace('$', '₹') : `₹${item.budget}`)) : '—'}
+                              </td>
 
-                                {/* On Published: Redirect to off-page */}
-                                {activeSubTab === 'published' && (
+                              {/* Activity Period */}
+                              <td style={{ padding: '10px 16px', fontSize: 12, color: '#64748b' }}>
+                                {item.period || group.period}
+                              </td>
+
+                              {/* Content POC */}
+                              <td style={{ padding: '10px 16px', fontSize: 12, color: '#475569' }}>
+                                <span>{item.content_poc || '—'}</span>
+                              </td>
+
+                              {/* Auditor */}
+                              <td style={{ padding: '10px 16px', fontSize: 12, color: '#475569' }}>
+                                <span>{item.auditor || '—'}</span>
+                              </td>
+
+                              {/* Individual Actions - In front of status column */}
+                              <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                                  {(isAiActivity || item.keyword_name || (Array.isArray(_pk) && _pk.length > 0) || item.ai_summary || item.ai_advisory) && (
+                                    <button
+                                      onClick={() => openAiRunModal({ projectName: group.projectName, activityId: item.id, activityName: item.activity_name, activityItem: item })}
+                                      title="View AI analysis and outreach data"
+                                      style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                                        background: '#F5F3FF', border: '1px solid #DDD6FE', color: '#7c3aed',
+                                        fontSize: 11, fontWeight: 700, borderRadius: 6, padding: '4px 8px', cursor: 'pointer'
+                                      }}
+                                      onMouseEnter={e => { e.currentTarget.style.background = '#EDE9FE'; }}
+                                      onMouseLeave={e => { e.currentTarget.style.background = '#F5F3FF'; }}
+                                    >
+                                      <Eye size={13} />
+                                      <span>View</span>
+                                    </button>
+                                  )}
                                   <button
-                                    type="button"
-                                    onClick={() => {
-                                      sessionStorage.setItem('offpage_target_project', item.project_name);
-                                      sessionStorage.setItem('offpage_target_row_uid', item.first_uid || `${item.activity_uid || 'ACT'}-KW1`);
-                                      if (onNavigate) {
-                                        if (item.channel === 'content') onNavigate('content-engine');
-                                        else onNavigate('search-visibility/off-page-scheduler');
-                                      }
-                                    }}
-                                    title={`Redirect to Off-Page under ${item.project_name} for this row`}
-                                    style={{
-                                      fontSize: 11,
-                                      fontWeight: 700,
-                                      padding: '4px 12px',
-                                      borderRadius: 5,
-                                      background: '#F6EEFD',
-                                      color: '#7B2FBE',
-                                      border: '1px solid #E5CCF7',
-                                      cursor: 'pointer',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: 4,
-                                      transition: 'all 0.15s ease'
-                                    }}
-                                    onMouseEnter={e => { e.currentTarget.style.background = '#EDE1F9'; }}
-                                    onMouseLeave={e => { e.currentTarget.style.background = '#F6EEFD'; }}
+                                    onClick={() => handleOpenEditModal(item)}
+                                    title="Edit Activity"
+                                    style={{ background: 'transparent', border: 'none', color: '#6366f1', cursor: 'pointer', padding: 4 }}
                                   >
-                                    <ExternalLink size={11} />
-                                    <span>Off-Page</span>
+                                    <Edit3 size={14} />
                                   </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
+                                  <button
+                                    onClick={() => handleDeleteItem(item)}
+                                    title="Delete Activity"
+                                    style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', padding: 4 }}
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              </td>
+
+                              {/* Move Status Buttons - In the end after Actions without icons */}
+                              <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                                  {/* On Draft: Only show Schedule button */}
+                                  {activeSubTab === 'saved' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveStatus(item, 'scheduled')}
+                                      title="Schedule Activity"
+                                      style={{
+                                        background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                                        color: '#ffffff',
+                                        border: 'none',
+                                        padding: '4px 12px',
+                                        borderRadius: 5,
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        boxShadow: '0 1px 4px rgba(124, 58, 237, 0.2)'
+                                      }}
+                                    >
+                                      Schedule
+                                    </button>
+                                  )}
+
+                                  {/* On Scheduled: Approve only */}
+                                  {activeSubTab === 'scheduled' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveStatus(item, 'approved')}
+                                      title="Approve Activity"
+                                      style={{
+                                        background: '#d1fae5',
+                                        color: '#047857',
+                                        border: '1px solid #a7f3d0',
+                                        padding: '4px 12px',
+                                        borderRadius: 5,
+                                        fontSize: 10.5,
+                                        fontWeight: 700,
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      Approve
+                                    </button>
+                                  )}
+
+                                  {/* On Approved: Publish only */}
+                                  {activeSubTab === 'approved' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveStatus(item, 'published')}
+                                      title="Publish Live"
+                                      style={{
+                                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                        color: '#ffffff',
+                                        border: 'none',
+                                        padding: '4px 12px',
+                                        borderRadius: 5,
+                                        fontSize: 10.5,
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        boxShadow: '0 1px 4px rgba(16, 185, 129, 0.25)'
+                                      }}
+                                    >
+                                      Publish
+                                    </button>
+                                  )}
+
+                                  {/* On Published: Redirect to off-page */}
+                                  {activeSubTab === 'published' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        sessionStorage.setItem('offpage_target_project', item.project_name);
+                                        sessionStorage.setItem('offpage_target_row_uid', item.first_uid || `${item.activity_uid || 'ACT'}-KW1`);
+                                        if (onNavigate) {
+                                          if (item.channel === 'content') onNavigate('content-engine');
+                                          else onNavigate('search-visibility/off-page-scheduler');
+                                        }
+                                      }}
+                                      title={`Redirect to Off-Page under ${item.project_name} for this row`}
+                                      style={{
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        padding: '4px 12px',
+                                        borderRadius: 5,
+                                        background: '#F6EEFD',
+                                        color: '#7B2FBE',
+                                        border: '1px solid #E5CCF7',
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 4,
+                                        transition: 'all 0.15s ease'
+                                      }}
+                                      onMouseEnter={e => { e.currentTarget.style.background = '#EDE1F9'; }}
+                                      onMouseLeave={e => { e.currentTarget.style.background = '#F6EEFD'; }}
+                                    >
+                                      <ExternalLink size={11} />
+                                      <span>Off-Page</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
                           );
                         })}
                       </React.Fragment>
@@ -3680,6 +3968,31 @@ function CalendarPage({ user, onNavigate }) {
                       <span>Save as Draft</span>
                     </button>
 
+                    {/* Manual mode: pick keywords yourself (same Landing Page + rank 5+ gate as AI) */}
+                    {!aiSchedulingEnabled && !editingItem && (
+                      <button
+                        type="button"
+                        disabled={savingActivity}
+                        onClick={handleManualChooseKeywords}
+                        style={{
+                          padding: '9px 22px',
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: '#ffffff',
+                          background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                          border: 'none',
+                          borderRadius: 8,
+                          cursor: savingActivity ? 'not-allowed' : 'pointer',
+                          boxShadow: '0 2px 10px rgba(124, 58, 237, 0.35)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8
+                        }}
+                      >
+                        <span>Choose Keywords &amp; Schedule</span>
+                      </button>
+                    )}
+
                     {/* Run AI Schedule button (if AI mode is on) */}
                     {aiSchedulingEnabled && !editingItem && (
                       <button
@@ -3864,7 +4177,7 @@ function CalendarPage({ user, onNavigate }) {
               ) : (() => {
                 const activeRunMeta = aiRunList.find(r => r.run_id === aiRunActiveId) || aiRunList[0];
                 const runBatches = { high: [], medium: [], low: [] };
-                aiRunKeywords.forEach(k => { 
+                aiRunKeywords.forEach(k => {
                   const b = k.batch || (k.delta > 0 ? 'high' : (k.delta < 0 ? 'medium' : 'low'));
                   if (runBatches[b]) runBatches[b].push(k);
                   else runBatches.low.push(k);

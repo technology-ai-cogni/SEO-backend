@@ -1127,7 +1127,7 @@ export default function KeywordsPage({ user }) {
                   />
                 </th>
 
-                <th style={{ padding: '12px 14px', fontWeight: 700 }}>KW</th>
+                <th style={{ padding: '12px 14px', fontWeight: 700 }}>KEYWORDS</th>
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>RANK</th>
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>SV</th>
                 <th style={{ padding: '12px 14px', fontWeight: 700 }}>KW DIFF</th>
