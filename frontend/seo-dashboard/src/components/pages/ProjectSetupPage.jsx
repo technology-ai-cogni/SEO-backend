@@ -4744,18 +4744,23 @@ function CompetitorDetailView({ competitor, onBack, user }) {
         {userCanDownload && (
           <button
             onClick={() => {
-              const rowsToExport = details.map(d => ({
-                Domain: d.domain,
-                Name: d.name,
-                Regions: (d.regions || []).join('; '),
-                DA: d.da ?? '',
-                'Ranking Keywords': d.rankingKeywords,
-                Location: d.location,
-                'Common KWs': Math.round(((d.commonKw ?? 0) / 100) * d.totalKw),
-                'Total KWs': d.totalKw,
-                'SERP Comp Level': d.serpCompLevel,
-                'Comp Level': d.compLevel,
-              }));
+              const rowsToExport = details.map(d => {
+                const rawType = d.type || d.websiteType || d.compType || d.comp_type || (d.device !== 'Desktop' && d.device !== 'Mobile' ? d.device : null);
+                const typeVal = rawType === 'Platform' ? 'Listing' : (rawType || '');
+                return {
+                  Domain: d.domain,
+                  Name: d.name,
+                  'Comp Type': typeVal,
+                  Regions: (d.regions || []).join('; '),
+                  DA: d.da ?? '',
+                  'Ranking Keywords': d.rankingKeywords,
+                  Location: d.location,
+                  'Common KWs': Math.round(((d.commonKw ?? 0) / 100) * d.totalKw),
+                  'Total KWs': d.totalKw,
+                  'SERP Comp Level': d.serpCompLevel,
+                  'Comp Level': d.compLevel,
+                };
+              });
               downloadCSV(`${title}_competitor_detail`, rowsToExport);
             }}
             title="Download CSV"
@@ -6476,17 +6481,22 @@ function CompetitorsTab({ competitors, scopedProject, selectedCategoriesFilter, 
               <button
                 onClick={() => {
                   if (subView === 'competitors') {
-                    const rowsToExport = filtered.map(c => ({
-                      Competitor: c.name || c.domain,
-                      Domain: c.domain,
-                      Device: c.device || 'Desktop',
-                      Location: c.location,
-                      DA: c.da ?? '',
-                      'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
-                      'Total KWs': c.totalKw,
-                      'SERP Comp Level': c.serpCompLevel,
-                      'Comp Level': c.compLevel,
-                    }));
+                    const rowsToExport = filtered.map(c => {
+                      const rawType = (classifiedTypes && (classifiedTypes[c.domain] || classifiedTypes[c.name] || classifiedTypes[c.url])) || c.type || c.websiteType || c.compType || c.comp_type || (c.device !== 'Desktop' && c.device !== 'Mobile' ? c.device : null);
+                      const typeVal = rawType === 'Platform' ? 'Listing' : (rawType || '');
+                      return {
+                        Competitor: c.name || c.domain,
+                        Domain: c.domain,
+                        'Comp Type': typeVal,
+                        Device: (c.device === 'Mobile' || c.device === 'Desktop') ? c.device : 'Desktop',
+                        Location: c.location,
+                        DA: c.da ?? '',
+                        'Common KWs': Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
+                        'Total KWs': c.totalKw,
+                        'SERP Comp Level': c.serpCompLevel,
+                        'Comp Level': c.compLevel,
+                      };
+                    });
                     downloadCSV(`${scopedProject?.name || 'competitors'}_list`, rowsToExport);
                   } else {
                     const rowsToExport = filteredPageRows.map(r => ({
@@ -8912,17 +8922,22 @@ export default function ProjectSetupPage({ tab, isStandaloneOutreach = false, us
       }));
       downloadCSV('pages_summary', rows);
     } else if (activeTab === 'Competitors') {
-      const rows = competitors.map(c => ({
-        Competitor: c.name || c.domain,
-        Domain: c.domain,
-        Device: c.device || 'Desktop',
-        Location: c.location,
-        DA: c.da ?? '',
-        CommonKWs: Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
-        TotalKWs: c.totalKw,
-        SERPCompLevel: c.serpCompLevel,
-        CompLevel: c.compLevel,
-      }));
+      const rows = competitors.map(c => {
+        const rawType = c.type || c.websiteType || c.compType || c.comp_type || (c.device !== 'Desktop' && c.device !== 'Mobile' ? c.device : null);
+        const typeVal = rawType === 'Platform' ? 'Listing' : (rawType || '');
+        return {
+          Competitor: c.name || c.domain,
+          Domain: c.domain,
+          'Comp Type': typeVal,
+          Device: (c.device === 'Mobile' || c.device === 'Desktop') ? c.device : 'Desktop',
+          Location: c.location,
+          DA: c.da ?? '',
+          CommonKWs: Math.round(((c.commonKw ?? 0) / 100) * c.totalKw),
+          TotalKWs: c.totalKw,
+          SERPCompLevel: c.serpCompLevel,
+          CompLevel: c.compLevel,
+        };
+      });
       downloadCSV('competitors_summary', rows);
     } else if (activeTab === 'Outreach') {
       const list = getFilteredOutreachLinks();

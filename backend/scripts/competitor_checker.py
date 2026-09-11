@@ -139,25 +139,49 @@ def scrape_website(session: requests.Session, url: str, max_words: int = 300) ->
         "error": None
     }
 
-    target_url = url.strip()
-    if not target_url.startswith(("http://", "https://")):
-        target_url = "https://" + target_url
+    raw = (url or "").strip()
+    if not raw:
+        result["error"] = "Empty URL/domain"
+        return result
+
+    if not raw.startswith(("http://", "https://")):
+        raw = "https://" + raw
 
     try:
-        result["domain"] = urlparse(target_url).netloc.lower().replace("www.", "")
+        domain = urlparse(raw).netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        if not domain:
+            domain = raw.replace("https://", "").replace("http://", "").split("/")[0].replace("www.", "")
+        result["domain"] = domain
+        target_url = f"https://{domain}"
     except Exception:
-        result["domain"] = target_url
+        domain = raw.replace("https://", "").replace("http://", "").split("/")[0].replace("www.", "")
+        result["domain"] = domain
+        target_url = f"https://{domain}"
 
     try:
-        response = session.get(
-            target_url,
-            timeout=(DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT),
-            allow_redirects=True
-        )
+        try:
+            response = session.get(
+                target_url,
+                timeout=(DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT),
+                allow_redirects=True
+            )
+        except Exception:
+            target_url = f"http://{domain}"
+            response = session.get(
+                target_url,
+                timeout=(DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT),
+                allow_redirects=True
+            )
+
         result["status_code"] = response.status_code
         result["final_url"] = response.url
         try:
-            result["domain"] = urlparse(response.url).netloc.lower().replace("www.", "")
+            netloc = urlparse(response.url).netloc.lower()
+            if netloc.startswith("www."):
+                netloc = netloc[4:]
+            result["domain"] = netloc or domain
         except Exception:
             pass
 

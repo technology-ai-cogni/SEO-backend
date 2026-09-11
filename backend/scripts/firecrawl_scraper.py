@@ -26,7 +26,7 @@ OUTPUT_FILE = "backend/datasets/its category.csv"
 OUTPUT_JSON_FILE = "backend/datasets/its category.json"
 CONCURRENCY_LIMIT = 3
 
-FIRECRAWL_API_KEY = os.environ.get("FIRECRAWL_API_KEY", "fc-4654d9c7d2e240368a1840e731d538be")
+FIRECRAWL_API_KEY = os.environ.get("FIRECRAWL_API_KEY", "fc-d8eed0b3fdaf48339e40755fc55eed17")
 FIRECRAWL_SEARCH_URL = "https://api.firecrawl.dev/v2/search"
 
 

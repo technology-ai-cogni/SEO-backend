@@ -766,12 +766,49 @@ export default function OffPageSchedulerPage({ user }) {
     try {
       const targetProj = sessionStorage.getItem('offpage_target_project');
       const targetUid = sessionStorage.getItem('offpage_target_row_uid');
-      if (targetProj) {
-        const normTarget = targetProj.toLowerCase().replace(/[\s_\-]/g, '');
-        const matched = filteredImports.find(imp => {
-          const p = String(imp.project || imp.project_name || imp.domain || '').toLowerCase().replace(/[\s_\-]/g, '');
-          return p.includes(normTarget) || normTarget.includes(p);
-        });
+      if (targetProj || targetUid) {
+        let matched = null;
+
+        // 1. If targetUid is provided, prioritize dataset that actually contains this row UID
+        if (targetUid) {
+          const normUid = targetUid.trim().toLowerCase();
+          const baseUid = normUid.split('-KW')[0];
+          matched = filteredImports.find(imp => {
+            const rows = imp.rowsData || [];
+            return rows.some(r => {
+              const u = String(r.uid || '').trim().toLowerCase();
+              return u === normUid || (baseUid && u.startsWith(baseUid));
+            });
+          });
+        }
+
+        // 2. Exact match on project name / slug / domain
+        if (!matched && targetProj) {
+          const normTarget = targetProj.toLowerCase().replace(/[\s_\-]/g, '');
+          matched = filteredImports.find(imp => {
+            const p = String(imp.project || imp.project_name || imp.domain || '').toLowerCase().replace(/[\s_\-]/g, '');
+            const slug = String(imp.project_slug || '').toLowerCase().replace(/[\s_\-]/g, '');
+            return p === normTarget || slug === normTarget;
+          });
+        }
+
+        // 3. Fallback: closest name match (smallest length difference)
+        if (!matched && targetProj) {
+          const normTarget = targetProj.toLowerCase().replace(/[\s_\-]/g, '');
+          const candidates = filteredImports.filter(imp => {
+            const p = String(imp.project || imp.project_name || imp.domain || '').toLowerCase().replace(/[\s_\-]/g, '');
+            return p.includes(normTarget) || normTarget.includes(p);
+          });
+          if (candidates.length > 0) {
+            candidates.sort((a, b) => {
+              const pa = String(a.project || a.project_name || a.domain || '').toLowerCase().replace(/[\s_\-]/g, '');
+              const pb = String(b.project || b.project_name || b.domain || '').toLowerCase().replace(/[\s_\-]/g, '');
+              return Math.abs(pa.length - normTarget.length) - Math.abs(pb.length - normTarget.length);
+            });
+            matched = candidates[0];
+          }
+        }
+
         if (matched) {
           setSelectedDataset(matched);
           setActiveTab('import');

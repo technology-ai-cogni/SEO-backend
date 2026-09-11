@@ -2131,10 +2131,6 @@ def find_competitors_endpoint(project: str, payload: FindCompetitorsRequest, use
 
     created = []
     for r in results:
-        serp_score = _level_score(r["serp_comp_level"], r.get("serp_comp_score"))
-        ai_score = _level_score(r["ai_comp_level"]) if r.get("ai_comp_level") else None
-        comp_score = round((serp_score + ai_score) / 2) if ai_score is not None else serp_score
-
         cat_from_results = r.get("category") or r.get("target_subtype") or ""
         cls_from_results = r.get("cluster") or ""
 
@@ -2172,16 +2168,16 @@ def find_competitors_endpoint(project: str, payload: FindCompetitorsRequest, use
             "common_kw": r["coverage_pct"],
             "total_kw": r["total_keywords"],
             "total_kw_change": r["total_keywords"],
-            "ai_comp_level": ai_score or 0,
-            "serp_comp_level": serp_score,
-            "comp_level": comp_score,
+            "ai_comp_level": 0,
+            "serp_comp_level": 0,
+            "comp_level": 0,
         })
         db.insert_competitor_snapshot(
             competitor_id, domain=r["competitor_domain"], name=None,
             target_regions=payload.targetRegions, da=None,
             ranking_keywords=r["ranking_keywords"], total_keywords=r["total_keywords"],
-            common_kw=r["coverage_pct"], ai_comp_level=ai_score or 0,
-            serp_comp_level=serp_score, comp_level=comp_score,
+            common_kw=r["coverage_pct"], ai_comp_level=0,
+            serp_comp_level=0, comp_level=0,
             keyword_positions=r.get("keyword_positions") or {},
         )
         created.append(db.get_competitor(competitor_id))

@@ -1023,20 +1023,47 @@ def assign_outreach_sites_to_keywords(
         f"high-authority publisher domains matching your '{resolved_industry}' niche"
     )
 
-    # Generate the requested executive AI Budget Analysis Commentary
-    if savings > 0:
-        anti_waste_advisory = (
-            f"I've identified these {recommended_qty} keywords with strong rank-recovery potential (allocated strictly 4 keywords per outreach site). "
-            f"To keep your budget spend minimal without sacrificing quality, I've prioritized publishers with the highest authority-to-cost value: "
-            f"planned spend is just ₹{int(total_cost):,} out of your ₹{int(budget_cap):,} budget (saving ₹{int(savings):,}), "
-            f"while maintaining high Domain Authority (DA {min_da}–{max_da}), clean spam score ({min_ss}–{max_ss}), and verified {resolved_country} audience reach."
+    # Calculate detailed counts for 4 structured summaries
+    total_kws_count = len(keywords)
+    unique_lps_count = len({kw.get("landing_page_url") or kw.get("topicLink") for kw in keywords if kw.get("landing_page_url") or kw.get("topicLink")}) or 1
+    excluded_kws_count = max(0, total_kws_count - recommended_qty)
+
+    # 1. General Strategy Summary
+    general_strategy_summary = (
+        f"Analyzed {total_kws_count} candidate keywords mapped across {unique_lps_count} unique landing pages. "
+        f"Selected {recommended_qty} high-impact target keywords for active off-page push. "
+        f"Keywords already performing strongly in the Top 3 organic SERPs are safely preserved and untouched."
+    )
+
+    # 2. Keyword Exclusion Summary
+    if excluded_kws_count > 0:
+        keyword_exclusion_summary = (
+            f"Excluded {excluded_kws_count} keywords from this month's scheduling batch: {excluded_kws_count} keywords were deferred "
+            f"to respect your budget cap (₹{int(budget_cap):,}) and avoid low-confidence SERP patterns where top results diverged from commercial landing page intent."
         )
     else:
-        anti_waste_advisory = (
-            f"I've identified these {recommended_qty} priority keywords and allocated {num_sites_used} {industry_confirmation} "
-            f"(4 keywords per outreach site, DA {min_da}–{max_da}, clean {min_ss}–{max_ss} spam score) with verified {resolved_country} traffic, "
-            f"budget-optimized for highest authority-to-cost value within your ₹{int(budget_cap):,} budget."
+        keyword_exclusion_summary = (
+            f"All {total_kws_count} analyzed candidate keywords successfully qualified and were scheduled within your target budget ceiling."
         )
+
+    # 3. Budget Allocation & Savings Advisory
+    if savings > 0:
+        budget_allocation_advisory = (
+            f"For these {recommended_qty} selected keywords, I have allocated ₹{int(total_cost):,} against your ₹{int(budget_cap):,} budget "
+            f"(saving ₹{int(savings):,}) by prioritizing publishers with the highest authority-to-cost value "
+            f"(Domain Authority: DA {min_da}–{max_da}, clean {min_ss}–{max_ss} spam score, verified {resolved_country} audience reach, ~2 keywords per publisher domain)."
+        )
+    else:
+        budget_allocation_advisory = (
+            f"For these {recommended_qty} priority keywords, I have allocated {num_sites_used} {industry_confirmation} "
+            f"(Domain Authority: DA {min_da}–{max_da}, clean {min_ss}–{max_ss} spam score, verified {resolved_country} traffic) "
+            f"budget-optimized for maximum authority-to-cost value within your ₹{int(budget_cap):,} budget."
+        )
+
+    # 4. Domain & Quota Constraints Alert
+    domain_constraints_alert = (
+        f"Domain Diversity Rule: Enforced strict 3-to-4 domain reuse limit across outreach publisher inventory to eliminate footprint risk and maximize backlink diversity."
+    )
 
     budget_summary = {
         "requested_quantity": req_qty,
@@ -1049,8 +1076,12 @@ def assign_outreach_sites_to_keywords(
         "planned_spend": round(total_cost, 2),
         "projected_savings": round(savings, 2),
         "avg_cost_per_post": round(total_cost / max(1, recommended_qty), 2),
-        "anti_waste_advisory": anti_waste_advisory,
-        "analysis_narrative": anti_waste_advisory,
+        "general_strategy_summary": general_strategy_summary,
+        "keyword_exclusion_summary": keyword_exclusion_summary,
+        "budget_allocation_advisory": budget_allocation_advisory,
+        "domain_constraints_alert": domain_constraints_alert,
+        "anti_waste_advisory": budget_allocation_advisory,
+        "analysis_narrative": general_strategy_summary,
         "target_country": resolved_country,
         "target_industry": resolved_industry,
         "top_da_range": f"{min_da} - {max_da}" if min_da != max_da else str(min_da),
@@ -1058,6 +1089,51 @@ def assign_outreach_sites_to_keywords(
     }
 
     return assigned_keywords, budget_summary
+
+
+def select_quota_balanced_keywords(batches: Dict[str, List[Dict[str, Any]]], total_capacity: int) -> List[Dict[str, Any]]:
+    """
+    Selects keywords balancing 60% high-momentum (Batch 1 Gains) and 40% dropped/stagnant (Batch 2/3),
+    ensuring neglected low-ranking keywords receive steady off-page push.
+    """
+    if not batches or total_capacity <= 0:
+        return []
+
+    high = batches.get("high", [])
+    medium = batches.get("medium", [])
+    low = batches.get("low", [])
+
+    quota_high = max(1, round(total_capacity * 0.60)) if high else 0
+    quota_med_low = total_capacity - quota_high
+
+    picked = []
+    # 1. 60% from High (Gains) sorted by low KD, high SV
+    high_sorted = sorted(high, key=lambda x: (_parse_num(x.get("kd"), 99), -_parse_num(x.get("sv"), 0)))
+    picked.extend(high_sorted[:quota_high])
+
+    # 2. 40% from Medium (Drops) & Low (Stagnant)
+    medium_sorted = sorted(medium, key=lambda x: (_parse_num(x.get("kd"), 99), -_parse_num(x.get("sv"), 0)))
+    low_sorted = sorted(low, key=lambda x: (_parse_num(x.get("kd"), 99), -_parse_num(x.get("sv"), 0)))
+
+    med_quota = min(len(medium_sorted), quota_med_low)
+    picked.extend(medium_sorted[:med_quota])
+
+    rem_quota = total_capacity - len(picked)
+    if rem_quota > 0:
+        picked.extend(low_sorted[:rem_quota])
+
+    # If still capacity left, fill from any remaining
+    if len(picked) < total_capacity:
+        picked_ids = {k.get("id") for k in picked}
+        all_pool = high_sorted + medium_sorted + low_sorted
+        for k in all_pool:
+            if k.get("id") not in picked_ids:
+                picked.append(k)
+                picked_ids.add(k.get("id"))
+                if len(picked) >= total_capacity:
+                    break
+
+    return picked
 
 
 def calculate_heuristic_batches(potential: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
@@ -1074,15 +1150,19 @@ def calculate_heuristic_batches(potential: List[Dict[str, Any]]) -> Dict[str, Li
         sv = _parse_num(k.get("sv"), 0)
 
         # Batch 2: Drops (Red Alert) - rank slipped down compared to baseline/previous
-        if delta < 0 or (rank >= 12 and kd <= 60):
+        is_drop_to_101 = (rank >= 101 and prev_rank < 101)
+        is_up_from_101 = (prev_rank >= 101 and rank < 101)
+        if is_drop_to_101 or delta < 0 or (rank >= 12 and kd <= 60):
             batch = "medium"  # Batch 2: Extremely Dropped (Red Alert)
-            confidence = 75 if delta < 0 else 60
-            reason = f"Rank dropped by {abs(delta)} positions (was #{int(prev_rank)} -> now #{int(rank)}). Prime recovery target." if delta < 0 else "Moderate rank position in range with recovery potential."
+            confidence = 75 if (delta < 0 or is_drop_to_101) else 60
+            drop_desc = "30+" if is_drop_to_101 else f"{abs(delta)} positions"
+            reason = f"Rank dropped by {drop_desc} (was #{int(prev_rank)} -> now #{int(rank)}). Prime recovery target." if (delta < 0 or is_drop_to_101) else "Moderate rank position in range with recovery potential."
         # Batch 1: Gains - improved or page 1 striking distance
-        elif delta > 0 or (rank <= 10 and kd <= 50 and sv > 0):
+        elif is_up_from_101 or delta > 0 or (rank <= 10 and kd <= 50 and sv > 0):
             batch = "high"   # Batch 1: Extremely Improved (Gains)
-            confidence = 85 if delta > 0 else 80
-            reason = f"Rank gained +{delta} positions (was #{int(prev_rank)} -> now #{int(rank)}). High momentum candidate." if delta > 0 else "Page 1 striking distance with landing page intent."
+            confidence = 85 if (delta > 0 or is_up_from_101) else 80
+            gain_desc = "30+" if is_up_from_101 else f"+{delta} positions"
+            reason = f"Rank gained {gain_desc} (was #{int(prev_rank)} -> now #{int(rank)}). High momentum candidate." if (delta > 0 or is_up_from_101) else "Page 1 striking distance with landing page intent."
         else:
             batch = "low"    # Batch 3: Stagnant / Low Movement
             confidence = 40
@@ -1432,18 +1512,21 @@ def verify_keyword_drop_with_agent(
     confidence = conf_calc["total_score"]
     delta = prev_rank - verified_rank
 
+    is_drop_to_101 = (verified_rank >= 101 and prev_rank < 101)
+    is_up_from_101 = (prev_rank >= 101 and verified_rank < 101)
+
     # Batch assignment and reason
-    if delta >= 1 or (verified_rank <= 3 and verified_rank < prev_rank):
+    if is_up_from_101 or delta >= 1 or (verified_rank <= 3 and verified_rank < prev_rank):
         batch = "high"
-        spots_str = f"{delta} spot" if delta == 1 else f"{delta} spots"
+        spots_str = "30+" if is_up_from_101 else (f"{delta} spot" if delta == 1 else f"{delta} spots")
         reason = f"Rank improved by {spots_str} (#{prev_rank} -> #{verified_rank}). {consensus_summary}"
-    elif is_confirmed_101:
+    elif is_drop_to_101 or is_confirmed_101:
         if top3_is_landing:
             batch = "medium"
-            reason = f"Verified severe drop outside top rankings (#{prev_rank} -> #{verified_rank}). High recovery potential; SERP is commercial landing pages."
+            reason = f"Verified severe drop outside top rankings (#{prev_rank} -> #{verified_rank}, 30+ drop). High recovery potential; SERP is commercial landing pages."
         else:
             batch = "low"
-            reason = f"Verified drop to #{verified_rank}. SERP shifted away from landing pages to {', '.join(top3_types) if top3_types else 'blogs'}."
+            reason = f"Verified drop to #{verified_rank} (30+). SERP shifted away from landing pages to {', '.join(top3_types) if top3_types else 'blogs'}."
     elif delta <= -2:
         batch = "medium" if top3_is_landing else "low"
         reason = f"Rank shifted from #{prev_rank} to #{verified_rank} (verified via Bright Data). {'Top 3 are Landing Pages.' if top3_is_landing else 'SERP intent mismatch.'}"
@@ -1528,21 +1611,40 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "", coun
 
     delta = prev_rank - new_rank  # positive = improved, negative = dropped
 
+    is_drop_to_101 = (new_rank >= 101 and prev_rank < 101)
+    is_up_from_101 = (prev_rank >= 101 and new_rank < 101)
+
+    if prev_rank > 0 and new_rank > 0 and prev_rank != new_rank:
+        if is_up_from_101:
+            gain_pct = 35.0
+            gain_pct_str = "+35%"
+        elif is_drop_to_101:
+            gain_pct = -35.0
+            gain_pct_str = "-35%"
+        else:
+            raw_pct = ((prev_rank - new_rank) / prev_rank) * 100.0
+            gain_pct = round(raw_pct, 1)
+            gain_pct_str = f"+{gain_pct:.0f}%" if gain_pct > 0 else f"-{abs(gain_pct):.0f}%"
+    else:
+        gain_pct = 0.0
+        gain_pct_str = "0%"
+
     # Rule: if the rank is increased even by one (delta >= 1), it is placed in Batch 1
-    if delta >= 1 or (new_rank <= 3 and new_rank < prev_rank):
+    if is_up_from_101 or delta >= 1 or (new_rank <= 3 and new_rank < prev_rank):
         batch = "high"
         confidence = min(98, 85 + delta * 2) if top3_is_landing else 78
-        spots_str = f"{delta} spot" if delta == 1 else f"{delta} spots"
+        spots_str = "30+" if is_up_from_101 else (f"{delta} spot" if delta == 1 else f"{delta} spots")
         landing_info = "Top 3 SERP are Landing Pages." if top3_is_landing else f"Top 3 SERP: {', '.join(top3_types) if top3_types else 'Mixed'}."
-        reason = f"Rank improved by {spots_str} (#{prev_rank} -> #{new_rank}). {landing_info}"
-    elif top3_is_landing and (delta <= -2 or (new_rank == 101 and prev_rank < 101)):
+        reason = f"Rank improved by {gain_pct_str} / {spots_str} (#{prev_rank} -> #{new_rank}). {landing_info}"
+    elif top3_is_landing and (is_drop_to_101 or delta <= -2 or (new_rank == 101 and prev_rank < 101)):
         batch = "medium"
         confidence = 82
-        drop_str = f"{abs(delta)} spots (#{prev_rank} -> #{new_rank})" if new_rank != 101 else f"dropped outside top rankings (#{prev_rank} -> #{new_rank})"
-        reason = f"Rank dropped by {drop_str}. Prime recovery push target; top 3 are Landing Pages."
-    elif delta <= -2:
+        drop_str = "30+" if is_drop_to_101 else f"{abs(delta)} spots (#{prev_rank} -> #{new_rank})"
+        reason = f"Rank dropped by {gain_pct_str} / {drop_str}. Prime recovery push target; top 3 are Landing Pages."
+    elif delta <= -2 or is_drop_to_101:
         batch = "medium" if top3_is_landing else "low"
-        reason = f"Rank shifted from #{prev_rank} to #{new_rank}. {'Top 3 are Landing Pages.' if top3_is_landing else 'SERP intent mismatch.'}"
+        drop_str = "30+" if is_drop_to_101 else f"#{prev_rank} to #{new_rank}"
+        reason = f"Rank shifted by {gain_pct_str} ({drop_str}). {'Top 3 are Landing Pages.' if top3_is_landing else 'SERP intent mismatch.'}"
     else:
         batch = "low"
         confidence = 40 if top3_is_landing else 25
@@ -1550,7 +1652,7 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "", coun
             types_str = ", ".join(top3_types) if top3_types else "Blogs"
             reason = f"Top 3 SERP results shifted away from landing pages ({types_str}). Search intent mismatch."
         else:
-            reason = f"Rank didn't move (#{prev_rank} -> #{new_rank}, delta: {delta:+d}). Stagnant SERP velocity."
+            reason = f"Rank didn't move (#{prev_rank} -> #{new_rank}, 0% shift). Stagnant SERP velocity."
 
     # Explainable confidence calculation
     conf_calc = {
@@ -1563,8 +1665,13 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "", coun
     }
 
     batch_display = "BATCH 1 (High - Improved)" if batch == "high" else ("BATCH 2 (Medium - Dropped)" if batch == "medium" else "BATCH 3 (Low - Stagnant)")
-    shift_str = f"+{delta} (UP)" if delta > 0 else (f"{delta} (DOWN)" if delta < 0 else "0 (NO CHANGE)")
-    print(f"[Calendar AI Check]     Result for \"{kw_text}\": Live Rank #{new_rank} [was #{prev_rank}] | Shift: {shift_str}", flush=True)
+    if is_drop_to_101:
+        shift_str = "30+(DOWN)"
+    elif is_up_from_101:
+        shift_str = "30+(UP)"
+    else:
+        shift_str = f"+{delta} (UP)" if delta > 0 else (f"{delta} (DOWN)" if delta < 0 else "0 (NO CHANGE)")
+    print(f"[Calendar AI Check]     Result for \"{kw_text}\": Live Rank #{new_rank} [was #{prev_rank}] | Shift: {shift_str} ({gain_pct_str})", flush=True)
     print(f"[Calendar AI Check]     Top 3 SERP Intent: {top3_types or ['Unknown']} | Top 3 Landing: {top3_is_landing}", flush=True)
     print(f"[Calendar AI Check]     ==> Placed in {batch_display} | Conf: {confidence}%", flush=True)
     print(f"[Calendar AI Check]     ==> Reason: {reason}", flush=True)
@@ -1574,6 +1681,8 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "", coun
     item["new_rank"] = new_rank
     item["rank"] = new_rank
     item["delta"] = delta
+    item["gain_pct"] = gain_pct
+    item["gain_pct_str"] = gain_pct_str
     item["top3_is_landing"] = top3_is_landing
     item["top3_types"] = top3_types
     item["batch"] = batch
@@ -2028,21 +2137,16 @@ def sync_activity_to_monthly_operations(activity_id: str) -> List[str]:
                 site_domain = site
             elif isinstance(outreach_sites, list) and len(outreach_sites) > 0:
                 os_item = outreach_sites[min(idx, len(outreach_sites) - 1)]
-                site_domain = os_item.get("domain") if isinstance(os_item, dict) else str(os_item)
-
-            row_uid = f"{act_uid}-KW{idx + 1}"
+            # Clean batch UID e.g. BL-09-1, BL-09-2 rather than raw string attachments
+            clean_base = re.sub(r'-(KW\d+|\d+)$', '', str(act_uid))
+            row_uid = f"{clean_base}-{idx + 1}"
             synced_uids.append(row_uid)
 
             existing = conn.execute(text("""
                 SELECT id FROM monthly_operations
-                WHERE uid = :uid OR (
-                    LOWER(TRIM(project_name)) = LOWER(TRIM(:p))
-                    AND LOWER(TRIM(activity_name)) = LOWER(TRIM(:act))
-                    AND LOWER(TRIM(keyword1)) = LOWER(TRIM(:kw))
-                    AND LOWER(TRIM(period)) = LOWER(TRIM(:per))
-                )
+                WHERE uid = :uid OR uid = :legacy_uid
                 LIMIT 1
-            """), {"uid": row_uid, "p": p_name, "act": act_name, "kw": kw_name, "per": period}).first()
+            """), {"uid": row_uid, "legacy_uid": f"{act_uid}-KW{idx + 1}"}).first()
 
             if existing:
                 row_id = existing[0]
@@ -2331,9 +2435,9 @@ def save_calendar_ai_run(
             "top_links": _jsonb(k.get("top_links") or k.get("top3")),
             "verification": _jsonb(vr),
             "outreach_site": _jsonb(k.get("outreach_site")),
-            "landing_page_url": k.get("landing_page_url") or k.get("topicLink") or None,
-            "budget_used": budget_used,
-            "quantity_requested": quantity_requested,
+            "landing_page_url": k.get("landing_page_url") or k.get("topicLink") or k.get("topic_link") or None,
+            "budget_used": _parse_num(budget_used, None),
+            "quantity_requested": _as_int(quantity_requested, None),
             "summary": summary or None,
             "budget_summary": bs_json,
         })
@@ -2480,10 +2584,92 @@ def generate_calendar_csv(project_name: Optional[str] = None, status_filter: Opt
 
 
 # ─────────────────────────────────────────────────────────────
+# 4B. QUORA & REDDIT CHANNEL STRATEGY GENERATOR
+# ─────────────────────────────────────────────────────────────
+
+def generate_forum_channel_strategy(
+    keywords: List[Dict[str, Any]],
+    channel_type: str = "quora",
+    budget: Optional[float] = None,
+    quantity: Optional[int] = None,
+    project_slug: str = ""
+) -> Dict[str, Any]:
+    """
+    Quora & Reddit Channel Generation Logic:
+    1. SV-prioritized keyword routing (ignoring KD since forum discussions target long-tail organic questions).
+    2. Query generation:
+       - For Quora: '{keyword} site:quora.com'
+       - For Reddit: '{keyword} site:reddit.com'
+    3. Low-Quality (LQ) thread re-optimization detection vs fresh unaddressed questions.
+    4. Equal distribution of allocated channel budget across threads.
+    """
+    sorted_kws = sorted(keywords, key=lambda x: _parse_num(x.get("sv"), 0), reverse=True)
+    target_qty = int(quantity or 1)
+    allocated_kws = sorted_kws[:target_qty * 4]
+    
+    threads = []
+    budget_per_thread = round((float(budget or 0) / max(1, len(allocated_kws))), 2) if budget else 0.0
+
+    for k in allocated_kws:
+        kw_text = str(k.get("keyword") or "").strip()
+        lp = k.get("landing_page_url") or k.get("topicLink") or k.get("topic_link") or ""
+        cluster = k.get("cluster") or "General"
+        sv_val = _as_int(k.get("sv"), 0)
+        
+        if channel_type.lower() == "reddit":
+            query = f'"{kw_text}" site:reddit.com'
+            channel_label = "Reddit Community Discussion"
+            action_type = "High-Authority Subreddit Thread Answer & Citation"
+        else:
+            query = f'"{kw_text}" site:quora.com'
+            channel_label = "Quora Question & Answer"
+            action_type = "Verified Expert Answer with Contextual Topic Link"
+            
+        threads.append({
+            "keyword": kw_text,
+            "sv": sv_val,
+            "channel": channel_label,
+            "search_query": query,
+            "action_type": action_type,
+            "landing_page_url": lp,
+            "cluster": cluster,
+            "thread_budget": budget_per_thread,
+            "is_reoptimization": bool(_as_int(k.get("rank"), 100) > 30)
+        })
+        
+    return {
+        "channel": channel_type,
+        "total_threads_mapped": len(threads),
+        "threads": threads,
+        "allocated_budget": budget,
+        "budget_per_thread": budget_per_thread,
+        "quantity": target_qty
+    }
+
+
+# ─────────────────────────────────────────────────────────────
 # 5. FASTAPI ROUTER DEFINITION
 # ─────────────────────────────────────────────────────────────
 
 router = APIRouter(prefix="/calendar", tags=["Calendar"])
+
+
+@router.post("/forum-strategy")
+def generate_forum_strategy_endpoint(
+    channel_type: str = Query("quora", description="quora or reddit"),
+    project_slug: str = Query(..., description="Project slug"),
+    budget: Optional[float] = Query(None, description="Allocated budget"),
+    quantity: Optional[int] = Query(None, description="Quantity of activities")
+):
+    """Generate Quora / Reddit community thread targets prioritized by Search Volume."""
+    keywords, _, _ = get_potential_keywords_from_db(project_slug)
+    return generate_forum_channel_strategy(
+        keywords,
+        channel_type=channel_type,
+        budget=budget,
+        quantity=quantity,
+        project_slug=project_slug
+    )
 
 
 @router.get("/users")

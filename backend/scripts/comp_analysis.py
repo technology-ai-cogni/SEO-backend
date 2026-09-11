@@ -154,7 +154,6 @@ def build_competitor_table(stats: dict, total_keywords: int, top_n: Optional[int
         ranking_keywords = len(kw_positions)
         avg_rank = round(sum(kw_positions.values()) / ranking_keywords, 2) if ranking_keywords else 0
         coverage = ranking_keywords / total_keywords if total_keywords else 0
-        level, score = serp_comp_level(coverage, avg_rank if avg_rank else 999)
 
         categories = sorted(list(data.get("categories", set())))
         clusters = sorted(list(data.get("clusters", set())))
@@ -174,11 +173,11 @@ def build_competitor_table(stats: dict, total_keywords: int, top_n: Optional[int
             "ranking_keywords": ranking_keywords,
             "coverage_pct": round(coverage * 100, 1),
             "avg_rank": avg_rank,
-            "serp_comp_level": level,
-            "serp_comp_score": score,
-            "keyword_positions": kw_positions,  # kept for AI prompt + JSON output
+            "serp_comp_level": "",
+            "serp_comp_score": 0,
+            "keyword_positions": kw_positions,  # kept for JSON output
         })
-    rows.sort(key=lambda r: r["serp_comp_score"], reverse=True)
+    rows.sort(key=lambda r: (r["ranking_keywords"], r["coverage_pct"]), reverse=True)
     if top_n:
         rows = rows[:top_n]
     return rows
@@ -191,64 +190,8 @@ def ai_comp_levels(
     own_domain: str,
     competitor_rows: List[dict],
 ) -> Dict[str, dict]:
-    """
-    One OpenAI chat completion per project: feed all competitor stats, get
-    back a comparative High/Medium/Low judgement + short reasoning per
-    domain.
-    """
-    if not competitor_rows:
-        return {}
-
-    payload = [
-        {
-            "domain": r["competitor_domain"],
-            "ranking_keywords": r["ranking_keywords"],
-            "total_keywords": r["total_keywords"],
-            "avg_rank": r["avg_rank"],
-            "keyword_positions": r["keyword_positions"],
-        }
-        for r in competitor_rows
-    ]
-
-    system_prompt = (
-        "You are an SEO competitive analyst. You will be given, for one client domain, "
-        "a list of competitor domains along with how many of the client's target keywords "
-        "each competitor ranks for, their average rank position, and per-keyword positions.\n\n"
-        "For each competitor, assign a competitive strength level relative to the others in "
-        "this same list:\n"
-        "- 'High': ranks for a large share of the keyword set at consistently strong positions.\n"
-        "- 'Medium': ranks for a moderate share, or ranks well but only for a few keywords.\n"
-        "- 'Low': minimal keyword coverage and/or consistently weak positions.\n\n"
-        "Judge levels RELATIVE to the other competitors provided, not against an absolute scale. "
-        "Give a one-sentence reasoning per competitor.\n\n"
-        "Output ONLY a raw JSON array, no markdown, no preamble, in this exact shape:\n"
-        '[{"domain": "string", "ai_comp_level": "High"|"Medium"|"Low", "ai_comp_reasoning": "string"}]'
-    )
-
-    user_prompt = (
-        f"Client domain: {own_domain}\nProject: {project_name}\n\n"
-        f"Competitor data:\n{json.dumps(payload, indent=2)}"
-    )
-
-    try:
-        resp = client.chat.completions.create(
-            model=model,
-            max_tokens=2000,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        text = (resp.choices[0].message.content or "").strip()
-        if "```json" in text:
-            text = text.split("```json")[1].split("```")[0].strip()
-        elif "```" in text:
-            text = text.split("```")[1].split("```")[0].strip()
-        parsed = json.loads(text)
-        return {item["domain"]: item for item in parsed}
-    except Exception as e:
-        print(f"[AI comp level] Failed for project '{project_name}': {e}")
-        return {}
+    """Deprecated: ai comp level calculation removed."""
+    return {}
 
 
 def select_top_2_keywords_per_group(rows: List[dict]) -> List[dict]:
@@ -298,14 +241,12 @@ def find_competitors_for_rows(
     project_name: str,
     exclude_domains: Optional[set] = None,
     top_n: Optional[int] = None,
-    use_ai: bool = True,
+    use_ai: bool = False,
     model: Optional[str] = None,
 ):
     """Entry point for the backend: given a project's keyword_categories
     rows (as returned by db.get_domain_results()), returns
-    (competitor_rows, own_domain). Each competitor row has the same shape
-    build_competitor_table() produces, plus ai_comp_level/ai_comp_reasoning
-    (empty strings if use_ai is False or no API key is configured)."""
+    (competitor_rows, own_domain)."""
     exclude_domains = DEFAULT_EXCLUDE_DOMAINS if exclude_domains is None else exclude_domains
 
     rows = select_top_2_keywords_per_group(rows)
@@ -317,21 +258,12 @@ def find_competitors_for_rows(
     stats, own_domain = aggregate_competitors(df, exclude_domains)
     table = build_competitor_table(stats, total_keywords, top_n=top_n)
 
-    ai_results = {}
-    if use_ai and table:
-        if OpenAI is None or not os.environ.get("OPENAI_API_KEY"):
-            print("[Warn] OpenAI not available/configured; skipping AI comp levels.")
-        else:
-            client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-            ai_results = ai_comp_levels(client, model or OPENAI_MODEL_DEFAULT, project_name, own_domain, table)
-
     results = []
     for r in table:
-        ai_info = ai_results.get(r["competitor_domain"], {})
         results.append({
             **r,
-            "ai_comp_level": ai_info.get("ai_comp_level", ""),
-            "ai_comp_reasoning": ai_info.get("ai_comp_reasoning", ""),
+            "ai_comp_level": "",
+            "ai_comp_reasoning": "",
         })
     return results, own_domain
 
