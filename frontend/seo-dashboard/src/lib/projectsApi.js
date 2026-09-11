@@ -1,5 +1,8 @@
 import { supabase } from './supabaseClient';
 import { derivedKeywordClusters, derivedPages } from '../data/mockData';
+import { cachedFetch, invalidateCache, clearCache } from './queryCache';
+
+export { invalidateCache, clearCache };
 
 export async function authFetch(url, options = {}) {
   let token = null;
@@ -383,98 +386,98 @@ if (isLocalMode) {
 
 // ─── Domain tab ─────────────────────────────────────────────────────────────
 
-export async function fetchDomainRows() {
-  if (isLocalMode) {
-    const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
-    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
-    const counts = aggregateKwCounts(kwRows);
-    return (domains || [])
-      .filter(d => d && d.domain && String(d.domain).trim() !== '')
-      .map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
-  }
+export async function fetchDomainRows(options = {}) {
+  return cachedFetch('domains:rows', async () => {
+    if (isLocalMode) {
+      const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
+      const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
+      const counts = aggregateKwCounts(kwRows);
+      return (domains || [])
+        .filter(d => d && d.domain && String(d.domain).trim() !== '')
+        .map(d => domainRowToProject(d, counts.get(d.project_slug) || EMPTY_KW_COUNTS));
+    }
 
-  const domainMap = new Map();
-  const countsMap = new Map(); // slug -> { total, commercial, landingPages, blogPages }
-  const num = (v) => Number(v) || 0;
+    const domainMap = new Map();
+    const countsMap = new Map(); // slug -> { total, commercial, landingPages, blogPages }
+    const num = (v) => Number(v) || 0;
 
-  // 1. Fetch from FastAPI backend /domains (PostgreSQL). Each row now carries a
-  //    live per-project keyword-count breakdown (kw_total / kw_commercial /
-  //    kw_landing / kw_blog) computed by a single GROUP BY on the server, so the
-  //    browser no longer paginates the entire keyword_categories table here.
-  try {
-    const res = await fetch(`${CATEGORY_API_BASE}/domains`);
-    if (res.ok) {
-      const json = await res.json();
-      (json.domains || []).forEach(d => {
-        const slug = d.project_slug || slugify(d.project_name || d.domain);
-        if (!slug) return;
-        domainMap.set(slug, {
-          ...d,
-          project_slug: slug,
-          project_name: d.project_name || d.domain
-        });
-        if (d.kw_total != null || d.kw_landing != null || d.kw_blog != null) {
-          countsMap.set(slug, {
-            total: num(d.kw_total),
-            commercial: num(d.kw_commercial),
-            landingPages: num(d.kw_landing),
-            blogPages: num(d.kw_blog),
+    // 1. Fetch from FastAPI backend /domains (PostgreSQL).
+    try {
+      const res = await fetch(`${CATEGORY_API_BASE}/domains`);
+      if (res.ok) {
+        const json = await res.json();
+        (json.domains || []).forEach(d => {
+          const slug = d.project_slug || slugify(d.project_name || d.domain);
+          if (!slug) return;
+          domainMap.set(slug, {
+            ...d,
+            project_slug: slug,
+            project_name: d.project_name || d.domain
           });
+          if (d.kw_total != null || d.kw_landing != null || d.kw_blog != null) {
+            countsMap.set(slug, {
+              total: num(d.kw_total),
+              commercial: num(d.kw_commercial),
+              landingPages: num(d.kw_landing),
+              blogPages: num(d.kw_blog),
+            });
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('[fetchDomainRows] Backend /domains fetch skipped:', e);
+    }
+
+    // 2. Fetch from Supabase
+    try {
+      const [{ data: activeProjects }, { data: domains }] = await Promise.all([
+        supabase.from('projects').select('slug').is('deleted_at', null),
+        supabase.from('domains').select('*').order('created_at', { ascending: false })
+      ]);
+
+      const activeSlugs = new Set((activeProjects || []).map(p => p.slug));
+
+      (domains || []).forEach(d => {
+        if (d.project_slug && (activeSlugs.has(d.project_slug) || activeSlugs.size === 0)) {
+          if (!domainMap.has(d.project_slug)) {
+            domainMap.set(d.project_slug, d);
+          }
         }
       });
+    } catch (e) {
+      console.warn('[fetchDomainRows] Supabase domain fetch skipped:', e);
     }
-  } catch (e) {
-    console.warn('[fetchDomainRows] Backend /domains fetch skipped:', e);
-  }
 
-  // 2. Fetch from Supabase
-  try {
-    const [{ data: activeProjects }, { data: domains }] = await Promise.all([
-      supabase.from('projects').select('slug').is('deleted_at', null),
-      supabase.from('domains').select('*').order('created_at', { ascending: false })
-    ]);
-
-    const activeSlugs = new Set((activeProjects || []).map(p => p.slug));
-
-    (domains || []).forEach(d => {
-      if (d.project_slug && (activeSlugs.has(d.project_slug) || activeSlugs.size === 0)) {
-        if (!domainMap.has(d.project_slug)) {
-          domainMap.set(d.project_slug, d);
-        }
-      }
-    });
-  } catch (e) {
-    console.warn('[fetchDomainRows] Supabase domain fetch skipped:', e);
-  }
-
-  const mergedDomains = Array.from(domainMap.values());
-  return mergedDomains.map(d => domainRowToProject(d, countsMap.get(d.project_slug) || EMPTY_KW_COUNTS));
+    const mergedDomains = Array.from(domainMap.values());
+    return mergedDomains.map(d => domainRowToProject(d, countsMap.get(d.project_slug) || EMPTY_KW_COUNTS));
+  }, { ttl: 30000, ...options });
 }
 
 // Lightweight project list for pages that only need the dropdown (name / slug /
 // domain / da / spam) and fetch keyword/page data per-project on demand.
-// Unlike fetchDomainRows() it does NOT scan the whole keyword_categories table.
-export async function fetchProjectListLite() {
-  if (isLocalMode) {
-    return fetchDomainRows();
-  }
-  try {
-    const [{ data: activeProjects }, { data: domains }] = await Promise.all([
-      supabase.from('projects').select('slug').is('deleted_at', null),
-      supabase.from('domains').select('*').order('created_at', { ascending: false }),
-    ]);
-    const activeSlugs = new Set((activeProjects || []).map(p => p.slug));
-    const rows = (domains || []).filter(d =>
-      d.domain && String(d.domain).trim() !== '' &&
-      (activeSlugs.size === 0 || activeSlugs.has(d.project_slug))
-    );
-    if (rows.length > 0) {
-      return rows.map(d => domainRowToProject(d, EMPTY_KW_COUNTS));
+export async function fetchProjectListLite(options = {}) {
+  return cachedFetch('projects:lite', async () => {
+    if (isLocalMode) {
+      return fetchDomainRows();
     }
-  } catch (e) {
-    console.warn('[fetchProjectListLite] Supabase query failed, falling back:', e);
-  }
-  return fetchDomainRows();
+    try {
+      const [{ data: activeProjects }, { data: domains }] = await Promise.all([
+        supabase.from('projects').select('slug').is('deleted_at', null),
+        supabase.from('domains').select('*').order('created_at', { ascending: false }),
+      ]);
+      const activeSlugs = new Set((activeProjects || []).map(p => p.slug));
+      const rows = (domains || []).filter(d =>
+        d.domain && String(d.domain).trim() !== '' &&
+        (activeSlugs.size === 0 || activeSlugs.has(d.project_slug))
+      );
+      if (rows.length > 0) {
+        return rows.map(d => domainRowToProject(d, EMPTY_KW_COUNTS));
+      }
+    } catch (e) {
+      console.warn('[fetchProjectListLite] Supabase query failed, falling back:', e);
+    }
+    return fetchDomainRows();
+  }, { ttl: 45000, ...options });
 }
 
 // Persist the live DA / Spam Score / traffic (from fetchDomainMetricsApi) onto
@@ -674,10 +677,14 @@ export async function createProject({ name, domain, regions, platforms, da, indu
     users: users || [],
   };
 
+  invalidateCache('domains');
+  invalidateCache('projects');
   return domainRowToProject(domainRow);
 }
 
 export async function updateDomainRow(id, updates) {
+  invalidateCache('domains');
+  invalidateCache('projects');
   if (isLocalMode) {
     const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
     const index = domains.findIndex(d => String(d.id) === String(id));
@@ -716,7 +723,7 @@ export async function updateDomainRow(id, updates) {
 
     domains[index] = dbUpdates;
     localStorage.setItem('seo_domains', JSON.stringify(domains));
-    const kwCounts = await fetchKwCountsForSlug(dbUpdates.project_slug);
+    const kwCounts = await fetchKwCountsForSlug(dbUpdates.project_slug || '');
     return domainRowToProject(dbUpdates, kwCounts);
   }
 
@@ -750,7 +757,21 @@ export async function updateDomainRow(id, updates) {
   if ('businessCentres' in updates) dbUpdates.business_centres = updates.businessCentres;
   if ('brandedTerms' in updates) dbUpdates.branded_terms = updates.brandedTerms;
 
-  const { data, error } = await supabase.from('domains').update(dbUpdates).eq('id', id).select().single();
+  let { data, error } = await supabase
+    .from('domains')
+    .update(dbUpdates)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error && error.message && error.message.includes('schema cache')) {
+    const safeUpdates = { ...dbUpdates };
+    delete safeUpdates.industry;
+    delete safeUpdates.industry_type;
+    const retry = await supabase.from('domains').update(safeUpdates).eq('id', id).select().single();
+    data = retry.data;
+    error = retry.error;
+  }
 
   // Also sync to FastAPI backend PostgreSQL database
   try {
@@ -773,6 +794,8 @@ export async function updateDomainRow(id, updates) {
 }
 
 export async function deleteDomainRow(id, slug) {
+  invalidateCache('domains');
+  invalidateCache('projects');
   if (isLocalMode) {
     const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
     const projects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
@@ -792,11 +815,77 @@ export async function deleteDomainRow(id, slug) {
 
 // ─── KW Cluster tab ─────────────────────────────────────────────────────────
 
-export async function fetchKwProjects() {
-  if (isLocalMode) {
-    const projects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
-    const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
-    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
+export async function fetchKwProjects(options = {}) {
+  return cachedFetch('projects:kw_list', async () => {
+    if (isLocalMode) {
+      const projects = JSON.parse(localStorage.getItem('seo_projects') || '[]');
+      const domains = JSON.parse(localStorage.getItem('seo_domains') || '[]');
+      const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
+
+      const domainBySlug = new Map();
+      (domains || []).forEach(d => { if (!domainBySlug.has(d.project_slug)) domainBySlug.set(d.project_slug, d); });
+
+      const counts = aggregateKwCounts(kwRows);
+
+      return (projects || [])
+        .filter(p => {
+          const domainRow = domainBySlug.get(p.slug);
+          return domainRow && domainRow.domain && String(domainRow.domain).trim() !== '';
+        })
+        .map(p => {
+          const domainRow = domainBySlug.get(p.slug) || domainBySlug.get(p.name);
+          const c = counts.get(p.slug) || counts.get(p.name);
+          const landingCount = c.landingPages > 0 ? c.landingPages : Math.max(0, c.total - c.blogPages);
+          return {
+            slug: p.slug,
+            name: p.name,
+            domain: domainRow?.domain || '',
+            locationIcon: iconForPlatforms(domainRow?.platforms),
+            location: domainRow?.target_regions?.[0] || 'Global',
+            totalPages: c.total,
+            totalKw: c.total,
+            commercialPct: `${c.commercial}/${c.total}`,
+            blogPages: c.blogPages,
+            blogDir: null,
+            keywords: landingCount,
+            targetPages: landingCount,
+            keywordsDir: null,
+            updated: timeAgo(domainRow?.updated_at || p.created_at),
+          };
+        });
+    }
+
+    const [{ data: projects, error: projectsError }, { data: domains, error: domainsError }] = await Promise.all([
+      supabase.from('projects').select('*').is('deleted_at', null),
+      supabase.from('domains').select('*'),
+    ]);
+    if (projectsError) throw projectsError;
+    if (domainsError) throw domainsError;
+
+    let kwRows = [];
+    try {
+      let page = 0;
+      const pageSize = 1000;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data: rows, error: kwError } = await supabase
+          .from('keyword_categories')
+          .select('project_name, subtype, target_type')
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+
+        if (kwError) break;
+        if (rows && rows.length > 0) {
+          kwRows = kwRows.concat(rows);
+          if (rows.length < pageSize) hasMore = false;
+          else page++;
+        } else {
+          hasMore = false;
+        }
+      }
+    } catch (e) {
+      console.warn('[fetchKwProjects] kw query error:', e);
+    }
 
     const domainBySlug = new Map();
     (domains || []).forEach(d => { if (!domainBySlug.has(d.project_slug)) domainBySlug.set(d.project_slug, d); });
@@ -829,71 +918,7 @@ export async function fetchKwProjects() {
           updated: timeAgo(domainRow?.updated_at || p.created_at),
         };
       });
-  }
-
-  const [{ data: projects, error: projectsError }, { data: domains, error: domainsError }] = await Promise.all([
-    supabase.from('projects').select('*').is('deleted_at', null),
-    supabase.from('domains').select('*'),
-  ]);
-  if (projectsError) throw projectsError;
-  if (domainsError) throw domainsError;
-
-  let kwRows = [];
-  try {
-    let page = 0;
-    const pageSize = 1000;
-    let hasMore = true;
-
-    while (hasMore) {
-      const { data: rows, error: kwError } = await supabase
-        .from('keyword_categories')
-        .select('project_name, subtype, target_type')
-        .range(page * pageSize, (page + 1) * pageSize - 1);
-
-      if (kwError) break;
-      if (rows && rows.length > 0) {
-        kwRows = kwRows.concat(rows);
-        if (rows.length < pageSize) hasMore = false;
-        else page++;
-      } else {
-        hasMore = false;
-      }
-    }
-  } catch (e) {
-    console.warn('[fetchKwProjects] kw query error:', e);
-  }
-
-  const domainBySlug = new Map();
-  (domains || []).forEach(d => { if (!domainBySlug.has(d.project_slug)) domainBySlug.set(d.project_slug, d); });
-
-  const counts = aggregateKwCounts(kwRows);
-
-  return (projects || [])
-    .filter(p => {
-      const domainRow = domainBySlug.get(p.slug);
-      return domainRow && domainRow.domain && String(domainRow.domain).trim() !== '';
-    })
-    .map(p => {
-      const domainRow = domainBySlug.get(p.slug) || domainBySlug.get(p.name);
-      const c = counts.get(p.slug) || counts.get(p.name);
-      const landingCount = c.landingPages > 0 ? c.landingPages : Math.max(0, c.total - c.blogPages);
-      return {
-        slug: p.slug,
-        name: p.name,
-        domain: domainRow?.domain || '',
-        locationIcon: iconForPlatforms(domainRow?.platforms),
-        location: domainRow?.target_regions?.[0] || 'Global',
-        totalPages: c.total,
-        totalKw: c.total,
-        commercialPct: `${c.commercial}/${c.total}`,
-        blogPages: c.blogPages,
-        blogDir: null,
-        keywords: landingCount,
-        targetPages: landingCount,
-        keywordsDir: null,
-        updated: timeAgo(domainRow?.updated_at || p.created_at),
-      };
-    });
+  }, { ttl: 30000, ...options });
 }
 
 function kwRowToUi(row) {
@@ -960,82 +985,85 @@ export async function insertKeywordRows(projectSlug, rows) {
 // of rows.
 const KW_COLS_FULL = 'id,keyword,sv,kw_diff,cluster,category,type,target_type,subtype,target_geo,priority,landing_page_url,rank,rank_checked_at,rank_meta,page_url_fetched';
 
-export async function fetchKeywordRows(projectSlug, { columns } = {}) {
+export async function fetchKeywordRows(projectSlug, { columns, forceRefresh = false } = {}) {
   if (!projectSlug) return [];
 
-  // 1. Try querying Supabase if available
-  if (!isLocalMode) {
-    try {
-      const pageSize = 1000;
-      const KW_COLS = columns || KW_COLS_FULL;
-      const pageQuery = (from) => supabase
-        .from('keyword_categories')
-        .select(KW_COLS)
-        .eq('project_name', projectSlug)
-        .order('id')
-        .range(from, from + pageSize - 1);
+  const cacheKey = `keywords:${projectSlug}:${columns || 'full'}`;
+  return cachedFetch(cacheKey, async () => {
+    // 1. Try querying Supabase if available
+    if (!isLocalMode) {
+      try {
+        const pageSize = 1000;
+        const KW_COLS = columns || KW_COLS_FULL;
+        const pageQuery = (from) => supabase
+          .from('keyword_categories')
+          .select(KW_COLS)
+          .eq('project_name', projectSlug)
+          .order('id')
+          .range(from, from + pageSize - 1);
 
-      // First page also asks for an exact count so the remaining pages can be
-      // fetched in PARALLEL instead of one-at-a-time.
-      const { data: first, error, count } = await supabase
-        .from('keyword_categories')
-        .select(KW_COLS, { count: 'exact' })
-        .eq('project_name', projectSlug)
-        .order('id')
-        .range(0, pageSize - 1);
+        // First page also asks for an exact count so the remaining pages can be
+        // fetched in PARALLEL instead of one-at-a-time.
+        const { data: first, error, count } = await supabase
+          .from('keyword_categories')
+          .select(KW_COLS, { count: 'exact' })
+          .eq('project_name', projectSlug)
+          .order('id')
+          .range(0, pageSize - 1);
 
-      if (error) {
-        console.warn('[fetchKeywordRows] Supabase error:', error);
-      } else {
-        let allRows = first || [];
-        if (typeof count === 'number' && count > pageSize) {
-          // Known total -> fetch every remaining page at once.
-          const pageCount = Math.ceil(count / pageSize);
-          const rest = await Promise.all(
-            Array.from({ length: pageCount - 1 }, (_, i) => pageQuery((i + 1) * pageSize))
-          );
-          rest.forEach(r => { if (r && r.data && r.data.length) allRows = allRows.concat(r.data); });
-        } else if (typeof count !== 'number' && allRows.length === pageSize) {
-          // Count unavailable -> fall back to sequential paging so no rows are missed.
-          let from = pageSize;
-          for (;;) {
-            const { data } = await pageQuery(from);
-            if (!data || data.length === 0) break;
-            allRows = allRows.concat(data);
-            if (data.length < pageSize) break;
-            from += pageSize;
+        if (error) {
+          console.warn('[fetchKeywordRows] Supabase error:', error);
+        } else {
+          let allRows = first || [];
+          if (typeof count === 'number' && count > pageSize) {
+            // Known total -> fetch every remaining page at once.
+            const pageCount = Math.ceil(count / pageSize);
+            const rest = await Promise.all(
+              Array.from({ length: pageCount - 1 }, (_, i) => pageQuery((i + 1) * pageSize))
+            );
+            rest.forEach(r => { if (r && r.data && r.data.length) allRows = allRows.concat(r.data); });
+          } else if (typeof count !== 'number' && allRows.length === pageSize) {
+            // Count unavailable -> fall back to sequential paging so no rows are missed.
+            let from = pageSize;
+            for (;;) {
+              const { data } = await pageQuery(from);
+              if (!data || data.length === 0) break;
+              allRows = allRows.concat(data);
+              if (data.length < pageSize) break;
+              from += pageSize;
+            }
+          }
+          if (allRows.length > 0) {
+            return allRows.map(kwRowToUi);
           }
         }
-        if (allRows.length > 0) {
-          return allRows.map(kwRowToUi);
-        }
+      } catch (e) {
+        console.warn('[fetchKeywordRows] Supabase query failed:', e);
       }
-    } catch (e) {
-      console.warn('[fetchKeywordRows] Supabase query failed:', e);
     }
-  }
 
-  // 2. Try fetching from local FastAPI backend endpoint
-  const candidateSlugs = [projectSlug, String(projectSlug || '').replace(/[^a-z0-9]/gi, '')];
-  for (const slug of candidateSlugs) {
-    if (!slug) continue;
-    try {
-      const res = await fetch(`${getApiBaseUrl()}/projects/${encodeURIComponent(slug)}/results`);
-      if (res.ok) {
-        const json = await res.json();
-        if (json.results && json.results.length > 0) {
-          return json.results.map(kwRowToUi);
+    // 2. Try fetching from local FastAPI backend endpoint
+    const candidateSlugs = [projectSlug, String(projectSlug || '').replace(/[^a-z0-9]/gi, '')];
+    for (const slug of candidateSlugs) {
+      if (!slug) continue;
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/projects/${encodeURIComponent(slug)}/results`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.results && json.results.length > 0) {
+            return json.results.map(kwRowToUi);
+          }
         }
+      } catch (e) {
+        // ignore
       }
-    } catch (e) {
-      // ignore
     }
-  }
 
-  // 3. Fallback to localStorage
-  const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
-  const filtered = kwRows.filter(r => r.project_name === projectSlug);
-  return filtered.map(kwRowToUi);
+    // 3. Fallback to localStorage
+    const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
+    const filtered = kwRows.filter(r => r.project_name === projectSlug);
+    return filtered.map(kwRowToUi);
+  }, { ttl: 30000, forceRefresh });
 }
 
 // Fetch ONLY the keyword rows whose text is in `keywords` (exact match on the
@@ -1121,6 +1149,7 @@ export async function updateKeywordRow(id, updates) {
 }
 
 export async function bulkUpdateKeywordRows(ids, field, value) {
+  invalidateCache('keywords');
   if (isLocalMode) {
     const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
     const dbUpdates = kwUpdatesToDb({ [field]: value });
@@ -1146,6 +1175,7 @@ export async function bulkUpdateKeywordRows(ids, field, value) {
 }
 
 export async function deleteKeywordRow(id) {
+  invalidateCache('keywords');
   if (isLocalMode) {
     const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
     const updated = kwRows.filter(r => String(r.id) !== String(id));
@@ -1166,6 +1196,7 @@ export async function deleteKeywordRow(id) {
 }
 
 export async function bulkDeleteKeywordRows(ids) {
+  invalidateCache('keywords');
   if (isLocalMode) {
     const kwRows = JSON.parse(localStorage.getItem('seo_keyword_categories') || '[]');
     const stringIds = ids.map(String);
@@ -1844,25 +1875,29 @@ function competitorRowToUi(row) {
   };
 }
 
-export async function fetchCompetitors(projectSlug) {
-  if (isLocalMode) {
-    const rows = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
-    return rows.filter(r => !projectSlug || r.projectSlug === projectSlug).map(competitorRowToUi);
-  }
+export async function fetchCompetitors(projectSlug, options = {}) {
+  const cacheKey = `competitors:${projectSlug || 'all'}`;
+  return cachedFetch(cacheKey, async () => {
+    if (isLocalMode) {
+      const rows = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
+      return rows.filter(r => !projectSlug || r.projectSlug === projectSlug).map(competitorRowToUi);
+    }
 
-  const url = projectSlug
-    ? `${CATEGORY_API_BASE}/competitors?project=${encodeURIComponent(projectSlug)}`
-    : `${CATEGORY_API_BASE}/competitors`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail || 'Failed to load competitors.');
-  }
-  const data = await res.json();
-  return (data.competitors || []).map(competitorRowToUi);
+    const url = projectSlug
+      ? `${CATEGORY_API_BASE}/competitors?project=${encodeURIComponent(projectSlug)}`
+      : `${CATEGORY_API_BASE}/competitors`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail || 'Failed to load competitors.');
+    }
+    const data = await res.json();
+    return (data.competitors || []).map(competitorRowToUi);
+  }, { ttl: 30000, ...options });
 }
 
 export async function insertCompetitor({ domain, name, da, targetRegions, projectSlug }) {
+  invalidateCache('competitors');
   if (isLocalMode) {
     const rows = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
     const maxId = rows.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
@@ -1899,6 +1934,7 @@ export async function insertCompetitor({ domain, name, da, targetRegions, projec
 }
 
 export async function updateCompetitor(id, updates) {
+  invalidateCache('competitors');
   if (isLocalMode) {
     const rows = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
     const index = rows.findIndex(r => String(r.id) === String(id));
@@ -1921,6 +1957,7 @@ export async function updateCompetitor(id, updates) {
 }
 
 export async function deleteCompetitor(id) {
+  invalidateCache('competitors');
   if (isLocalMode) {
     const rows = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
     localStorage.setItem('seo_competitors', JSON.stringify(rows.filter(r => String(r.id) !== String(id))));
@@ -1941,6 +1978,7 @@ export async function deleteCompetitor(id) {
 }
 
 export async function deleteCompetitorProjectData(slug) {
+  invalidateCache('competitors');
   if (isLocalMode) {
     const competitors = JSON.parse(localStorage.getItem('seo_competitors') || '[]');
     const updated = competitors.filter(r => r.projectSlug !== slug);

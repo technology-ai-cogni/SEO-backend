@@ -26,11 +26,22 @@ import os
 import re
 import json
 import time
+import asyncio
 from urllib.parse import quote, urlparse
+from typing import List, Tuple, Optional, Dict, Any
 import requests
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
+
+try:
+    from core.rate_limiter import external_api_limiter
+except ImportError:
+    try:
+        from backend.core.rate_limiter import external_api_limiter
+    except ImportError:
+        external_api_limiter = None
 
 # --- Bright Data credentials -----------------------------------------------
 BRIGHTDATA_API_KEY = os.environ.get("BRIGHTDATA_API_KEY")
@@ -398,6 +409,141 @@ def find_rank_by_domain(keyword, target_domain, country_code=None):
     """
     td = normalize_domain(target_domain)
     results = get_top_n_organic_results(keyword, TOP_N, country_code=country_code)
+    all_urls = [r["url"] for r in results]
+    if not td:
+        return NOT_FOUND_RANK, "", all_urls
+    for rank, r in enumerate(results, start=1):
+        if _domain_matches(r["domain"], td):
+            return rank, r["url"], all_urls
+    return NOT_FOUND_RANK, "", all_urls
+
+
+# ─── Async Bright Data Rank Checking (httpx.AsyncClient + Limiter) ───────────
+
+async def async_fetch_serp_page(
+    keyword: str,
+    start: int = 0,
+    country_code: Optional[str] = None,
+    num: Optional[int] = None,
+    client: Optional[httpx.AsyncClient] = None
+) -> Optional[dict]:
+    """
+    Asynchronously request one page of Google results through Bright Data SERP zone.
+    Protected by external_api_limiter.
+    """
+    if not BRIGHTDATA_API_KEY:
+        raise RuntimeError("BRIGHTDATA_API_KEY is not set.")
+
+    gl = country_code or COUNTRY_CODE
+    num_param = f"&num={num}" if num else ""
+    search_url = (
+        f"https://{GOOGLE_DOMAIN}/search?q={quote(keyword)}"
+        f"&gl={gl}&hl={LANGUAGE_CODE}&start={start}{num_param}&brd_json=1"
+    )
+
+    payload = {
+        "zone": BRIGHTDATA_SERP_ZONE,
+        "url": search_url,
+        "format": "raw",
+    }
+    headers = {
+        "Authorization": f"Bearer {BRIGHTDATA_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    async def _do_fetch(http_c: httpx.AsyncClient):
+        for attempt in range(1, MAX_REQUEST_RETRIES + 1):
+            try:
+                if external_api_limiter:
+                    async with external_api_limiter.limit("brightdata"):
+                        resp = await http_c.post(
+                            BRIGHTDATA_REQUEST_URL,
+                            headers=headers,
+                            json=payload,
+                            timeout=float(REQUEST_TIMEOUT)
+                        )
+                else:
+                    resp = await http_c.post(
+                        BRIGHTDATA_REQUEST_URL,
+                        headers=headers,
+                        json=payload,
+                        timeout=float(REQUEST_TIMEOUT)
+                    )
+
+                if resp.status_code in RETRYABLE_HTTP_STATUSES and attempt < MAX_REQUEST_RETRIES:
+                    await asyncio.sleep(RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1)))
+                    continue
+
+                resp.raise_for_status()
+                data = resp.json()
+                if isinstance(data, dict) and "organic" in data:
+                    return data
+                return None
+            except Exception:
+                if attempt < MAX_REQUEST_RETRIES:
+                    await asyncio.sleep(RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1)))
+                else:
+                    return None
+        return None
+
+    if client:
+        return await _do_fetch(client)
+    else:
+        async with httpx.AsyncClient(timeout=float(REQUEST_TIMEOUT)) as local_c:
+            return await _do_fetch(local_c)
+
+
+async def async_get_top_n_organic_results(
+    keyword: str,
+    n: int = TOP_N,
+    country_code: Optional[str] = None,
+    client: Optional[httpx.AsyncClient] = None
+) -> List[dict]:
+    """Async SERP result collection for keyword."""
+    results, seen = [], set()
+    max_pages = max(5, (n // 10) + 2)
+    empty = 0
+    for page_idx in range(max_pages):
+        if len(results) >= n:
+            break
+        start = page_idx * RESULTS_PER_PAGE
+        num = max(n, 40) if start == 0 else None
+        data = await async_fetch_serp_page(
+            keyword, start=start, country_code=country_code, num=num, client=client
+        )
+        if not data:
+            empty += 1
+            if empty >= 2:
+                break
+            continue
+        added = 0
+        for r in parse_organic_results(data):
+            key = clean_url(r["url"])
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(r)
+            added += 1
+            if len(results) >= n:
+                break
+        empty = 0 if added else empty + 1
+        if empty >= 2:
+            break
+        await asyncio.sleep(SLEEP_BETWEEN_REQUESTS)
+    return results[:n]
+
+
+async def async_find_rank_by_domain(
+    keyword: str,
+    target_domain: str,
+    country_code: Optional[str] = None,
+    client: Optional[httpx.AsyncClient] = None
+) -> Tuple[int, str, List[str]]:
+    """Async domain rank finder with Bright Data SERP parsing."""
+    td = normalize_domain(target_domain)
+    results = await async_get_top_n_organic_results(
+        keyword, TOP_N, country_code=country_code, client=client
+    )
     all_urls = [r["url"] for r in results]
     if not td:
         return NOT_FOUND_RANK, "", all_urls

@@ -19,6 +19,8 @@ from typing import Dict, Any, List, Tuple, Optional
 from sqlalchemy import text
 from dotenv import load_dotenv
 
+from functools import lru_cache
+
 from core.db import engine_kwargs, DATABASE_URL
 from sqlalchemy import create_engine
 
@@ -66,40 +68,85 @@ def get_embedding(text_to_embed: str) -> List[float]:
         return (vec / norm).tolist()
 
 
-_LOCATION_WORDS_SET = {
-    "london", "uk", "usa", "ny", "york", "delhi", "mumbai", "sydney", "toronto",
-    "chicago", "california", "dubai", "pune", "bangalore", "hyderabad", "chennai",
-    "kolkata", "ahmedabad", "noida", "gurgaon", "gurugram", "india", "australia",
-    "canada", "singapore", "us", "uae", "tx", "texas", "fl", "florida", "ca",
-    "san", "francisco", "boston", "seattle", "austin", "dallas", "houston"
-}
+@lru_cache(maxsize=8192)
+def clean_location_from_text(text: str) -> str:
+    """
+    Dynamic Context-Aware AI Location Stripper (Zero-Maintenance):
+    Uses LLM (gpt-4o-mini) to dynamically identify and remove ANY geographical place,
+    city, town, state, country, province, district, county, neighborhood, street, or area entity from text.
+    
+    Preserves essential topic modifiers (like 'International', 'Global', 'CBSE', 'ICSE', 'IB',
+    'Digital', 'Marketing', 'Commercial', 'Residential', 'Logistics', etc.).
+    
+    Results are cached in-memory with LRU cache (8192 entries) for sub-millisecond repeated lookups.
+    """
+    if not text or not text.strip():
+        return ""
+
+    raw_text = text.strip()
+
+    # Fast normalization for obvious universal noise
+    quick_clean = re.sub(r"\b(near\s+me|near\s+by|in\s+my\s+area|around\s+me)\b", "", raw_text, flags=re.IGNORECASE).strip()
+    quick_clean = re.sub(r"\b(in|near|at|around|from)\s*$", "", quick_clean, flags=re.IGNORECASE).strip()
+
+    client = _get_openai_client()
+    if not client:
+        return quick_clean
+
+    prompt = (
+        f"Input Keyword/Phrase: \"{raw_text}\"\n\n"
+        "Task: Identify and REMOVE all geographical location names, places, cities, states, countries, provinces, districts, neighborhoods, or areas from this phrase.\n"
+        "Rules:\n"
+        "1. REMOVE any location or place name (e.g. 'Mumbai', 'Navi Mumbai', 'Pune', 'Bangalore', 'Delhi', 'London', 'New York', 'Texas', 'UK', 'USA', 'Dubai', 'Jayanagar', 'SoHo', etc.).\n"
+        "2. REMOVE location prepositions ('in', 'at', 'near', 'around', 'of', 'for') that only refer to the removed location.\n"
+        "3. RETAIN and PRESERVE all topic modifiers, curriculum names, service types, and industry descriptors (e.g. 'International', 'Global', 'CBSE', 'ICSE', 'IB', 'Digital', 'Marketing', 'Commercial', 'Logistics', 'Schools', 'Dental', 'Real Estate').\n"
+        "4. Return ONLY the cleaned, location-free topic phrase, nothing else."
+    )
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0
+        )
+        cleaned_ai = resp.choices[0].message.content.strip().strip("\"'").strip()
+        if cleaned_ai:
+            return cleaned_ai
+    except Exception as e:
+        print(f"[RAG Engine] Dynamic AI location stripper notice: {e}", flush=True)
+
+    return quick_clean
 
 
 def _extract_frequent_serp_words(keyword: str, serp_titles: Optional[List[str]]) -> str:
     """
     Extracts words that appear at least 2 times across the fetched Top 3 SERP titles (or in keyword).
-    Excludes stop words, numbers, and location names.
+    Excludes stop words, numbers, and dynamically stripped location terms.
     """
     stop_words = {
         "in", "for", "near", "at", "of", "the", "and", "a", "an", "is", "to", "with", "by", "from",
-        "best", "top", "which", "what", "how", "where", "who", "why"
+        "best", "top", "which", "what", "how", "where", "who", "why", "are", "these", "this", "that", "those"
     }
+
+    # Pre-clean locations from keyword and SERP titles using dynamic AI stripper
+    clean_kw = clean_location_from_text(keyword or "")
+    clean_titles = [clean_location_from_text(t) for t in (serp_titles or [])[:3]]
     
-    all_text = (keyword or "") + " "
-    if serp_titles:
-        all_text += " ".join(serp_titles[:3])
+    all_text = (clean_kw or "") + " "
+    if clean_titles:
+        all_text += " ".join(clean_titles)
 
     words = re.findall(r"\b[A-Za-z0-9]+\b", all_text)
     counts = Counter([w.lower() for w in words])
     
-    kw_words = set(re.findall(r"\b[A-Za-z0-9]+\b", (keyword or "").lower()))
+    kw_words = set(re.findall(r"\b[A-Za-z0-9]+\b", (clean_kw or "").lower()))
     
     frequent_words = []
     seen = set()
     for w in words:
         w_lower = w.lower()
-        # Exclude stop words, short words, numbers, and locations
-        if w_lower in stop_words or len(w_lower) <= 2 or re.search(r"\d", w) or w_lower in _LOCATION_WORDS_SET:
+        # Exclude stop words, short words, and numbers
+        if w_lower in stop_words or len(w_lower) <= 2 or re.search(r"\d", w):
             continue
         # Words must appear at least 2 times across SERP titles (or present in target keyword)
         if counts[w_lower] >= 2 or w_lower in kw_words:
@@ -107,14 +154,14 @@ def _extract_frequent_serp_words(keyword: str, serp_titles: Optional[List[str]])
                 seen.add(w_lower)
                 frequent_words.append(w.capitalize())
 
-    return " ".join(frequent_words) if frequent_words else (keyword or "").title()
+    return " ".join(frequent_words) if frequent_words else clean_kw.title()
 
 
 def _validate_and_clean_category(category_name: str, keyword: str, serp_titles: Optional[List[str]]) -> str:
     """
     FINAL VERIFICATION STEP:
     1. Removes any numbers/digits.
-    2. Removes any city, state, country, or location names.
+    2. Dynamic AI location stripping for any residual place names.
     3. Final Frequency Check: Verifies every word in the category appears 
        at least 2 times across the Top 3 SERP titles (or in target keyword).
     """
@@ -123,32 +170,43 @@ def _validate_and_clean_category(category_name: str, keyword: str, serp_titles: 
 
     has_bt = category_name.lower().startswith("best/top")
     clean = re.sub(r"^(best/top|best|top)\s+", "", category_name, flags=re.IGNORECASE).strip()
+    
+    # Strip any locations dynamically
+    clean = clean_location_from_text(clean)
 
-    all_text = (keyword or "") + " "
-    if serp_titles:
-        all_text += " ".join(serp_titles[:3])
+    clean_kw = clean_location_from_text(keyword or "")
+    clean_titles = [clean_location_from_text(t) for t in (serp_titles or [])[:3]]
+
+    all_text = (clean_kw or "") + " "
+    if clean_titles:
+        all_text += " ".join(clean_titles)
+
+    stop_words = {
+        "in", "for", "near", "at", "of", "the", "and", "a", "an", "is", "to", "with", "by", "from",
+        "best", "top", "which", "what", "how", "where", "who", "why", "are", "these", "this", "that", "those"
+    }
 
     raw_words = re.findall(r"\b[A-Za-z0-9]+\b", all_text)
     counts = Counter([w.lower() for w in raw_words])
-    kw_words = set(re.findall(r"\b[A-Za-z0-9]+\b", (keyword or "").lower()))
+    kw_words = set(re.findall(r"\b[A-Za-z0-9]+\b", (clean_kw or "").lower()))
 
     words = clean.split()
     valid_words = []
 
     for w in words:
         w_lower = w.lower()
-        # 1. No Numbers/Digits
-        if re.search(r"\d", w):
+        # 1. No Numbers/Digits or Stop/Question words
+        if re.search(r"\d", w) or w_lower in stop_words or len(w_lower) <= 2:
             continue
-        # 2. No Location/Place Names
-        if w_lower in _LOCATION_WORDS_SET:
-            continue
-        # 3. Final Frequency Check: Must appear >= 2 times across SERP titles (or in target keyword)
+        # 2. Final Frequency Check: Must appear >= 2 times across SERP titles (or in target keyword)
         if counts[w_lower] >= 2 or w_lower in kw_words:
             valid_words.append(w.capitalize() if w.islower() or w.istitle() else w)
 
     if not valid_words:
-        valid_words = [w.capitalize() for w in kw_words if not re.search(r"\d", w) and w.lower() not in _LOCATION_WORDS_SET]
+        valid_words = [
+            w.capitalize() for w in kw_words
+            if not re.search(r"\d", w) and w.lower() not in stop_words and len(w) > 2
+        ]
 
     res = " ".join(valid_words[:3])
     return f"Best/Top {res}".strip() if has_bt else res.strip()
@@ -231,24 +289,26 @@ def _refine_category_with_llm(frequent_words: str, keyword: str) -> str:
     """
     Applies LLM categorization prompt on frequent SERP words:
     - Removes brand/school/business names (e.g. D.A.V., EuroSchool).
-    - Removes cities/locations (London, Mumbai, Delhi).
+    - Removes all cities, states, countries, places, or location names (London, Mumbai, Delhi, Texas, UK, USA).
     - Retains specific topic modifiers (CBSE, ICSE, International, Digital).
     - Capped at maximum 3 words.
     - No hardcoded pluralization.
     """
     client = _get_openai_client()
+    clean_kw = clean_location_from_text(keyword)
+    clean_candidates = clean_location_from_text(frequent_words)
     if not client:
-        return frequent_words
+        return clean_candidates or frequent_words
 
     prompt = (
-        f"You are an expert SEO categorizer. Frequent candidate words extracted from SERP titles (frequency >= 2) for keyword '{keyword}' are '{frequent_words}'.\n"
+        f"You are an expert SEO categorizer. Frequent candidate words extracted from SERP titles (frequency >= 2) for keyword '{clean_kw}' are '{clean_candidates}'.\n"
         "Understand the search intent and arrange/phrase them into a single, clean, grammatically meaningful, professional SEO category name.\n"
         "CRITICAL RULES:\n"
         "1. FREQUENCY RULE: ONLY use words provided in the candidate list above (which appeared at least 2 times in SERP titles).\n"
         "2. NEVER include question words (e.g. 'which', 'what', 'how') or filler metadata words (e.g. 'child', 'parents', 'insights').\n"
         "3. REMOVE any specific brand name, business name, or school name (e.g. 'D.A.V.', 'EuroSchool', 'Horizon'). Keep category generic.\n"
-        "4. REMOVE any specific city, state, or neighborhood name (e.g. 'London', 'Navi', 'Mumbai', 'Airoli', 'UK', 'USA').\n"
-        "5. Retain specific topic modifiers (e.g. 'ICSE', 'CBSE', 'international', 'digital', 'marketing').\n"
+        "4. REMOVE any location, place, city, state, country, province, district, or neighborhood name (e.g. 'London', 'Navi Mumbai', 'Mumbai', 'Pune', 'Bangalore', 'Delhi', 'California', 'Texas', 'UK', 'USA', 'India'). The category MUST be 100% topic-focused and location-neutral.\n"
+        "5. RETAIN and PRESERVE essential topic modifiers (e.g. 'International', 'Global', 'ICSE', 'CBSE', 'IB', 'Digital', 'Marketing', 'Commercial'). NEVER strip 'international' or 'global' when they describe a curriculum, business, or service type.\n"
         "6. Keep it concise (maximum 3 words). Do not add 'Best' or 'Top' (handled separately).\n"
         "Output ONLY the refined category name, nothing else."
     )
@@ -260,10 +320,11 @@ def _refine_category_with_llm(frequent_words: str, keyword: str) -> str:
             temperature=0.0
         )
         refined = resp.choices[0].message.content.strip().strip("\"'")
-        return refined if refined else frequent_words
+        refined = clean_location_from_text(refined)
+        return refined if refined else clean_candidates
     except Exception as e:
         print(f"[RAG Engine] LLM category refinement error: {e}", flush=True)
-        return frequent_words
+        return clean_candidates
 
 
 def _ensure_project_exists(project_slug: str):
@@ -335,28 +396,36 @@ def assign_cluster_rag(project_slug: str, category_name: str) -> str:
     """
     Dynamically assigns a category to a broad cluster.
     RULE: The cluster name MUST be contained within (or derived directly from) the category name itself.
+    NEVER contains any location, city, state, or country name.
     """
     if not category_name or category_name.strip() in ("General", "Uncategorized", "—"):
         return "General"
 
-    # Strip Best/Top prefix for cluster concept
+    # Strip Best/Top prefix and any location names for cluster concept
     clean_cat = re.sub(r"^(best/top|best|top)\s+", "", category_name, flags=re.IGNORECASE).strip()
+    clean_cat = clean_location_from_text(clean_cat)
     clean_cat_lower = clean_cat.lower()
+
+    if not clean_cat:
+        return "General"
 
     # Search existing vector clusters
     similar_clusters = search_similar_clusters(project_slug, clean_cat, top_k=5)
 
-    # Filter matched clusters: Cluster name MUST be present inside the category_name
+    # Filter matched clusters: Cluster name MUST be present inside the category_name and have NO locations
     for cls_item in similar_clusters:
-        cls_name = cls_item["name"]
+        cls_name = clean_location_from_text(cls_item["name"])
         cls_lower = cls_name.lower()
         if cls_item["similarity"] >= 0.75 and (cls_lower in category_name.lower() or cls_lower in clean_cat_lower):
             _map_category_to_cluster(project_slug, category_name, cls_name)
             print(f"[RAG CLUSTER MATCH] Category: '{category_name}' -> Cluster: '{cls_name}' (Cosine Sim: {cls_item['similarity']:.4f})", flush=True)
             return cls_name
 
-    # Derive cluster directly FROM the category name itself
-    words = [w.capitalize() for w in clean_cat.split() if w.lower() not in ("best", "top", "in", "for", "near", "and", "the", "a", "an")]
+    # Derive cluster directly FROM the category name itself, excluding stop words and location words
+    words = [
+        w.capitalize() for w in clean_cat.split()
+        if w.lower() not in ("best", "top", "in", "for", "near", "and", "the", "a", "an", "at", "around", "of") and len(w) > 2
+    ]
     
     if len(words) >= 2:
         broad_cluster = " ".join(words)
@@ -364,6 +433,10 @@ def assign_cluster_rag(project_slug: str, category_name: str) -> str:
         broad_cluster = words[0]
     else:
         broad_cluster = clean_cat.title()
+
+    broad_cluster = clean_location_from_text(broad_cluster)
+    if not broad_cluster:
+        broad_cluster = "General"
 
     upsert_cluster_vector(project_slug, broad_cluster)
     _map_category_to_cluster(project_slug, category_name, broad_cluster)
@@ -400,18 +473,22 @@ def _has_best_or_top(titles: Optional[List[str]]) -> bool:
 
 def categorize_keyword_rag(project_slug: str, keyword: str, serp_titles: Optional[List[str]] = None) -> Tuple[str, str, float, str]:
     """
-    3-Tier Category & Cluster RAG Pipeline with Best/Top Rule & Previous LLM Rules.
+    3-Tier Category & Cluster RAG Pipeline with Best/Top Rule & Location-Agnostic Processing.
     Returns (assigned_category, assigned_cluster, similarity_score, match_tier)
     """
     has_best_top = _has_best_or_top(serp_titles) or bool(re.search(r"\b(best|top)\b", keyword, re.IGNORECASE))
     
-    context_text = f"Keyword: {keyword}"
-    if serp_titles:
-        context_text += "\nSERP Titles: " + " | ".join(serp_titles[:3])
+    # Strip locations from keyword and SERP titles for location-agnostic category search & vector matching
+    clean_kw = clean_location_from_text(keyword)
+    clean_titles = [clean_location_from_text(t) for t in (serp_titles or [])[:3]]
 
-    print(f"[RAG START] Processing Keyword: '{keyword}' (Project: '{project_slug}')", flush=True)
+    context_text = f"Keyword: {clean_kw}"
+    if clean_titles:
+        context_text += "\nSERP Titles: " + " | ".join(clean_titles)
 
-    # Search existing categories in pgvector
+    print(f"[RAG START] Processing Keyword: '{keyword}' (Cleaned: '{clean_kw}', Project: '{project_slug}')", flush=True)
+
+    # Search existing categories in pgvector with location-agnostic context
     candidates = search_similar_categories(project_slug, context_text, top_k=5, has_best_top=has_best_top)
 
     assigned_category = None
@@ -420,18 +497,18 @@ def categorize_keyword_rag(project_slug: str, keyword: str, serp_titles: Optiona
 
     # Tier 1: Instant Match (Cosine Similarity >= 0.88)
     if candidates and candidates[0]["similarity"] >= 0.88:
-        assigned_category = candidates[0]["name"]
+        assigned_category = clean_location_from_text(candidates[0]["name"])
         similarity_score = candidates[0]["similarity"]
         match_tier = "tier_1_exact"
         print(f"[RAG TIER 1 - INSTANT VECTOR MATCH] '{keyword}' -> '{assigned_category}' (Sim: {similarity_score:.4f}, Latency: <10ms, Tokens: 0)", flush=True)
 
     # Tier 2: RAG Candidate Selection (0.70 <= Cosine Similarity < 0.88)
     elif candidates and candidates[0]["similarity"] >= 0.70:
-        top_candidates = [c["name"] for c in candidates if c["similarity"] >= 0.70]
+        top_candidates = [clean_location_from_text(c["name"]) for c in candidates if c["similarity"] >= 0.70]
         client = _get_openai_client()
 
         if client and top_candidates:
-            prompt = f"""Target Keyword: "{keyword}"
+            prompt = f"""Target Keyword: "{clean_kw}"
 Context: "{context_text}"
 
 Top Candidate Categories:
@@ -452,7 +529,7 @@ Instructions:
                 parsed = json.loads(res.choices[0].message.content)
                 choice = parsed.get("category")
                 if choice and choice != "NONE" and choice in top_candidates:
-                    assigned_category = choice
+                    assigned_category = clean_location_from_text(choice)
                     similarity_score = candidates[0]["similarity"]
                     match_tier = "tier_2_rag"
                     print(f"[RAG TIER 2 - LLM CANDIDATE MATCH] '{keyword}' -> '{assigned_category}' (Sim: {similarity_score:.4f}, Candidates: {len(top_candidates)})", flush=True)
@@ -474,10 +551,10 @@ Instructions:
         match_tier = "tier_3_new"
 
         # Index new category into vector store
-        upsert_category_vector(project_slug, assigned_category, f"Category for {keyword}")
+        upsert_category_vector(project_slug, assigned_category, f"Category for {clean_kw}")
         print(f"[RAG TIER 3 - NEW CATEGORY CREATED & INDEXED] '{keyword}' -> '{assigned_category}' (Vector Store Updated)", flush=True)
 
-    # Assign Cluster in Real-Time
+    # Assign Cluster in Real-Time (guaranteed location-free)
     assigned_cluster = assign_cluster_rag(project_slug, assigned_category)
 
     return assigned_category, assigned_cluster, similarity_score, match_tier

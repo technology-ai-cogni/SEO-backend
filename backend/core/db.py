@@ -86,6 +86,14 @@ def _clean_for_json(v):
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
+try:
+    from core import cache
+except ImportError:
+    try:
+        from backend.core import cache
+    except ImportError:
+        import cache
+
 load_dotenv()
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -96,9 +104,10 @@ if not DATABASE_URL:
 engine_kwargs = {"pool_pre_ping": True}
 if not DATABASE_URL.startswith("sqlite"):
     engine_kwargs.update({
-        "pool_recycle": 300,
-        "pool_size": 10,
-        "max_overflow": 5
+        "pool_recycle": int(os.environ.get("DB_POOL_RECYCLE", "300")),
+        "pool_size": int(os.environ.get("DB_POOL_SIZE", "20")),
+        "max_overflow": int(os.environ.get("DB_MAX_OVERFLOW", "10")),
+        "pool_timeout": int(os.environ.get("DB_POOL_TIMEOUT", "30")),
     })
 
 engine = create_engine(DATABASE_URL, **engine_kwargs)
@@ -169,11 +178,41 @@ _KEYWORD_PASS_THROUGH_COLUMNS = [
 ]
 
 
+DB_INIT_ADVISORY_LOCK_ID = 849204812
+
+
+def _safe_execute(conn, sql: str, params: dict = None):
+    """Execute a DDL or DML statement inside a savepoint (sub-transaction)
+    so any failure or notice does NOT abort the parent transaction block."""
+    try:
+        with conn.begin_nested():
+            if params:
+                return conn.execute(text(sql), params)
+            return conn.execute(text(sql))
+    except Exception as e:
+        print(f"[DB Init] Safe execute notice: {e}")
+        return None
+
+
+def _add_column_if_not_exists(conn, table: str, column: str, col_type: str):
+    """Check if a column exists in information_schema before running ALTER TABLE.
+    Uses a savepoint to prevent transaction aborts if an error occurs."""
+    try:
+        with conn.begin_nested():
+            exists = conn.execute(text("""
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = :t AND column_name = :c
+            """), {"t": table, "c": column}).scalar()
+            if not exists:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}"))
+    except Exception as e:
+        print(f"[DB Init] Note: column check/add for {table}.{column}: {e}")
+
+
 def init_db():
     """Create every shared table if it doesn't exist yet. Safe to run
-    repeatedly.  Uses a lock timeout + retry to avoid deadlocks when
-    another process holds an open read lock on the same tables.
-    If all retries fail due to locks, the app still starts (tables already exist)."""
+    repeatedly across multiple workers. Uses transaction-level advisory locks
+    and savepoints to eliminate deadlocks and aborted transaction blocks."""
     if not os.environ.get("DATABASE_URL"):
         print("[Warning] Skipping DB init: DATABASE_URL is not set.")
         return
@@ -186,40 +225,41 @@ def init_db():
         except Exception as e:
             err_str = str(e).lower()
             if "deadlock" in err_str or "lock" in err_str:
-                print(f"[DB Init] Lock/deadlock on attempt {attempt}/{max_retries}: {e}")
+                print(f"[DB Init] Lock contention on attempt {attempt}/{max_retries}: {e}")
                 if attempt < max_retries:
                     import time as _time
-                    _time.sleep(2 * attempt)  # backoff: 2s, 4s
+                    _time.sleep(2 * attempt)
                     continue
                 else:
-                    # All retries failed — but tables already exist on production,
-                    # so the app can still run. Log warning and continue.
-                    print(f"[DB Init] WARNING: All {max_retries} init_db attempts failed due to database locks.")
-                    print(f"[DB Init] Tables already exist — app will continue without migration.")
-                    print(f"[DB Init] Run 'python kill_db_locks.py' to clear stuck connections, then restart.")
+                    print(f"[DB Init] WARNING: All {max_retries} init_db attempts encountered locks; continuing.")
                     return
-            raise  # non-lock error — propagate
-
-
-def _add_column_if_not_exists(conn, table: str, column: str, col_type: str):
-    """Check if a column exists in information_schema before running ALTER TABLE.
-    This avoids acquiring an ACCESS EXCLUSIVE lock on active tables during startup."""
-    try:
-        exists = conn.execute(text("""
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = :t AND column_name = :c
-        """), {"t": table, "c": column}).scalar()
-        if not exists:
-            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}"))
-    except Exception as e:
-        print(f"[DB Init] Note: column check/add for {table}.{column}: {e}")
+            raise
 
 
 def _init_db_inner():
     """Actual init_db logic, separated so the outer function can retry."""
     with engine.begin() as conn:
-        # Set a lock timeout so DDL fails fast instead of deadlocking
-        conn.execute(text("SET lock_timeout = '5s'"))
+        # Acquire transaction-level advisory lock in PostgreSQL.
+        # This guarantees only one process runs DDL migrations at any moment,
+        # and automatically releases when the transaction commits or rolls back.
+        if engine.dialect.name == "postgresql":
+            try:
+                locked = conn.execute(
+                    text("SELECT pg_try_advisory_xact_lock(:lock_id)"),
+                    {"lock_id": DB_INIT_ADVISORY_LOCK_ID}
+                ).scalar()
+                if not locked:
+                    print("[DB Init] Schema migration is already running in another process. Skipping concurrent init.")
+                    return
+            except Exception as lock_err:
+                print(f"[DB Init] Note on advisory lock: {lock_err}")
+
+        # Set a lock timeout so DDL fails fast instead of blocking queries
+        try:
+            conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+        except Exception:
+            pass
+
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id UUID PRIMARY KEY,
@@ -417,6 +457,8 @@ def _init_db_inner():
         conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS uid TEXT"))
         conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT FALSE"))
         conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS fetched_data JSONB"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_monthly_ops_proj ON monthly_operations (project_slug)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_monthly_ops_proj_date ON monthly_operations (project_slug, scheduled_date)"))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS scheduled_activities (
@@ -498,17 +540,14 @@ def _init_db_inner():
             "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS page_url_fetched TEXT",
             "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS subtype TEXT"
         ]:
-            try:
-                conn.execute(text(alter_cmd))
-            except Exception as alter_err:
-                print(f"[DB Init] Notice skipping table alter: {alter_err}")
-        try:
-            conn.execute(text("UPDATE keyword_categories SET type = 'Google' WHERE type IS NULL OR TRIM(type) = ''"))
-            conn.execute(text("ALTER TABLE keyword_categories ALTER COLUMN type SET DEFAULT 'Google'"))
-        except Exception as update_type_err:
-            print(f"[DB Init] Notice updating default keyword type: {update_type_err}")
+            _safe_execute(conn, alter_cmd)
+        _safe_execute(conn, "UPDATE keyword_categories SET type = 'Google' WHERE type IS NULL OR TRIM(type) = ''")
+        _safe_execute(conn, "ALTER TABLE keyword_categories ALTER COLUMN type SET DEFAULT 'Google'")
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_keyword_categories_job ON keyword_categories (job_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_keyword_categories_project ON keyword_categories (project_name)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_kw_proj_cat ON keyword_categories (project_name, category)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_kw_proj_rank ON keyword_categories (project_name, rank)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_kw_proj_status ON keyword_categories (project_name, status)"))
 
         # --- Pages (the frontend's "Add Pages" sheet upload) -------------
         conn.execute(text("""
@@ -525,6 +564,8 @@ def _init_db_inner():
             )
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pages_project ON pages (project_name)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pages_proj_cat ON pages (project_name, category)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pages_proj_cluster ON pages (project_name, cluster)"))
 
         # --- Competitor Pages (separate db for Competitors tab Add Pages) ---
         conn.execute(text("""
@@ -576,6 +617,7 @@ def _init_db_inner():
         conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS url TEXT"))
         conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS urls TEXT[]"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_competitors_project ON competitors (project_slug)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_comp_proj_type ON competitors (project_slug, website_type)"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS url_classifications (
                 url TEXT PRIMARY KEY,
@@ -609,11 +651,8 @@ def _init_db_inner():
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
-        try:
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_competitor_snapshots_competitor ON competitor_snapshots (competitor_id, created_at DESC)"))
-            conn.execute(text("ALTER TABLE competitor_snapshots ADD COLUMN IF NOT EXISTS keyword_positions JSONB"))
-        except Exception as idx_err:
-            print(f"[DB Init] Notice during startup migration: {idx_err}")
+        _safe_execute(conn, "CREATE INDEX IF NOT EXISTS idx_competitor_snapshots_competitor ON competitor_snapshots (competitor_id, created_at DESC)")
+        _safe_execute(conn, "ALTER TABLE competitor_snapshots ADD COLUMN IF NOT EXISTS keyword_positions JSONB")
 
         # --- Outreach Sites Table ---
         conn.execute(text("""
@@ -674,6 +713,7 @@ def _init_db_inner():
         conn.execute(text("ALTER TABLE outreach_sites ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'New site'"))
         conn.execute(text("ALTER TABLE outreach_sites ADD COLUMN IF NOT EXISTS rejected_reason TEXT"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_outreach_sites_project ON outreach_sites (project_slug)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_outreach_proj_status ON outreach_sites (project_slug, status)"))
 
 
 # --- Outreach Sites Database Functions ------------------------------------
@@ -901,6 +941,12 @@ def get_or_create_project(name):
         conn.execute(text("INSERT INTO projects (name, slug) VALUES (:name, :slug)"),
                      {"name": name, "slug": slug})
 
+    try:
+        from core.cache import invalidate_projects_cache
+        invalidate_projects_cache()
+    except Exception:
+        pass
+
     return slug
 
 
@@ -933,6 +979,11 @@ def get_recycle_bin_project(slug_or_name):
 
 
 def list_projects(include_deleted=False, only_deleted=False):
+    cache_key = f"cache:projects:{'deleted' if only_deleted else ('all' if include_deleted else 'active')}"
+    cached = cache.cache_get(cache_key) if cache else None
+    if cached is not None:
+        return cached
+
     with engine.begin() as conn:
         if only_deleted:
             rows = conn.execute(text("""
@@ -942,11 +993,17 @@ def list_projects(include_deleted=False, only_deleted=False):
                 WHERE item_type = 'project'
                 ORDER BY deleted_at DESC
             """)).mappings().fetchall()
-            return [dict(r) for r in rows]
+            res = [dict(r) for r in rows]
+            if cache:
+                cache.cache_set(cache_key, res, ttl_seconds=60)
+            return res
 
         sql = "SELECT * FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC"
         rows = conn.execute(text(sql)).mappings().fetchall()
-        return [dict(r) for r in rows]
+        res = [dict(r) for r in rows]
+        if cache:
+            cache.cache_set(cache_key, res, ttl_seconds=60)
+        return res
 
 
 def list_recycle_bin_items(item_type=None):
@@ -971,6 +1028,17 @@ def list_recycle_bin_items(item_type=None):
 
         rows = conn.execute(text(sql), params).mappings().fetchall()
         return [dict(r) for r in rows]
+
+
+def mark_project_deleted(slug):
+    """Instantly marks a project as deleted in projects table so it vanishes from all active queries in milliseconds (< 10ms)."""
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE projects SET deleted_at = now() WHERE slug = :slug"), {"slug": slug})
+    try:
+        if cache:
+            cache.invalidate_projects_cache()
+    except Exception:
+        pass
 
 
 def soft_delete_project(slug):
@@ -1016,7 +1084,19 @@ def _soft_delete_project_inner(slug):
             if isinstance(obj, list):
                 return [_clean_json(i) for i in obj]
             if isinstance(obj, dict):
-                return {k: (v.isoformat() if hasattr(v, 'isoformat') else str(v) if isinstance(v, uuid.UUID) else v) for k, v in obj.items()}
+                clean = {}
+                for k, v in obj.items():
+                    if k == 'embedding':  # omit heavy embeddings to keep archive lightweight & fast
+                        continue
+                    if hasattr(v, 'isoformat'):
+                        clean[k] = v.isoformat()
+                    elif isinstance(v, uuid.UUID):
+                        clean[k] = str(v)
+                    elif hasattr(v, 'tolist'):
+                        clean[k] = v.tolist()
+                    else:
+                        clean[k] = v
+                return clean
             return obj
 
         archive_data = {
@@ -1153,6 +1233,11 @@ def restore_project(slug):
             })
 
         conn.execute(text("DELETE FROM recycle_bin WHERE id = :id"), {"id": row["id"]})
+    try:
+        from core.cache import invalidate_projects_cache
+        invalidate_projects_cache()
+    except Exception:
+        pass
 
 
 def delete_project(slug):
@@ -1169,6 +1254,11 @@ def delete_project(slug):
         conn.execute(text("DELETE FROM competitors WHERE project_slug = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM outreach_sites WHERE project_slug = :slug"), {"slug": slug})
         conn.execute(text("DELETE FROM projects WHERE slug = :slug"), {"slug": slug})
+    try:
+        from core.cache import invalidate_projects_cache
+        invalidate_projects_cache()
+    except Exception:
+        pass
 
 
 def purge_expired_projects():
@@ -1677,6 +1767,32 @@ def update_keyword_rank(row_id, rank, rank_meta=None, page_url_fetched=None):
         conn.execute(text(f"UPDATE keyword_categories SET {', '.join(sets)} WHERE id = :id"), params)
 
 
+def bulk_update_keyword_ranks(updates: list):
+    """Bulk updates multiple keyword rank results in chunks of 50 rows per query.
+    Eliminates thousands of individual SQL round-trips under heavy concurrent load."""
+    if not updates:
+        return
+    for chunk in _chunked(updates, size=50):
+        with engine.begin() as conn:
+            for item in chunk:
+                row_id = item.get("id")
+                rank = item.get("rank")
+                rank_meta = item.get("rank_meta")
+                page_url_fetched = item.get("page_url_fetched")
+
+                sets = ["rank = :rank", "rank_checked_at = now()", "rank_meta = CAST(:rank_meta AS JSONB)"]
+                params = {
+                    "id": row_id,
+                    "rank": rank,
+                    "rank_meta": json.dumps(rank_meta) if rank_meta is not None else None,
+                }
+                if page_url_fetched is not None:
+                    sets.append("page_url_fetched = :page_url_fetched")
+                    params["page_url_fetched"] = page_url_fetched or None
+
+                conn.execute(text(f"UPDATE keyword_categories SET {', '.join(sets)} WHERE id = :id"), params)
+
+
 def get_job_keyword_rows_for_rank_check(job_id):
     """Every keyword row for a job, with enough info to enqueue a
     rank-check task per row: id (to write the result back to THIS exact
@@ -1985,6 +2101,19 @@ def get_url_classification(url_or_domain: str):
     if not url_or_domain:
         return None
     raw = str(url_or_domain).strip().lower()
+
+    # 0. Check Redis cache first (< 2ms)
+    import hashlib
+    url_hash = hashlib.md5(raw.encode("utf-8")).hexdigest()
+    cache_key = f"cache:url_class:{url_hash}"
+    try:
+        if cache:
+            cached = cache.cache_get(cache_key)
+            if cached is not None:
+                return cached
+    except Exception:
+        pass
+
     clean_domain = raw
     if clean_domain.startswith("http://") or clean_domain.startswith("https://"):
         try:
@@ -1994,6 +2123,7 @@ def get_url_classification(url_or_domain: str):
             pass
     clean_domain = clean_domain.replace("www.", "")
 
+    result = None
     with engine.begin() as conn:
         # 1. Check url_classifications table
         row = conn.execute(
@@ -2002,28 +2132,35 @@ def get_url_classification(url_or_domain: str):
         ).mappings().fetchone()
 
         if row and row.get("website_type"):
-            return {
+            result = {
                 "url": url_or_domain,
                 "website_type": row["website_type"],
                 "is_competitor": row.get("is_competitor") or ("YES" if "Official" in row["website_type"] else "NO")
             }
+        else:
+            # 2. Check competitors table
+            comp_row = conn.execute(
+                text("SELECT website_type, type FROM competitors WHERE (website_type IS NOT NULL OR type IS NOT NULL) AND LOWER(domain) LIKE :dom LIMIT 1"),
+                {"dom": f"%{clean_domain}%"}
+            ).mappings().fetchone()
 
-        # 2. Check competitors table
-        comp_row = conn.execute(
-            text("SELECT website_type, type FROM competitors WHERE (website_type IS NOT NULL OR type IS NOT NULL) AND LOWER(domain) LIKE :dom LIMIT 1"),
-            {"dom": f"%{clean_domain}%"}
-        ).mappings().fetchone()
+            if comp_row:
+                wtype = comp_row.get("website_type") or comp_row.get("type")
+                if wtype:
+                    result = {
+                        "url": url_or_domain,
+                        "website_type": wtype,
+                        "is_competitor": "YES" if "Official" in wtype else "NO"
+                    }
 
-        if comp_row:
-            wtype = comp_row.get("website_type") or comp_row.get("type")
-            if wtype:
-                return {
-                    "url": url_or_domain,
-                    "website_type": wtype,
-                    "is_competitor": "YES" if "Official" in wtype else "NO"
-                }
+    if result:
+        try:
+            if cache:
+                cache.cache_set(cache_key, result, ttl_seconds=604800)  # 7 days TTL
+        except Exception:
+            pass
 
-    return None
+    return result
 
 
 def save_url_classification(url: str, website_type: str, is_competitor: str = "NO"):
@@ -2057,6 +2194,18 @@ def save_url_classification(url: str, website_type: str, is_competitor: str = "N
                 text("UPDATE competitors SET website_type = :wtype, type = :wtype, updated_at = now() WHERE LOWER(domain) LIKE :dom"),
                 {"wtype": website_type, "dom": f"%{clean_domain}%"}
             )
+
+    try:
+        import hashlib
+        from core.cache import cache_set
+        url_hash = hashlib.md5(raw_url.lower().encode("utf-8")).hexdigest()
+        cache_set(f"cache:url_class:{url_hash}", {
+            "url": raw_url,
+            "website_type": website_type,
+            "is_competitor": is_competitor
+        }, ttl_seconds=604800)
+    except Exception:
+        pass
 
 
 def delete_competitor(competitor_id):

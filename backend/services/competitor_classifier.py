@@ -1,14 +1,17 @@
 """
 Service for classifying URLs into website types ("Official Entity" vs "Platform")
 and determining competitor status ("YES" vs "NO") using OpenAI API.
+Provides both high-concurrency Async I/O (httpx.AsyncClient + AsyncOpenAI)
+and synchronous helper methods with connection pooling and caching.
 """
 
 import os
 import re
 import json
 import time
+import asyncio
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
@@ -16,7 +19,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 from bs4 import BeautifulSoup, Comment
 from dotenv import load_dotenv
-from openai import OpenAI
+import httpx
+from openai import OpenAI, AsyncOpenAI
 
 load_dotenv()
 
@@ -25,6 +29,14 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONNECT_TIMEOUT = 5.0
 DEFAULT_READ_TIMEOUT = 20.0
 DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+
+try:
+    from core.rate_limiter import external_api_limiter
+except ImportError:
+    try:
+        from backend.core.rate_limiter import external_api_limiter
+    except ImportError:
+        external_api_limiter = None
 
 REALISTIC_HEADERS = {
     "User-Agent": (
@@ -42,6 +54,15 @@ REALISTIC_HEADERS = {
 COOKIE_BANNER_PATTERNS = re.compile(
     r"cookie|gdpr|consent|privacy-banner|cookie-banner|onetrust|ccpa",
     re.IGNORECASE,
+)
+
+SYSTEM_CLASSIFICATION_PROMPT = (
+    "You are an expert website classification AI. "
+    "Analyze website metadata and content snippet to classify it into exactly one of two categories:\n\n"
+    "1. 'Official Entity': The website belongs to one specific organization, business, company, institution, university, school, college, hospital, hotel, restaurant, government department, NGO, SaaS company, manufacturer, retailer, startup, real estate firm, or brand (is_competitor: YES).\n"
+    "   Note: An official school/company site is 'Official Entity' even if the URL path is a blog/guide page on their domain.\n\n"
+    "2. 'Platform': Operating as a third-party marketplace, directory, listing portal, review aggregator, independent news/media portal, blog platform, search engine, or comparison portal (is_competitor: NO).\n\n"
+    "Respond ONLY in valid raw JSON with exact keys: 'website_type' ('Official Entity' or 'Platform') and 'is_competitor' ('YES' or 'NO')."
 )
 
 
@@ -62,25 +83,11 @@ def create_http_session() -> requests.Session:
     return session
 
 
-def scrape_website(session: requests.Session, url: str, max_words: int = 300) -> Dict[str, Any]:
-    """Fetches domain homepage via HTTP and extracts Title, Meta Description, Keywords, and Top 300 words."""
-    result = {
-        "original_url": url,
-        "final_url": url,
-        "domain": "",
-        "title": "",
-        "description": "",
-        "keywords": "",
-        "text_snippet": "",
-        "status_code": None,
-        "error": None
-    }
-
+def _normalize_scrape_target(url: str) -> Tuple[str, str]:
+    """Normalize input URL or domain to root domain and standard https target URL."""
     raw = (url or "").strip()
     if not raw:
-        result["error"] = "Empty URL/domain"
-        return result
-
+        return "", ""
     if not raw.startswith(("http://", "https://")):
         raw = "https://" + raw
 
@@ -90,41 +97,29 @@ def scrape_website(session: requests.Session, url: str, max_words: int = 300) ->
             domain = domain[4:]
         if not domain:
             domain = raw.replace("https://", "").replace("http://", "").split("/")[0].replace("www.", "")
-        result["domain"] = domain
-        target_url = f"https://{domain}"
     except Exception:
         domain = raw.replace("https://", "").replace("http://", "").split("/")[0].replace("www.", "")
-        result["domain"] = domain
-        target_url = f"https://{domain}"
+
+    return domain, f"https://{domain}" if domain else raw
+
+
+def _parse_scraped_soup(html_bytes: bytes, target_url: str, final_url: str, status_code: Optional[int], max_words: int = 300) -> Dict[str, Any]:
+    """Shared parsing logic for extracted HTML content across sync and async scraper."""
+    domain, _ = _normalize_scrape_target(final_url or target_url)
+    result = {
+        "original_url": target_url,
+        "final_url": final_url,
+        "domain": domain,
+        "title": "",
+        "description": "",
+        "keywords": "",
+        "text_snippet": "",
+        "status_code": status_code,
+        "error": None
+    }
 
     try:
-        try:
-            response = session.get(
-                target_url,
-                timeout=(DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT),
-                allow_redirects=True
-            )
-        except Exception:
-            target_url = f"http://{domain}"
-            response = session.get(
-                target_url,
-                timeout=(DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT),
-                allow_redirects=True
-            )
-
-        result["status_code"] = response.status_code
-        result["final_url"] = response.url
-        try:
-            netloc = urlparse(response.url).netloc.lower()
-            if netloc.startswith("www."):
-                netloc = netloc[4:]
-            result["domain"] = netloc or domain
-        except Exception:
-            pass
-
-        response.raise_for_status()
-
-        soup = BeautifulSoup(response.content, "lxml")
+        soup = BeautifulSoup(html_bytes, "lxml")
 
         # Decompose non-content tags
         for tag in soup(["script", "style", "svg", "noscript", "iframe"]):
@@ -171,21 +166,290 @@ def scrape_website(session: requests.Session, url: str, max_words: int = 300) ->
         raw_words = soup.get_text(separator=" ", strip=True).split()
         cleaned_words = [w for w in raw_words if w][:max_words]
         result["text_snippet"] = " ".join(cleaned_words)
-
-    except requests.exceptions.Timeout:
-        result["error"] = "Request timeout"
-    except requests.exceptions.SSLError:
-        result["error"] = "SSL certificate verification failed"
-    except requests.exceptions.ConnectionError:
-        result["error"] = "DNS or connection failure"
-    except requests.exceptions.HTTPError as e:
-        status_code = getattr(e.response, "status_code", "unknown") if hasattr(e, "response") else "unknown"
-        result["error"] = f"HTTP Error {status_code}"
     except Exception as e:
         result["error"] = f"Extraction failure: {str(e)}"
 
     return result
 
+
+def scrape_website(session: requests.Session, url: str, max_words: int = 300) -> Dict[str, Any]:
+    """Synchronous URL fetch via requests and HTML parsing with root domain fallback."""
+    domain, target_url = _normalize_scrape_target(url)
+    if not target_url:
+        return {
+            "original_url": url, "final_url": url, "domain": "", "title": "",
+            "description": "", "keywords": "", "text_snippet": "", "status_code": None,
+            "error": "Empty URL/domain"
+        }
+
+    try:
+        try:
+            response = session.get(
+                target_url,
+                timeout=(DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT),
+                allow_redirects=True
+            )
+        except Exception:
+            target_url = f"http://{domain}"
+            response = session.get(
+                target_url,
+                timeout=(DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT),
+                allow_redirects=True
+            )
+
+        response.raise_for_status()
+        return _parse_scraped_soup(response.content, target_url, str(response.url), response.status_code, max_words)
+    except Exception as e:
+        return {
+            "original_url": url,
+            "final_url": target_url,
+            "domain": domain,
+            "title": "",
+            "description": "",
+            "keywords": "",
+            "text_snippet": "",
+            "status_code": getattr(getattr(e, "response", None), "status_code", None),
+            "error": str(e)
+        }
+
+
+async def async_scrape_website(client: httpx.AsyncClient, url: str, max_words: int = 300) -> Dict[str, Any]:
+    """Asynchronous URL fetch via httpx.AsyncClient and HTML parsing with root domain fallback."""
+    domain, target_url = _normalize_scrape_target(url)
+    if not target_url:
+        return {
+            "original_url": url, "final_url": url, "domain": "", "title": "",
+            "description": "", "keywords": "", "text_snippet": "", "status_code": None,
+            "error": "Empty URL/domain"
+        }
+
+    try:
+        try:
+            response = await client.get(
+                target_url,
+                headers=REALISTIC_HEADERS,
+                follow_redirects=True,
+                timeout=15.0
+            )
+        except Exception:
+            target_url = f"http://{domain}"
+            response = await client.get(
+                target_url,
+                headers=REALISTIC_HEADERS,
+                follow_redirects=True,
+                timeout=15.0
+            )
+
+        response.raise_for_status()
+        return _parse_scraped_soup(response.content, target_url, str(response.url), response.status_code, max_words)
+    except Exception as e:
+        return {
+            "original_url": url,
+            "final_url": target_url,
+            "domain": domain,
+            "title": "",
+            "description": "",
+            "keywords": "",
+            "text_snippet": "",
+            "status_code": getattr(getattr(e, "response", None), "status_code", None),
+            "error": str(e)
+        }
+
+
+# ─── Async URL Classification (AsyncOpenAI + Token Bucket Semaphores) ────────
+
+async def async_classify_url(
+    url: str,
+    http_client: Optional[httpx.AsyncClient] = None,
+    openai_client: Optional[AsyncOpenAI] = None,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None
+) -> Dict[str, str]:
+    """
+    Asynchronously classifies a single URL with httpx + AsyncOpenAI.
+    Protected by external_api_limiter semaphore.
+    """
+    resolved_api_key = api_key or os.getenv("OPENAI_API_KEY")
+    if not resolved_api_key:
+        raise ValueError("OPENAI_API_KEY is not configured.")
+
+    target_model = model or DEFAULT_OPENAI_MODEL
+
+    # 1. Check DB cache first
+    try:
+        from core import db
+        cached = db.get_url_classification(url)
+        if cached and cached.get("website_type"):
+            return {
+                "url": url,
+                "website_type": cached["website_type"],
+                "is_competitor": cached.get("is_competitor", "NO")
+            }
+    except Exception:
+        pass
+
+    # 2. Async Scrape
+    if http_client:
+        page_data = await async_scrape_website(http_client, url)
+    else:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as local_http:
+            page_data = await async_scrape_website(local_http, url)
+
+    user_prompt = f"""Extracted Website Data:
+- Target URL: {page_data['original_url']}
+- Domain: {page_data['domain']}
+- Page Title: {page_data['title']}
+- Meta Description: {page_data['description']}
+- Meta Keywords: {page_data['keywords']}
+- Page Text Content: {page_data['text_snippet']}
+"""
+
+    ai_client = openai_client or AsyncOpenAI(api_key=resolved_api_key)
+    candidate_models = [target_model, "gpt-4o-mini", "gpt-4o"]
+    seen_models = []
+    for m in candidate_models:
+        if m and m not in seen_models:
+            seen_models.append(m)
+
+    for current_model in seen_models:
+        for attempt in range(3):
+            try:
+                if external_api_limiter:
+                    async with external_api_limiter.limit("openai"):
+                        response = await ai_client.chat.completions.create(
+                            model=current_model,
+                            messages=[
+                                {"role": "system", "content": SYSTEM_CLASSIFICATION_PROMPT},
+                                {"role": "user", "content": user_prompt}
+                            ],
+                            temperature=0.1,
+                            response_format={"type": "json_object"}
+                        )
+                else:
+                    response = await ai_client.chat.completions.create(
+                        model=current_model,
+                        messages=[
+                            {"role": "system", "content": SYSTEM_CLASSIFICATION_PROMPT},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        temperature=0.1,
+                        response_format={"type": "json_object"}
+                    )
+
+                content = response.choices[0].message.content.strip()
+                parsed_json = json.loads(content)
+
+                w_type = str(parsed_json.get("website_type", "Platform")).strip()
+                is_comp = str(parsed_json.get("is_competitor", "NO")).strip().upper()
+
+                if "Official" in w_type:
+                    w_type = "Official Entity"
+                    is_comp = "YES"
+                else:
+                    w_type = "Platform"
+                    is_comp = "NO"
+
+                return {
+                    "url": url,
+                    "website_type": w_type,
+                    "is_competitor": is_comp
+                }
+            except Exception as req_err:
+                logger.error(f"Async OpenAI classification error (model: {current_model}, attempt {attempt+1}): {req_err}")
+                await asyncio.sleep(1.5)
+
+    return {
+        "url": url,
+        "website_type": "Platform",
+        "is_competitor": "NO"
+    }
+
+
+async def async_classify_urls(
+    keyword: str,
+    urls: List[str],
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    batch_info: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    High-concurrency async batch classification with non-blocking I/O.
+    """
+    try:
+        from core import db
+    except Exception:
+        db = None
+
+    cache: Dict[str, Dict[str, str]] = {}
+    uncached_urls: List[str] = []
+
+    # 1. Check DB Cache
+    for u in urls:
+        clean_u = u.strip()
+        if not clean_u:
+            continue
+        if clean_u in cache:
+            continue
+        if db:
+            try:
+                db_res = db.get_url_classification(clean_u)
+                if db_res:
+                    cache[clean_u] = db_res
+                    continue
+            except Exception:
+                pass
+        if clean_u not in uncached_urls:
+            uncached_urls.append(clean_u)
+
+    resolved_api_key = api_key or os.getenv("OPENAI_API_KEY")
+
+    if uncached_urls and resolved_api_key:
+        sem = asyncio.Semaphore(15)
+        ai_client = AsyncOpenAI(api_key=resolved_api_key)
+
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as http_client:
+            async def _process_single(u_target: str):
+                async with sem:
+                    try:
+                        res = await async_classify_url(
+                            url=u_target,
+                            http_client=http_client,
+                            openai_client=ai_client,
+                            api_key=resolved_api_key,
+                            model=model
+                        )
+                        wtype = res.get("website_type", "Platform")
+                        is_comp = res.get("is_competitor", "NO")
+                        if db:
+                            try:
+                                db.save_url_classification(u_target, wtype, is_comp)
+                                db.update_competitor_website_type(u_target, wtype)
+                            except Exception:
+                                pass
+                        return u_target, res
+                    except Exception as e:
+                        fallback = {"url": u_target, "website_type": "Platform", "is_competitor": "NO"}
+                        if db:
+                            try:
+                                db.save_url_classification(u_target, "Platform", "NO")
+                                db.update_competitor_website_type(u_target, "Platform")
+                            except Exception:
+                                pass
+                        return u_target, fallback
+
+            tasks = [_process_single(u) for u in uncached_urls]
+            results_tuples = await asyncio.gather(*tasks, return_exceptions=False)
+            for u_k, u_res in results_tuples:
+                cache[u_k] = u_res
+
+    results = [cache[u.strip()] for u in urls if u.strip() in cache]
+    return {
+        "keyword": keyword,
+        "results": results
+    }
+
+
+# ─── Synchronous Wrapper Methods (Backward Compatibility) ────────────────────
 
 def classify_url(
     url: str,
@@ -207,12 +471,11 @@ def classify_url(
         session = create_http_session()
         close_session = True
 
-    # 1. Check DB cache first to avoid re-classifying already classified URLs
+    # 1. Check DB cache first
     try:
         from core import db
         cached = db.get_url_classification(url)
         if cached and cached.get("website_type"):
-            logger.info(f"[Classification Cache Hit] '{url}' already classified as '{cached['website_type']}'. Skipping re-classification.")
             return {
                 "url": url,
                 "website_type": cached["website_type"],
@@ -223,18 +486,6 @@ def classify_url(
 
     try:
         page_data = scrape_website(session, url)
-        if page_data.get("error"):
-            logger.warning(f"Scrape warning for URL '{url}': {page_data['error']}")
-
-        system_prompt = (
-            "You are an expert website classification AI. "
-            "Analyze website metadata and content snippet to classify it into exactly one of two categories:\n\n"
-            "1. 'Official Entity': The website belongs to one specific organization, business, company, institution, university, school, college, hospital, hotel, restaurant, government department, NGO, SaaS company, manufacturer, retailer, startup, real estate firm, or brand (is_competitor: YES).\n"
-            "   Note: An official school/company site is 'Official Entity' even if the URL path is a blog/guide page on their domain.\n\n"
-            "2. 'Platform': Operating as a third-party marketplace, directory, listing portal, review aggregator, independent news/media portal, blog platform, search engine, or comparison portal (is_competitor: NO).\n\n"
-            "Respond ONLY in valid raw JSON with exact keys: 'website_type' ('Official Entity' or 'Platform') and 'is_competitor' ('YES' or 'NO')."
-        )
-
         user_prompt = f"""Extracted Website Data:
 - Target URL: {page_data['original_url']}
 - Domain: {page_data['domain']}
@@ -245,7 +496,6 @@ def classify_url(
 """
 
         client = OpenAI(api_key=resolved_api_key)
-
         candidate_models = [target_model, "gpt-4o-mini", "gpt-4o"]
         seen_models = []
         for m in candidate_models:
@@ -258,7 +508,7 @@ def classify_url(
                     response = client.chat.completions.create(
                         model=current_model,
                         messages=[
-                            {"role": "system", "content": system_prompt},
+                            {"role": "system", "content": SYSTEM_CLASSIFICATION_PROMPT},
                             {"role": "user", "content": user_prompt}
                         ],
                         temperature=0.1,
@@ -270,17 +520,12 @@ def classify_url(
                     w_type = str(parsed_json.get("website_type", "Platform")).strip()
                     is_comp = str(parsed_json.get("is_competitor", "NO")).strip().upper()
 
-                    if is_comp not in ["YES", "NO"]:
-                        is_comp = "YES" if "Official" in w_type else "NO"
                     if "Official" in w_type:
                         w_type = "Official Entity"
                         is_comp = "YES"
                     else:
                         w_type = "Platform"
                         is_comp = "NO"
-
-                    print(f"[OpenAI Model Output] Model: '{current_model}' | Output: website_type='{w_type}', is_competitor='{is_comp}'", flush=True)
-                    logger.info(f"[OpenAI Model Output] Model: '{current_model}' | Output: website_type='{w_type}', is_competitor='{is_comp}'")
 
                     return {
                         "url": url,
@@ -337,8 +582,6 @@ def classify_urls(
                 try:
                     db_res = db.get_url_classification(clean_u)
                     if db_res:
-                        print(f"  [DB CACHE HIT] '{clean_u}' -> {db_res.get('website_type')}", flush=True)
-                        logger.info(f"DB Cache Hit for {clean_u}: {db_res['website_type']}")
                         cache[clean_u] = db_res
                         continue
                 except Exception:
@@ -348,27 +591,10 @@ def classify_urls(
                 uncached_urls.append(clean_u)
 
         total_urls = len(urls)
-        cached_count = total_urls - len(uncached_urls)
         unclassified_count = len(uncached_urls)
-
-        b_num = batch_info.get("batch_num") if batch_info else None
-        t_batches = batch_info.get("total_batches") if batch_info else None
-        t_unclass = batch_info.get("total_unclassified") if batch_info else None
-
-        print(f"\n========================================================", flush=True)
-        if b_num and t_batches:
-            print(f"[COMPETITOR CLASSIFIER] === BATCH {b_num} of {t_batches} ===", flush=True)
-        if t_unclass:
-            print(f"[COMPETITOR CLASSIFIER] Overall Unclassified : {t_unclass}", flush=True)
-        print(f"[COMPETITOR CLASSIFIER] Batch URLs submitted : {total_urls}", flush=True)
-        print(f"[COMPETITOR CLASSIFIER] Already Classified   : {cached_count}", flush=True)
-        print(f"[COMPETITOR CLASSIFIER] NOT Classified (To Do): {unclassified_count}", flush=True)
-        print(f"========================================================\n", flush=True)
 
         # Step 2: Process uncached URLs concurrently in parallel worker threads
         if uncached_urls:
-            batch_prefix = f"[Batch {b_num}/{t_batches}] " if b_num and t_batches else ""
-            print(f"  [PARALLEL AI START] {batch_prefix}Launching AI classification for {unclassified_count} unclassified URLs...", flush=True)
             def process_single_url(target_u: str):
                 local_sess = create_http_session()
                 try:
@@ -383,17 +609,11 @@ def classify_urls(
                     if db:
                         try:
                             db.save_url_classification(target_u, wtype, is_comp)
-                        except Exception as db_err:
-                            logger.warning(f"DB cache save warning for {target_u}: {db_err}")
-                        try:
                             db.update_competitor_website_type(target_u, wtype)
-                        except Exception as db_err2:
-                            logger.warning(f"DB competitor update warning for {target_u}: {db_err2}")
-                    print(f"  [AI CLASSIFIED & SAVED TO DB] {batch_prefix}'{target_u}' -> {wtype}", flush=True)
+                        except Exception:
+                            pass
                     return target_u, res
                 except Exception as e:
-                    print(f"  [AI CLASSIFY ERROR] {batch_prefix}'{target_u}': {e}", flush=True)
-                    logger.error(f"Error classifying URL {target_u}: {e}")
                     fallback = {"url": target_u, "website_type": "Platform", "is_competitor": "NO"}
                     if db:
                         try:
@@ -406,22 +626,17 @@ def classify_urls(
                     local_sess.close()
 
             max_workers = min(15, len(uncached_urls))
-            completed_count = 0
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_url = {executor.submit(process_single_url, u): u for u in uncached_urls}
                 for future in as_completed(future_to_url):
                     try:
                         u_key, u_res = future.result()
                         cache[u_key] = u_res
-                    except Exception as exc:
+                    except Exception:
                         u_target = future_to_url[future]
                         cache[u_target] = {"url": u_target, "website_type": "Platform", "is_competitor": "NO"}
-                    completed_count += 1
-                    remaining = unclassified_count - completed_count
-                    print(f"  [PROGRESS] {batch_prefix}Finished {completed_count}/{unclassified_count} | Remaining in batch {b_num or 1}: {remaining}", flush=True)
 
         results = [cache[u.strip()] for u in urls if u.strip() in cache]
-
         return {
             "keyword": keyword,
             "results": results
