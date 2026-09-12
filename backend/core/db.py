@@ -459,6 +459,8 @@ def _init_db_inner():
         conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS fetched_data JSONB"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_monthly_ops_proj ON monthly_operations (project_slug)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_monthly_ops_proj_date ON monthly_operations (project_slug, scheduled_date)"))
+        conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS activity_id TEXT"))
+        conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS activity_uid TEXT"))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS scheduled_activities (
@@ -538,7 +540,8 @@ def _init_db_inner():
             # project's own domain during rank-checking (domain-based match,
             # not the pre-declared landing_page_url).
             "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS page_url_fetched TEXT",
-            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS subtype TEXT"
+            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS subtype TEXT",
+            "ALTER TABLE keyword_categories ADD COLUMN IF NOT EXISTS calendar_rank_history JSONB DEFAULT '[]'::jsonb"
         ]:
             _safe_execute(conn, alter_cmd)
         _safe_execute(conn, "UPDATE keyword_categories SET type = 'Google' WHERE type IS NULL OR TRIM(type) = ''")

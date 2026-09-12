@@ -758,26 +758,36 @@ export default function OffPageSchedulerPage({ user }) {
     }
   }, [isVendor, hasMultipleProjects, filteredImports, selectedDataset]);
 
-  // Auto-redirect from Calendar Page to specific project & row
-  const [highlightedRowUid, setHighlightedRowUid] = useState(null);
+  // Auto-redirect from Calendar Page to specific project & row(s)
+  const [highlightedRowUids, setHighlightedRowUids] = useState([]);
 
   useEffect(() => {
     if (!filteredImports || filteredImports.length === 0) return;
     try {
       const targetProj = sessionStorage.getItem('offpage_target_project');
-      const targetUid = sessionStorage.getItem('offpage_target_row_uid');
-      if (targetProj || targetUid) {
+      const rawTargetUid = sessionStorage.getItem('offpage_target_row_uid');
+      if (targetProj || rawTargetUid) {
         let matched = null;
+        const targetUids = rawTargetUid
+          ? rawTargetUid.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+          : [];
 
-        // 1. If targetUid is provided, prioritize dataset that actually contains this row UID
-        if (targetUid) {
-          const normUid = targetUid.trim().toLowerCase();
-          const baseUid = normUid.split('-KW')[0];
+        // 1. If targetUid is provided, prioritize dataset that actually contains any of these row UIDs
+        if (targetUids.length > 0) {
           matched = filteredImports.find(imp => {
             const rows = imp.rowsData || [];
             return rows.some(r => {
               const u = String(r.uid || '').trim().toLowerCase();
-              return u === normUid || (baseUid && u.startsWith(baseUid));
+              const actUid = String(r.activity_uid || '').trim().toLowerCase();
+              const actId = String(r.activity_id || '').trim().toLowerCase();
+              return targetUids.some(tu => {
+                const baseTu = tu.split('-kw')[0];
+                return (
+                  (u && (u === tu || (baseTu && u.startsWith(baseTu)) || tu.startsWith(u))) ||
+                  (actUid && (actUid === tu || actUid.startsWith(tu) || tu.startsWith(actUid))) ||
+                  (actId && actId === tu)
+                );
+              });
             });
           });
         }
@@ -812,8 +822,8 @@ export default function OffPageSchedulerPage({ user }) {
         if (matched) {
           setSelectedDataset(matched);
           setActiveTab('import');
-          if (targetUid) {
-            setHighlightedRowUid(targetUid);
+          if (targetUids.length > 0) {
+            setHighlightedRowUids(targetUids);
             sessionStorage.removeItem('offpage_target_row_uid');
           }
           sessionStorage.removeItem('offpage_target_project');
@@ -824,22 +834,32 @@ export default function OffPageSchedulerPage({ user }) {
     }
   }, [filteredImports]);
 
-  // Scroll to and flash highlighted row
+  // Scroll to and flash highlighted row(s)
   useEffect(() => {
-    if (highlightedRowUid && activeDataset) {
+    if (highlightedRowUids && highlightedRowUids.length > 0 && activeDataset) {
       const timer = setTimeout(() => {
-        const el = document.getElementById(`offpage-row-${highlightedRowUid}`) ||
-          document.querySelector(`[id^="offpage-row-${highlightedRowUid.split('-KW')[0]}"]`);
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        let targetEl = null;
+        for (const tu of highlightedRowUids) {
+          const el = document.getElementById(`offpage-row-${tu}`) ||
+            document.querySelector(`[id^="offpage-row-${tu.split('-kw')[0]}"]`);
+          if (el) {
+            targetEl = el;
+            break;
+          }
+        }
+        if (!targetEl) {
+          targetEl = document.querySelector('.offpage-row-highlighted');
+        }
+        if (targetEl) {
+          targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       }, 400);
       const clearTimer = setTimeout(() => {
-        setHighlightedRowUid(null);
-      }, 4500);
+        setHighlightedRowUids([]);
+      }, 5500);
       return () => { clearTimeout(timer); clearTimeout(clearTimer); };
     }
-  }, [highlightedRowUid, activeDataset]);
+  }, [highlightedRowUids, activeDataset]);
 
   const handleDownloadMonthlyOperations = async () => {
     try {
@@ -2268,22 +2288,34 @@ export default function OffPageSchedulerPage({ user }) {
                 ) : (
                   filteredRows.map((row, rIdx) => {
                     const isTargetHighlighted = Boolean(
-                      highlightedRowUid && (
-                        row.uid === highlightedRowUid ||
-                        (row.uid && highlightedRowUid && row.uid.startsWith(highlightedRowUid)) ||
-                        (row.uid && highlightedRowUid && highlightedRowUid.startsWith(row.uid))
+                      highlightedRowUids && highlightedRowUids.length > 0 && (
+                        (() => {
+                          const u = String(row.uid || '').trim().toLowerCase();
+                          const actUid = String(row.activity_uid || '').trim().toLowerCase();
+                          const actId = String(row.activity_id || '').trim().toLowerCase();
+                          return highlightedRowUids.some(tu => {
+                            const baseTu = tu.split('-kw')[0];
+                            return (
+                              (u && (u === tu || (baseTu && u.startsWith(baseTu)) || tu.startsWith(u))) ||
+                              (actUid && (actUid === tu || actUid.startsWith(tu) || tu.startsWith(actUid))) ||
+                              (actId && actId === tu)
+                            );
+                          });
+                        })()
                       )
                     );
                     return (
                     <tr key={rIdx}
-                      id={row.uid ? `offpage-row-${row.uid}` : undefined}
+                      id={row.uid ? `offpage-row-${String(row.uid).trim().toLowerCase()}` : undefined}
+                      className={isTargetHighlighted ? 'offpage-row-highlighted' : undefined}
                       style={{
                         borderBottom: isTargetHighlighted ? '2px solid #7B2FBE' : '1px solid var(--border)',
+                        borderLeft: isTargetHighlighted ? '4px solid #7B2FBE' : '4px solid transparent',
                         background: isTargetHighlighted
                           ? '#F6EEFD'
                           : (selectedRowIndices.includes(rIdx) ? '#f0f9ff' : 'transparent'),
-                        boxShadow: isTargetHighlighted ? 'inset 0 0 0 1px #7B2FBE, 0 0 12px rgba(123, 47, 190, 0.25)' : 'none',
-                        transition: 'all 0.25s ease'
+                        boxShadow: isTargetHighlighted ? 'inset 0 0 0 1px #E5CCF7, 0 2px 14px rgba(123, 47, 190, 0.22)' : 'none',
+                        transition: 'all 0.3s ease'
                       }}
                       onMouseEnter={e => { if (!isTargetHighlighted) e.currentTarget.style.background = selectedRowIndices.includes(rIdx) ? '#e0f2fe' : '#fafbfc'; }}
                       onMouseLeave={e => { if (!isTargetHighlighted) e.currentTarget.style.background = selectedRowIndices.includes(rIdx) ? '#f0f9ff' : 'transparent'; }}>

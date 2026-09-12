@@ -3191,6 +3191,25 @@ export async function analyzeCalendarAiPushPotentialApi(projectSlug, domain = ''
   return null;
 }
 
+// Generate forum channel strategy (Quora, Reddit)
+export async function generateForumStrategyApi(projectSlug, channelType = 'quora', budget = null, quantity = null) {
+  try {
+    const params = new URLSearchParams({
+      project_slug: projectSlug,
+      channel_type: channelType
+    });
+    if (budget != null) params.append('budget', String(budget));
+    if (quantity != null) params.append('quantity', String(quantity));
+    const res = await fetch(`${CATEGORY_API_BASE}/calendar/forum-strategy?${params.toString()}`);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('[generateForumStrategyApi] error:', e);
+  }
+  return { channel: channelType, total_threads_mapped: 0, threads: [], budget_per_thread: 0 };
+}
+
 // Fetch registered users for calendar scheduler/POC dropdowns
 export async function fetchCalendarUsersApi() {
   try {

@@ -352,7 +352,7 @@ const PATH_TO_URL_MAP = {
   'settings/logs': '/logs',
   'settings/profile': '/profile',
   'settings/help': '/help',
-  'search-visibility/position-analysis': '/position-analysis',
+  'search-visibility/position-analysis': '/brand-discovery',
   'search-visibility/ai-analysis': '/ai-analysis',
   'search-visibility/keywords': '/keywords',
   'search-visibility/top-pages': '/top-pages',

@@ -17,7 +17,9 @@ from decimal import Decimal
 import math
 import re
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Tuple
+from concurrent.futures import ThreadPoolExecutor
+import urllib.parse
+from typing import Optional, List, Dict, Any, Tuple, Set
 
 from fastapi import APIRouter, HTTPException, Query, Response, status, Depends
 from fastapi.responses import StreamingResponse
@@ -96,15 +98,63 @@ def generate_project_code(project_name: Optional[str]) -> str:
         return clean[:2].upper()
     return (clean + "X")[:2].upper()
 
-def generate_activity_uid(conn, project_name: Optional[str], period: Optional[str]) -> str:
+def get_channel_code(activity_name_or_channel: Optional[str]) -> str:
     """
-    Generates a unique sequential Activity UID like 'BL-03-0096'.
-    Format: {PROJECT_CODE}-{MONTH_CODE}-{4_DIGIT_SEQUENCE}
-    Always starts strictly from 0001 for each project and month.
+    Returns a clean 2-letter channel code:
+    - Paid Guest Post / Guest Post -> 'PG'
+    - Forum - Reddit / Reddit -> 'RD'
+    - Forum - Quora / Quora -> 'QR'
+    - Brand Mentions -> 'BM'
+    - Profile Backlinks / Profile -> 'PR'
+    - Editorial Backlinks / Outreach -> 'ED'
+    - Local Citations / Citations -> 'LC'
+    - Infographics -> 'IG'
+    - Directory Submissions -> 'DS'
+    - Web 2.0 -> 'WB'
+    - Press Release -> 'PR'
+    - Default / Other -> 'OP'
+    """
+    if not activity_name_or_channel:
+        return "OP"
+    val = str(activity_name_or_channel).strip().lower()
+    if "guest" in val or "paid" in val:
+        return "PG"
+    if "reddit" in val:
+        return "RD"
+    if "quora" in val:
+        return "QR"
+    if "brand" in val or "mention" in val:
+        return "BM"
+    if "profile" in val:
+        return "PR"
+    if "editorial" in val:
+        return "ED"
+    if "citation" in val or "local" in val:
+        return "LC"
+    if "infographic" in val:
+        return "IG"
+    if "directory" in val:
+        return "DS"
+    if "web 2" in val or "web2" in val:
+        return "WB"
+    if "press" in val:
+        return "PR"
+    words = [w for w in re.split(r'[\s\-_]+', val) if w and w not in ["forum"]]
+    if len(words) >= 2:
+        return (words[0][0] + words[1][0]).upper()
+    elif len(words) == 1 and len(words[0]) >= 2:
+        return words[0][:2].upper()
+    return "OP"
+
+def generate_activity_uid(conn, project_name: Optional[str], period: Optional[str], activity_name_or_channel: Optional[str] = None) -> str:
+    """
+    Generates a unique sequential Activity UID in Calendar like 'BL-PG-09-1'.
+    Format: {PROJECT_CODE}-{CHANNEL_CODE}-{MONTH_CODE}-{SEQUENCE}
     """
     proj_code = generate_project_code(project_name)
+    chan_code = get_channel_code(activity_name_or_channel)
     month_code = get_month_code(period)
-    prefix_pattern = f"{proj_code}-{month_code}-%"
+    prefix_pattern = f"{proj_code}-{chan_code}-{month_code}-%"
 
     rows = conn.execute(
         text("SELECT activity_uid FROM off_page_activities WHERE activity_uid LIKE :pattern"),
@@ -115,8 +165,8 @@ def generate_activity_uid(conn, project_name: Optional[str], period: Optional[st
     for r in rows:
         if r and r[0]:
             try:
-                parts = str(r[0]).split("-")
-                if len(parts) >= 3 and parts[-1].isdigit():
+                parts = str(r[0]).replace("ACT-", "").split("-")
+                if parts[-1].isdigit():
                     val = int(parts[-1])
                     if val > max_seq:
                         max_seq = val
@@ -124,15 +174,39 @@ def generate_activity_uid(conn, project_name: Optional[str], period: Optional[st
                 pass
 
     next_seq = max_seq + 1
-    return f"{proj_code}-{month_code}-{next_seq:04d}"
+    return f"{proj_code}-{chan_code}-{month_code}-{next_seq}"
 
 def _ensure_activity_uids(conn):
-    """Backfill activity_uid for any existing rows missing one."""
+    """Backfill / upgrade activity_uid for any existing rows in bulk without ACT prefix."""
     try:
-        rows = conn.execute(text("SELECT id, project_name, period FROM off_page_activities WHERE activity_uid IS NULL OR activity_uid = '' ORDER BY created_at ASC")).fetchall()
+        # Clean any legacy ACT- prefixes from database
+        conn.execute(text("UPDATE off_page_activities SET activity_uid = REPLACE(activity_uid, 'ACT-', '') WHERE activity_uid LIKE 'ACT-%'"))
+        conn.execute(text("UPDATE monthly_operations SET activity_uid = REPLACE(activity_uid, 'ACT-', '') WHERE activity_uid LIKE 'ACT-%'"))
+        conn.execute(text("UPDATE monthly_operations SET uid = REPLACE(uid, 'ACT-', '') WHERE uid LIKE 'ACT-%'"))
+
+        rows = conn.execute(text("SELECT id, project_name, period, activity_name, activity_uid FROM off_page_activities ORDER BY created_at ASC")).fetchall()
+        act_seqs = {}
         for r in rows:
-            uid = generate_activity_uid(conn, r[1], r[2])
-            conn.execute(text("UPDATE off_page_activities SET activity_uid = :uid WHERE id = :id"), {"uid": uid, "id": r[0]})
+            uid_str = str(r[4] or "").strip()
+            if uid_str and not uid_str.startswith("ACT-"):
+                parts = uid_str.split("-")
+                if len(parts) >= 4 and parts[-1].isdigit():
+                    pfx = "-".join(parts[:-1])
+                    v = int(parts[-1])
+                    if v > act_seqs.get(pfx, 0):
+                        act_seqs[pfx] = v
+
+        for r in rows:
+            aid, p_name, per, a_name, curr_uid = r[0], r[1], r[2], r[3], r[4]
+            if not curr_uid or str(curr_uid).startswith("ACT-"):
+                p_code = generate_project_code(p_name)
+                c_code = get_channel_code(a_name)
+                m_code = get_month_code(per)
+                pfx = f"{p_code}-{c_code}-{m_code}"
+                seq = act_seqs.get(pfx, 0) + 1
+                act_seqs[pfx] = seq
+                new_uid = f"{pfx}-{seq}"
+                conn.execute(text("UPDATE off_page_activities SET activity_uid = :uid WHERE id = :id"), {"uid": new_uid, "id": aid})
     except Exception as e:
         print(f"[Calendar] UID backfill notice: {e}", file=sys.stderr)
 
@@ -177,6 +251,8 @@ def ensure_calendar_tables():
             conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS budget_summary JSONB;"))
             conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS outreach_sites JSONB;"))
             conn.execute(text("ALTER TABLE off_page_activities ADD COLUMN IF NOT EXISTS ai_run_id TEXT;"))
+            conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS activity_id TEXT;"))
+            conn.execute(text("ALTER TABLE monthly_operations ADD COLUMN IF NOT EXISTS activity_uid TEXT;"))
             _ensure_activity_uids(conn)
 
             # Full record of every AI-scheduling analysis run: one row per
@@ -223,6 +299,8 @@ def ensure_calendar_tables():
             conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS budget_summary JSONB;"))
             conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS brand_mention_site JSONB;"))
             conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS brand_mention_sites JSONB;"))
+            conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS topic_link TEXT;"))
+            conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS selected BOOLEAN DEFAULT FALSE;"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_run ON calendar_ai_analysis (run_id);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_project ON calendar_ai_analysis (project_slug, created_at DESC);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_activity ON calendar_ai_analysis (activity_id);"))
@@ -376,7 +454,7 @@ def get_potential_keywords_from_db(project_slug_or_name: str) -> Tuple[List[Dict
 
     # Step B: Query with strict target_type 'Landing Page', landing_page_url check, and min rank 5, ordered by search volume descending
     query = text("""
-        SELECT id, keyword, category, cluster, rank, sv, kw_diff, landing_page_url, target_type, rank_meta
+        SELECT id, keyword, category, cluster, rank, sv, kw_diff, landing_page_url, target_type, rank_meta, calendar_rank_history
         FROM keyword_categories
         WHERE (LOWER(project_name) = :slug OR LOWER(project_name) = :alt_slug)
           AND landing_page_url IS NOT NULL
@@ -429,6 +507,16 @@ def get_potential_keywords_from_db(project_slug_or_name: str) -> Tuple[List[Dict
         elif not isinstance(rm, dict):
             rm = {}
 
+        # Parse calendar rank history list
+        cal_hist = k.get("calendar_rank_history")
+        if isinstance(cal_hist, str):
+            try:
+                cal_hist = json.loads(cal_hist)
+            except Exception:
+                cal_hist = []
+        elif not isinstance(cal_hist, list):
+            cal_hist = []
+
         prev_rank = _parse_num(rm.get("previous_rank") or rm.get("prev_rank") or rm.get("initial_rank") or rank, rank)
         delta = int(prev_rank) - int(rank)  # delta < 0 means rank worsened (dropped); delta > 0 means gained
 
@@ -446,7 +534,9 @@ def get_potential_keywords_from_db(project_slug_or_name: str) -> Tuple[List[Dict
             "target_type": k.get("target_type") or "Landing Page",
             "potentialScore": sv,
             "topicLink": lp_url,
-            "landing_page_url": lp_url
+            "landing_page_url": lp_url,
+            "calendar_rank_history": cal_hist,
+            "history": cal_hist
         })
 
     # Prioritize: high search volume first, breaking ties with historical drops
@@ -972,10 +1062,11 @@ def assign_outreach_sites_to_keywords(
     assigned_keywords = []
     for idx, kw in enumerate(keywords):
         item = dict(kw)
-        lp = kw.get("landing_page_url") or kw.get("topicLink") or kw.get("topic_link") or ""
+        lp = kw.get("landing_page_url") or kw.get("topicLink") or ""
         item["landing_page_url"] = lp
         item["topicLink"] = lp
-        item["topic_link"] = lp
+        item["topic_link"] = kw.get("topic_link") or None
+        item["selected"] = bool(idx < req_qty)
         site_idx = idx // KEYWORDS_PER_SITE
         if site_idx < len(selected_sites):
             chosen_site = selected_sites[site_idx]
@@ -1011,7 +1102,7 @@ def assign_outreach_sites_to_keywords(
     num_sites_used = min(len(selected_sites), max(1, (len(keywords) + KEYWORDS_PER_SITE - 1) // KEYWORDS_PER_SITE))
     total_cost = sum(s.get("_price", 500.0) for s in selected_sites[:num_sites_used])
 
-    recommended_qty = min(len(selected_sites) * KEYWORDS_PER_SITE, len(keywords)) if keywords else len(selected_sites) * KEYWORDS_PER_SITE
+    recommended_qty = min(req_qty, len(keywords)) if keywords else req_qty
     savings = max(0.0, budget_cap - total_cost)
 
     # Quality metrics summary
@@ -1029,59 +1120,85 @@ def assign_outreach_sites_to_keywords(
         f"high-authority publisher domains matching your '{resolved_industry}' niche"
     )
 
+    # Query total project keywords in DB for transparent exclusion funnel reporting
+    total_db_keywords_count = len(keywords)
+    if project_slug:
+        clean_p_slug = str(project_slug).strip().lower()
+        alt_p_slug = clean_p_slug.replace(" ", "-").replace("_", "-")
+        try:
+            with engine.begin() as conn:
+                db_c = conn.execute(text("""
+                    SELECT COUNT(*) FROM keyword_categories
+                    WHERE (LOWER(project_name) = :slug OR LOWER(project_name) = :alt_slug)
+                """), {"slug": clean_p_slug, "alt_slug": alt_p_slug}).scalar()
+                if db_c and int(db_c) > 0:
+                    total_db_keywords_count = int(db_c)
+        except Exception:
+            pass
+
     # Calculate detailed counts for 4 structured summaries
     total_kws_count = len(keywords)
     unique_lps_count = len({kw.get("landing_page_url") or kw.get("topicLink") for kw in keywords if kw.get("landing_page_url") or kw.get("topicLink")}) or 1
-    excluded_kws_count = max(0, total_kws_count - recommended_qty)
+    selected_kws_count = len([k for k in assigned_keywords if k.get("selected")]) or min(req_qty, total_kws_count)
+    excluded_kws_count = max(0, total_kws_count - selected_kws_count)
 
     # 1. General Strategy Summary
     general_strategy_summary = (
-        f"Analyzed {total_kws_count} candidate keywords mapped across {unique_lps_count} unique landing pages. "
-        f"Selected {recommended_qty} high-impact target keywords for active off-page push. "
-        f"Keywords already performing strongly in the Top 3 organic SERPs are safely preserved and untouched."
+        f"I analyzed total {total_db_keywords_count} keywords, "
+        f"out of them, I have picked {total_kws_count} qualified candidate keywords with verified landing pages (Rank 5+), "
+        f"and out of those, I suggest you to work on these {selected_kws_count} high-impact target keywords for your campaign, "
+        f"prioritizing live SERP momentum and recovery candidates."
     )
 
-    # 2. Keyword Exclusion Summary
+    # 2. Keyword Exclusion Summary (Transparent Step-by-Step Funnel)
     if excluded_kws_count > 0:
         keyword_exclusion_summary = (
-            f"Excluded {excluded_kws_count} keywords from this month's scheduling batch: {excluded_kws_count} keywords were deferred "
-            f"to respect your budget cap (₹{int(budget_cap):,}) and avoid low-confidence SERP patterns where top results diverged from commercial landing page intent."
+            f"The database contained {total_db_keywords_count} keywords in total for this project. From these, I evaluated {total_kws_count} candidate keywords with verified landing pages (Rank 5+), "
+            f"selected {selected_kws_count} priority targets matching your campaign criteria, and excluded {excluded_kws_count} keywords to respect your ₹{int(budget_cap):,} budget ceiling, "
+            f"preserve keywords already ranking in Top 3, and filter out low-confidence SERP patterns without matching outreach publishers."
         )
     else:
         keyword_exclusion_summary = (
-            f"All {total_kws_count} analyzed candidate keywords successfully qualified and were scheduled within your target budget ceiling."
+            f"The database contained {total_db_keywords_count} keywords in total for this project. From these, I evaluated and selected all {total_kws_count} candidate keywords with verified landing pages (Rank 5+) within your budget ceiling."
         )
 
     # 3. Budget Allocation & Savings Advisory
     if savings > 0:
         budget_allocation_advisory = (
-            f"For these {recommended_qty} selected keywords, I have allocated ₹{int(total_cost):,} against your ₹{int(budget_cap):,} budget "
-            f"(saving ₹{int(savings):,}) by prioritizing publishers with the highest authority-to-cost value "
-            f"(Domain Authority: DA {min_da}–{max_da}, clean {min_ss}–{max_ss} spam score, verified {resolved_country} audience reach, ~2 keywords per publisher domain)."
+            f"For these {selected_kws_count} selected keywords, I've allocated ₹{int(total_cost):,} against your ₹{int(budget_cap):,} budget "
+            f"(saving you ₹{int(savings):,}) by prioritizing high-authority publishers with the best authority-per-rupee value "
+            f"(DA {min_da}–{max_da}, clean {min_ss}–{max_ss} spam score, verified {resolved_country} audience traffic, capped at 2–4 keywords per publisher domain)."
         )
     else:
         budget_allocation_advisory = (
-            f"For these {recommended_qty} priority keywords, I have allocated {num_sites_used} {industry_confirmation} "
-            f"(Domain Authority: DA {min_da}–{max_da}, clean {min_ss}–{max_ss} spam score, verified {resolved_country} traffic) "
-            f"budget-optimized for maximum authority-to-cost value within your ₹{int(budget_cap):,} budget."
+            f"For these {selected_kws_count} priority keywords, I've allocated {num_sites_used} {industry_confirmation} "
+            f"(DA {min_da}–{max_da}, clean {min_ss}–{max_ss} spam score, verified {resolved_country} traffic) "
+            f"budget-optimized to deliver maximum authority per rupee spent within your ₹{int(budget_cap):,} budget."
         )
 
-    # 4. Domain & Quota Constraints Alert
-    domain_constraints_alert = (
-        f"Domain Diversity Rule: Enforced strict 3-to-4 domain reuse limit across outreach publisher inventory to eliminate footprint risk and maximize backlink diversity."
-    )
+    # 4. Domain & Quota Constraints Alert (only generated when outreach publisher inventory is limited)
+    domain_constraints_alert = None
+    if len(available_sites) < target_sites_qty or (len(available_sites) * KEYWORDS_PER_SITE < len(keywords)):
+        domain_constraints_alert = (
+            f"Our available outreach publisher pool is currently limited for this project's target volume ({len(available_sites)} publisher domain{'s' if len(available_sites) != 1 else ''} available for {len(keywords)} keywords). "
+            f"I've enforced a strict guardrail of maximum 3-to-4 keywords per publisher domain to prevent footprint risks and maintain natural velocity."
+        )
 
     budget_summary = {
+        "total_db_keywords": total_db_keywords_count,
+        "evaluated_landing_keywords": total_kws_count,
+        "selected_keywords_count": selected_kws_count,
+        "excluded_keywords_count": excluded_kws_count,
         "requested_quantity": req_qty,
         "requested_activities": req_qty,
-        "recommended_quantity": recommended_qty,
-        "recommended_activities": recommended_qty,
-        "redundant_posts_saved": max(0, req_qty - recommended_qty),
+        "recommended_quantity": selected_kws_count,
+        "recommended_activities": selected_kws_count,
+        "redundant_posts_saved": max(0, req_qty - selected_kws_count),
         "budget_cap": round(budget_cap, 2),
         "total_budget_cap": round(budget_cap, 2),
         "planned_spend": round(total_cost, 2),
         "projected_savings": round(savings, 2),
-        "avg_cost_per_post": round(total_cost / max(1, recommended_qty), 2),
+        "avg_cost_per_post": round(total_cost / max(1, selected_kws_count), 2),
         "general_strategy_summary": general_strategy_summary,
         "keyword_exclusion_summary": keyword_exclusion_summary,
         "budget_allocation_advisory": budget_allocation_advisory,
@@ -1155,24 +1272,28 @@ def calculate_heuristic_batches(potential: List[Dict[str, Any]]) -> Dict[str, Li
         kd = _parse_num(k.get("kd"), 0)
         sv = _parse_num(k.get("sv"), 0)
 
-        # Batch 2: Drops (Red Alert) - rank slipped down compared to baseline/previous
+        # Batch 1: Gains (Improving) - rank gained positions
         is_drop_to_101 = (rank >= 101 and prev_rank < 101)
         is_up_from_101 = (prev_rank >= 101 and rank < 101)
-        if is_drop_to_101 or delta < 0 or (rank >= 12 and kd <= 60):
-            batch = "medium"  # Batch 2: Extremely Dropped (Red Alert)
-            confidence = 75 if (delta < 0 or is_drop_to_101) else 60
-            drop_desc = "30+" if is_drop_to_101 else f"{abs(delta)} positions"
-            reason = f"Rank dropped by {drop_desc} (was #{int(prev_rank)} -> now #{int(rank)}). Prime recovery target." if (delta < 0 or is_drop_to_101) else "Moderate rank position in range with recovery potential."
-        # Batch 1: Gains - improved or page 1 striking distance
-        elif is_up_from_101 or delta > 0 or (rank <= 10 and kd <= 50 and sv > 0):
+        has_101 = (rank >= 101 or prev_rank >= 101)
+        prev_disp = f"#{int(prev_rank)}"
+        curr_disp = f"#{int(rank)}"
+
+        if is_up_from_101 or delta > 0:
             batch = "high"   # Batch 1: Extremely Improved (Gains)
-            confidence = 85 if (delta > 0 or is_up_from_101) else 80
-            gain_desc = "30+" if is_up_from_101 else f"+{delta} positions"
-            reason = f"Rank gained {gain_desc} (was #{int(prev_rank)} -> now #{int(rank)}). High momentum candidate." if (delta > 0 or is_up_from_101) else "Page 1 striking distance with landing page intent."
+            confidence = 85
+            gain_desc = "30+" if (has_101 or abs(delta) >= 30) else f"+{delta} positions"
+            reason = f"Rank gained {gain_desc} (was {prev_disp} -> now {curr_disp}). High momentum candidate."
+        # Batch 2: Drops (Declining) - rank dropped positions
+        elif is_drop_to_101 or delta < 0:
+            batch = "medium"  # Batch 2: Extremely Dropped (Drops)
+            confidence = 75
+            drop_desc = "30+" if (has_101 or abs(delta) >= 30) else f"{abs(delta)} positions"
+            reason = f"Rank dropped by {drop_desc} (was {prev_disp} -> now {curr_disp}). Prime recovery target."
         else:
-            batch = "low"    # Batch 3: Stagnant / Low Movement
+            batch = "low"    # Batch 3: Stagnant / Unchanged
             confidence = 40
-            reason = "Rank hasn't moved significantly. Stagnant SERP velocity candidate."
+            reason = f"Rank hasn't moved ({prev_disp} -> {curr_disp}). Stagnant SERP velocity candidate."
 
         item = dict(k)
         item["batch"] = batch
@@ -1573,6 +1694,64 @@ def verify_keyword_drop_with_agent(
     }
 
 
+def record_calendar_rank_hit(
+    kw_id: Any,
+    new_rank: int,
+    prev_rank: int,
+    delta: int,
+    existing_history: Optional[List[Dict[str, Any]]] = None
+) -> List[Dict[str, Any]]:
+    """
+    Appends a new live check snapshot to keyword_categories.calendar_rank_history in the DB.
+    Returns the updated historical list.
+    """
+    hist = list(existing_history or [])
+    now_dt = datetime.utcnow()
+    date_str = now_dt.strftime("%d %b")
+
+    snapshot = {
+        "rank": int(new_rank),
+        "prev_rank": int(prev_rank),
+        "delta": int(delta),
+        "date": date_str,
+        "timestamp": now_dt.isoformat()
+    }
+
+    # If history is empty, seed with initial/prev rank if available
+    if not hist:
+        if prev_rank and prev_rank > 0 and prev_rank != new_rank:
+            hist.append({
+                "rank": int(prev_rank),
+                "date": "Initial",
+                "timestamp": now_dt.isoformat()
+            })
+        hist.append(snapshot)
+    else:
+        # If last entry was recorded today with same rank, update timestamp, else append
+        last = hist[-1]
+        if last.get("rank") == snapshot["rank"] and last.get("date") == snapshot["date"]:
+            hist[-1] = snapshot
+        else:
+            hist.append(snapshot)
+
+    # Keep last 15 historical points
+    hist = hist[-15:]
+
+    # Persist back to database if kw_id is a valid DB record id
+    if kw_id and str(kw_id).isdigit():
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    UPDATE keyword_categories 
+                    SET calendar_rank_history = CAST(:hist AS JSONB)
+                    WHERE id = :id
+                """), {"hist": json.dumps(hist), "id": int(kw_id)})
+        except Exception as err:
+            print(f"[Calendar AI] Notice persisting calendar_rank_history for kw_id {kw_id}: {err}", flush=True)
+
+    return hist
+
+
 def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "", country_code: str = "in") -> Dict[str, Any]:
     """
     Live rank check + Top-3 SERP landing page verification for one keyword.
@@ -1635,30 +1814,35 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "", coun
         gain_pct = 0.0
         gain_pct_str = "0%"
 
-    # Rule: if the rank is increased even by one (delta >= 1), it is placed in Batch 1
-    if is_up_from_101 or delta >= 1 or (new_rank <= 3 and new_rank < prev_rank):
+    # Strict Batch Rules:
+    # Batch 1 (high): ONLY keywords whose ranking is improving on live rank check (delta > 0 or is_up_from_101)
+    # Batch 2 (medium): ONLY keywords whose ranking is declining on live rank check (delta < 0 or is_drop_to_101)
+    # Batch 3 (low): Stagnant keywords whose rank did not move (delta == 0)
+    sv_num = _as_int(k.get("sv"), 0)
+    sv_disp = f"{sv_num:,}" if sv_num > 0 else "high"
+    has_101 = (new_rank >= 101 or prev_rank >= 101)
+    prev_disp = f"#{prev_rank}"
+    new_disp = f"#{new_rank}"
+
+    if is_up_from_101 or delta > 0:
         batch = "high"
         confidence = min(98, 85 + delta * 2) if top3_is_landing else 78
-        spots_str = "30+" if is_up_from_101 else (f"{delta} spot" if delta == 1 else f"{delta} spots")
-        landing_info = "Top 3 SERP are Landing Pages." if top3_is_landing else f"Top 3 SERP: {', '.join(top3_types) if top3_types else 'Mixed'}."
-        reason = f"Rank improved by {gain_pct_str} / {spots_str} (#{prev_rank} -> #{new_rank}). {landing_info}"
-    elif top3_is_landing and (is_drop_to_101 or delta <= -2 or (new_rank == 101 and prev_rank < 101)):
+        spots_str = "30+" if (has_101 or abs(delta) >= 30) else (f"{delta} spot" if delta == 1 else f"{delta} spots")
+        landing_info = "with verified commercial landing page intent." if top3_is_landing else f"with SERP intent ({', '.join(top3_types) if top3_types else 'Mixed'})."
+        reason = f"I've selected this keyword because its historical rank surged from {prev_disp} to {new_disp} (+{spots_str}, {gain_pct_str} gain) with {sv_disp} monthly search volume and {landing_info}"
+    elif is_drop_to_101 or delta < 0:
         batch = "medium"
-        confidence = 82
-        drop_str = "30+" if is_drop_to_101 else f"{abs(delta)} spots (#{prev_rank} -> #{new_rank})"
-        reason = f"Rank dropped by {gain_pct_str} / {drop_str}. Prime recovery push target; top 3 are Landing Pages."
-    elif delta <= -2 or is_drop_to_101:
-        batch = "medium" if top3_is_landing else "low"
-        drop_str = "30+" if is_drop_to_101 else f"#{prev_rank} to #{new_rank}"
-        reason = f"Rank shifted by {gain_pct_str} ({drop_str}). {'Top 3 are Landing Pages.' if top3_is_landing else 'SERP intent mismatch.'}"
+        confidence = 82 if top3_is_landing else 65
+        drop_str = "30+" if (has_101 or abs(delta) >= 30) else f"{abs(delta)} spots"
+        reason = f"I've selected this keyword because its historical rank dropped from {prev_disp} to {new_disp} (-{drop_str}) despite strong {sv_disp} monthly search volume, making it a high-priority recovery target."
     else:
         batch = "low"
         confidence = 40 if top3_is_landing else 25
         if not top3_is_landing:
             types_str = ", ".join(top3_types) if top3_types else "Blogs"
-            reason = f"Top 3 SERP results shifted away from landing pages ({types_str}). Search intent mismatch."
+            reason = f"I've selected this keyword as a maintenance candidate; historical rank held steady at {new_disp} ({sv_disp} SV) while SERP shows informational intent ({types_str})."
         else:
-            reason = f"Rank didn't move (#{prev_rank} -> #{new_rank}, 0% shift). Stagnant SERP velocity."
+            reason = f"I've selected this keyword because historical rank has remained stagnant at {new_disp} (0% shift) with {sv_disp} monthly search volume, requiring an authority push to reach page 1."
 
     # Explainable confidence calculation
     conf_calc = {
@@ -1682,6 +1866,16 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "", coun
     print(f"[Calendar AI Check]     ==> Placed in {batch_display} | Conf: {confidence}%", flush=True)
     print(f"[Calendar AI Check]     ==> Reason: {reason}", flush=True)
 
+    # Persist live hit into calendar_rank_history for this keyword in DB
+    existing_hist = k.get("calendar_rank_history") or k.get("history") or []
+    updated_hist = record_calendar_rank_hit(
+        kw_id=k.get("id"),
+        new_rank=new_rank,
+        prev_rank=prev_rank,
+        delta=delta,
+        existing_history=existing_hist
+    )
+
     item = dict(k)
     item["prev_rank"] = prev_rank
     item["new_rank"] = new_rank
@@ -1695,6 +1889,8 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "", coun
     item["confidence"] = confidence
     item["confidence_breakdown"] = conf_calc
     item["reason"] = reason
+    item["calendar_rank_history"] = updated_hist
+    item["history"] = updated_hist
     return item
 
 
@@ -1749,10 +1945,10 @@ def calculate_live_serp_batches(
     batches["low"].sort(key=lambda x: x.get("sv", 0), reverse=True)
 
     summary = (
-        f"Analyzed {len(potential)} Landing Page keywords: "
-        f"{len(batches['high'])} extremely improved (Batch 1), "
-        f"{len(batches['medium'])} extremely dropped (Batch 2), "
-        f"{len(batches['low'])} stagnant/non-landing (Batch 3)."
+        f"I've analyzed {len(potential)} candidate Landing Page keywords against live Google SERPs: "
+        f"I found {len(batches['high'])} keywords with strong upward momentum (Batch 1 Gains), "
+        f"{len(batches['medium'])} keywords experiencing drops requiring recovery push (Batch 2 Drops), and "
+        f"{len(batches['low'])} stagnant terms (Batch 3)."
     )
 
     print(f"\n=======================================================", flush=True)
@@ -1857,12 +2053,13 @@ def calculate_ai_batches(
             rank = _parse_num(r.get("rank"), 99)
             kd = _parse_num(r.get("kd"), 0)
             sv = _parse_num(r.get("sv"), 0)
+            sv_disp = f"{sv:,}" if sv > 0 else "steady"
             if rank <= 10 and kd <= 40 and sv > 0:
-                batch, conf, reason = "high", 80, "Close to page 1 with manageable difficulty."
+                batch, conf, reason = "high", 80, f"I've selected this keyword because historical ranking (#{rank}) is within striking distance of Page 1 with low KD ({kd}) and {sv_disp} monthly search volume."
             elif rank <= 15 and kd <= 60:
-                batch, conf, reason = "medium", 55, "Moderate distance to page 1 and difficulty."
+                batch, conf, reason = "medium", 55, f"I've selected this keyword because historical rank is #{rank} with manageable difficulty ({kd}), making it a prime candidate for an authority backlink push."
             else:
-                batch, conf, reason = "low", 30, "Far from page 1 or a hard SERP."
+                batch, conf, reason = "low", 30, f"I've selected this keyword as a longer-term candidate; historical rank is #{rank} on a competitive SERP requiring sustained link authority."
 
         out_item = dict(r)
         out_item["batch"] = batch
@@ -1991,7 +2188,12 @@ def create_calendar_activity(data: Dict[str, Any]) -> Dict[str, Any]:
         # Generate activity_uid if not provided
         act_uid = str(data.get("activity_uid") or "").strip()
         if not act_uid:
-            act_uid = generate_activity_uid(conn, data.get("project_name"), data.get("period"))
+            act_uid = generate_activity_uid(
+                conn,
+                data.get("project_name"),
+                data.get("period"),
+                data.get("activity_name") or data.get("channel")
+            )
 
         conn.execute(
             text("""
@@ -2054,23 +2256,14 @@ def get_calendar_activity(activity_id: str) -> Optional[Dict[str, Any]]:
                 except Exception:
                     pass
 
-        # If activity was moved to published status, sync to monthly_operations (Off-Page)
-        if params.get("status") == "published":
-            try:
-                synced_uids = sync_activity_to_monthly_operations(activity_id)
-                row["synced_uids"] = synced_uids
-                row["first_uid"] = synced_uids[0] if synced_uids else None
-            except Exception as err:
-                print(f"[Calendar API] Error syncing to monthly_operations: {err}", file=sys.stderr)
-
         return row
 
 
 def sync_activity_to_monthly_operations(activity_id: str) -> List[str]:
     """
     Sync keywords from a published calendar activity into monthly_operations (Off-Page).
-    Creates rows with: uid, period, keyword1, cluster, landing_page, kw_category,
-    activity_name, content_spoc, publisher (POC), pg_site_domain (outreach sites).
+    Assigns strictly unique sequential task UIDs like 'BL-PG-09-1', 'BL-PG-09-2', 'BL-RD-09-1', etc.
+    Links monthly_operations rows to the source calendar activity via activity_id and activity_uid.
     """
     with engine.begin() as conn:
         res = conn.execute(text("SELECT * FROM off_page_activities WHERE id = :id"), {"id": str(activity_id)}).first()
@@ -2082,7 +2275,7 @@ def sync_activity_to_monthly_operations(activity_id: str) -> List[str]:
         p_slug = p_name.lower().replace(" ", "").strip()
         period = act.get("period") or datetime.now().strftime("%B %Y")
         act_name = act.get("activity_name") or "Off-Page Activity"
-        act_uid = act.get("activity_uid") or f"ACT-{str(activity_id)[:6].upper()}"
+        act_uid = act.get("activity_uid") or f"{str(activity_id)[:8].upper()}"
         content_spoc = act.get("content_poc") or act.get("main_poc") or ""
         publisher = act.get("main_poc") or ""
         today_str = datetime.now().strftime("%Y-%m-%d")
@@ -2109,14 +2302,16 @@ def sync_activity_to_monthly_operations(activity_id: str) -> List[str]:
             for n in names:
                 kw_list.append({
                     "keyword": n,
-                    "landing_page_url": act.get("topic_link"),
+                    "landing_page_url": act.get("landing_page_url") or "",
+                    "topic_link": act.get("topic_link") or "",
                     "category": act.get("category"),
                     "cluster": act.get("cluster")
                 })
         else:
             kw_list = [{
                 "keyword": act_name,
-                "landing_page_url": act.get("topic_link"),
+                "landing_page_url": act.get("landing_page_url") or "",
+                "topic_link": act.get("topic_link") or "",
                 "category": act.get("category"),
                 "cluster": act.get("cluster")
             }]
@@ -2128,10 +2323,43 @@ def sync_activity_to_monthly_operations(activity_id: str) -> List[str]:
             except Exception:
                 outreach_sites = []
 
+        is_forum_act = any(f in str(act.get("channel") or act.get("activity_name") or "").lower() for f in ["quora", "reddit", "forum"])
+
+        # Determine task row prefix: {PROJ}-{CHAN}-{MONTH} e.g. BL-PG-09, BL-RD-09, BL-QR-09
+        proj_code = generate_project_code(p_name)
+        chan_code = get_channel_code(act_name or act.get("channel"))
+        month_code = get_month_code(period)
+        task_prefix = f"{proj_code}-{chan_code}-{month_code}"
+
+        # Fetch existing rows for this activity if already synced
+        existing_act_rows = conn.execute(
+            text("SELECT id, uid, keyword1 FROM monthly_operations WHERE activity_id = :aid ORDER BY id ASC"),
+            {"aid": str(activity_id)}
+        ).fetchall()
+        existing_by_kw = {str(r[2]).strip().lower(): dict(r._mapping) for r in existing_act_rows if r[2]}
+
+        # Query all existing UIDs with this prefix in monthly_operations to find true max sequence
+        existing_uids = conn.execute(
+            text("SELECT uid FROM monthly_operations WHERE uid LIKE :pattern"),
+            {"pattern": f"{task_prefix}-%"}
+        ).fetchall()
+        max_seq = 0
+        for u in existing_uids:
+            if u and u[0]:
+                try:
+                    s_str = str(u[0]).split("-")[-1]
+                    if s_str.isdigit():
+                        v = int(s_str)
+                        if v > max_seq:
+                            max_seq = v
+                except Exception:
+                    pass
+
         synced_uids = []
         for idx, k in enumerate(kw_list):
-            kw_name = k.get("keyword") or ""
-            lp = k.get("landing_page_url") or k.get("topic_link") or k.get("topicLink") or act.get("topic_link") or ""
+            kw_name = (k.get("keyword") or "").strip()
+            topic_val = (k.get("topic_link") or act.get("topic_link") or "") if is_forum_act else ""
+            lp_val = k.get("landing_page_url") or act.get("landing_page_url") or ""
             cluster = k.get("cluster") or act.get("cluster") or ""
             kw_cat = k.get("category") or act.get("category") or ""
 
@@ -2143,25 +2371,29 @@ def sync_activity_to_monthly_operations(activity_id: str) -> List[str]:
                 site_domain = site
             elif isinstance(outreach_sites, list) and len(outreach_sites) > 0:
                 os_item = outreach_sites[min(idx, len(outreach_sites) - 1)]
-            # Clean batch UID e.g. BL-09-1, BL-09-2 rather than raw string attachments
-            clean_base = re.sub(r'-(KW\d+|\d+)$', '', str(act_uid))
-            row_uid = f"{clean_base}-{idx + 1}"
-            synced_uids.append(row_uid)
+                if isinstance(os_item, dict):
+                    site_domain = os_item.get("domain") or ""
+                elif isinstance(os_item, str):
+                    site_domain = os_item
 
-            existing = conn.execute(text("""
-                SELECT id FROM monthly_operations
-                WHERE uid = :uid OR uid = :legacy_uid
-                LIMIT 1
-            """), {"uid": row_uid, "legacy_uid": f"{act_uid}-KW{idx + 1}"}).first()
-
-            if existing:
-                row_id = existing[0]
+            # Check if this row already existed
+            existing_row = existing_by_kw.get(kw_name.lower())
+            if existing_row:
+                row_uid = existing_row.get("uid")
+                # Normalize UID if it was in an old non-channel format
+                if not row_uid or not row_uid.startswith(task_prefix):
+                    max_seq += 1
+                    row_uid = f"{task_prefix}-{max_seq}"
+                row_id = existing_row.get("id")
                 conn.execute(text("""
                     UPDATE monthly_operations SET
                         uid = :uid,
+                        activity_id = :activity_id,
+                        activity_uid = :activity_uid,
                         period = :period,
                         keyword1 = :keyword1,
                         landing_page = :landing_page,
+                        topic = :topic,
                         cluster = :cluster,
                         kw_category = :kw_category,
                         activity_name = :activity_name,
@@ -2173,9 +2405,12 @@ def sync_activity_to_monthly_operations(activity_id: str) -> List[str]:
                     WHERE id = :id
                 """), {
                     "uid": row_uid,
+                    "activity_id": str(activity_id),
+                    "activity_uid": act_uid,
                     "period": period,
                     "keyword1": kw_name,
-                    "landing_page": lp,
+                    "landing_page": lp_val,
+                    "topic": topic_val,
                     "cluster": cluster,
                     "kw_category": kw_cat,
                     "activity_name": act_name,
@@ -2186,29 +2421,34 @@ def sync_activity_to_monthly_operations(activity_id: str) -> List[str]:
                     "id": row_id
                 })
             else:
+                max_seq += 1
+                row_uid = f"{task_prefix}-{max_seq}"
                 conn.execute(text("""
                     INSERT INTO monthly_operations (
-                        uid, filename, project_name, project_slug, period, scheduled_date,
+                        uid, activity_id, activity_uid, filename, project_name, project_slug, period, scheduled_date,
                         keyword1, keyword2, landing_page, cluster, kw_category,
                         activity_name, word_count, content_spoc, topic, content_doc,
                         status, publisher, pg_site_domain, live_link, remarks, solution,
                         verified, last_activity, updated_date, created_at, updated_at
                     ) VALUES (
-                        :uid, :filename, :project_name, :project_slug, :period, :scheduled_date,
+                        :uid, :activity_id, :activity_uid, :filename, :project_name, :project_slug, :period, :scheduled_date,
                         :keyword1, '', :landing_page, :cluster, :kw_category,
-                        :activity_name, '1000', :content_spoc, '', '',
+                        :activity_name, '1000', :content_spoc, :topic, '',
                         'In Progress', :publisher, :pg_site_domain, '', '', '',
                         false, :activity_name, :updated_date, now(), now()
                     )
                 """), {
                     "uid": row_uid,
+                    "activity_id": str(activity_id),
+                    "activity_uid": act_uid,
                     "filename": filename,
                     "project_name": p_name,
                     "project_slug": p_slug,
                     "period": period,
                     "scheduled_date": today_str,
                     "keyword1": kw_name,
-                    "landing_page": lp,
+                    "landing_page": lp_val,
+                    "topic": topic_val,
                     "cluster": cluster,
                     "kw_category": kw_cat,
                     "activity_name": act_name,
@@ -2217,6 +2457,8 @@ def sync_activity_to_monthly_operations(activity_id: str) -> List[str]:
                     "pg_site_domain": site_domain,
                     "updated_date": today_str
                 })
+
+            synced_uids.append(row_uid)
 
         return synced_uids
 
@@ -2349,6 +2591,8 @@ def _ensure_ai_analysis_table():
             conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS budget_summary JSONB;"))
             conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS brand_mention_site JSONB;"))
             conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS brand_mention_sites JSONB;"))
+            conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS topic_link TEXT;"))
+            conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS selected BOOLEAN DEFAULT FALSE;"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_run ON calendar_ai_analysis (run_id);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_project ON calendar_ai_analysis (project_slug, created_at DESC);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_activity ON calendar_ai_analysis (activity_id);"))
@@ -2448,6 +2692,8 @@ def save_calendar_ai_run(
             "brand_mention_site": _jsonb(k.get("brand_mention_site")),
             "brand_mention_sites": _jsonb(k.get("brand_mention_sites")),
             "landing_page_url": k.get("landing_page_url") or k.get("topicLink") or k.get("topic_link") or None,
+            "topic_link": k.get("topic_link") or None,
+            "selected": bool(k.get("selected")),
             "budget_used": _parse_num(budget_used, None),
             "quantity_requested": _as_int(quantity_requested, None),
             "summary": summary or None,
@@ -2461,14 +2707,14 @@ def save_calendar_ai_run(
                     run_id, activity_id, project_slug, domain, country, keyword, keyword_id,
                     category, cluster, db_rank, prev_rank, live_rank, delta, sv, kd, target_type,
                     batch, confidence, confidence_breakdown, reason, top3_types, top3_is_landing,
-                    top_links, verification, outreach_site, brand_mention_site, brand_mention_sites, landing_page_url, budget_used,
+                    top_links, verification, outreach_site, brand_mention_site, brand_mention_sites, landing_page_url, topic_link, selected, budget_used,
                     quantity_requested, summary, budget_summary
                 ) VALUES (
                     :run_id, :activity_id, :project_slug, :domain, :country, :keyword, :keyword_id,
                     :category, :cluster, :db_rank, :prev_rank, :live_rank, :delta, :sv, :kd, :target_type,
                     :batch, :confidence, CAST(:confidence_breakdown AS JSONB), :reason,
                     CAST(:top3_types AS JSONB), :top3_is_landing, CAST(:top_links AS JSONB),
-                    CAST(:verification AS JSONB), CAST(:outreach_site AS JSONB), CAST(:brand_mention_site AS JSONB), CAST(:brand_mention_sites AS JSONB), :landing_page_url,
+                    CAST(:verification AS JSONB), CAST(:outreach_site AS JSONB), CAST(:brand_mention_site AS JSONB), CAST(:brand_mention_sites AS JSONB), :landing_page_url, :topic_link, :selected,
                     :budget_used, :quantity_requested, :summary, CAST(:budget_summary AS JSONB)
                 )
             """), rows)
@@ -2595,6 +2841,214 @@ def generate_calendar_csv(project_name: Optional[str] = None, status_filter: Opt
     return output.getvalue()
 
 
+def _normalize_forum_url(url: str) -> str:
+    """Normalize a URL to canonical domain+path for duplicate detection."""
+    if not url:
+        return ""
+    u = str(url).strip().lower()
+    u = re.sub(r'^https?://', '', u)
+    u = re.sub(r'^www\.', '', u)
+    u = u.split('?')[0].split('#')[0].rstrip('/')
+    return u
+
+
+def fetch_existing_offpage_topic_links(project_slug: str = "", project_name: str = "") -> Set[str]:
+    """Retrieve all previously assigned forum topic links in Off-Page (monthly_operations & off_page_activities)."""
+    used_links = set()
+    p_slug = str(project_slug or "").strip().lower()
+    p_name = str(project_name or project_slug or "").strip().lower()
+    try:
+        with engine.connect() as conn:
+            # 1. From monthly_operations
+            q1 = text("""
+                SELECT topic FROM monthly_operations
+                WHERE (LOWER(TRIM(project_slug)) = LOWER(TRIM(:slug)) OR LOWER(TRIM(project_name)) = LOWER(TRIM(:pname)))
+                  AND topic IS NOT NULL AND TRIM(topic) != ''
+            """)
+            rows1 = conn.execute(q1, {"slug": p_slug, "pname": p_name}).fetchall()
+            for r in rows1:
+                t = str(r[0] or "").strip()
+                if t:
+                    for part in t.split('|'):
+                        norm = _normalize_forum_url(part)
+                        if norm:
+                            used_links.add(norm)
+
+            # 2. From off_page_activities
+            q2 = text("""
+                SELECT topic_link FROM off_page_activities
+                WHERE (LOWER(TRIM(project_name)) = LOWER(TRIM(:pname)))
+                  AND topic_link IS NOT NULL AND TRIM(topic_link) != ''
+            """)
+            rows2 = conn.execute(q2, {"pname": p_name}).fetchall()
+            for r in rows2:
+                t = str(r[0] or "").strip()
+                if t:
+                    for part in t.split('|'):
+                        norm = _normalize_forum_url(part)
+                        if norm:
+                            used_links.add(norm)
+    except Exception as err:
+        print(f"[Calendar AI] Notice fetching existing offpage topic links: {err}", file=sys.stderr, flush=True)
+
+    return used_links
+
+
+def is_valid_forum_post_url(url: str, channel_type: str = "quora") -> bool:
+    """
+    Strict validation to ensure only genuine discussion posts, questions, or comment threads are accepted.
+    Strictly rejects:
+    - User profile URLs (e.g. reddit.com/user/..., quora.com/profile/...)
+    - Search URLs (e.g. quora.com/search?q=..., reddit.com/search?q=...)
+    - Subreddit root pages without /comments/
+    - Spaces, topic tags, and system directory pages.
+    """
+    if not url or not isinstance(url, str):
+        return False
+    u = url.strip()
+    u_lower = u.lower()
+    if not u_lower.startswith(("http://", "https://")):
+        return False
+    
+    parsed = urllib.parse.urlparse(u)
+    domain = parsed.netloc.lower()
+    path = parsed.path.strip("/")
+    path_lower = path.lower()
+    query = parsed.query.lower()
+    
+    # 1. Strictly reject any search term / query string / search path
+    if "search" in path_lower or "search" in query or "q=" in query or "query=" in query:
+        return False
+        
+    # 2. Strictly reject any profile / user page across all channels
+    if any(p in path_lower for p in ["profile", "user/", "/user", "u/", "/u"]):
+        return False
+
+    if "reddit" in channel_type.lower():
+        # Domain must be reddit.com
+        if not (domain == "reddit.com" or domain == "www.reddit.com" or domain.endswith(".reddit.com") or domain == "redd.it"):
+            return False
+        # Must be an actual comments post / submission thread (e.g. r/{sub}/comments/{id}/{slug})
+        if not path_lower.startswith("r/") or "/comments/" not in path_lower:
+            return False
+        # Must have valid post ID segment after /comments/
+        parts = path_lower.split("/")
+        if "comments" in parts:
+            idx = parts.index("comments")
+            if len(parts) <= idx + 1 or not parts[idx + 1]:
+                return False
+        if any(x in path_lower for x in ["/about", "/rules", "/wiki", "/settings", "/premium", "/help"]):
+            return False
+        return True
+
+    else: # Quora
+        # Must strictly start with quora.com / www.quora.com
+        if not (domain == "quora.com" or domain == "www.quora.com"):
+            return False
+        if not path:
+            return False
+        disallowed = [
+            "search", "q", "profile", "user", "u", "topic", "about", "contact", "terms",
+            "privacy", "press", "careers", "directory", "settings", "messages",
+            "notifications", "login", "signup", "spaces", "space", "partner", "unanswered"
+        ]
+        first_seg = path.split("/")[0].lower()
+        if first_seg in disallowed or any(d in path_lower for d in ["/profile", "/user", "/search", "/topic"]):
+            return False
+        if len(first_seg) < 3:
+            return False
+        return True
+
+
+def canonicalize_forum_topic_url(url: str, channel_type: str = "quora") -> Optional[str]:
+    """
+    Standardize valid forum topic URLs to always start with https://www.quora.com or https://www.reddit.com.
+    """
+    if not is_valid_forum_post_url(url, channel_type):
+        return None
+    u = str(url).strip()
+    parsed = urllib.parse.urlparse(u)
+    path = "/" + parsed.path.strip("/")
+    
+    if "reddit" in channel_type.lower():
+        return f"https://www.reddit.com{path}"
+    else:
+        return f"https://www.quora.com{path}"
+
+
+def fetch_forum_candidate_urls(
+    keyword: str,
+    cluster: str = "",
+    channel_type: str = "quora",
+    country_code: str = "in"
+) -> List[str]:
+    """
+    Query Google SERP for genuine forum post/comment threads.
+    """
+    kw_text = str(keyword or "").strip()
+    c_type = "reddit" if "reddit" in str(channel_type or "").lower() else "quora"
+
+    queries = []
+    if c_type == "reddit":
+        queries.append(f"{kw_text} + reddit")
+        queries.append(f"{kw_text} reddit")
+        if cluster and cluster != "General":
+            queries.append(f"{cluster} + reddit")
+            queries.append(f"{cluster} reddit")
+    else:
+        queries.append(f"{kw_text} + quora")
+        queries.append(f"{kw_text} quora")
+        if cluster and cluster != "General":
+            queries.append(f"{cluster} + quora")
+            queries.append(f"{cluster} quora")
+
+    candidate_urls = []
+    for search_query in queries:
+        print(f"[Forum Topic Discovery] Querying SERP: '{search_query}' (Country: {country_code})...", flush=True)
+        results = fetch_serp_via_firecrawl(search_query, country_code=country_code, limit=10)
+        if not results:
+            results = fetch_serp_via_serpapi(search_query, country_code=country_code, limit=10)
+        if not results:
+            results = fetch_serp_via_brightdata(search_query, country_code=country_code, limit=10)
+
+        for item in (results or []):
+            url = (item.get("url") or item.get("link") or "").strip()
+            canon_url = canonicalize_forum_topic_url(url, c_type)
+            if canon_url and canon_url not in candidate_urls:
+                candidate_urls.append(canon_url)
+        if len(candidate_urls) >= 5:
+            break
+
+    return candidate_urls
+
+
+def discover_forum_topic_link(
+    keyword: str,
+    cluster: str = "",
+    channel_type: str = "quora",
+    existing_links: Optional[Set[str]] = None,
+    country_code: str = "in"
+) -> Optional[str]:
+    """
+    Discover a single genuine post/comment topic link for a keyword, skipping any link in existing_links.
+    """
+    existing_links = existing_links if existing_links is not None else set()
+    kw_text = str(keyword or "").strip()
+    c_type = "reddit" if "reddit" in str(channel_type or "").lower() else "quora"
+
+    candidates = fetch_forum_candidate_urls(kw_text, cluster=cluster, channel_type=c_type, country_code=country_code)
+    for cand_url in candidates:
+        norm = _normalize_forum_url(cand_url)
+        if norm and norm not in existing_links:
+            existing_links.add(norm)
+            print(f"[Forum Topic Discovery] Discovered genuine post link for '{kw_text}': {cand_url}", flush=True)
+            return cand_url
+        else:
+            print(f"[Forum Topic Discovery] [Skip-Dup] Link '{cand_url}' already taken or in DB, skipping for '{kw_text}'...", flush=True)
+
+    return None
+
+
 # ─────────────────────────────────────────────────────────────
 # 4B. QUORA & REDDIT CHANNEL STRATEGY GENERATOR
 # ─────────────────────────────────────────────────────────────
@@ -2604,55 +3058,154 @@ def generate_forum_channel_strategy(
     channel_type: str = "quora",
     budget: Optional[float] = None,
     quantity: Optional[int] = None,
-    project_slug: str = ""
+    project_slug: str = "",
+    country: str = "India"
 ) -> Dict[str, Any]:
     """
-    Quora & Reddit Channel Generation Logic:
-    1. SV-prioritized keyword routing (ignoring KD since forum discussions target long-tail organic questions).
-    2. Query generation:
-       - For Quora: '{keyword} site:quora.com'
-       - For Reddit: '{keyword} site:reddit.com'
-    3. Low-Quality (LQ) thread re-optimization detection vs fresh unaddressed questions.
-    4. Equal distribution of allocated channel budget across threads.
+    Forum Quora and Forum Reddit Keyword Strategy:
+    - Same keyword picking logic as Paid Guest Post (Landing Page target_type, Rank 5+, SV & Live Delta).
+    - Discovers genuine Quora question threads & Reddit comment discussion posts starting with quora.com or reddit.com.
+    - Strictly rejects search query URLs (e.g. quora.com/search?q=...) and user profile URLs (e.g. reddit.com/user/..., quora.com/profile/...).
+    - Strictly prevents duplicate topic links across keywords or existing Off-Page records.
+    - Preserves client website URL in landing_page_url and genuine forum thread URL in topic_link.
     """
-    sorted_kws = sorted(keywords, key=lambda x: _parse_num(x.get("sv"), 0), reverse=True)
-    target_qty = int(quantity or 1)
-    allocated_kws = sorted_kws[:target_qty * 4]
+    country_code = "in" if str(country or "").strip().lower() in ("india", "in") else "us"
+    existing_links = fetch_existing_offpage_topic_links(project_slug, project_slug)
+    used_topic_links = set(existing_links)
     
-    threads = []
+    # 1. Enforce core keyword criteria
+    valid_kws = []
+    for k in keywords:
+        tt = str(k.get("target_type") or "").strip().lower()
+        if tt not in ("landing page", "landing"):
+            continue
+        lp = str(k.get("landing_page_url") or k.get("topicLink") or k.get("topic_link") or "").strip()
+        if not lp or lp.lower() == "nan":
+            continue
+        rank = _parse_num(k.get("rank"), 0)
+        if rank < 5:
+            continue
+        k_copy = dict(k)
+        k_copy["landing_page_url"] = lp
+        valid_kws.append(k_copy)
+
+    if not valid_kws:
+        valid_kws = [dict(k) for k in keywords if _parse_num(k.get("rank"), 0) >= 5] or [dict(k) for k in keywords]
+
+    # 2. Sort by Search Volume & Momentum (same as Paid Guest Post)
+    sorted_kws = sorted(valid_kws, key=lambda x: (_parse_num(x.get("delta"), 0), _parse_num(x.get("sv"), 0)), reverse=True)
+    target_qty = int(quantity or 1)
+    allocated_kws = sorted_kws
+
+    c_label = "Reddit Community Discussion" if "reddit" in channel_type.lower() else "Quora Question & Answer"
+    act_type = "High-Authority Subreddit Thread Answer & Citation" if "reddit" in channel_type.lower() else "Verified Expert Answer with Contextual Topic Link"
+    domain_label = "reddit.com" if "reddit" in channel_type.lower() else "quora.com"
+    da_val = 91 if "reddit" in channel_type.lower() else 93
+
     budget_per_thread = round((float(budget or 0) / max(1, len(allocated_kws))), 2) if budget else 0.0
 
+    # 3. Fetch candidate SERP links concurrently
+    candidate_map = {}
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_to_kw = {
+            executor.submit(
+                fetch_forum_candidate_urls,
+                k.get("keyword", ""),
+                k.get("cluster", ""),
+                channel_type,
+                country_code
+            ): k for k in allocated_kws
+        }
+        for future in future_to_kw:
+            k = future_to_kw[future]
+            kw_id = str(k.get("id") or k.get("keyword"))
+            try:
+                candidate_map[kw_id] = future.result()
+            except Exception as err:
+                print(f"[Forum Topic Discovery] Error fetching candidates for '{k.get('keyword')}': {err}", file=sys.stderr, flush=True)
+                candidate_map[kw_id] = []
+
+    # 4. Sequentially assign strictly unique topic links to each keyword
+    threads = []
     for k in allocated_kws:
         kw_text = str(k.get("keyword") or "").strip()
+        kw_id = str(k.get("id") or k.get("keyword"))
+        candidates = candidate_map.get(kw_id, [])
+        picked_url = None
+
+        for cand_url in candidates:
+            canon = canonicalize_forum_topic_url(cand_url, channel_type)
+            if not canon:
+                continue
+            norm = _normalize_forum_url(canon)
+            if norm and norm not in used_topic_links:
+                picked_url = canon
+                used_topic_links.add(norm)
+                print(f"[Forum Topic Discovery] Assigned genuine topic link for '{kw_text}': {canon}", flush=True)
+                break
+            else:
+                print(f"[Forum Topic Discovery] [Skip-Dup] Topic link '{cand_url}' already taken or invalid, skipping for '{kw_text}'...", flush=True)
+
         lp = k.get("landing_page_url") or k.get("topicLink") or k.get("topic_link") or ""
         cluster = k.get("cluster") or "General"
+        cat = k.get("category") or "General"
         sv_val = _as_int(k.get("sv"), 0)
-        
-        if channel_type.lower() == "reddit":
-            query = f'"{kw_text}" site:reddit.com'
-            channel_label = "Reddit Community Discussion"
-            action_type = "High-Authority Subreddit Thread Answer & Citation"
-        else:
-            query = f'"{kw_text}" site:quora.com'
-            channel_label = "Quora Question & Answer"
-            action_type = "Verified Expert Answer with Contextual Topic Link"
-            
+        kd_val = _as_int(k.get("kd"), 0)
+        db_rank = _as_int(k.get("rank"), 10)
+        prev_rank = _as_int(k.get("prev_rank"), db_rank)
+        live_rank = _as_int(k.get("new_rank"), db_rank)
+        delta_val = _as_int(k.get("delta"), 0)
+        gain_pct_str = k.get("gain_pct_str") or (f"{delta_val:+d}" if delta_val != 0 else "0")
+        rank_hist = k.get("calendar_rank_history") or k.get("history") or []
+
         threads.append({
+            "id": k.get("id") or str(uuid.uuid4()),
             "keyword": kw_text,
             "sv": sv_val,
-            "channel": channel_label,
-            "search_query": query,
-            "action_type": action_type,
+            "kd": kd_val,
+            "rank": db_rank,
+            "prev_rank": prev_rank,
+            "new_rank": live_rank,
+            "delta": delta_val,
+            "gain_pct_str": gain_pct_str,
+            "calendar_rank_history": rank_hist,
+            "history": rank_hist,
+            "confidence": _as_int(k.get("confidence"), 85),
+            "reason": k.get("reason") or f"I've selected this keyword because historical rank is #{db_rank} with {sv_val:,} monthly search volume, well-suited for {c_label} community citations.",
+            "channel": c_label,
+            "search_query": f"{kw_text} {'reddit' if 'reddit' in channel_type.lower() else 'quora'}",
+            "action_type": act_type,
+            "topic_link": picked_url or "",
             "landing_page_url": lp,
             "cluster": cluster,
+            "category": cat,
+            "target_type": "Landing Page",
             "thread_budget": budget_per_thread,
-            "is_reoptimization": bool(_as_int(k.get("rank"), 100) > 30)
+            "outreach_site": {
+                "domain": domain_label,
+                "da": da_val,
+                "spam_score": 1,
+                "price": f"₹{budget_per_thread}"
+            },
+            "is_reoptimization": bool(db_rank > 30),
+            "selected": bool(picked_url)
         })
-        
+
+    # Divide into high/medium/low batches:
+    # Batch 1 (high): improving on live rank check (delta > 0)
+    # Batch 2 (medium): declining on live rank check (delta < 0)
+    # Batch 3 (low): stagnant on live rank check (delta == 0)
+    batches = {
+        "high": [t for t in threads if t.get("delta", 0) > 0],
+        "medium": [t for t in threads if t.get("delta", 0) < 0],
+        "low": [t for t in threads if t.get("delta", 0) == 0]
+    }
+
     return {
         "channel": channel_type,
-        "total_threads_mapped": len(threads),
+        "total_threads_mapped": len([t for t in threads if t.get("topic_link")]),
         "threads": threads,
+        "batches": batches,
         "allocated_budget": budget,
         "budget_per_thread": budget_per_thread,
         "quantity": target_qty
@@ -2666,7 +3219,7 @@ def generate_forum_channel_strategy(
 router = APIRouter(prefix="/calendar", tags=["Calendar"])
 
 
-@router.post("/forum-strategy")
+@router.api_route("/forum-strategy", methods=["GET", "POST"])
 def generate_forum_strategy_endpoint(
     channel_type: str = Query("quora", description="quora or reddit"),
     project_slug: str = Query(..., description="Project slug"),
@@ -2807,7 +3360,7 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
                 continue
             k["landing_page_url"] = lp
             k["topicLink"] = lp
-            k["topic_link"] = lp
+            # Do not overwrite topic_link with landing page URL
             filtered_kws.append(k)
         keywords = filtered_kws
     print('Selected Keywords from intent table\n', keywords)
@@ -2906,9 +3459,9 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
                 enriched_batch.append(assigned_by_id[kw_id])
             else:
                 kw_copy = dict(kw)
-                kw_copy["landing_page_url"] = kw.get("landing_page_url") or kw.get("topicLink") or kw.get("topic_link") or ""
+                kw_copy["landing_page_url"] = kw.get("landing_page_url") or kw.get("topicLink") or ""
                 kw_copy["topicLink"] = kw_copy["landing_page_url"]
-                kw_copy["topic_link"] = kw_copy["landing_page_url"]
+                kw_copy["topic_link"] = kw.get("topic_link") or None
                 enriched_batch.append(kw_copy)
         ai_res["batches"][b_key] = enriched_batch
 
@@ -3007,6 +3560,16 @@ def update_activity_endpoint(activity_id: str, payload: CalendarActivityUpdatePa
     if isinstance(pk, list) and pk:
         picked = [k.get("keyword") for k in pk if isinstance(k, dict) and k.get("keyword")]
         mark_calendar_ai_selected(activity_id, picked)
+
+    # Automatically sync to Off-Page (monthly_operations) if published
+    if data.get("status") == "published":
+        try:
+            synced_uids = sync_activity_to_monthly_operations(activity_id)
+            if synced_uids:
+                updated["synced_uids"] = synced_uids
+                updated["first_uid"] = synced_uids[0]
+        except Exception as sync_err:
+            print(f"[Calendar API] Error syncing to monthly_operations: {sync_err}", file=sys.stderr)
 
     return {"activity": updated}
 

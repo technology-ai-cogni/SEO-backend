@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Bookmark,
   Clock,
@@ -43,7 +44,8 @@ import {
   analyzeCalendarAiPushPotentialApi,
   fetchCalendarUsersApi,
   listCalendarAiRunsApi,
-  getCalendarAiRunApi
+  getCalendarAiRunApi,
+  generateForumStrategyApi
 } from '../../lib/projectsApi';
 import BrandInfinityLoader from '../common/BrandInfinityLoader';
 
@@ -145,144 +147,322 @@ function PlainSelect({ value, onChange, options, placeholder = 'Select...', requ
   );
 }
 
+// ─── DYNAMIC CHANNEL CONFIG & NORMALIZATION ───
+export function mapActivityToChannelKey(name = '') {
+  const lower = String(name || '').toLowerCase();
+  if (lower.includes('quora')) return 'quora';
+  if (lower.includes('reddit')) return 'reddit';
+  if (lower.includes('brand')) return 'brand_mention';
+  return 'guest_post';
+}
+
+export const CHANNEL_CONFIG = {
+  guest_post: { id: 'guest_post', label: 'Paid Guest Post', shortLabel: 'Guest Post' },
+  quora: { id: 'quora', label: 'Quora', shortLabel: 'Quora' },
+  reddit: { id: 'reddit', label: 'Reddit', shortLabel: 'Reddit' },
+  brand_mention: { id: 'brand_mention', label: 'Brand Mention', shortLabel: 'Brand Mention' }
+};
+
 // ─── PUSH-POTENTIAL BATCHING (Hariba.ai Brand Palette) ───
 
-// ─── INTERACTIVE SERP SPARKLINE ON HOVER ───
-function RankSparklineHover({ prevRank, liveRank, delta, gainPctStr }) {
+export const formatRankBadge = (val) => {
+  if (val == null) return '—';
+  const num = Number(val);
+  if (isNaN(num)) return String(val);
+  return `#${num}`;
+};
+
+export const formatShiftSpots = (prev, curr, delta) => {
+  const p = prev != null ? Number(prev) : null;
+  const c = curr != null ? Number(curr) : null;
+  const has101 = (p != null && p >= 101) || (c != null && c >= 101);
+  if (has101) return '30+';
+  const d = delta != null ? Math.abs(delta) : (p != null && c != null ? Math.abs(p - c) : null);
+  if (d == null || d === 0) return '0 spots';
+  if (d >= 30) return '30+';
+  return `${d} spot${d > 1 ? 's' : ''}`;
+};
+
+export const cleanReasonSpots = (reasonText) => {
+  if (!reasonText || typeof reasonText !== 'string') return reasonText;
+  return reasonText
+    .replace(/(?:[3-9]\d|\d{3,})\s+spots?/gi, '30+')
+    .replace(/\+8\d\b/g, '+30+')
+    .replace(/-8\d\b/g, '-30+');
+};
+
+// ─── INTERACTIVE SERP SPARKLINE ON HOVER (PORTAL BASED - NEVER CLIPPED BY BATCH OR HEADER) ───
+function RankSparklineHover({ initialRank, prevRank, liveRank, delta, gainPctStr, history = [] }) {
   const [hovered, setHovered] = useState(false);
-  const pNum = prevRank != null ? Number(prevRank) : null;
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef(null);
+
+  const initNum = initialRank != null ? Number(initialRank) : (prevRank != null ? Number(prevRank) : null);
+  const pNum = prevRank != null ? Number(prevRank) : initNum;
   const lNum = liveRank != null ? Number(liveRank) : null;
-  const isUp = (pNum != null && lNum != null && pNum > lNum) || (delta > 0);
-  const isDrop = (pNum != null && lNum != null && pNum < lNum) || (delta < 0);
+  const has101 = (initNum != null && initNum >= 101) || (pNum != null && pNum >= 101) || (lNum != null && lNum >= 101);
+  const isUp = (pNum != null && lNum != null && pNum > lNum) || (delta > 0) || (pNum != null && pNum >= 101 && lNum != null && lNum < 101);
+  const isDrop = (pNum != null && lNum != null && pNum < lNum) || (delta < 0) || (lNum != null && lNum >= 101 && pNum != null && pNum < 101);
 
-  // Calculate SVG curve coordinates (inverted Y since rank 1 is highest on SERP)
-  const calcY = (r) => {
-    if (r == null) return 16;
-    if (r >= 100) return 26;
-    return Math.max(5, Math.min(27, Math.round(27 - ((100 - r) * 0.22))));
-  };
-
-  const y1 = calcY(pNum);
-  const y2 = calcY(lNum);
-  const yMid = Math.max(4, Math.min(28, Math.round((y1 + y2) / 2 + (isUp ? -5 : (isDrop ? 5 : 0)))));
+  // Build points array showing: Initial -> Last Check -> Now
+  let points = [];
+  if (Array.isArray(history) && history.length >= 3) {
+    points = history.map((h, i) => {
+      const isFirst = i === 0;
+      const isLast = i === history.length - 1;
+      const isSecondToLast = i === history.length - 2;
+      return {
+        rank: Number(h.rank ?? h.new_rank ?? 10),
+        label: isFirst ? 'Initial' : (isLast ? 'Now' : (isSecondToLast ? 'Last Check' : (h.date || `Hit ${i + 1}`)))
+      };
+    });
+    // Ensure Initial rank is at start if distinct
+    if (initNum != null && points[0].rank !== initNum) {
+      points.unshift({ rank: initNum, label: 'Initial' });
+    } else {
+      points[0].label = 'Initial';
+    }
+    // Ensure last point is Now
+    if (lNum != null && points[points.length - 1].rank !== lNum) {
+      points.push({ rank: lNum, label: 'Now' });
+    } else {
+      points[points.length - 1].label = 'Now';
+    }
+  } else {
+    // 3 distinct stages: Initial -> Last Check -> Now
+    points = [
+      { rank: initNum ?? pNum ?? 10, label: 'Initial' },
+      { rank: pNum ?? initNum ?? 10, label: 'Last Check' },
+      { rank: lNum ?? pNum ?? 10, label: 'Now' }
+    ];
+  }
 
   const strokeColor = isUp ? '#00BFA2' : (isDrop ? '#D4007A' : '#8A8A9A');
   const fillColor = isUp ? '#E6FAF6' : (isDrop ? '#FDEBF4' : '#F5F5F5');
   const borderColor = isUp ? '#A7F3D0' : (isDrop ? '#F8B4D9' : '#E2DBEC');
 
+  // Dynamic chart dimensions
+  const chartWidth = Math.max(130, Math.min(210, points.length * 38));
+  const chartHeight = 32;
+  const padX = 12;
+
+  const calcY = (r) => {
+    if (r == null || isNaN(r)) return 16;
+    const clamped = Math.max(1, Math.min(100, r));
+    // Invert Y so rank 1 is highest on chart (Y=6) and rank 100 is at bottom (Y=28)
+    return Math.round(28 - ((100 - clamped) * 0.22));
+  };
+
+  const getX = (idx) => {
+    if (points.length <= 1) return chartWidth / 2;
+    return Math.round(padX + (idx * ((chartWidth - (2 * padX)) / (points.length - 1))));
+  };
+
+  // Generate SVG path (smooth curve or polyline)
+  const pathD = points.length === 2
+    ? `M ${getX(0)},${calcY(points[0].rank)} Q ${(getX(0) + getX(1)) / 2},${Math.max(4, Math.min(28, (calcY(points[0].rank) + calcY(points[1].rank)) / 2 + (isUp ? -4 : (isDrop ? 4 : 0))))} ${getX(1)},${calcY(points[1].rank)}`
+    : points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${getX(idx)},${calcY(p.rank)}`).join(' ');
+
+  const handleMouseEnter = () => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const popoverHeight = 115;
+      const popoverWidth = chartWidth + 24;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const placeAbove = spaceBelow < popoverHeight && rect.top > popoverHeight;
+
+      setCoords({
+        top: placeAbove ? (rect.top - popoverHeight - 6) : (rect.bottom + 6),
+        left: Math.max(10, Math.min(window.innerWidth - popoverWidth - 10, rect.left))
+      });
+    }
+    setHovered(true);
+  };
+
+  const badgeShiftText = has101 ? '30+' : (gainPctStr || `${Math.abs(delta || 0)}`);
+
   return (
-    <div
-      style={{ position: 'relative', display: 'inline-block' }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <div style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 5,
-        background: fillColor,
-        color: strokeColor,
-        border: `1px solid ${borderColor}`,
-        padding: '2px 8px',
-        borderRadius: 6,
-        fontSize: 11,
-        fontWeight: 800,
-        cursor: 'pointer',
-        transition: 'all 0.15s ease'
-      }}>
-        <span>{isUp ? `↑ ${gainPctStr || `+${Math.abs(delta || 0)}`}` : (isDrop ? `↓ ${gainPctStr || `-${Math.abs(delta || 0)}`}` : '— 0%')}</span>
-        <span style={{ fontSize: 9.5, opacity: 0.9 }}>{isUp ? 'GAIN' : (isDrop ? 'DROP' : 'STEADY')}</span>
+    <>
+      <div
+        ref={triggerRef}
+        style={{ position: 'relative', display: 'inline-block' }}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={() => setHovered(false)}
+      >
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+          background: fillColor,
+          color: strokeColor,
+          border: `1px solid ${borderColor}`,
+          padding: '2px 8px',
+          borderRadius: 6,
+          fontSize: 11,
+          fontWeight: 800,
+          cursor: 'pointer',
+          transition: 'all 0.15s ease'
+        }}>
+          <span>{isUp ? `↑ ${badgeShiftText}` : (isDrop ? `↓ ${badgeShiftText}` : '— 0%')}</span>
+          <span style={{ fontSize: 9.5, opacity: 0.9 }}>{isUp ? 'GAIN' : (isDrop ? 'DROP' : 'STEADY')}</span>
+        </div>
       </div>
 
-      {hovered && (
+      {hovered && typeof document !== 'undefined' && createPortal(
         <div style={{
-          position: 'absolute',
-          bottom: 'calc(100% + 8px)',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 120,
+          position: 'fixed',
+          top: coords.top,
+          left: coords.left,
+          zIndex: 999999,
           background: '#0F172A',
           color: '#FFFFFF',
           borderRadius: 8,
-          padding: '8px 12px',
-          boxShadow: '0 10px 25px rgba(15,23,42,0.35)',
-          minWidth: 150,
+          padding: '9px 12px',
+          boxShadow: '0 16px 40px rgba(0,0,0,0.5)',
+          minWidth: chartWidth + 24,
           pointerEvents: 'none',
           border: '1px solid #334155'
         }}>
-          <div style={{ fontSize: 9.5, fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
-            SERP Trajectory
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 9.5, fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Historical Pattern
+            </span>
+            <span style={{ fontSize: 9, color: '#64748B', fontWeight: 600 }}>
+              {points.length} {points.length === 1 ? 'Check' : 'Checks'}
+            </span>
           </div>
-          <svg width="125" height="30" style={{ overflow: 'visible', display: 'block' }}>
+
+          <svg width={chartWidth} height={chartHeight} style={{ overflow: 'visible', display: 'block', margin: '0 auto' }}>
             <path
-              d={`M 8,${y1} Q 62,${yMid} 118,${y2}`}
+              d={pathD}
               fill="none"
               stroke={strokeColor}
               strokeWidth="2.5"
               strokeLinecap="round"
+              strokeLinejoin="round"
             />
-            <circle cx="8" cy={y1} r="3" fill="#FFFFFF" stroke={strokeColor} strokeWidth="1.5" />
-            <circle cx="118" cy={y2} r="3.5" fill={strokeColor} stroke="#FFFFFF" strokeWidth="1.5" />
+            {points.map((p, idx) => {
+              const isLast = idx === points.length - 1;
+              return (
+                <circle
+                  key={idx}
+                  cx={getX(idx)}
+                  cy={calcY(p.rank)}
+                  r={isLast ? 3.5 : 2.5}
+                  fill={isLast ? strokeColor : '#FFFFFF'}
+                  stroke={strokeColor}
+                  strokeWidth="1.5"
+                />
+              );
+            })}
           </svg>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontWeight: 600, color: '#CBD5E1', marginTop: 3 }}>
-            <span>Prev: {pNum != null ? `#${pNum}` : '—'}</span>
-            <span style={{ color: strokeColor, fontWeight: 800 }}>Live: {lNum != null ? `#${lNum}` : '—'}</span>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, fontWeight: 600, color: '#CBD5E1', marginTop: 4, gap: 8 }}>
+            {points.length <= 4 ? (
+              points.map((p, idx) => (
+                <div key={idx} style={{ textAlign: idx === 0 ? 'left' : (idx === points.length - 1 ? 'right' : 'center') }}>
+                  <div style={{ fontSize: 8.5, color: '#64748B' }}>{p.label}</div>
+                  <div style={{ fontWeight: 800, color: idx === points.length - 1 ? strokeColor : '#E2E8F0' }}>
+                    {formatRankBadge(p.rank)}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <>
+                <div style={{ textAlign: 'left' }}>
+                  <div style={{ fontSize: 8.5, color: '#64748B' }}>{points[0].label}</div>
+                  <div style={{ fontWeight: 800, color: '#E2E8F0' }}>{formatRankBadge(points[0].rank)}</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 8.5, color: '#64748B' }}>Mid</div>
+                  <div style={{ fontWeight: 800, color: '#E2E8F0' }}>{formatRankBadge(points[Math.floor(points.length / 2)].rank)}</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 8.5, color: '#64748B' }}>{points[points.length - 1].label}</div>
+                  <div style={{ fontWeight: 800, color: strokeColor }}>{formatRankBadge(points[points.length - 1].rank)}</div>
+                </div>
+              </>
+            )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 }
 
-// ─── COMPACT RATIONALE BUTTON WITH FULL HOVER POPOVER ───
+// ─── COMPACT RATIONALE BUTTON WITH FULL HOVER POPOVER (PORTAL BASED - NEVER CLIPPED) ───
 function RationaleTooltip({ item }) {
   const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef(null);
+
   const conf = item.confidence != null ? Number(item.confidence) : 85;
   const confColor = conf >= 80 ? '#00BFA2' : (conf >= 60 ? '#D4007A' : '#8A8A9A');
 
-  return (
-    <div
-      style={{ position: 'relative', display: 'inline-block' }}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
-      <button
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 4,
-          background: open ? '#EDE9FE' : '#F6EEFD',
-          border: '1px solid #E5CCF7',
-          color: '#7B2FBE',
-          borderRadius: 6,
-          padding: '2px 8px',
-          fontSize: 11,
-          fontWeight: 700,
-          cursor: 'pointer',
-          transition: 'all 0.15s ease'
-        }}
-      >
-        <span>VI Rationale</span>
-        <span style={{ fontSize: 10, opacity: 0.7 }}>...</span>
-      </button>
+  const handleMouseEnter = () => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const popoverHeight = 160;
+      const popoverWidth = 310;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const placeAbove = spaceBelow < popoverHeight && rect.top > popoverHeight;
 
-      {open && (
+      setCoords({
+        top: placeAbove ? (rect.top - popoverHeight - 6) : (rect.bottom + 6),
+        left: Math.max(10, Math.min(window.innerWidth - popoverWidth - 10, rect.left))
+      });
+    }
+    setOpen(true);
+  };
+
+  return (
+    <>
+      <div
+        ref={triggerRef}
+        style={{ position: 'relative', display: 'inline-block' }}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={() => setOpen(false)}
+      >
+        <button
+          type="button"
+          onClick={() => setOpen(v => !v)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            background: open ? '#EDE9FE' : '#F6EEFD',
+            border: '1px solid #E5CCF7',
+            color: '#7B2FBE',
+            borderRadius: 6,
+            padding: '2px 8px',
+            fontSize: 11,
+            fontWeight: 700,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease'
+          }}
+        >
+          <span>Rationale</span>
+          <span style={{ fontSize: 10, opacity: 0.7 }}>...</span>
+        </button>
+      </div>
+
+      {open && typeof document !== 'undefined' && createPortal(
         <div style={{
-          position: 'absolute',
-          top: 'calc(100% + 6px)',
-          left: 0,
-          zIndex: 130,
+          position: 'fixed',
+          top: coords.top,
+          left: coords.left,
+          zIndex: 999999,
           background: '#1E1B4B',
           color: '#FFFFFF',
           borderRadius: 10,
           padding: '12px 14px',
           width: 310,
-          boxShadow: '0 12px 30px rgba(0,0,0,0.35)',
+          boxShadow: '0 16px 40px rgba(0,0,0,0.45)',
           fontSize: 12,
           lineHeight: 1.45,
-          border: '1px solid #4338CA'
+          border: '1px solid #4338CA',
+          pointerEvents: 'none'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.12)', paddingBottom: 6 }}>
             <span style={{ fontSize: 11, fontWeight: 800, color: '#C7D2FE', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -312,9 +492,10 @@ function RationaleTooltip({ item }) {
           <p style={{ margin: 0, color: '#E0E7FF', fontSize: 11.5, lineHeight: 1.5 }}>
             {item.reason || 'Optimal candidate for top-3 rankings based on verified landing page search intent and SERP competitive gap.'}
           </p>
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 }
 
@@ -350,6 +531,7 @@ const PUSH_BATCH_META = {
     hint: 'Rank didn’t move or Top 3 Google SERP shifted away from Landing Pages'
   },
 };
+
 
 function CalendarPage({ user, onNavigate }) {
   const [projects, setProjects] = useState([]);
@@ -581,7 +763,9 @@ function CalendarPage({ user, onNavigate }) {
 
   // Step 2 view state
   const [step2ViewMode, setStep2ViewMode] = useState('strategy');
-  const [activeChannelTab, setActiveChannelTab] = useState('guest_post'); // 'guest_post' | 'quora' | 'reddit' | 'brand_mention' // 'strategy' | 'breakdown'
+  const [activeChannelTab, setActiveChannelTab] = useState('guest_post'); // 'guest_post' | 'quora' | 'reddit' | 'brand_mention'
+  const [forumStrategies, setForumStrategies] = useState({ quora: null, reddit: null });
+  const [selectedForumThreads, setSelectedForumThreads] = useState({ quora: new Set(), reddit: new Set() });
   const [activeInfoKwId, setActiveInfoKwId] = useState(null);
   const [potentialKws, setPotentialKws] = useState([]);
   const [pushBatches, setPushBatches] = useState({ high: [], medium: [], low: [] });
@@ -736,7 +920,9 @@ function CalendarPage({ user, onNavigate }) {
               confidence: k.push_confidence || k.confidence || 80,
               reason: k.push_reason || k.reason || 'Strategic candidate with verified domain metrics',
               outreach_site: k.outreach_site,
-              landing_page_url: k.landing_page_url || k.topic_link || k.topicLink,
+              landing_page_url: k.landing_page_url || (k.topic_link && !k.topic_link.includes('quora.com') && !k.topic_link.includes('reddit.com') ? k.topic_link : '') || (k.topicLink && !k.topicLink.includes('quora.com') && !k.topicLink.includes('reddit.com') ? k.topicLink : '') || '',
+              topic_link: k.topic_link || (k.landing_page_url && (k.landing_page_url.includes('quora.com') || k.landing_page_url.includes('reddit.com')) ? k.landing_page_url : '') || (k.topicLink && (k.topicLink.includes('quora.com') || k.topicLink.includes('reddit.com')) ? k.topicLink : '') || activityItem.topic_link || '',
+              calendar_rank_history: k.calendar_rank_history || k.history || [],
               budget_summary: bSum,
               selected: true
             };
@@ -757,7 +943,9 @@ function CalendarPage({ user, onNavigate }) {
             confidence: 80,
             reason: 'Scheduled keyword for off-page activity',
             outreach_site: (Array.isArray(activityItem.outreach_sites) && activityItem.outreach_sites[idx]) || null,
-            landing_page_url: activityItem.topic_link || '',
+            landing_page_url: activityItem.landing_page_url || (activityItem.topic_link && !activityItem.topic_link.includes('quora.com') && !activityItem.topic_link.includes('reddit.com') ? activityItem.topic_link : '') || '',
+            topic_link: activityItem.topic_link || '',
+            calendar_rank_history: [],
             budget_summary: bSum,
             selected: true
           }));
@@ -868,6 +1056,20 @@ function CalendarPage({ user, onNavigate }) {
       return next;
     });
   };
+
+  const currentActivitiesList = useMemo(() => {
+    return (createdActivitiesList && createdActivitiesList.length > 0) ? createdActivitiesList : activitiesList;
+  }, [createdActivitiesList, activitiesList]);
+
+  const availableChannels = useMemo(() => {
+    const set = new Set();
+    (currentActivitiesList || []).forEach(a => {
+      const key = mapActivityToChannelKey(a.activity_name);
+      set.add(key);
+    });
+    if (set.size === 0) set.add('guest_post');
+    return Array.from(set).map(k => CHANNEL_CONFIG[k] || { id: k, label: k });
+  }, [currentActivitiesList]);
 
   const selectedByBatch = useMemo(() => {
     const counts = { high: 0, medium: 0, low: 0 };
@@ -1065,6 +1267,8 @@ function CalendarPage({ user, onNavigate }) {
     setBudgetOptimization(null);
     setSelectedOutreachSites({});
     setLandingPageErrorNotice(null);
+    setForumStrategies({ quora: null, reddit: null });
+    setSelectedForumThreads({ quora: new Set(), reddit: new Set() });
     setActivitiesList([
       { id: 'act-1', activity_name: 'Paid Guest Post', quantity: 1, budget: '₹250' }
     ]);
@@ -1188,7 +1392,6 @@ function CalendarPage({ user, onNavigate }) {
 
     try {
       const formattedPeriod = `${periodMonth} ${periodYear}`;
-      const primaryAct = activitiesList[0] || { activity_name: 'Paid Guest Post', quantity: 1, budget: '₹250' };
 
       // Calculate total requested quantity and budget across multi-activity batch
       let totalQty = 0;
@@ -1224,18 +1427,28 @@ function CalendarPage({ user, onNavigate }) {
       const primaryCreated = newCreatedList[0];
       setCreatedActivity(primaryCreated);
 
+      // Determine requested channels
+      const requestedChannels = new Set(activitiesList.map(a => mapActivityToChannelKey(a.activity_name)));
+      const hasGuestPost = requestedChannels.has('guest_post');
+      const hasQuora = requestedChannels.has('quora');
+      const hasReddit = requestedChannels.has('reddit');
+
+      // Set default active tab to the first selected channel
+      const firstTab = mapActivityToChannelKey(activitiesList[0]?.activity_name || 'guest_post');
+      setActiveChannelTab(firstTab);
+
       // Transition to Step 2
       setModalStep('keywords_prompt');
       setStep2ViewMode('strategy');
       setSavingActivity(false);
       setLoadingKeywords(true);
-      setLoadingStepText('Scanning database for candidate Landing Page keywords (Rank 5+)...');
+      setLoadingStepText('Scanning database & generating channel strategies...');
 
       const matchedProj = projects.find(p => (p.name || p.domain) === formData.project_name);
       const slug = matchedProj?.slug || formData.project_name.toLowerCase().replace(/\s+/g, '');
       const domain = matchedProj?.domain || '';
 
-      // Step 1: Query candidates with budget and quantity optimization
+      // Step 1: Query master candidate keywords for the project across all activities
       const res = await fetchCalendarPotentialKeywordsApi(slug, domain, false, totalBudget, totalQty);
       const kws = res.potential_keywords || [];
       const fallbackBatches = res.batches || { high: [], medium: [], low: [] };
@@ -1274,20 +1487,21 @@ function CalendarPage({ user, onNavigate }) {
       });
       setTopicLinks(initialTopicLinks);
 
-      // Step 2: Live ranking ping with budget and quantity optimization
-      setLoadingStepText(`Analyzing Keywords...`);
+      // Step 2: Run single live rank check for candidate keywords
+      setLoadingStepText(`Analyzing & live ranking keywords...`);
       setAnalyzingPotential(true);
 
+      let evaluatedKws = kws;
       try {
         const aiRes = await analyzeCalendarAiPushPotentialApi(slug, domain, kws, 'India', totalBudget, totalQty, primaryCreated?.id, activitiesList.map(a => a.activity_name));
         if (aiRes?.run_id) setLatestAiRunId(aiRes.run_id);
         if (aiRes?.summary) setLatestAiSummary(aiRes.summary);
         if (aiRes?.batches) {
           setPushBatches(aiRes.batches);
-          const evaluated = (aiRes.evaluated_keywords && aiRes.evaluated_keywords.length > 0)
+          evaluatedKws = (aiRes.evaluated_keywords && aiRes.evaluated_keywords.length > 0)
             ? aiRes.evaluated_keywords
             : kws;
-          setPotentialKws(evaluated);
+          setPotentialKws(evaluatedKws);
 
           if (aiRes.available_outreach_sites) {
             setAvailableOutreachSites(aiRes.available_outreach_sites);
@@ -1298,7 +1512,7 @@ function CalendarPage({ user, onNavigate }) {
 
           setSelectedOutreachSites(prev => {
             const next = { ...prev };
-            evaluated.forEach(ek => {
+            evaluatedKws.forEach(ek => {
               if (ek.outreach_site && !next[ek.id]) {
                 next[ek.id] = ek.outreach_site;
               }
@@ -1306,25 +1520,14 @@ function CalendarPage({ user, onNavigate }) {
             return next;
           });
 
-          setTopicLinks(prev => {
-            const next = { ...prev };
-            evaluated.forEach(ek => {
-              const lp = ek.landing_page_url || ek.topicLink || ek.topic_link;
-              if (lp && !next[ek.id]) {
-                next[ek.id] = lp;
-              }
-            });
-            return next;
-          });
-
-          // Auto-select with 60% Gains / 40% Drops & Stagnant quota balance (strictly 4 keywords per site)
-          const evaluatedSelected = evaluated.filter(k => k.selected).map(k => k.id);
+          // Auto-select keywords equal to or less than the quantity selected for the activity
+          const maxAutoSelect = totalQty || 1;
+          const evaluatedSelected = evaluatedKws.filter(k => k.selected).map(k => k.id).slice(0, maxAutoSelect);
           if (evaluatedSelected.length > 0) {
             setSelectedKwIds(new Set(evaluatedSelected));
           } else {
-            const maxAutoSelect = (totalQty || 1) * 4;
             const highQuota = Math.max(1, Math.round(maxAutoSelect * 0.6));
-            const dropQuota = maxAutoSelect - highQuota;
+            const dropQuota = Math.max(0, maxAutoSelect - highQuota);
             const highPicked = (aiRes.batches.high || []).slice(0, highQuota).map(k => k.id);
             const otherCandidates = [...(aiRes.batches.medium || []), ...(aiRes.batches.low || [])];
             const otherPicked = otherCandidates.slice(0, dropQuota).map(k => k.id);
@@ -1334,7 +1537,7 @@ function CalendarPage({ user, onNavigate }) {
         } else {
           setPotentialKws(kws);
           setPushBatches(fallbackBatches);
-          const maxAutoSelect = (totalQty || 1) * 4;
+          const maxAutoSelect = totalQty || 1;
           const fallbackList = [
             ...(fallbackBatches.high || []).map(k => k.id),
             ...(fallbackBatches.medium || []).map(k => k.id)
@@ -1345,7 +1548,7 @@ function CalendarPage({ user, onNavigate }) {
         console.warn('[CalendarPage] Live rank check notice:', liveErr);
         setPotentialKws(kws);
         setPushBatches(fallbackBatches);
-        const maxAutoSelect = (totalQty || 1) * 4;
+        const maxAutoSelect = totalQty || 1;
         const liveFallbackList = [
           ...(fallbackBatches.high || []).map(k => k.id),
           ...(fallbackBatches.medium || []).map(k => k.id)
@@ -1353,8 +1556,58 @@ function CalendarPage({ user, onNavigate }) {
         setSelectedKwIds(new Set(liveFallbackList));
       } finally {
         setAnalyzingPotential(false);
-        setLoadingKeywords(false);
       }
+
+      // Step 3: Discover Quora & Reddit topic links concurrently for all candidate keywords
+      const forumPromises = [];
+      if (hasQuora) {
+        const quoraActs = activitiesList.filter(a => mapActivityToChannelKey(a.activity_name) === 'quora');
+        const qQty = quoraActs.reduce((acc, a) => acc + (parseInt(a.quantity, 10) || 1), 0);
+        const qBudget = quoraActs.reduce((acc, a) => acc + (parseFloat(String(a.budget || '0').replace(/[^0-9.]/g, '')) || 0), 0);
+        const p = generateForumStrategyApi(slug, 'quora', qBudget, qQty).then(qRes => {
+          if (qRes && (Array.isArray(qRes.threads) || qRes.batches)) {
+            setForumStrategies(prev => ({ ...prev, quora: qRes }));
+            const qThreads = qRes.threads || [];
+            const nextLinks = {};
+            qThreads.forEach(t => {
+              if (t.topic_link) {
+                nextLinks[`quora_${t.id}`] = t.topic_link;
+                nextLinks[`quora_${t.keyword}`] = t.topic_link;
+                nextLinks[t.id] = t.topic_link;
+              }
+            });
+            setTopicLinks(prev => ({ ...prev, ...nextLinks }));
+          }
+        }).catch(err => console.warn('[CalendarPage] Quora strategy notice:', err));
+        forumPromises.push(p);
+      }
+
+      if (hasReddit) {
+        const redditActs = activitiesList.filter(a => mapActivityToChannelKey(a.activity_name) === 'reddit');
+        const rQty = redditActs.reduce((acc, a) => acc + (parseInt(a.quantity, 10) || 1), 0);
+        const rBudget = redditActs.reduce((acc, a) => acc + (parseFloat(String(a.budget || '0').replace(/[^0-9.]/g, '')) || 0), 0);
+        const p = generateForumStrategyApi(slug, 'reddit', rBudget, rQty).then(rRes => {
+          if (rRes && (Array.isArray(rRes.threads) || rRes.batches)) {
+            setForumStrategies(prev => ({ ...prev, reddit: rRes }));
+            const rThreads = rRes.threads || [];
+            const nextLinks = {};
+            rThreads.forEach(t => {
+              if (t.topic_link) {
+                nextLinks[`reddit_${t.id}`] = t.topic_link;
+                nextLinks[`reddit_${t.keyword}`] = t.topic_link;
+                nextLinks[t.id] = t.topic_link;
+              }
+            });
+            setTopicLinks(prev => ({ ...prev, ...nextLinks }));
+          }
+        }).catch(err => console.warn('[CalendarPage] Reddit strategy notice:', err));
+        forumPromises.push(p);
+      }
+
+      if (forumPromises.length > 0) {
+        await Promise.all(forumPromises);
+      }
+      setLoadingKeywords(false);
     } catch (err) {
       alert(`Error running AI schedule: ${err.message}`);
       setSavingActivity(false);
@@ -1364,75 +1617,13 @@ function CalendarPage({ user, onNavigate }) {
 
   // ─── CONFIRM & SCHEDULE KEYWORDS FROM STEP 2 ───
   const handleConfirmAddKeywords = async () => {
-    if (!createdActivity) {
-      setIsModalOpen(false);
-      return;
-    }
-    const rawSelected = potentialKws.filter(k => selectedKwIds.has(k.id));
-    if (rawSelected.length === 0) {
+    if (selectedKwIds.size === 0) {
       showNoDataPopup("There's no data to schedule. Please select at least one keyword.");
       return;
     }
+
     setSavingActivity(true);
     try {
-      const isPaidGuestPost = String(createdActivity?.activity_name || '').toLowerCase().includes('guest');
-      const batchById = new Map();
-      ['high', 'medium', 'low'].forEach(b => (pushBatches[b] || []).forEach(r => batchById.set(r.id, r)));
-
-      const selectedPotential = potentialKws.filter(k => selectedKwIds.has(k.id)).map(k => {
-        const info = batchById.get(k.id) || {};
-        const chosenSite = selectedOutreachSites[k.id] || k.outreach_site || null;
-        // brand_mention_sites = raw domains FETCHED by the live search (audit trail).
-        // k.brand_mention_site / info.brand_mention_site is now the ALLOCATED list
-        // (outreach-table + DA>25/SS<3 gate) -- the one actually saved is whichever
-        // the user picked (dropdown), defaulting to the best allocated one.
-        const brandMentionSites = k.brand_mention_sites || info.brand_mention_sites || [];
-        const brandMentionAllocated = (Array.isArray(k.brand_mention_site) ? k.brand_mention_site : null)
-          || (Array.isArray(info.brand_mention_site) ? info.brand_mention_site : null)
-          || [];
-        const brandMentionSite = selectedBrandMentionSites[k.id] || brandMentionAllocated[0] || null;
-        const lp = (topicLinks[k.id] !== undefined && topicLinks[k.id] !== '')
-          ? topicLinks[k.id]
-          : (k.topic_link || k.landing_page_url || k.topicLink || '');
-        return {
-          keyword: k.keyword,
-          category: k.category,
-          cluster: k.cluster,
-          rank: k.new_rank || k.rank,
-          prev_rank: k.prev_rank || k.rank,
-          new_rank: k.new_rank || k.rank,
-          delta: k.delta || 0,
-          sv: k.sv,
-          kd: k.kd,
-          target_type: k.target_type || 'Landing Page',
-          top3_is_landing: k.top3_is_landing ?? info.top3_is_landing ?? true,
-          push_batch: info.batch || null,
-          push_confidence: info.confidence ?? null,
-          push_reason: info.reason || '',
-          topic_link: lp,
-          landing_page_url: lp,
-          outreach_site: chosenSite,
-          brand_mention_site: brandMentionSite,
-          brand_mention_sites: brandMentionSites,
-          brand_mention_allocated_sites: brandMentionAllocated
-        };
-      });
-
-      const updatePayload = {
-        potential_keywords: selectedPotential,
-        status: 'scheduled',
-        ai_summary: latestAiSummary || `Analyzed ${potentialKws.length} keywords for ${formData.project_name}`,
-        ai_advisory: budgetOptimization?.anti_waste_advisory || '',
-        budget_summary: budgetOptimization,
-        outreach_sites: selectedPotential.map(k => k.outreach_site).filter(Boolean),
-        ai_run_id: latestAiRunId
-      };
-      if (selectedPotential.length > 0) {
-        updatePayload.keyword_name = selectedPotential.map(k => k.keyword).join(', ');
-        updatePayload.category = selectedPotential[0].category;
-        updatePayload.cluster = selectedPotential[0].cluster;
-        updatePayload.topic_link = selectedPotential.map(k => k.topic_link || k.landing_page_url).filter(Boolean).join(' | ');
-      }
 
       const targets = (createdActivitiesList && createdActivitiesList.length > 0)
         ? createdActivitiesList
@@ -1444,37 +1635,166 @@ function CalendarPage({ user, onNavigate }) {
 
       const totalAllocatedBudget = activitiesList.reduce((acc, a) => acc + (parseFloat(String(a.budget || '0').replace(/[^0-9.]/g, '')) || 0), 0);
 
-      let kwCursor = 0;
+      let gpKwCursor = 0;
       const updatedTargets = [];
+
       for (let i = 0; i < targets.length; i++) {
         const tgt = targets[i];
         const actSpec = activitiesList[i] || activitiesList[0] || {};
+        const actChannel = mapActivityToChannelKey(tgt.activity_name || actSpec.activity_name);
         const actReqQty = parseInt(actSpec.quantity || tgt.quantity, 10) || 1;
         const actReqBudget = parseFloat(String(actSpec.budget || tgt.budget || '0').replace(/[^0-9.]/g, '')) || (totalAllocatedBudget / (activitiesList.length || 1));
         const budgetWeight = totalAllocatedBudget > 0 ? (actReqBudget / totalAllocatedBudget) : (1 / (activitiesList.length || 1));
         const tgtBudget = Math.round(totalPlannedSpend * budgetWeight) || Math.round(totalPlannedSpend / (activitiesList.length || 1));
 
-        const tgtMaxKws = actReqQty * 4;
-        const tgtKws = selectedPotential.slice(kwCursor, kwCursor + tgtMaxKws);
-        kwCursor += tgtMaxKws;
+        let effectiveKws = [];
+        let outreachList = [];
 
-        const effectiveKws = tgtKws.length > 0 ? tgtKws : selectedPotential.slice(0, tgtMaxKws);
+        if (actChannel === 'quora') {
+          const gpb = pushBatches || {};
+          const allMaster = [...(gpb.high || []), ...(gpb.medium || []), ...(gpb.low || []), ...(potentialKws || [])];
+          const chosen = allMaster.filter(k => selectedKwIds.has(k.id));
+          const list = chosen.length > 0 ? chosen : allMaster;
+          const usedQuoraLinks = new Set();
+
+          effectiveKws = list.map(t => {
+            let tLink = t.quora_topic_link || topicLinks[`quora_${t.id}`] || topicLinks[`quora_${t.keyword}`] || forumStrategies.quora?.threads?.find(th => th.keyword === t.keyword || th.id === t.id)?.topic_link || topicLinks[t.id] || t.topic_link || '';
+            const norm = String(tLink || '').toLowerCase().trim().replace(/\/+$/, '');
+            // Reject any search URLs or duplicate links
+            if (norm.includes('/search') || norm.includes('?q=') || norm.includes('search?') || usedQuoraLinks.has(norm)) {
+              tLink = '';
+            } else if (norm) {
+              usedQuoraLinks.add(norm);
+            }
+            return {
+              id: t.id,
+              keyword: t.keyword,
+              sv: t.sv,
+              kd: t.kd,
+              rank: t.new_rank || t.rank,
+              prev_rank: t.prev_rank || t.rank,
+              new_rank: t.new_rank || t.rank,
+              delta: t.delta || 0,
+              gain_pct_str: t.gain_pct_str,
+              calendar_rank_history: t.calendar_rank_history || t.history || [],
+              history: t.calendar_rank_history || t.history || [],
+              confidence: t.confidence,
+              reason: t.reason,
+              category: t.category || t.cluster || 'Quora',
+              cluster: t.cluster || 'Quora',
+              landing_page_url: t.landing_page_url,
+              topic_link: tLink,
+              search_query: `${t.keyword} + quora`,
+              action_type: 'Quora Question & Answer Topic Link',
+              channel: 'Forum - Quora',
+              thread_budget: t.thread_budget || Math.round(actReqBudget / (list.length || 1))
+            };
+          });
+        } else if (actChannel === 'reddit') {
+          const gpb = pushBatches || {};
+          const allMaster = [...(gpb.high || []), ...(gpb.medium || []), ...(gpb.low || []), ...(potentialKws || [])];
+          const chosen = allMaster.filter(k => selectedKwIds.has(k.id));
+          const list = chosen.length > 0 ? chosen : allMaster;
+          const usedRedditLinks = new Set();
+
+          effectiveKws = list.map(t => {
+            let tLink = t.reddit_topic_link || topicLinks[`reddit_${t.id}`] || topicLinks[`reddit_${t.keyword}`] || forumStrategies.reddit?.threads?.find(th => th.keyword === t.keyword || th.id === t.id)?.topic_link || topicLinks[t.id] || t.topic_link || '';
+            const norm = String(tLink || '').toLowerCase().trim().replace(/\/+$/, '');
+            // Reject any search URLs or duplicate links
+            if (norm.includes('/search') || norm.includes('?q=') || norm.includes('search?') || !norm.includes('/comments/') || usedRedditLinks.has(norm)) {
+              tLink = '';
+            } else if (norm) {
+              usedRedditLinks.add(norm);
+            }
+            return {
+              id: t.id,
+              keyword: t.keyword,
+              sv: t.sv,
+              kd: t.kd,
+              rank: t.new_rank || t.rank,
+              prev_rank: t.prev_rank || t.rank,
+              new_rank: t.new_rank || t.rank,
+              delta: t.delta || 0,
+              gain_pct_str: t.gain_pct_str,
+              calendar_rank_history: t.calendar_rank_history || t.history || [],
+              history: t.calendar_rank_history || t.history || [],
+              confidence: t.confidence,
+              reason: t.reason,
+              category: t.category || t.cluster || 'Reddit',
+              cluster: t.cluster || 'Reddit',
+              landing_page_url: t.landing_page_url,
+              topic_link: tLink,
+              search_query: `${t.keyword} + reddit`,
+              action_type: 'Reddit Subreddit Discussion Link',
+              channel: 'Forum - Reddit',
+              thread_budget: t.thread_budget || Math.round(actReqBudget / (list.length || 1))
+            };
+          });
+        } else {
+          // Paid Guest Post: Only select keywords that have an outreach publisher assigned
+          const gpb = pushBatches || {};
+          const allGP = [...(gpb.high || []), ...(gpb.medium || []), ...(gpb.low || []), ...(potentialKws || [])];
+          const chosen = allGP.filter(k => selectedKwIds.has(k.id));
+          const list = chosen.length > 0 ? chosen : allGP;
+
+          const matchedWithOutreach = list.filter(k => {
+            const s = selectedOutreachSites[k.id] || k.outreach_site;
+            return Boolean(s && (s.domain || s.url));
+          });
+
+          const picked = matchedWithOutreach.length > 0 ? matchedWithOutreach : list;
+          effectiveKws = picked.map(k => {
+            const chosenSite = selectedOutreachSites[k.id] || k.outreach_site || null;
+            const lp = k.landing_page_url || (k.topic_link && !k.topic_link.includes('quora.com') && !k.topic_link.includes('reddit.com') ? k.topic_link : '') || (topicLinks[k.id] && !topicLinks[k.id].includes('quora.com') && !topicLinks[k.id].includes('reddit.com') ? topicLinks[k.id] : '') || '';
+            return {
+              id: k.id,
+              keyword: k.keyword,
+              category: k.category,
+              cluster: k.cluster,
+              rank: k.new_rank || k.rank,
+              prev_rank: k.prev_rank || k.rank,
+              new_rank: k.new_rank || k.rank,
+              delta: k.delta || 0,
+              gain_pct_str: k.gain_pct_str,
+              sv: k.sv,
+              kd: k.kd,
+              target_type: k.target_type || 'Landing Page',
+              top3_is_landing: k.top3_is_landing ?? true,
+              push_batch: k.batch || null,
+              push_confidence: k.confidence ?? null,
+              push_reason: k.reason || '',
+              topic_link: null,
+              landing_page_url: lp,
+              outreach_site: chosenSite
+            };
+          });
+          outreachList = effectiveKws.map(k => k.outreach_site).filter(Boolean);
+        }
+
         const tgtPayload = {
-          ...updatePayload,
-          quantity: actReqQty,
+          quantity: effectiveKws.length > 0 ? effectiveKws.length : actReqQty,
           budget: `₹${tgtBudget.toLocaleString()}`,
+          status: 'scheduled',
+          ai_summary: latestAiSummary || `Scheduled ${effectiveKws.length} targets for ${formData.project_name}`,
+          ai_advisory: budgetOptimization?.anti_waste_advisory || '',
+          budget_summary: budgetOptimization,
           potential_keywords: effectiveKws,
-          outreach_sites: effectiveKws.map(k => k.outreach_site).filter(Boolean)
+          outreach_sites: outreachList,
+          ai_run_id: latestAiRunId
         };
         if (effectiveKws.length > 0) {
           tgtPayload.keyword_name = effectiveKws.map(k => k.keyword).join(', ');
-          tgtPayload.category = effectiveKws[0].category;
-          tgtPayload.cluster = effectiveKws[0].cluster;
-          tgtPayload.topic_link = effectiveKws.map(k => k.topic_link || k.landing_page_url).filter(Boolean).join(' | ');
+          tgtPayload.category = effectiveKws[0].category || 'General';
+          tgtPayload.cluster = effectiveKws[0].cluster || 'General';
+          tgtPayload.landing_page_url = effectiveKws.map(k => k.landing_page_url).filter(Boolean).join(' | ');
+          tgtPayload.topic_link = (actChannel === 'quora' || actChannel === 'reddit')
+            ? effectiveKws.map(k => k.topic_link).filter(Boolean).join(' | ')
+            : null;
         }
         await updateCalendarActivityApi(tgt.id, tgtPayload);
         updatedTargets.push({ id: tgt.id, payload: tgtPayload });
       }
+
       setActivities(prev => prev.map(a => {
         const found = updatedTargets.find(t => t.id === a.id);
         return found ? { ...a, ...found.payload } : a;
@@ -1583,10 +1903,10 @@ function CalendarPage({ user, onNavigate }) {
 
     setSavingActivity(true);
     try {
+      const isForum = activeChannelTab === 'quora' || activeChannelTab === 'reddit';
       const selected = rawSelected.map(k => {
-        const lp = (topicLinks[k.id] !== undefined && topicLinks[k.id] !== '')
-          ? topicLinks[k.id]
-          : (k.landing_page_url || k.topic_link || k.topicLink || '');
+        const lp = k.landing_page_url || (k.topic_link && !k.topic_link.includes('quora.com') && !k.topic_link.includes('reddit.com') ? k.topic_link : '') || (topicLinks[k.id] && !topicLinks[k.id].includes('quora.com') && !topicLinks[k.id].includes('reddit.com') ? topicLinks[k.id] : '') || '';
+        const tLink = isForum ? (k.topic_link || topicLinks[k.id] || '') : null;
         return {
           keyword: k.keyword,
           category: k.category,
@@ -1598,7 +1918,7 @@ function CalendarPage({ user, onNavigate }) {
           sv: k.sv,
           kd: k.kd,
           target_type: k.target_type || 'Landing Page',
-          topic_link: lp,
+          topic_link: tLink,
           landing_page_url: lp,
           outreach_site: k.outreach_site || null
         };
@@ -1621,7 +1941,8 @@ function CalendarPage({ user, onNavigate }) {
           payload.keyword_name = eff.map(k => k.keyword).join(', ');
           payload.category = eff[0].category;
           payload.cluster = eff[0].cluster;
-          payload.topic_link = eff.map(k => k.topic_link || k.landing_page_url).filter(Boolean).join(' | ');
+          payload.landing_page_url = eff.map(k => k.landing_page_url).filter(Boolean).join(' | ');
+          payload.topic_link = isForum ? eff.map(k => k.topic_link).filter(Boolean).join(' | ') : null;
         }
         await updateCalendarActivityApi(tgt.id, payload);
         updated.push({ id: tgt.id, payload });
@@ -1660,7 +1981,7 @@ function CalendarPage({ user, onNavigate }) {
     try {
       const res = await updateCalendarActivityApi(item.id, { status: newStatus });
       const updatedAct = res?.activity || {};
-      const firstUid = updatedAct.first_uid || (updatedAct.synced_uids && updatedAct.synced_uids[0]) || `${item.activity_uid || 'ACT'}-KW1`;
+      const firstUid = updatedAct.first_uid || (updatedAct.synced_uids && updatedAct.synced_uids[0]) || item.activity_uid || '';
 
       setActivities(prev => prev.map(a => a.id === item.id ? {
         ...a,
@@ -1795,12 +2116,13 @@ function CalendarPage({ user, onNavigate }) {
     }
 
     // Dynamic Multi-Channel definitions
-    const channelPills = [
-      { id: 'guest_post', label: 'Paid Guest Post', count: selectedKwIds.size },
-      { id: 'quora', label: 'Quora', count: 0 },
-      { id: 'reddit', label: 'Reddit', count: 0 },
-      { id: 'brand_mention', label: 'Brand Mention', count: 0 }
-    ];
+    const channelPills = availableChannels.map(ac => {
+      let count = 0;
+      if (ac.id === 'guest_post') count = selectedKwIds.size;
+      else if (ac.id === 'quora') count = selectedForumThreads.quora?.size ?? (forumStrategies.quora?.threads?.length || 0);
+      else if (ac.id === 'reddit') count = selectedForumThreads.reddit?.size ?? (forumStrategies.reddit?.threads?.length || 0);
+      return { ...ac, count };
+    });
 
     return (
       <div style={{ padding: '24px 32px', minHeight: '100%', background: '#F5F5F5', display: 'flex', flexDirection: 'column', gap: 20, fontFamily: "'Outfit', sans-serif" }}>
@@ -1924,10 +2246,20 @@ function CalendarPage({ user, onNavigate }) {
 
           {/* Sticky Top Confirm & Schedule Button */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button
-              type="button"
-              disabled={selectedKwIds.size === 0 || savingActivity}
-              onClick={handleConfirmAddKeywords}
+            {(() => {
+              const hasGuestPost = availableChannels.some(c => c.id === 'guest_post');
+              const hasQuora = availableChannels.some(c => c.id === 'quora');
+              const hasReddit = availableChannels.some(c => c.id === 'reddit');
+              const canConfirm = (
+                (hasGuestPost && selectedKwIds.size > 0) ||
+                (hasQuora && (selectedForumThreads.quora?.size > 0 || (forumStrategies.quora?.threads?.length || 0) > 0)) ||
+                (hasReddit && (selectedForumThreads.reddit?.size > 0 || (forumStrategies.reddit?.threads?.length || 0) > 0))
+              ) && !savingActivity;
+              return (
+                <button
+                  type="button"
+                  disabled={!canConfirm}
+                  onClick={handleConfirmAddKeywords}
               style={{
                 padding: '10px 22px',
                 fontSize: 13,
@@ -1957,6 +2289,8 @@ function CalendarPage({ user, onNavigate }) {
                 </>
               )}
             </button>
+              );
+            })()}
           </div>
         </div>
 
@@ -1973,13 +2307,13 @@ function CalendarPage({ user, onNavigate }) {
             <BrandInfinityLoader label={loadingStepText} size="lg" minHeight="240px" />
             <div style={{ marginTop: 24, fontSize: 13, color: '#8A8A9A', maxWidth: 520, margin: '16px auto 0' }}>
               {activitiesList.length > 1 ? (
-                <>Scanning database and dividing <strong>₹{totalAllocatedBudgetFormatted}</strong> budget and <strong>{totalRequestedQuantity} activities</strong> across <strong>{activitiesList.length} activity channels</strong>...</>
+                <>Scanning database and dividing <strong>{totalAllocatedBudgetFormatted}</strong> budget and <strong>{totalRequestedQuantity} activities</strong> across <strong>{activitiesList.length} activity channels</strong>...</>
               ) : (
                 <>We are checking live rankings and calculating growth trajectory before showing recommendations.</>
               )}
             </div>
           </div>
-        ) : potentialKws.length === 0 ? (
+        ) : (availableChannels.some(c => c.id === 'guest_post') && potentialKws.length === 0 && !forumStrategies.quora?.threads?.length && !forumStrategies.reddit?.threads?.length) ? (
           <div style={{
             background: '#FFFFFF',
             borderRadius: 16,
@@ -2060,8 +2394,8 @@ function CalendarPage({ user, onNavigate }) {
                     padding: '3px 10px',
                     borderRadius: 20
                   }}>
-                    <Sparkles size={12} />
-                    AI Autonomous Strategy
+                    <Sparkles size={14} />
+                    AI Recommended Strategy
                   </span>
                   <span style={{ fontSize: 12, color: '#8A8A9A' }}>•</span>
                   <span style={{ fontSize: 12, fontWeight: 600, color: '#2D2D44' }}>
@@ -2088,7 +2422,83 @@ function CalendarPage({ user, onNavigate }) {
                 )}
               </div>
 
-              {/* 4 STRUCTURED NARRATIVE BLOCKS */}
+              {/* 4 STRATEGIC KPI CARDS (SHOWN FIRST) */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14, margin: '18px 0 18px 0' }}>
+                {/* Card 1: Keywords */}
+                <div style={{ background: '#FFFFFF', border: '1px solid #E2DBEC', borderRadius: 12, padding: '14px 18px' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#8A8A9A', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                    Keywords Scanned vs Targeted
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: '#7B2FBE' }}>{selectedKwIds.size}</span>
+                    <span style={{ fontSize: 13, color: '#8A8A9A' }}>of {potentialKws.length} scanned</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: '#7B2FBE', background: '#F6EEFD', padding: '1px 6px', borderRadius: 6, border: '1px solid #E5CCF7' }}>
+                      +{selectedByBatch.high} Gains
+                    </span>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: '#7B2FBE', background: '#F6EEFD', padding: '1px 6px', borderRadius: 6, border: '1px solid #E5CCF7' }}>
+                      -{selectedByBatch.medium} Drops
+                    </span>
+                  </div>
+                </div>
+
+                {/* Card 2: Activities Allocation */}
+                <div style={{ background: '#FFFFFF', border: '1px solid #E2DBEC', borderRadius: 12, padding: '14px 18px' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#8A8A9A', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                    Planned vs AI Recommended
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: '#7B2FBE' }}>
+                      {budgetOptimization?.recommended_quantity || budgetOptimization?.recommended_activities || selectedKwIds.size}
+                    </span>
+                    <span style={{ fontSize: 13, color: '#8A8A9A' }}>vs {totalRequestedQuantity} planned</span>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#7B2FBE', fontWeight: 600, marginTop: 6 }}>
+                    {(() => {
+                      const rec = budgetOptimization?.recommended_quantity || budgetOptimization?.recommended_activities || selectedKwIds.size;
+                      const plan = totalRequestedQuantity;
+                      if (rec === plan) return '100% Target Fulfilled';
+                      if (rec < plan) return `${plan - rec} Redundant Slot${plan - rec > 1 ? 's' : ''} Saved`;
+                      return 'High-Impact Target Allocation';
+                    })()}
+                  </div>
+                </div>
+
+                {/* Card 3: Budget Allocation */}
+                <div style={{ background: '#FFFFFF', border: '1px solid #E2DBEC', borderRadius: 12, padding: '14px 18px' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#8A8A9A', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                    Budget Allocation
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: '#7B2FBE' }}>
+                      {budgetOptimization?.planned_spend !== undefined ? `₹${budgetOptimization.planned_spend.toLocaleString()}` : totalAllocatedBudgetFormatted}
+                    </span>
+                    <span style={{ fontSize: 12, color: '#7B2FBE', fontWeight: 600 }}>
+                      {budgetOptimization?.projected_savings > 0 ? `Saves ₹${budgetOptimization.projected_savings.toLocaleString()}` : 'Optimized'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#8A8A9A', marginTop: 6 }}>
+                    Cap: ₹{(budgetOptimization?.total_budget_cap || budgetOptimization?.budget_cap || totalAllocatedBudget).toLocaleString()}
+                  </div>
+                </div>
+
+                {/* Card 4: Target Landing Pages */}
+                <div style={{ background: '#FFFFFF', border: '1px solid #E2DBEC', borderRadius: 12, padding: '14px 18px' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#8A8A9A', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                    Landing Pages Targeted
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: '#7B2FBE' }}>{uniqueLandingPagesCount}</span>
+                    <span style={{ fontSize: 13, color: '#8A8A9A' }}>Unique URLs</span>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#7B2FBE', fontWeight: 700, marginTop: 6 }}>
+                    100% Landing Page SERP Verified
+                  </div>
+                </div>
+              </div>
+
+              {/* 4 STRUCTURED NARRATIVE BLOCKS (SHOWN SECOND) */}
               <div style={{
                 background: '#FAFAFD',
                 border: '1px solid #E2DBEC',
@@ -2109,12 +2519,7 @@ function CalendarPage({ user, onNavigate }) {
                   <p style={{ fontSize: 13, color: '#2D2D44', lineHeight: 1.6, margin: 0 }}>
                     {budgetOptimization?.general_strategy_summary || (
                       <>
-                        For <strong>{createdActivity?.project_name || formData.project_name}</strong>, AI analyzed{' '}
-                        <strong>{potentialKws.length}</strong> candidate keywords and shortlisted{' '}
-                        <strong style={{ color: '#7B2FBE' }}>{selectedKwIds.size} high-impact landing page targets</strong> across{' '}
-                        <strong>{uniqueLandingPagesCount} unique landing pages</strong>. Multi-batch quota distribution balances{' '}
-                        <strong style={{ color: '#00BFA2' }}>{selectedByBatch.high} high-potential gainers (60% quota)</strong> and{' '}
-                        <strong style={{ color: '#D4007A' }}>{selectedByBatch.medium} recovery targets (40% quota)</strong> for maximum SERP authority acceleration.
+                        I analyzed <strong>{budgetOptimization?.total_db_keywords || potentialKws.length} keywords</strong> from the database for <strong>{createdActivity?.project_name || formData.project_name}</strong>. Out of them, I have picked <strong>{potentialKws.length} candidate keywords</strong> with verified landing pages across <strong>{uniqueLandingPagesCount} unique landing pages</strong> (Rank 5+), and out of those, I suggest you to work on these <strong style={{ color: '#7B2FBE' }}>{selectedKwIds.size} high-impact target keywords</strong> for your campaign.
                       </>
                     )}
                   </p>
@@ -2133,7 +2538,9 @@ function CalendarPage({ user, onNavigate }) {
                   </div>
                   <p style={{ fontSize: 12.5, color: '#64748B', lineHeight: 1.55, margin: 0 }}>
                     {budgetOptimization?.keyword_exclusion_summary || (
-                      "Excluded low-confidence drop queries and non-landing SERPs where intent is purely informational or already saturated in Top 3, preventing redundant expenditure and maintaining high link relevance."
+                      <>
+                        The database contained <strong>{budgetOptimization?.total_db_keywords || potentialKws.length} keywords</strong> in total for this project. From these, I evaluated <strong>{potentialKws.length} candidate keywords</strong> with verified landing pages (Rank 5+), selected <strong style={{ color: '#7B2FBE' }}>{selectedKwIds.size} priority targets</strong> matching your campaign criteria, and excluded <strong>{Math.max(0, potentialKws.length - selectedKwIds.size)} keywords</strong> to respect your budget ceiling, preserve keywords already ranking in Top 3, and filter out queries without matching outreach publisher inventory.
+                      </>
                     )}
                   </p>
                 </div>
@@ -2152,115 +2559,37 @@ function CalendarPage({ user, onNavigate }) {
                     </div>
 
                     {/* Domain Criteria Tags */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 10.5, fontWeight: 700, color: '#4A1A8C', background: '#F6EEFD', border: '1px solid #E5CCF7', padding: '1px 7px', borderRadius: 4 }}>
-                        High DA (40+)
-                      </span>
-                      <span style={{ fontSize: 10.5, fontWeight: 700, color: '#00BFA2', background: '#E6FAF6', border: '1px solid #A7F3D0', padding: '1px 7px', borderRadius: 4 }}>
-                        Spam Score ≤ 1%
-                      </span>
-                      <span style={{ fontSize: 10.5, fontWeight: 700, color: '#00C2FF', background: '#E6F8FF', border: '1px solid #B3EDFF', padding: '1px 7px', borderRadius: 4 }}>
-                        Regional Traffic
-                      </span>
-                      <span style={{ fontSize: 10.5, fontWeight: 700, color: '#7B2FBE', background: '#F6EEFD', border: '1px solid #E5CCF7', padding: '1px 7px', borderRadius: 4 }}>
-                        Industry Match
-                      </span>
-                    </div>
+                    
                   </div>
                   <p style={{ fontSize: 12.5, color: '#2D2D44', lineHeight: 1.55, margin: 0 }}>
                     {budgetOptimization?.budget_allocation_advisory || budgetOptimization?.anti_waste_advisory || (
-                      "AI allocated spend strictly to publishers offering highest domain authority per rupee with verified regional traffic, eliminating low-ROI links."
+                      "I've allocated spend strictly to publishers offering the highest domain authority per rupee with verified regional traffic, eliminating low-ROI links and optimizing your budget."
                     )}
                   </p>
                 </div>
 
-                {/* Thin Dotted Separator */}
-                <div style={{ borderTop: '1px dashed #E2DBEC', width: '100%' }} />
-
-                {/* Block 4: Domain Constraints & Alerts */}
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                    <AlertCircle size={13} color="#D4007A" />
-                    <strong style={{ fontSize: 12.5, color: '#1A1A1A', fontWeight: 800 }}>
-                      Domain Constraints &amp; Velocity Guardrail
-                    </strong>
-                  </div>
-                  <p style={{ fontSize: 12, color: '#8A8A9A', lineHeight: 1.5, margin: 0 }}>
-                    {budgetOptimization?.domain_constraints_alert || (
-                      "Strict 3-to-4 keyword capacity per domain enforced to maintain natural link velocity and prevent over-concentration across publisher properties."
-                    )}
-                  </p>
-                </div>
-              </div>
-
-              {/* 4 STRATEGIC KPI CARDS */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14, marginTop: 18 }}>
-                {/* Card 1: Keywords */}
-                <div style={{ background: '#FFFFFF', border: '1px solid #E2DBEC', borderRadius: 12, padding: '14px 18px' }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#8A8A9A', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
-                    Keywords Scanned vs Targeted
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                    <span style={{ fontSize: 22, fontWeight: 800, color: '#1A1A1A' }}>{selectedKwIds.size}</span>
-                    <span style={{ fontSize: 13, color: '#8A8A9A' }}>of {potentialKws.length} scanned</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                    <span style={{ fontSize: 10.5, fontWeight: 700, color: '#00BFA2', background: '#E6FAF6', padding: '1px 6px', borderRadius: 6, border: '1px solid #A7F3D0' }}>
-                      +{selectedByBatch.high} Gains
-                    </span>
-                    <span style={{ fontSize: 10.5, fontWeight: 700, color: '#D4007A', background: '#FDEBF4', padding: '1px 6px', borderRadius: 6, border: '1px solid #F8B4D9' }}>
-                      -{selectedByBatch.medium} Drops
-                    </span>
-                  </div>
-                </div>
-
-                {/* Card 2: Activities Allocation */}
-                <div style={{ background: '#FFFFFF', border: '1px solid #E2DBEC', borderRadius: 12, padding: '14px 18px' }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#8A8A9A', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
-                    Planned vs AI Recommended
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                    <span style={{ fontSize: 22, fontWeight: 800, color: '#7B2FBE' }}>
-                      {budgetOptimization?.recommended_quantity || budgetOptimization?.recommended_activities || selectedKwIds.size}
-                    </span>
-                    <span style={{ fontSize: 13, color: '#8A8A9A' }}>vs {totalRequestedQuantity} planned</span>
-                  </div>
-                  <div style={{ fontSize: 11.5, color: '#7B2FBE', fontWeight: 600, marginTop: 6 }}>
-                    60/40 Quota Optimized
-                  </div>
-                </div>
-
-                {/* Card 3: Budget Optimization */}
-                <div style={{ background: '#FFFFFF', border: '1px solid #E2DBEC', borderRadius: 12, padding: '14px 18px' }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#8A8A9A', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
-                    Budget Allocation
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                    <span style={{ fontSize: 22, fontWeight: 800, color: '#00BFA2' }}>
-                      {budgetOptimization?.planned_spend !== undefined ? `₹${budgetOptimization.planned_spend.toLocaleString()}` : totalAllocatedBudgetFormatted}
-                    </span>
-                    <span style={{ fontSize: 12, color: '#00BFA2', fontWeight: 600 }}>
-                      {budgetOptimization?.projected_savings > 0 ? `Saves ₹${budgetOptimization.projected_savings.toLocaleString()}` : 'Optimized'}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 11.5, color: '#8A8A9A', marginTop: 6 }}>
-                    Cap: ₹{(budgetOptimization?.total_budget_cap || budgetOptimization?.budget_cap || totalAllocatedBudget).toLocaleString()}
-                  </div>
-                </div>
-
-                {/* Card 4: Target Landing Pages */}
-                <div style={{ background: '#FFFFFF', border: '1px solid #E2DBEC', borderRadius: 12, padding: '14px 18px' }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#8A8A9A', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
-                    Landing Pages Targeted
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                    <span style={{ fontSize: 22, fontWeight: 800, color: '#1A1A1A' }}>{uniqueLandingPagesCount}</span>
-                    <span style={{ fontSize: 13, color: '#8A8A9A' }}>Unique URLs</span>
-                  </div>
-                  <div style={{ fontSize: 11.5, color: '#00BFA2', fontWeight: 700, marginTop: 6 }}>
-                    100% Landing Page SERP Verified
-                  </div>
-                </div>
+                {/* Block 4: Domain Constraints & Alerts (Only shown when outreach publishers are limited) */}
+                {Boolean(
+                  budgetOptimization?.domain_constraints_alert ||
+                  (availableOutreachSites && availableOutreachSites.length > 0 && availableOutreachSites.length < Math.ceil(selectedKwIds.size / 4))
+                ) && (
+                  <>
+                    <div style={{ borderTop: '1px dashed #E2DBEC', width: '100%' }} />
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <AlertCircle size={13} color="#7B2FBE" />
+                        <strong style={{ fontSize: 12.5, color: '#1A1A1A', fontWeight: 800 }}>
+                          Domain Constraints &amp; Publisher Availability
+                        </strong>
+                      </div>
+                      <p style={{ fontSize: 12, color: '#8A8A9A', lineHeight: 1.5, margin: 0 }}>
+                        {budgetOptimization?.domain_constraints_alert || (
+                          "Our available outreach publisher pool is currently limited for this project's target volume. I've enforced a strict guardrail of maximum 3-to-4 keywords per publisher domain to maintain natural backlink velocity."
+                        )}
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -2277,12 +2606,7 @@ function CalendarPage({ user, onNavigate }) {
               gap: 10
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                {[
-                  { id: 'guest_post', label: 'Paid Guest Post', count: selectedKwIds.size },
-                  { id: 'quora', label: 'Quora', count: 0 },
-                  { id: 'reddit', label: 'Reddit', count: 0 },
-                  { id: 'brand_mention', label: 'Brand Mention', count: 0 }
-                ].map(tab => {
+                {channelPills.map(tab => {
                   const isActive = activeChannelTab === tab.id;
                   return (
                     <button
@@ -2305,476 +2629,576 @@ function CalendarPage({ user, onNavigate }) {
                       }}
                     >
                       <span>{tab.label}</span>
-                      {tab.id === 'guest_post' && selectedKwIds.size > 0 && (
-                        <span style={{
-                          background: isActive ? '#E5CCF7' : '#F1F5F9',
-                          color: isActive ? '#4A1A8C' : '#64748B',
-                          fontSize: 11,
-                          fontWeight: 800,
-                          padding: '1px 7px',
-                          borderRadius: 10
-                        }}>
-                          {selectedKwIds.size}
-                        </span>
-                      )}
+                      {(() => {
+                        let count = 0;
+                        const masterIds = new Set([...(pushBatches.high || []), ...(pushBatches.medium || []), ...(pushBatches.low || [])].map(r => r.id));
+                        count = [...selectedKwIds].filter(id => masterIds.has(id)).length;
+                        if (count <= 0) return null;
+                        return (
+                          <span style={{
+                            background: isActive ? '#E5CCF7' : '#F1F5F9',
+                            color: isActive ? '#4A1A8C' : '#64748B',
+                            fontSize: 11,
+                            fontWeight: 800,
+                            padding: '1px 7px',
+                            borderRadius: 10
+                          }}>
+                            {count}
+                          </span>
+                        );
+                      })()}
                     </button>
                   );
                 })}
               </div>
 
-              <div style={{ fontSize: 11.5, color: '#8A8A9A', fontStyle: 'italic', paddingRight: 8 }}>
-                Rankings and prompts are currently tracked up to 40th position.
-              </div>
+              
             </div>
 
-            {/* TAB CONTENT: PAID GUEST POST */}
-            {activeChannelTab === 'guest_post' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                {['high', 'medium', 'low'].map(batchKey => {
-                  const meta = PUSH_BATCH_META[batchKey];
-                  const rows = pushBatches[batchKey] || [];
-                  const isCollapsed = collapsedBatches[batchKey];
-                  const checkedCount = rows.filter(r => selectedKwIds.has(r.id)).length;
+            {/* UNIFIED TAB CONTENT ACROSS ALL ACTIVITIES (Paid Guest Post, Quora, Reddit) */}
+            {activeChannelTab !== 'brand_mention' ? (() => {
+              // Master batches produced from the single live rank check
+              const masterBatches = pushBatches || { high: [], medium: [], low: [] };
+              let channelLabel = 'Paid Guest Post';
+              let isForum = false;
 
-                  return (
-                    <div
-                      key={batchKey}
-                      style={{
-                        background: '#FFFFFF',
-                        borderRadius: 14,
-                        border: `1px solid ${meta.border}`,
-                        overflow: 'hidden',
-                        boxShadow: '0 2px 10px rgba(0,0,0,0.03)'
-                      }}
-                    >
-                      {/* Batch Header */}
-                      <div style={{
-                        padding: '12px 20px',
-                        background: meta.bg,
-                        borderBottom: isCollapsed ? 'none' : `1px solid ${meta.border}`,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        flexWrap: 'wrap',
-                        gap: 12
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <div style={{
-                            width: 28,
-                            height: 28,
-                            borderRadius: 8,
-                            background: '#FFFFFF',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            border: `1px solid ${meta.border}`
-                          }}>
-                            <meta.Icon size={16} color={meta.tint} />
-                          </div>
-                          <div>
-                            <span style={{ fontSize: 14, fontWeight: 800, color: '#1A1A1A' }}>
-                              {meta.label}
-                            </span>
-                            <span style={{
-                              marginLeft: 8,
-                              fontSize: 11,
-                              fontWeight: 800,
-                              padding: '2px 8px',
-                              borderRadius: 10,
+              if (activeChannelTab === 'quora') {
+                channelLabel = 'Forum - Quora';
+                isForum = true;
+              } else if (activeChannelTab === 'reddit') {
+                channelLabel = 'Forum - Reddit';
+                isForum = true;
+              }
+
+              // Enrich each batch row with channel-specific topic link or outreach data
+              const currentBatches = {
+                high: (masterBatches.high || []).map(item => {
+                  const qTopic = item.quora_topic_link || topicLinks[`quora_${item.id}`] || topicLinks[`quora_${item.keyword}`] || forumStrategies.quora?.threads?.find(t => t.keyword === item.keyword || t.id === item.id)?.topic_link;
+                  const rTopic = item.reddit_topic_link || topicLinks[`reddit_${item.id}`] || topicLinks[`reddit_${item.keyword}`] || forumStrategies.reddit?.threads?.find(t => t.keyword === item.keyword || t.id === item.id)?.topic_link;
+                  return {
+                    ...item,
+                    topic_link: activeChannelTab === 'quora' ? (qTopic || item.topic_link || '') : (activeChannelTab === 'reddit' ? (rTopic || item.topic_link || '') : (item.topic_link || ''))
+                  };
+                }),
+                medium: (masterBatches.medium || []).map(item => {
+                  const qTopic = item.quora_topic_link || topicLinks[`quora_${item.id}`] || topicLinks[`quora_${item.keyword}`] || forumStrategies.quora?.threads?.find(t => t.keyword === item.keyword || t.id === item.id)?.topic_link;
+                  const rTopic = item.reddit_topic_link || topicLinks[`reddit_${item.id}`] || topicLinks[`reddit_${item.keyword}`] || forumStrategies.reddit?.threads?.find(t => t.keyword === item.keyword || t.id === item.id)?.topic_link;
+                  return {
+                    ...item,
+                    topic_link: activeChannelTab === 'quora' ? (qTopic || item.topic_link || '') : (activeChannelTab === 'reddit' ? (rTopic || item.topic_link || '') : (item.topic_link || ''))
+                  };
+                }),
+                low: (masterBatches.low || []).map(item => {
+                  const qTopic = item.quora_topic_link || topicLinks[`quora_${item.id}`] || topicLinks[`quora_${item.keyword}`] || forumStrategies.quora?.threads?.find(t => t.keyword === item.keyword || t.id === item.id)?.topic_link;
+                  const rTopic = item.reddit_topic_link || topicLinks[`reddit_${item.id}`] || topicLinks[`reddit_${item.keyword}`] || forumStrategies.reddit?.threads?.find(t => t.keyword === item.keyword || t.id === item.id)?.topic_link;
+                  return {
+                    ...item,
+                    topic_link: activeChannelTab === 'quora' ? (qTopic || item.topic_link || '') : (activeChannelTab === 'reddit' ? (rTopic || item.topic_link || '') : (item.topic_link || ''))
+                  };
+                })
+              };
+
+              const isChannelLoading = loadingKeywords && (!masterBatches.high?.length && !masterBatches.medium?.length && !masterBatches.low?.length);
+
+              if (isChannelLoading) {
+                return (
+                  <div style={{ background: '#FFFFFF', borderRadius: 14, border: '1px solid #E2DBEC', padding: '48px 24px', textAlign: 'center' }}>
+                    <BrandInfinityLoader label={`Analyzing & ranking ${channelLabel} keyword batches...`} size="md" minHeight="160px" />
+                  </div>
+                );
+              }
+
+              const totalBatchRows = (currentBatches.high?.length || 0) + (currentBatches.medium?.length || 0) + (currentBatches.low?.length || 0);
+              if (totalBatchRows === 0 && !loadingKeywords) {
+                return (
+                  <div style={{ background: '#FFFFFF', borderRadius: 14, border: '1px solid #E2DBEC', padding: '36px 24px', textAlign: 'center' }}>
+                    <Sparkles size={24} color="#7B2FBE" style={{ margin: '0 auto 10px' }} />
+                    <h4 style={{ fontSize: 15, fontWeight: 700, color: '#1A1A1A', margin: '0 0 6px 0' }}>
+                      No {channelLabel} targets found
+                    </h4>
+                    <p style={{ fontSize: 12.5, color: '#64748B', margin: 0 }}>
+                      Ensure candidate landing pages and rank 5+ keywords exist in project dataset.
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {['high', 'medium', 'low'].map(batchKey => {
+                    const meta = PUSH_BATCH_META[batchKey];
+                    const rows = currentBatches[batchKey] || [];
+                    const isCollapsed = collapsedBatches[batchKey];
+                    const checkedCount = rows.filter(r => selectedKwIds.has(r.id)).length;
+
+                    return (
+                      <div
+                        key={batchKey}
+                        style={{
+                          background: '#FFFFFF',
+                          borderRadius: 14,
+                          border: `1px solid ${meta.border}`,
+                          overflow: 'hidden',
+                          boxShadow: '0 2px 10px rgba(0,0,0,0.03)'
+                        }}
+                      >
+                        {/* Batch Header */}
+                        <div style={{
+                          padding: '12px 20px',
+                          background: meta.bg,
+                          borderBottom: isCollapsed ? 'none' : `1px solid ${meta.border}`,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: 12
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <div style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: 8,
                               background: '#FFFFFF',
-                              color: meta.tint,
-                              border: `1px solid ${meta.border}`
-                            }}>
-                              {checkedCount} / {rows.length} selected
-                            </span>
-                          </div>
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          {rows.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const allIds = rows.map(r => r.id);
-                                const allChecked = allIds.every(id => selectedKwIds.has(id));
-                                const next = new Set(selectedKwIds);
-                                if (allChecked) allIds.forEach(id => next.delete(id));
-                                else allIds.forEach(id => next.add(id));
-                                setSelectedKwIds(next);
-                              }}
-                              style={{
-                                fontSize: 11.5,
-                                fontWeight: 700,
-                                color: meta.tint,
-                                background: '#FFFFFF',
-                                border: `1px solid ${meta.border}`,
-                                padding: '4px 10px',
-                                borderRadius: 6,
-                                cursor: 'pointer'
-                              }}
-                            >
-                              {rows.every(r => selectedKwIds.has(r.id)) ? 'Deselect All' : 'Select All'}
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => toggleBatchCollapse(batchKey)}
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              cursor: 'pointer',
-                              color: '#8A8A9A',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: 4,
-                              fontSize: 12,
-                              fontWeight: 600
-                            }}
-                          >
-                            <span>{isCollapsed ? 'Expand' : 'Collapse'}</span>
-                            {isCollapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Batch Table Body */}
-                      {!isCollapsed && (
-                        <>
-                          {rows.length === 0 ? (
-                            <div style={{ fontSize: 12.5, color: '#8A8A9A', fontStyle: 'italic', padding: '16px 20px' }}>
-                              No keywords categorized into this batch.
+                              justifyContent: 'center',
+                              border: `1px solid ${meta.border}`
+                            }}>
+                              <meta.Icon size={16} color={meta.tint} />
                             </div>
-                          ) : (
-                            <div style={{ overflowX: 'auto' }}>
-                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, textAlign: 'left' }}>
-                                <thead>
-                                  <tr style={{
-                                    color: '#8A8A9A',
-                                    fontSize: 11,
-                                    fontWeight: 700,
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.04em',
-                                    background: '#F5F5F5',
-                                    borderBottom: '1px solid #E2DBEC'
-                                  }}>
-                                    <th style={{ padding: '9px 12px', width: 44, textAlign: 'center' }}></th>
-                                    <th style={{ padding: '9px 14px', minWidth: 220 }}>Guest Post / Keyword</th>
-                                    <th style={{ padding: '9px 14px', width: 180 }}>Rank Shift &amp; Trajectory</th>
-                                    <th style={{ padding: '9px 14px', width: 75 }}>SV</th>
-                                    <th style={{ padding: '9px 14px', width: 60 }}>KD</th>
-                                    <th style={{ padding: '9px 14px', width: 85 }}>Confidence</th>
-                                    <th style={{ padding: '9px 14px', width: 130 }}>VI Rationale</th>
-                                    <th style={{ padding: '9px 14px', width: 230 }}>Target Outreach Site</th>
-                                    <th style={{ padding: '9px 14px', minWidth: 220 }}>Target Landing Page</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {rows.map(item => {
-                                    const isChecked = selectedKwIds.has(item.id);
-                                    const prevRankVal = item.prev_rank ?? item.rank;
-                                    const currentRank = item.new_rank ?? item.rank;
+                            <div>
+                              <span style={{ fontSize: 14, fontWeight: 800, color: '#1A1A1A' }}>
+                                {meta.label}
+                              </span>
+                              <span style={{
+                                marginLeft: 8,
+                                fontSize: 11,
+                                fontWeight: 800,
+                                padding: '2px 8px',
+                                borderRadius: 10,
+                                background: '#FFFFFF',
+                                color: meta.tint,
+                                border: `1px solid ${meta.border}`
+                              }}>
+                                {checkedCount} / {rows.length} selected
+                              </span>
+                            </div>
+                          </div>
 
-                                    return (
-                                      <tr
-                                        key={item.id}
-                                        style={{
-                                          borderTop: '1px solid #F5F5F5',
-                                          background: isChecked ? '#F6EEFD' : 'transparent',
-                                          transition: 'background-color 0.1s ease'
-                                        }}
-                                      >
-                                        <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                                          <input
-                                            type="checkbox"
-                                            checked={isChecked}
-                                            onChange={(e) => {
-                                              const next = new Set(selectedKwIds);
-                                              if (e.target.checked) next.add(item.id);
-                                              else next.delete(item.id);
-                                              setSelectedKwIds(next);
-                                            }}
-                                            style={{ cursor: 'pointer', width: 16, height: 16, accentColor: '#7B2FBE' }}
-                                          />
-                                        </td>
-                                        <td style={{ padding: '8px 14px' }}>
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                                            <div style={{ fontWeight: 700, color: '#1A1A1A', fontSize: 13 }}>{item.keyword}</div>
-                                            {activitiesList.length > 1 && keywordToActivityMap[item.id] && (
-                                              <span style={{
-                                                fontSize: 10,
-                                                fontWeight: 700,
-                                                color: '#7B2FBE',
-                                                background: '#F6EEFD',
-                                                border: '1px solid #E5CCF7',
-                                                padding: '1px 6px',
-                                                borderRadius: 4,
-                                                display: 'inline-flex',
-                                                alignItems: 'center',
-                                                gap: 3
-                                              }}>
-                                                <Layers size={10} />
-                                                <span>{keywordToActivityMap[item.id]}</span>
-                                              </span>
-                                            )}
-                                          </div>
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
-                                            {(item.category || item.cluster) && (
-                                              <span style={{ fontSize: 11, color: '#8A8A9A' }}>
-                                                {[item.category, item.cluster].filter(Boolean).join(' • ')}
-                                              </span>
-                                            )}
-                                          </div>
-                                        </td>
-                                        <td style={{ padding: '8px 14px' }}>
-                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                                            <RankSparklineHover
-                                              prevRank={prevRankVal}
-                                              liveRank={currentRank}
-                                              delta={item.delta}
-                                              gainPctStr={item.gain_pct_str}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            {rows.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const allIds = rows.map(r => r.id);
+                                  const allChecked = allIds.every(id => selectedKwIds.has(id));
+                                  const next = new Set(selectedKwIds);
+                                  if (allChecked) allIds.forEach(id => next.delete(id));
+                                  else allIds.forEach(id => next.add(id));
+                                  setSelectedKwIds(next);
+                                }}
+                                style={{
+                                  fontSize: 11.5,
+                                  fontWeight: 700,
+                                  color: meta.tint,
+                                  background: '#FFFFFF',
+                                  border: `1px solid ${meta.border}`,
+                                  padding: '4px 10px',
+                                  borderRadius: 6,
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                {rows.every(r => selectedKwIds.has(r.id)) ? 'Deselect All' : 'Select All'}
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => toggleBatchCollapse(batchKey)}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                color: '#8A8A9A',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                fontSize: 12,
+                                fontWeight: 600
+                              }}
+                            >
+                              <span>{isCollapsed ? 'Expand' : 'Collapse'}</span>
+                              {isCollapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Batch Table Body */}
+                        {!isCollapsed && (
+                          <>
+                            {rows.length === 0 ? (
+                              <div style={{ fontSize: 12.5, color: '#8A8A9A', fontStyle: 'italic', padding: '16px 20px' }}>
+                                No keywords categorized into this batch.
+                              </div>
+                            ) : (
+                              <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, textAlign: 'left' }}>
+                                  <thead>
+                                    <tr style={{
+                                      color: '#8A8A9A',
+                                      fontSize: 11,
+                                      fontWeight: 700,
+                                      textTransform: 'uppercase',
+                                      letterSpacing: '0.04em',
+                                      background: '#F5F5F5',
+                                      borderBottom: '1px solid #E2DBEC'
+                                    }}>
+                                      <th style={{ padding: '9px 12px', width: 44, textAlign: 'center' }}></th>
+                                      <th style={{ padding: '9px 14px', minWidth: 220 }}>
+                                        {activeChannelTab === 'guest_post' ? ' Keyword' : (activeChannelTab === 'quora' ? 'Keyword' : 'Keyword')}
+                                      </th>
+                                      <th style={{ padding: '9px 14px', width: 180 }}>Rank Shift</th>
+                                      <th style={{ padding: '9px 14px', width: 75 }}>SV</th>
+                                      <th style={{ padding: '9px 14px', width: 60 }}>KD</th>
+                                      <th style={{ padding: '9px 14px', width: 85 }}>Confidence</th>
+                                      <th style={{ padding: '9px 14px', minWidth: 260 }}>Rationale</th>
+                                      {activeChannelTab === 'guest_post' ? (
+                                        <th style={{ padding: '9px 14px', width: 230 }}>PG Site</th>
+                                      ) : (
+                                        <th style={{ padding: '9px 14px', width: 240 }}>
+                                          Topic Link ({activeChannelTab === 'quora' ? 'Quora' : 'Reddit'})
+                                        </th>
+                                      )}
+                                      <th style={{ padding: '9px 14px', minWidth: 220 }}>Landing Page</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {rows.map(item => {
+                                      const isChecked = selectedKwIds.has(item.id);
+                                      const prevRankVal = item.prev_rank ?? item.rank;
+                                      const currentRank = item.new_rank ?? item.rank;
+
+                                      return (
+                                        <tr
+                                          key={item.id}
+                                          style={{
+                                            borderTop: '1px solid #F5F5F5',
+                                            background: isChecked ? '#F6EEFD' : 'transparent',
+                                            transition: 'background-color 0.1s ease'
+                                          }}
+                                        >
+                                          <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                            <input
+                                              type="checkbox"
+                                              checked={isChecked}
+                                              onChange={(e) => {
+                                                const next = new Set(selectedKwIds);
+                                                if (e.target.checked) next.add(item.id);
+                                                else next.delete(item.id);
+                                                setSelectedKwIds(next);
+                                              }}
+                                              style={{ cursor: 'pointer', width: 16, height: 16, accentColor: '#7B2FBE' }}
                                             />
-                                            <div style={{ fontSize: 10.5, color: '#8A8A9A' }}>
-                                              {prevRankVal != null ? `#${prevRankVal}` : '—'} → <strong style={{ color: '#1A1A1A' }}>{currentRank != null ? `#${currentRank}` : '—'}</strong>
-                                              {item.delta ? ` (${Math.abs(item.delta)} spot${Math.abs(item.delta) > 1 ? 's' : ''})` : ''}
+                                          </td>
+                                          <td style={{ padding: '8px 14px' }}>
+                                            <div style={{ fontWeight: 700, color: '#1A1A1A', fontSize: 13 }}>{item.keyword}</div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
+                                              {item.category && (
+                                                <div style={{ fontSize: 11, color: '#64748B' }}>
+                                                  <strong style={{ color: '#475569', fontWeight: 700 }}>Category:</strong> {item.category}
+                                                </div>
+                                              )}
+                                              {item.cluster && (
+                                                <div style={{ fontSize: 11, color: '#64748B' }}>
+                                                  <strong style={{ color: '#475569', fontWeight: 700 }}>Cluster:</strong> {item.cluster}
+                                                </div>
+                                              )}
                                             </div>
-                                          </div>
-                                        </td>
-                                        <td style={{ padding: '8px 14px', fontWeight: 600, color: '#2D2D44' }}>
-                                          {item.sv ? item.sv.toLocaleString() : '—'}
-                                        </td>
-                                        <td style={{ padding: '8px 14px', color: '#8A8A9A' }}>
-                                          {item.kd ?? '—'}
-                                        </td>
-                                        <td style={{ padding: '8px 14px' }}>
-                                          {item.confidence !== undefined ? (
-                                            <span style={{
-                                              fontWeight: 800,
-                                              fontSize: 11.5,
-                                              color: item.confidence >= 80 ? '#00BFA2' : (item.confidence >= 60 ? '#D4007A' : '#8A8A9A')
-                                            }}>
-                                              {item.confidence}%
-                                            </span>
-                                          ) : '—'}
-                                        </td>
-                                        <td style={{ padding: '8px 14px' }}>
-                                          <RationaleTooltip item={item} />
-                                        </td>
-                                        <td style={{ padding: '8px 14px' }}>
-                                          {(() => {
-                                            const assignedSite = selectedOutreachSites[item.id] || item.outreach_site;
-                                            return (
-                                              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                                {availableOutreachSites && availableOutreachSites.length > 0 ? (
-                                                  <select
-                                                    value={assignedSite?.domain || ''}
-                                                    onChange={(e) => {
-                                                      const domainVal = e.target.value;
-                                                      const matchedSite = availableOutreachSites.find(s => s.domain === domainVal);
-                                                      handleSelectSiteForKeyword(item.id, matchedSite || null);
-                                                    }}
-                                                    style={{
-                                                      padding: '4px 8px',
-                                                      fontSize: 12,
-                                                      fontWeight: 600,
-                                                      color: assignedSite ? '#1A1A1A' : '#8A8A9A',
-                                                      background: '#FFFFFF',
-                                                      border: '1px solid #E2DBEC',
-                                                      borderRadius: 6,
-                                                      outline: 'none',
-                                                      maxWidth: 210,
-                                                      cursor: 'pointer'
-                                                    }}
-                                                  >
-                                                    <option value="">-- Select Outreach Site --</option>
-                                                    {availableOutreachSites.map(site => {
-                                                      const currentCount = Object.entries(selectedOutreachSites).filter(
-                                                        ([id, s]) => s?.domain === site.domain
-                                                      ).length;
-                                                      const isCurrent = assignedSite?.domain === site.domain;
-                                                      const isFull = currentCount >= 4 && !isCurrent;
-                                                      return (
-                                                        <option key={site.id || site.domain} value={site.domain} disabled={isFull}>
-                                                          {site.domain} (DA {site.da} | {String(site.price).startsWith('₹') ? site.price : (String(site.price).startsWith('$') ? site.price.replace('$', '₹') : `₹${site.price}`)}) {isFull ? '— Full (4/4 assigned)' : `(${currentCount}/4 kws)`}
-                                                        </option>
-                                                      );
-                                                    })}
-                                                  </select>
-                                                ) : assignedSite ? (
-                                                  <span style={{ fontSize: 12, fontWeight: 700, color: '#1A1A1A' }}>
-                                                    {assignedSite.domain}
-                                                  </span>
-                                                ) : (
-                                                  <span style={{ fontSize: 11, color: '#8A8A9A', fontStyle: 'italic' }}>
-                                                    Auto-assigned on schedule
-                                                  </span>
-                                                )}
+                                          </td>
+                                          <td style={{ padding: '8px 14px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                              <RankSparklineHover
+                                                initialRank={item.initial_rank ?? prevRankVal}
+                                                prevRank={prevRankVal}
+                                                liveRank={currentRank}
+                                                delta={item.delta}
+                                                gainPctStr={item.gain_pct_str}
+                                                history={item.calendar_rank_history || item.history || []}
+                                              />
+                                              <div style={{ fontSize: 10.5, color: '#8A8A9A' }}>
+                                                {formatRankBadge(prevRankVal)} → <strong style={{ color: '#1A1A1A' }}>{formatRankBadge(currentRank)}</strong>
+                                                {item.delta ? ` (${formatShiftSpots(prevRankVal, currentRank, item.delta)})` : ''}
+                                              </div>
+                                            </div>
+                                          </td>
+                                          <td style={{ padding: '8px 14px', fontWeight: 600, color: '#2D2D44' }}>
+                                            {item.sv ? item.sv.toLocaleString() : '—'}
+                                          </td>
+                                          <td style={{ padding: '8px 14px', color: '#8A8A9A' }}>
+                                            {item.kd ?? '—'}
+                                          </td>
+                                          <td style={{ padding: '8px 14px' }}>
+                                            {item.confidence !== undefined ? (
+                                              <span style={{
+                                                fontWeight: 800,
+                                                fontSize: 11.5,
+                                                color: item.confidence >= 80 ? '#00BFA2' : (item.confidence >= 60 ? '#D4007A' : '#8A8A9A')
+                                              }}>
+                                                {item.confidence}%
+                                              </span>
+                                            ) : '—'}
+                                          </td>
+                                          <td style={{ padding: '8px 14px', minWidth: 260, maxWidth: 360 }}>
+                                            <div style={{ fontSize: 12, color: '#2D2D44', lineHeight: 1.45 }}>
+                                              {cleanReasonSpots(item.reason) || (
+                                                item.delta > 0
+                                                  ? `I've selected this keyword because its historical rank surged from ${formatRankBadge(prevRankVal)} to ${formatRankBadge(currentRank)} (+${formatShiftSpots(prevRankVal, currentRank, item.delta)}${item.gain_pct_str ? `, ${item.gain_pct_str}` : ''}) with ${item.sv ? item.sv.toLocaleString() : 'high'} monthly search volume and verified landing page intent.`
+                                                  : item.delta < 0
+                                                    ? `I've selected this keyword because its historical rank dropped from ${formatRankBadge(prevRankVal)} to ${formatRankBadge(currentRank)} (-${formatShiftSpots(prevRankVal, currentRank, item.delta)}) despite strong ${item.sv ? item.sv.toLocaleString() : 'high'} monthly search volume, making it a prime recovery target.`
+                                                    : `I've selected this keyword because historical rank has held steady at ${formatRankBadge(currentRank)} (0% shift) with ${item.sv ? item.sv.toLocaleString() : 'steady'} monthly search volume, ready for an authority push.`
+                                              )}
+                                            </div>
+                                          </td>
 
-                                                {assignedSite && (
-                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                                                    <span style={{
-                                                      fontSize: 10,
-                                                      fontWeight: 800,
-                                                      background: (assignedSite.da || 0) >= 50 ? '#E6FAF6' : '#F5F5F5',
-                                                      color: (assignedSite.da || 0) >= 50 ? '#00BFA2' : '#2D2D44',
-                                                      border: `1px solid ${(assignedSite.da || 0) >= 50 ? '#A7F3D0' : '#E2DBEC'}`,
-                                                      padding: '1px 5px',
-                                                      borderRadius: 4
-                                                    }}>
-                                                      DA {assignedSite.da}
-                                                    </span>
-                                                    <span style={{
-                                                      fontSize: 10,
-                                                      fontWeight: 700,
-                                                      background: (assignedSite.spam_score || 0) <= 5 ? '#E6FAF6' : '#FDEBF4',
-                                                      color: (assignedSite.spam_score || 0) <= 5 ? '#00BFA2' : '#D4007A',
-                                                      border: `1px solid ${(assignedSite.spam_score || 0) <= 5 ? '#A7F3D0' : '#F8B4D9'}`,
-                                                      padding: '1px 5px',
-                                                      borderRadius: 4
-                                                    }}>
-                                                      Spam {assignedSite.spam_score}%
-                                                    </span>
-                                                    <span style={{
-                                                      fontSize: 10,
-                                                      fontWeight: 700,
-                                                      color: '#00BFA2',
-                                                      background: '#E6FAF6',
-                                                      border: '1px solid #A7F3D0',
-                                                      padding: '1px 5px',
-                                                      borderRadius: 4
-                                                    }}>
-                                                      {String(assignedSite.price).startsWith('₹') ? assignedSite.price : (String(assignedSite.price).startsWith('$') ? assignedSite.price.replace('$', '₹') : `₹${assignedSite.price}`)}
-                                                    </span>
-                                                    {assignedSite.country_traffic && (
-                                                      <span style={{
-                                                        fontSize: 10,
-                                                        fontWeight: 700,
-                                                        color: '#00C2FF',
-                                                        background: '#E6F8FF',
-                                                        border: '1px solid #B3EDFF',
-                                                        padding: '1px 5px',
-                                                        borderRadius: 4
-                                                      }} title="Target Country Organic Traffic">
-                                                        {assignedSite.country_traffic} Traffic
+                                          {/* Channel Specific Column: Outreach Site for Guest Post VS Discovered Topic Link for Quora / Reddit */}
+                                          {activeChannelTab === 'guest_post' ? (
+                                            <td style={{ padding: '8px 14px' }}>
+                                              {(() => {
+                                                const assignedSite = selectedOutreachSites[item.id] || item.outreach_site;
+                                                return (
+                                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                                    {availableOutreachSites && availableOutreachSites.length > 0 ? (
+                                                      <select
+                                                        value={assignedSite?.domain || ''}
+                                                        onChange={(e) => {
+                                                          const domainVal = e.target.value;
+                                                          const matchedSite = availableOutreachSites.find(s => s.domain === domainVal);
+                                                          handleSelectSiteForKeyword(item.id, matchedSite || null);
+                                                        }}
+                                                        style={{
+                                                          padding: '4px 8px',
+                                                          fontSize: 12,
+                                                          fontWeight: 600,
+                                                          color: assignedSite ? '#1A1A1A' : '#8A8A9A',
+                                                          background: '#FFFFFF',
+                                                          border: '1px solid #E2DBEC',
+                                                          borderRadius: 6,
+                                                          outline: 'none',
+                                                          maxWidth: 210,
+                                                          cursor: 'pointer'
+                                                        }}
+                                                      >
+                                                        <option value="">-- Select Outreach Site --</option>
+                                                        {availableOutreachSites.map(site => {
+                                                          const currentCount = Object.entries(selectedOutreachSites).filter(
+                                                            ([id, s]) => s?.domain === site.domain
+                                                          ).length;
+                                                          const isCurrent = assignedSite?.domain === site.domain;
+                                                          const isFull = currentCount >= 4 && !isCurrent;
+                                                          return (
+                                                            <option key={site.id || site.domain} value={site.domain} disabled={isFull}>
+                                                              {site.domain} (DA {site.da} | {String(site.price).startsWith('₹') ? site.price : (String(site.price).startsWith('$') ? site.price.replace('$', '₹') : `₹${site.price}`)}) {isFull ? '— Full (4/4 assigned)' : `(${currentCount}/4 kws)`}
+                                                            </option>
+                                                          );
+                                                        })}
+                                                      </select>
+                                                    ) : assignedSite ? (
+                                                      <span style={{ fontSize: 12, fontWeight: 700, color: '#1A1A1A' }}>
+                                                        {assignedSite.domain}
+                                                      </span>
+                                                    ) : (
+                                                      <span style={{ fontSize: 11, color: '#8A8A9A', fontStyle: 'italic' }}>
+                                                        Auto-assigned on schedule
                                                       </span>
                                                     )}
+
+                                                    {assignedSite && (
+                                                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                                                        <span style={{
+                                                          fontSize: 10,
+                                                          fontWeight: 800,
+                                                          background: (assignedSite.da || 0) >= 50 ? '#E6FAF6' : '#F5F5F5',
+                                                          color: (assignedSite.da || 0) >= 50 ? '#00BFA2' : '#2D2D44',
+                                                          border: `1px solid ${(assignedSite.da || 0) >= 50 ? '#A7F3D0' : '#E2DBEC'}`,
+                                                          padding: '1px 5px',
+                                                          borderRadius: 4
+                                                        }}>
+                                                          DA {assignedSite.da}
+                                                        </span>
+                                                        <span style={{
+                                                          fontSize: 10,
+                                                          fontWeight: 700,
+                                                          background: (assignedSite.spam_score || 0) <= 5 ? '#E6FAF6' : '#FDEBF4',
+                                                          color: (assignedSite.spam_score || 0) <= 5 ? '#00BFA2' : '#D4007A',
+                                                          border: `1px solid ${(assignedSite.spam_score || 0) <= 5 ? '#A7F3D0' : '#F8B4D9'}`,
+                                                          padding: '1px 5px',
+                                                          borderRadius: 4
+                                                        }}>
+                                                          Spam {assignedSite.spam_score}%
+                                                        </span>
+                                                        <span style={{
+                                                          fontSize: 10,
+                                                          fontWeight: 700,
+                                                          color: '#00BFA2',
+                                                          background: '#E6FAF6',
+                                                          border: '1px solid #A7F3D0',
+                                                          padding: '1px 5px',
+                                                          borderRadius: 4
+                                                        }}>
+                                                          {String(assignedSite.price).startsWith('₹') ? assignedSite.price : (String(assignedSite.price).startsWith('$') ? assignedSite.price.replace('$', '₹') : `₹${assignedSite.price}`)}
+                                                        </span>
+                                                        {assignedSite.country_traffic && (
+                                                          <span style={{
+                                                            fontSize: 10,
+                                                            fontWeight: 700,
+                                                            color: '#00C2FF',
+                                                            background: '#E6F8FF',
+                                                            border: '1px solid #B3EDFF',
+                                                            padding: '1px 5px',
+                                                            borderRadius: 4
+                                                          }} title="Target Country Organic Traffic">
+                                                            {assignedSite.country_traffic} Traffic
+                                                          </span>
+                                                        )}
+                                                      </div>
+                                                    )}
                                                   </div>
-                                                )}
-                                              </div>
-                                            );
-                                          })()}
-                                        </td>
-                                        <td style={{ padding: '8px 14px' }}>
-                                          {(() => {
-                                            const currentLp = item.landing_page_url || item.topicLink || item.topic_link || topicLinks[item.id] || '';
-                                            if (!currentLp) {
+                                                );
+                                              })()}
+                                            </td>
+                                          ) : (
+                                            <td style={{ padding: '8px 14px' }}>
+                                              {(() => {
+                                                const tLink = item.topic_link || topicLinks[item.id] || '';
+                                                const isInvalidSearchUrl = tLink.includes('/search') || tLink.includes('?q=') || tLink.includes('search?');
+                                                if (!tLink || isInvalidSearchUrl) {
+                                                  return (
+                                                    <span style={{ fontSize: 11.5, color: '#8A8A9A', fontStyle: 'italic' }}>
+                                                      Topic thread matching on schedule
+                                                    </span>
+                                                  );
+                                                }
+                                                return (
+                                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                                    <a
+                                                      href={tLink}
+                                                      target="_blank"
+                                                      rel="noreferrer"
+                                                      title={tLink}
+                                                      style={{
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: 4,
+                                                        fontSize: 12,
+                                                        fontWeight: 700,
+                                                        color: '#7B2FBE',
+                                                        textDecoration: 'none',
+                                                        maxWidth: 220,
+                                                        overflow: 'hidden',
+                                                        textOverflow: 'ellipsis',
+                                                        whiteSpace: 'nowrap'
+                                                      }}
+                                                      onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline'; }}
+                                                      onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none'; }}
+                                                    >
+                                                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                        {tLink.replace(/^https?:\/\/(www\.)?/, '')}
+                                                      </span>
+                                                      <ExternalLink size={11} color="#7B2FBE" style={{ flexShrink: 0 }} />
+                                                    </a>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                      <span style={{
+                                                        fontSize: 9.5,
+                                                        fontWeight: 800,
+                                                        color: '#00BFA2',
+                                                        background: '#E6FAF6',
+                                                        border: '1px solid #A7F3D0',
+                                                        padding: '1px 5px',
+                                                        borderRadius: 4
+                                                      }}>
+                                                        {activeChannelTab === 'quora' ? 'Quora Thread' : 'Reddit Thread'}
+                                                      </span>
+                                                      {item.thread_budget && (
+                                                        <span style={{
+                                                          fontSize: 9.5,
+                                                          fontWeight: 700,
+                                                          color: '#4A1A8C',
+                                                          background: '#F6EEFD',
+                                                          border: '1px solid #E5CCF7',
+                                                          padding: '1px 5px',
+                                                          borderRadius: 4
+                                                        }}>
+                                                          ₹{item.thread_budget}
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                );
+                                              })()}
+                                            </td>
+                                          )}
+
+                                          {/* Client Target Landing Page */}
+                                          <td style={{ padding: '8px 14px' }}>
+                                            {(() => {
+                                              const currentLp = item.landing_page_url || (activeChannelTab === 'guest_post' ? (item.topicLink || item.topic_link || topicLinks[item.id]) : '') || '';
+                                              if (!currentLp) {
+                                                return (
+                                                  <span style={{ fontSize: 12, color: '#8A8A9A', fontStyle: 'italic' }}>
+                                                    —
+                                                  </span>
+                                                );
+                                              }
                                               return (
-                                                <span style={{ fontSize: 12, color: '#8A8A9A', fontStyle: 'italic' }}>
-                                                  —
-                                                </span>
+                                                <a
+                                                  href={currentLp}
+                                                  target="_blank"
+                                                  rel="noreferrer"
+                                                  title={currentLp}
+                                                  style={{
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: 4,
+                                                    fontSize: 12,
+                                                    fontWeight: 600,
+                                                    color: '#7B2FBE',
+                                                    textDecoration: 'none',
+                                                    maxWidth: 240,
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis',
+                                                    whiteSpace: 'nowrap',
+                                                    background: 'transparent',
+                                                    border: 'none',
+                                                    padding: 0
+                                                  }}
+                                                  onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline'; }}
+                                                  onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none'; }}
+                                                >
+                                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                    {currentLp.replace(/^https?:\/\/(www\.)?/, '')}
+                                                  </span>
+                                                  <ExternalLink size={11} color="#7B2FBE" style={{ flexShrink: 0 }} />
+                                                </a>
                                               );
-                                            }
-                                            return (
-                                              <a
-                                                href={currentLp}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                title={currentLp}
-                                                style={{
-                                                  display: 'inline-flex',
-                                                  alignItems: 'center',
-                                                  gap: 4,
-                                                  fontSize: 12,
-                                                  fontWeight: 600,
-                                                  color: '#7B2FBE',
-                                                  textDecoration: 'none',
-                                                  maxWidth: 250,
-                                                  overflow: 'hidden',
-                                                  textOverflow: 'ellipsis',
-                                                  whiteSpace: 'nowrap',
-                                                  background: 'transparent',
-                                                  border: 'none',
-                                                  padding: 0
-                                                }}
-                                                onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline'; }}
-                                                onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none'; }}
-                                              >
-                                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                  {currentLp.replace(/^https?:\/\/(www\.)?/, '')}
-                                                </span>
-                                                <ExternalLink size={11} color="#7B2FBE" style={{ flexShrink: 0 }} />
-                                              </a>
-                                            );
-                                          })()}
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* TAB CONTENT: QUORA (Channel Preview) */}
-            {activeChannelTab === 'quora' && (
-              <div style={{
-                background: '#FFFFFF',
-                borderRadius: 14,
-                border: '1px solid #E2DBEC',
-                padding: '32px 24px',
-                textAlign: 'center'
-              }}>
-                <div style={{ width: 44, height: 44, borderRadius: 12, background: '#F6EEFD', color: '#7B2FBE', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
-                  <Sparkles size={22} />
+                                            })()}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-                <h3 style={{ fontSize: 17, fontWeight: 800, color: '#1A1A1A', margin: '0 0 8px 0' }}>
-                  Quora Community Outreach &amp; Topic Answers
-                </h3>
-                <p style={{ fontSize: 13, color: '#64748B', maxWidth: 520, margin: '0 auto 18px', lineHeight: 1.55 }}>
-                  AI maps high-intent search queries to relevant Quora question threads to generate organic referral authority and natural topic citations.
-                </p>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#F6EEFD', border: '1px solid #E5CCF7', color: '#7B2FBE', padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
-                  <span>Tracked under unified organic campaign</span>
-                </div>
-              </div>
-            )}
-
-            {/* TAB CONTENT: REDDIT (Channel Preview) */}
-            {activeChannelTab === 'reddit' && (
-              <div style={{
-                background: '#FFFFFF',
-                borderRadius: 14,
-                border: '1px solid #E2DBEC',
-                padding: '32px 24px',
-                textAlign: 'center'
-              }}>
-                <div style={{ width: 44, height: 44, borderRadius: 12, background: '#F6EEFD', color: '#7B2FBE', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
-                  <Sparkles size={22} />
-                </div>
-                <h3 style={{ fontSize: 17, fontWeight: 800, color: '#1A1A1A', margin: '0 0 8px 0' }}>
-                  Reddit Community Discussions &amp; Subreddit Authority
-                </h3>
-                <p style={{ fontSize: 13, color: '#64748B', maxWidth: 520, margin: '0 auto 18px', lineHeight: 1.55 }}>
-                  AI identifies active niche subreddits aligned with your target landing pages to build high-trust community engagement and brand signals.
-                </p>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#F6EEFD', border: '1px solid #E5CCF7', color: '#7B2FBE', padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
-                  <span>Tracked under unified organic campaign</span>
-                </div>
-              </div>
-            )}
-
-            {/* TAB CONTENT: BRAND MENTION -- same AI-scheduled keyword batches as
-                Paid Guest Post, same table UI, but the outreach-site column is
-                replaced with a "Brand Mentions" column (left empty for now --
-                no real mention-URL data wired in yet). */}
-            {activeChannelTab === 'brand_mention' && (
+              );
+            })() : (
+              /* TAB CONTENT: BRAND MENTION -- same AI-scheduled keyword batches as
+                Paid Guest Post, same table UI, with Brand Mentions column. */
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 {['high', 'medium', 'low'].map(batchKey => {
                   const meta = PUSH_BATCH_META[batchKey];
@@ -2905,8 +3329,8 @@ function CalendarPage({ user, onNavigate }) {
                                     borderBottom: '1px solid #E2DBEC'
                                   }}>
                                     <th style={{ padding: '9px 12px', width: 44, textAlign: 'center' }}></th>
-                                    <th style={{ padding: '9px 14px', minWidth: 220 }}>Guest Post / Keyword</th>
-                                    <th style={{ padding: '9px 14px', width: 180 }}>Rank Shift &amp; Trajectory</th>
+                                    <th style={{ padding: '9px 14px', minWidth: 220 }}>Keyword</th>
+                                    <th style={{ padding: '9px 14px', width: 180 }}>Rank Shift</th>
                                     <th style={{ padding: '9px 14px', width: 75 }}>SV</th>
                                     <th style={{ padding: '9px 14px', width: 60 }}>KD</th>
                                     <th style={{ padding: '9px 14px', width: 85 }}>Confidence</th>
@@ -2975,10 +3399,12 @@ function CalendarPage({ user, onNavigate }) {
                                         <td style={{ padding: '8px 14px' }}>
                                           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                                             <RankSparklineHover
+                                              initialRank={item.initial_rank ?? prevRankVal}
                                               prevRank={prevRankVal}
                                               liveRank={currentRank}
                                               delta={item.delta}
                                               gainPctStr={item.gain_pct_str}
+                                              history={item.calendar_rank_history || item.history || []}
                                             />
                                             <div style={{ fontSize: 10.5, color: '#8A8A9A' }}>
                                               {prevRankVal != null ? `#${prevRankVal}` : '—'} → <strong style={{ color: '#1A1A1A' }}>{currentRank != null ? `#${currentRank}` : '—'}</strong>
@@ -3244,7 +3670,11 @@ function CalendarPage({ user, onNavigate }) {
 
                 <button
                   type="button"
-                  disabled={selectedKwIds.size === 0 || savingActivity}
+                  disabled={!(
+                    (availableChannels.some(c => c.id === 'guest_post') && selectedKwIds.size > 0) ||
+                    (availableChannels.some(c => c.id === 'quora') && (selectedForumThreads.quora?.size > 0 || (forumStrategies.quora?.threads?.length || 0) > 0)) ||
+                    (availableChannels.some(c => c.id === 'reddit') && (selectedForumThreads.reddit?.size > 0 || (forumStrategies.reddit?.threads?.length || 0) > 0))
+                  ) || savingActivity}
                   onClick={handleConfirmAddKeywords}
                   style={{
                     padding: '9px 24px',
@@ -3711,11 +4141,6 @@ function CalendarPage({ user, onNavigate }) {
                   groupedProjects.map((group, gIdx) => {
                     const isExpanded = expandedProjects.has(group.projectName);
                     const overallUid = (() => {
-                      const itemWithUid = group.items.find(it => it.activity_uid);
-                      if (itemWithUid && itemWithUid.activity_uid) {
-                        const parts = itemWithUid.activity_uid.split('-');
-                        if (parts.length >= 2) return `${parts[0]}-${parts[1]}`;
-                      }
                       const pLower = (group.projectName || '').toLowerCase();
                       let pCode = 'PR';
                       if (pLower.includes('billabong')) pCode = 'BL';
@@ -3926,17 +4351,29 @@ function CalendarPage({ user, onNavigate }) {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  sessionStorage.setItem('offpage_target_project', group.projectName);
-                                  const firstItem = group.items.find(it => it.first_uid || it.activity_uid);
-                                  if (firstItem) {
-                                    sessionStorage.setItem('offpage_target_row_uid', firstItem.first_uid || `${firstItem.activity_uid}-KW1`);
+                                  const allUids = [];
+                                  (group.items || []).forEach(it => {
+                                    if (Array.isArray(it.synced_uids) && it.synced_uids.length > 0) {
+                                      allUids.push(...it.synced_uids);
+                                    }
+                                    if (it.first_uid) allUids.push(it.first_uid);
+                                    if (it.activity_uid) allUids.push(it.activity_uid);
+                                    if (it.uid) allUids.push(it.uid);
+                                    if (it.id) allUids.push(String(it.id));
+                                  });
+                                  const uniqueUids = [...new Set(allUids.filter(Boolean))];
+                                  sessionStorage.setItem('offpage_target_project', group.projectName || '');
+                                  if (uniqueUids.length > 0) {
+                                    sessionStorage.setItem('offpage_target_row_uid', uniqueUids.join(','));
+                                  } else {
+                                    sessionStorage.removeItem('offpage_target_row_uid');
                                   }
                                   if (onNavigate) {
                                     if (group.channel === 'content') onNavigate('content-engine');
                                     else onNavigate('search-visibility/off-page-scheduler');
                                   }
                                 }}
-                                title="Redirect to Off-Page under this project"
+                                title="Redirect to Off-Page under this project and highlight activities"
                                 style={{
                                   padding: '6px 14px',
                                   borderRadius: 6,
@@ -4160,14 +4597,27 @@ function CalendarPage({ user, onNavigate }) {
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        sessionStorage.setItem('offpage_target_project', item.project_name);
-                                        sessionStorage.setItem('offpage_target_row_uid', item.first_uid || `${item.activity_uid || 'ACT'}-KW1`);
+                                        const allUids = [];
+                                        if (Array.isArray(item.synced_uids) && item.synced_uids.length > 0) {
+                                          allUids.push(...item.synced_uids);
+                                        }
+                                        if (item.first_uid) allUids.push(item.first_uid);
+                                        if (item.activity_uid) allUids.push(item.activity_uid);
+                                        if (item.uid) allUids.push(item.uid);
+                                        if (item.id) allUids.push(String(item.id));
+                                        const uniqueUids = [...new Set(allUids.filter(Boolean))];
+                                        sessionStorage.setItem('offpage_target_project', item.project_name || group.projectName || '');
+                                        if (uniqueUids.length > 0) {
+                                          sessionStorage.setItem('offpage_target_row_uid', uniqueUids.join(','));
+                                        } else {
+                                          sessionStorage.removeItem('offpage_target_row_uid');
+                                        }
                                         if (onNavigate) {
                                           if (item.channel === 'content') onNavigate('content-engine');
                                           else onNavigate('search-visibility/off-page-scheduler');
                                         }
                                       }}
-                                      title={`Redirect to Off-Page under ${item.project_name} for this row`}
+                                      title={`Redirect to Off-Page under ${item.project_name || group.projectName} and highlight row`}
                                       style={{
                                         fontSize: 11,
                                         fontWeight: 700,
@@ -4533,49 +4983,6 @@ function CalendarPage({ user, onNavigate }) {
                     ))}
                   </div>
 
-                  {/* Batch Summary & Divide Evenly (if multiple activities) */}
-                  {activitiesList.length > 1 && !editingItem && (
-                    <div style={{
-                      marginTop: 10,
-                      padding: '9px 14px',
-                      background: '#F6EEFD',
-                      border: '1px solid #E5CCF7',
-                      borderRadius: 8,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      flexWrap: 'wrap',
-                      gap: 8
-                    }}>
-                      <div style={{ fontSize: 12, color: '#4A1A8C' }}>
-                        <strong>Batch Total:</strong> {activitiesList.reduce((acc, a) => acc + (parseInt(a.quantity, 10) || 1), 0)} activities · <strong>₹{activitiesList.reduce((acc, a) => acc + (parseFloat(String(a.budget || '0').replace(/[^0-9.]/g, '')) || 0), 0).toLocaleString()}</strong> budget
-                        <span style={{ marginLeft: 6, color: '#7B2FBE', fontSize: 11.5 }}>
-                          (AI will divide budget &amp; keywords across all {activitiesList.length} activities)
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleDivideBudgetAndQuantityEvenly}
-                        style={{
-                          padding: '4px 10px',
-                          fontSize: 11.5,
-                          fontWeight: 700,
-                          color: '#7B2FBE',
-                          background: '#FFFFFF',
-                          border: '1px solid #E5CCF7',
-                          borderRadius: 6,
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 4
-                        }}
-                      >
-                        <Sliders size={12} />
-                        <span>Divide Evenly</span>
-                      </button>
-                    </div>
-                  )}
-
                   {/* Centered "+ Add Another Activity" Button */}
                   {!editingItem && (
                     <div style={{ textAlign: 'center', marginTop: 12 }}>
@@ -4915,7 +5322,7 @@ function CalendarPage({ user, onNavigate }) {
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 15.5, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em', display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span>{isModalManual ? 'Activity Details' : 'Activity Analysis'} — {aiRunModalProject?.activityName || aiRunModalProject?.name || ''}</span>
+                        <span> {aiRunModalProject?.activityName || aiRunModalProject?.name || ''}</span>
                         <span style={{
                           fontSize: 10.5, fontWeight: 800,
                           background: isModalManual ? '#eff6ff' : '#f5f3ff',
@@ -5073,134 +5480,244 @@ function CalendarPage({ user, onNavigate }) {
                       </div>
                     </div>
 
-                    {/* Summary strip */}
+                    {/* Executive Strategy & Budget Allocation Banner (Identical to Step 2 UI) */}
                     <div style={{
-                      display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 16
-                    }}>
-                      {[
-                        { label: isItemManual ? 'Keywords Attached' : 'Keywords Analyzed', value: aiRunKeywords.length, color: '#0f172a' },
-                        { label: 'Batch 1 · Gains', value: runBatches.high.length, color: '#16a34a' },
-                        { label: 'Batch 2 · Drops', value: runBatches.medium.length, color: '#d97706' },
-                        { label: 'Batch 3 · Stagnant', value: runBatches.low.length, color: '#64748b' },
-                        { label: 'Selected & Scheduled', value: selCount, color: '#7c3aed' },
-                        { label: 'Budget', value: activeRunMeta?.budget_used != null ? `₹${Number(activeRunMeta.budget_used).toLocaleString()}` : (aiRunModalProject?.activityItem?.budget ? (String(aiRunModalProject.activityItem.budget).startsWith('₹') ? aiRunModalProject.activityItem.budget : `₹${aiRunModalProject.activityItem.budget}`) : '—'), color: '#059669' }
-                      ].map((c, i) => (
-                        <div key={i} style={{ background: '#ffffff', border: '1px solid #E4DFEE', borderRadius: 12, padding: '12px 14px' }}>
-                          <div style={{ fontSize: 10.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{c.label}</div>
-                          <div style={{ fontSize: 20, fontWeight: 800, color: c.color }}>{c.value}</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* 4 STRUCTURED NARRATIVE BLOCKS IN SAVED RUN VIEWER */}
-                    <div style={{
-                      background: '#FAFAFD',
+                      background: '#FFFFFF',
                       border: '1px solid #E2DBEC',
-                      borderRadius: 12,
-                      padding: '16px 18px',
+                      borderRadius: 14,
+                      padding: '20px 22px',
                       marginBottom: 16,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 12
+                      boxShadow: '0 2px 10px rgba(0,0,0,0.02)'
                     }}>
-                      {/* Block 1: General Strategy */}
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                          <Sparkles size={14} color="#7B2FBE" />
-                          <strong style={{ fontSize: 13, color: '#1A1A1A', fontWeight: 800 }}>
-                            {isItemManual ? 'Manual Activity Summary' : 'AI Strategy & Growth Narrative'}
-                          </strong>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: 12,
+                        marginBottom: 16
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: 8,
+                            background: '#F6EEFD',
+                            border: '1px solid #E5CCF7',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <Sparkles size={16} color="#7B2FBE" />
+                          </div>
+                          <div>
+                            <h3 style={{ fontSize: 15, fontWeight: 800, color: '#1A1A1A', margin: 0, letterSpacing: '-0.01em' }}>
+                              {isItemManual ? 'Manual Activity Details & Allocation' : 'Executive AI Strategy & Budget Allocation'}
+                            </h3>
+                            <span style={{ fontSize: 11.5, color: '#8A8A9A' }}>
+                              {isItemManual ? 'Target Keywords & Campaign Distribution' : 'Live SERP Velocity & Balanced Quota Engine'}
+                            </span>
+                          </div>
                         </div>
-                        <p style={{ fontSize: 12.5, color: '#2D2D44', lineHeight: 1.55, margin: 0 }}>
-                          {bSum?.general_strategy_summary || summaryText}
-                        </p>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            color: '#4A1A8C',
+                            background: '#F6EEFD',
+                            border: '1px solid #E5CCF7',
+                            padding: '3px 10px',
+                            borderRadius: 20
+                          }}>
+                            Period: {aiRunModalProject?.activityItem?.period || 'Current'}
+                          </span>
+
+                          {bSum?.projected_savings > 0 && (
+                            <span style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              background: '#E6FAF6',
+                              color: '#00BFA2',
+                              border: '1px solid #A7F3D0',
+                              padding: '3px 10px',
+                              borderRadius: 20,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4
+                            }}>
+                              <TrendingDown size={12} />
+                              ₹{Number(bSum.projected_savings).toLocaleString()} Projected Savings
+                            </span>
+                          )}
+                        </div>
                       </div>
 
-                      {!isItemManual && (
-                        <>
-                          <div style={{ borderTop: '1px dashed #E2DBEC', width: '100%' }} />
-                          {/* Block 2: Exclusion Summary */}
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                              <Info size={13} color="#8A8A9A" />
-                              <strong style={{ fontSize: 12.5, color: '#1A1A1A', fontWeight: 800 }}>
-                                Keyword Exclusion &amp; SERP Logic
-                              </strong>
-                            </div>
-                            <p style={{ fontSize: 12, color: '#64748B', lineHeight: 1.5, margin: 0 }}>
-                              {bSum?.keyword_exclusion_summary || "Excluded low-confidence SERP drop queries and non-landing pages to eliminate budget leakage."}
-                            </p>
+                      {/* 4 STRATEGIC KPI CARDS (SHOWN FIRST) */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14, margin: '18px 0 18px 0' }}>
+                        {/* Card 1: Keywords */}
+                        <div style={{ background: '#FFFFFF', border: '1px solid #E2DBEC', borderRadius: 12, padding: '14px 18px' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#8A8A9A', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                            Keywords Scanned vs Targeted
                           </div>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                            <span style={{ fontSize: 22, fontWeight: 800, color: '#7B2FBE' }}>{selCount || aiRunKeywords.length}</span>
+                            <span style={{ fontSize: 13, color: '#8A8A9A' }}>of {aiRunKeywords.length} scanned</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                            <span style={{ fontSize: 10.5, fontWeight: 700, color: '#7B2FBE', background: '#F6EEFD', padding: '1px 6px', borderRadius: 6, border: '1px solid #E5CCF7' }}>
+                              +{runBatches.high.length} Gains
+                            </span>
+                            <span style={{ fontSize: 10.5, fontWeight: 700, color: '#7B2FBE', background: '#F6EEFD', padding: '1px 6px', borderRadius: 6, border: '1px solid #E5CCF7' }}>
+                              -{runBatches.medium.length} Drops
+                            </span>
+                          </div>
+                        </div>
 
-                          <div style={{ borderTop: '1px dashed #E2DBEC', width: '100%' }} />
-                          {/* Block 3: Budget Allocation */}
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4, flexWrap: 'wrap', gap: 6 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <DollarSign size={13} color="#00BFA2" />
-                                <strong style={{ fontSize: 12.5, color: '#1A1A1A', fontWeight: 800 }}>
-                                  Budget Allocation Advisory
+                        {/* Card 2: Activities Allocation */}
+                        <div style={{ background: '#FFFFFF', border: '1px solid #E2DBEC', borderRadius: 12, padding: '14px 18px' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#8A8A9A', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                            Planned vs AI Recommended
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                            <span style={{ fontSize: 22, fontWeight: 800, color: '#7B2FBE' }}>
+                              {bSum?.recommended_quantity || bSum?.recommended_activities || selCount || aiRunKeywords.length}
+                            </span>
+                            <span style={{ fontSize: 13, color: '#8A8A9A' }}>vs {aiRunModalProject?.activityItem?.quantity ?? activeRunMeta?.quantity_requested ?? '1'} planned</span>
+                          </div>
+                          <div style={{ fontSize: 11.5, color: '#7B2FBE', fontWeight: 600, marginTop: 6 }}>
+                            {(() => {
+                              const rec = bSum?.recommended_quantity || bSum?.recommended_activities || selCount || aiRunKeywords.length;
+                              const plan = Number(aiRunModalProject?.activityItem?.quantity ?? activeRunMeta?.quantity_requested ?? 1);
+                              if (rec === plan) return '100% Target Fulfilled';
+                              if (rec < plan) return `${plan - rec} Redundant Slot${plan - rec > 1 ? 's' : ''} Saved`;
+                              return 'High-Impact Target Allocation';
+                            })()}
+                          </div>
+                        </div>
+
+                        {/* Card 3: Budget Optimization */}
+                        <div style={{ background: '#FFFFFF', border: '1px solid #E2DBEC', borderRadius: 12, padding: '14px 18px' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#8A8A9A', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                            Budget Allocation
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                            <span style={{ fontSize: 22, fontWeight: 800, color: '#7B2FBE' }}>
+                              {bSum?.planned_spend !== undefined ? `₹${Number(bSum.planned_spend).toLocaleString()}` : (activeRunMeta?.budget_used != null ? `₹${Number(activeRunMeta.budget_used).toLocaleString()}` : (aiRunModalProject?.activityItem?.budget ? (String(aiRunModalProject.activityItem.budget).startsWith('₹') ? aiRunModalProject.activityItem.budget : `₹${aiRunModalProject.activityItem.budget}`) : '₹0'))}
+                            </span>
+                            <span style={{ fontSize: 12, color: '#7B2FBE', fontWeight: 600 }}>
+                              {bSum?.projected_savings > 0 ? `Saves ₹${Number(bSum.projected_savings).toLocaleString()}` : 'Optimized'}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 11.5, color: '#8A8A9A', marginTop: 6 }}>
+                            Cap: ₹{Number(bSum?.total_budget_cap || bSum?.budget_cap || activeRunMeta?.budget_used || aiRunModalProject?.activityItem?.budget || 0).toLocaleString()}
+                          </div>
+                        </div>
+
+                        {/* Card 4: Target Landing Pages */}
+                        <div style={{ background: '#FFFFFF', border: '1px solid #E2DBEC', borderRadius: 12, padding: '14px 18px' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#8A8A9A', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                            Target Landing Pages
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                            <span style={{ fontSize: 22, fontWeight: 800, color: '#7B2FBE' }}>
+                              {new Set(aiRunKeywords.map(k => k.landing_page_url || k.topicLink).filter(Boolean)).size || 1}
+                            </span>
+                            <span style={{ fontSize: 13, color: '#8A8A9A' }}>unique URLs</span>
+                          </div>
+                          <div style={{ fontSize: 11.5, color: '#7B2FBE', fontWeight: 600, marginTop: 6 }}>
+                            {bSum?.target_industry || 'Target Niche'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 4 STRUCTURED NARRATIVE BLOCKS (SHOWN SECOND) */}
+                      <div style={{
+                        background: '#FAFAFD',
+                        border: '1px solid #E2DBEC',
+                        borderRadius: 12,
+                        padding: '18px 20px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 14
+                      }}>
+                        {/* Block 1: General Strategy Summary */}
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                            <Sparkles size={14} color="#7B2FBE" />
+                            <strong style={{ fontSize: 13.5, color: '#1A1A1A', fontWeight: 800 }}>
+                              {isItemManual ? 'Manual Strategy Summary' : 'General Strategy & Growth Narrative'}
+                            </strong>
+                          </div>
+                          <p style={{ fontSize: 13, color: '#2D2D44', lineHeight: 1.6, margin: 0 }}>
+                            {bSum?.general_strategy_summary || (
+                              <>
+                                I analyzed <strong>{bSum?.total_db_keywords || aiRunKeywords.length} keywords</strong> from the database for <strong>{aiRunModalProject?.name || ''}</strong>. Out of them, I have picked <strong>{aiRunKeywords.length} candidate keywords</strong> with verified landing pages across <strong>{new Set(aiRunKeywords.map(k => k.landing_page_url || k.topicLink).filter(Boolean)).size || 1} unique landing pages</strong> (Rank 5+), and out of those, I suggest you to work on these <strong style={{ color: '#7B2FBE' }}>{selCount || aiRunKeywords.length} high-impact target keywords</strong> for your campaign.
+                              </>
+                            )}
+                          </p>
+                        </div>
+
+                        {!isItemManual && (
+                          <>
+                            {/* Thin Dotted Separator */}
+                            <div style={{ borderTop: '1px dashed #E2DBEC', width: '100%' }} />
+
+                            {/* Block 2: Keyword Exclusion Summary */}
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                                <Info size={14} color="#8A8A9A" />
+                                <strong style={{ fontSize: 13, color: '#1A1A1A', fontWeight: 800 }}>
+                                  Keyword &amp; SERP Exclusion Logic
                                 </strong>
                               </div>
-                              {bSum?.projected_savings > 0 && (
-                                <span style={{ fontSize: 10, fontWeight: 700, color: '#00BFA2', background: '#E6FAF6', border: '1px solid #A7F3D0', padding: '1px 6px', borderRadius: 10 }}>
-                                  Saves ₹{Number(bSum.projected_savings).toLocaleString()}
-                                </span>
-                              )}
+                              <p style={{ fontSize: 12.5, color: '#64748B', lineHeight: 1.55, margin: 0 }}>
+                                {bSum?.keyword_exclusion_summary || "I've excluded low-confidence drop queries and non-landing SERPs where intent is purely informational or saturated in Top 3, avoiding wasted spend and ensuring maximum link relevance."}
+                              </p>
                             </div>
-                            <p style={{ fontSize: 12, color: '#2D2D44', lineHeight: 1.5, margin: 0 }}>
-                              {bSum?.budget_allocation_advisory || bSum?.anti_waste_advisory || advisoryText || "AI allocated direct spend toward high authority publishers with verified regional traffic."}
-                            </p>
-                          </div>
 
-                          <div style={{ borderTop: '1px dashed #E2DBEC', width: '100%' }} />
-                          {/* Block 4: Domain Constraints */}
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                              <AlertCircle size={13} color="#D4007A" />
-                              <strong style={{ fontSize: 12, color: '#1A1A1A', fontWeight: 800 }}>
-                                Domain Constraints Notice
-                              </strong>
-                            </div>
-                            <p style={{ fontSize: 12, color: '#8A8A9A', lineHeight: 1.45, margin: 0 }}>
-                              {bSum?.domain_constraints_alert || "Enforced 3-to-4 domain reuse limit to maintain natural link velocity."}
-                            </p>
-                          </div>
-                        </>
-                      )}
-                    </div>
+                            {/* Thin Dotted Separator */}
+                            <div style={{ borderTop: '1px dashed #E2DBEC', width: '100%' }} />
 
-                    {/* Budget Optimization Summary */}
-                    {bSum && (
-                      <div style={{
-                        background: '#ffffff', border: '1px solid #E4DFEE', borderRadius: 12, padding: '14px 16px', marginBottom: 16
-                      }}>
-                        <div style={{ fontSize: 10.5, fontWeight: 800, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <DollarSign size={12} /> Budget Optimization Summary
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
-                          {[
-                            { label: 'Budget Cap', value: money(bSum.budget_cap), color: '#0f172a' },
-                            { label: 'Planned Spend', value: money(bSum.planned_spend), color: '#059669' },
-                            { label: 'Projected Savings', value: money(bSum.projected_savings), color: '#16a34a' },
-                            { label: 'Avg Cost / Post', value: money(bSum.avg_cost_per_post), color: '#334155' },
-                            { label: 'Requested Posts', value: bSum.requested_quantity ?? '—', color: '#334155' },
-                            { label: 'AI Recommended', value: bSum.recommended_quantity ?? '—', color: '#7c3aed' },
-                            { label: 'Redundant Posts Saved', value: bSum.redundant_posts_saved ?? 0, color: '#d97706' }
-                          ].map((c, i) => (
-                            <div key={i}>
-                              <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 3 }}>{c.label}</div>
-                              <div style={{ fontSize: 16, fontWeight: 800, color: c.color }}>{c.value}</div>
+                            {/* Block 3: Budget Allocation & Savings Advisory */}
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5, flexWrap: 'wrap', gap: 8 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <DollarSign size={14} color="#00BFA2" />
+                                  <strong style={{ fontSize: 13, color: '#1A1A1A', fontWeight: 800 }}>
+                                    Budget Allocation &amp; Publisher Value Advisory
+                                  </strong>
+                                </div>
+
+                                {/* Domain Criteria Tags */}
+                                
+                              </div>
+                              <p style={{ fontSize: 12.5, color: '#2D2D44', lineHeight: 1.55, margin: 0 }}>
+                                {bSum?.budget_allocation_advisory || bSum?.anti_waste_advisory || advisoryText || "I've allocated spend strictly to publishers offering the highest domain authority per rupee with verified regional traffic, eliminating low-ROI links and optimizing your budget."}
+                              </p>
                             </div>
-                          ))}
-                        </div>
-                        {(bSum.projected_savings > 0 || bSum.redundant_posts_saved > 0) && (
-                          <div style={{ fontSize: 12, color: '#166534', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '8px 10px', marginTop: 10 }}>
-                            AI avoided redundant spend: {bSum.redundant_posts_saved > 0 ? `${bSum.redundant_posts_saved} fewer posts, ` : ''}{money(bSum.projected_savings)} kept under the cap.
-                          </div>
+
+                            {/* Block 4: Domain Constraints & Alerts (Only shown when outreach publishers are limited) */}
+                            {Boolean(bSum?.domain_constraints_alert) && (
+                              <>
+                                <div style={{ borderTop: '1px dashed #E2DBEC', width: '100%' }} />
+                                <div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                                    <AlertCircle size={13} color="#7B2FBE" />
+                                    <strong style={{ fontSize: 12.5, color: '#1A1A1A', fontWeight: 800 }}>
+                                      Domain Constraints &amp; Publisher Availability
+                                    </strong>
+                                  </div>
+                                  <p style={{ fontSize: 12, color: '#8A8A9A', lineHeight: 1.5, margin: 0 }}>
+                                    {bSum.domain_constraints_alert}
+                                  </p>
+                                </div>
+                              </>
+                            )}
+                          </>
                         )}
                       </div>
-                    )}
+                    </div>
 
                     {/* Batch tables */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -5231,8 +5748,20 @@ function CalendarPage({ user, onNavigate }) {
                                       <th style={{ padding: '8px 14px', width: 70 }}>SV</th>
                                       <th style={{ padding: '8px 14px', width: 55 }}>KD</th>
                                       <th style={{ padding: '8px 14px', width: 60 }}>Conf</th>
-                                      <th style={{ padding: '8px 14px', minWidth: 240 }}>Live AI Status &amp; Rationale</th>
-                                      <th style={{ padding: '8px 14px', minWidth: 180 }}>Target Outreach Site</th>
+                                      <th style={{ padding: '8px 14px', minWidth: 240 }}>Rationale</th>
+                                      {(() => {
+                                        const modalChannel = String(aiRunModalProject?.activityItem?.channel || aiRunModalProject?.activityItem?.activity_name || aiRunModalProject?.activityName || '').toLowerCase();
+                                        const isQuoraModal = modalChannel.includes('quora');
+                                        const isRedditModal = modalChannel.includes('reddit');
+                                        if (isQuoraModal || isRedditModal) {
+                                          return (
+                                            <th style={{ padding: '8px 14px', minWidth: 240 }}>
+                                              Topic Link ({isQuoraModal ? 'Quora' : 'Reddit'})
+                                            </th>
+                                          );
+                                        }
+                                        return <th style={{ padding: '8px 14px', minWidth: 180 }}>PG Site</th>;
+                                      })()}
                                       <th style={{ padding: '8px 14px', minWidth: 180 }}>Landing Page</th>
                                     </tr>
                                   </thead>
@@ -5240,6 +5769,10 @@ function CalendarPage({ user, onNavigate }) {
                                     {rows.map((k, ri) => {
                                       const site = k.outreach_site || null;
                                       const delta = k.delta;
+                                      const modalChannel = String(aiRunModalProject?.activityItem?.channel || aiRunModalProject?.activityItem?.activity_name || aiRunModalProject?.activityName || '').toLowerCase();
+                                      const isQuoraModal = modalChannel.includes('quora');
+                                      const isRedditModal = modalChannel.includes('reddit');
+                                      const isForumModal = isQuoraModal || isRedditModal;
                                       return (
                                         <tr key={ri} style={{ borderTop: '1px solid #f1f5f9', background: k.selected ? '#f5f3ff' : 'transparent' }}>
                                           <td style={{ padding: '8px 12px', textAlign: 'center' }}>
@@ -5253,22 +5786,32 @@ function CalendarPage({ user, onNavigate }) {
                                           </td>
                                           <td style={{ padding: '8px 14px' }}>
                                             <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 12.5 }}>{k.keyword}</div>
-                                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>
-                                              {[k.category, k.cluster].filter(Boolean).join(' · ') || '—'}
-                                              {k.top3_is_landing ? <span style={{ marginLeft: 6, color: '#15803d', fontWeight: 700 }}></span> : null}
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
+                                              {k.category && (
+                                                <div style={{ fontSize: 11, color: '#64748b' }}>
+                                                  <strong style={{ color: '#475569', fontWeight: 700 }}>Category:</strong> {k.category}
+                                                </div>
+                                              )}
+                                              {k.cluster && (
+                                                <div style={{ fontSize: 11, color: '#64748b' }}>
+                                                  <strong style={{ color: '#475569', fontWeight: 700 }}>Cluster:</strong> {k.cluster}
+                                                </div>
+                                              )}
                                             </div>
                                           </td>
                                           <td style={{ padding: '8px 14px' }}>
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                                               <RankSparklineHover
+                                                initialRank={k.initial_rank ?? k.prev_rank}
                                                 prevRank={k.prev_rank}
                                                 liveRank={k.live_rank}
                                                 delta={k.delta}
                                                 gainPctStr={k.gain_pct_str}
+                                                history={k.calendar_rank_history || k.history || []}
                                               />
                                               <div style={{ fontSize: 10.5, color: '#8A8A9A' }}>
-                                                {fmtRank(k.prev_rank)} → <strong style={{ color: '#1A1A1A' }}>{fmtRank(k.live_rank)}</strong>
-                                                {k.delta ? ` (${Math.abs(k.delta)} spot${Math.abs(k.delta) > 1 ? 's' : ''})` : ''}
+                                                {formatRankBadge(k.prev_rank)} → <strong style={{ color: '#1A1A1A' }}>{formatRankBadge(k.live_rank)}</strong>
+                                                {k.delta ? ` (${formatShiftSpots(k.prev_rank, k.live_rank, k.delta)})` : ''}
                                               </div>
                                             </div>
                                           </td>
@@ -5277,32 +5820,83 @@ function CalendarPage({ user, onNavigate }) {
                                           <td style={{ padding: '8px 14px', fontWeight: 700, color: (k.confidence ?? 0) >= 80 ? '#16a34a' : ((k.confidence ?? 0) >= 60 ? '#d97706' : '#64748b') }}>
                                             {k.confidence != null ? `${k.confidence}%` : '—'}
                                           </td>
-                                          <td style={{ padding: '8px 14px', color: '#334155', lineHeight: 1.45, fontSize: 12 }}>
-                                            {k.reason || '—'}
+                                          <td style={{ padding: '8px 14px', minWidth: 260, maxWidth: 360 }}>
+                                            <div style={{ fontSize: 12, color: '#334155', lineHeight: 1.45 }}>
+                                              {cleanReasonSpots(k.reason) || (
+                                                k.delta > 0
+                                                  ? `I've selected this keyword because its historical rank surged from ${formatRankBadge(k.prev_rank)} to ${formatRankBadge(k.live_rank)} (+${formatShiftSpots(k.prev_rank, k.live_rank, k.delta)}${k.gain_pct_str ? `, ${k.gain_pct_str}` : ''}) with ${k.sv ? Number(k.sv).toLocaleString() : 'high'} monthly search volume and verified landing page intent.`
+                                                  : k.delta < 0
+                                                    ? `I've selected this keyword because its historical rank dropped from ${formatRankBadge(k.prev_rank)} to ${formatRankBadge(k.live_rank)} (-${formatShiftSpots(k.prev_rank, k.live_rank, k.delta)}) despite strong ${k.sv ? Number(k.sv).toLocaleString() : 'high'} monthly search volume, making it a prime recovery target.`
+                                                    : `I've selected this keyword because historical rank has held steady at ${formatRankBadge(k.live_rank)} (0% shift) with ${k.sv ? Number(k.sv).toLocaleString() : 'steady'} monthly search volume, ready for an authority push.`
+                                              )}
+                                            </div>
                                           </td>
-                                          <td style={{ padding: '8px 14px' }}>
-                                            {site?.domain ? (
-                                              <div>
-                                                <div style={{ fontWeight: 700, color: '#1e1b4b', fontSize: 12 }}>{site.domain}</div>
-                                                <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 1, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                                                  {site.da != null ? <span>DA {site.da}</span> : null}
-                                                  {(site.spam_score != null || site.ss != null) ? <span>Spam {site.ss || `${site.spam_score}%`}</span> : null}
-                                                  {(site.selling_price != null || site.price != null) ? (
-                                                    <strong style={{ color: '#059669' }}>
-                                                      {String(site.selling_price || site.price).startsWith('₹') ? (site.selling_price || site.price) : `₹${site.selling_price || site.price}`}
-                                                    </strong>
-                                                  ) : null}
-                                                </div>
-                                                {site.match_rationale && (
-                                                  <div style={{ fontSize: 10, color: '#4338ca', marginTop: 2 }}>
-                                                    {site.match_rationale}
+                                          {isForumModal ? (
+                                            <td style={{ padding: '8px 14px' }}>
+                                              {(() => {
+                                                const tLink = k.topic_link || (k.landing_page_url && (k.landing_page_url.includes('quora.com') || k.landing_page_url.includes('reddit.com')) ? k.landing_page_url : '') || aiRunModalProject?.activityItem?.topic_link || '';
+                                                const isInvalidSearch = tLink.includes('/search') || tLink.includes('?q=') || tLink.includes('search?');
+                                                if (!tLink || isInvalidSearch) {
+                                                  return (
+                                                    <span style={{ fontSize: 11.5, color: '#94a3b8', fontStyle: 'italic' }}>
+                                                      Topic thread matching on schedule
+                                                    </span>
+                                                  );
+                                                }
+                                                return (
+                                                  <a
+                                                    href={tLink}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    style={{
+                                                      display: 'inline-flex',
+                                                      alignItems: 'center',
+                                                      gap: 5,
+                                                      fontSize: 11.5,
+                                                      fontWeight: 600,
+                                                      color: '#7c3aed',
+                                                      textDecoration: 'none',
+                                                      background: '#f5f3ff',
+                                                      border: '1px solid #ddd6fe',
+                                                      padding: '3px 8px',
+                                                      borderRadius: 6,
+                                                      maxWidth: 240
+                                                    }}
+                                                    title={tLink}
+                                                  >
+                                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                      {tLink.replace(/^https?:\/\/(www\.)?/, '')}
+                                                    </span>
+                                                    <ExternalLink size={11} style={{ flexShrink: 0 }} />
+                                                  </a>
+                                                );
+                                              })()}
+                                            </td>
+                                          ) : (
+                                            <td style={{ padding: '8px 14px' }}>
+                                              {site?.domain ? (
+                                                <div>
+                                                  <div style={{ fontWeight: 700, color: '#1e1b4b', fontSize: 12 }}>{site.domain}</div>
+                                                  <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 1, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                                    {site.da != null ? <span>DA {site.da}</span> : null}
+                                                    {(site.spam_score != null || site.ss != null) ? <span>Spam {site.ss || `${site.spam_score}%`}</span> : null}
+                                                    {(site.selling_price != null || site.price != null) ? (
+                                                      <strong style={{ color: '#059669' }}>
+                                                        {String(site.selling_price || site.price).startsWith('₹') ? (site.selling_price || site.price) : `₹${site.selling_price || site.price}`}
+                                                      </strong>
+                                                    ) : null}
                                                   </div>
-                                                )}
-                                              </div>
-                                            ) : (
-                                              <span style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>—</span>
-                                            )}
-                                          </td>
+                                                  {site.match_rationale && (
+                                                    <div style={{ fontSize: 10, color: '#4338ca', marginTop: 2 }}>
+                                                      {site.match_rationale}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              ) : (
+                                                <span style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>—</span>
+                                              )}
+                                            </td>
+                                          )}
                                           <td style={{ padding: '8px 14px' }}>
                                             {k.landing_page_url ? (
                                               <a href={k.landing_page_url} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: '#7c3aed', wordBreak: 'break-all' }}>
