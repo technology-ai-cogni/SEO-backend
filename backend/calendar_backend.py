@@ -2859,7 +2859,7 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
             available_sites, target_country=resolved_country, target_industry=profile.get("industry") or "General",
         )
         assigned_kws, budget_summary = assign_and_summarize_brand_mentions(
-            eval_kws, scored_sites_for_bm,
+            eval_kws, scored_sites_for_bm, project_slug=payload.project_slug,
             client_domain=payload.domain, country=resolved_country,
             budget_ceiling=payload.budget, requested_quantity=payload.quantity,
         )
@@ -2884,7 +2884,8 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
                     available_sites, target_country=resolved_country, target_industry=profile.get("industry") or "General",
                 )
                 assigned_kws = assign_brand_mentions_to_keywords(
-                    assigned_kws, scored_sites_for_bm, client_domain=payload.domain, country=resolved_country,
+                    assigned_kws, scored_sites_for_bm, project_slug=payload.project_slug,
+                    client_domain=payload.domain, country=resolved_country,
                 )
             except Exception as e:
                 print(f"[Calendar AI] Brand Mentions assignment notice: {e}", file=sys.stderr, flush=True)
