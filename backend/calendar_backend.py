@@ -27,6 +27,7 @@ from sqlalchemy import text
 # Import database engine from existing core
 from core.db import engine, _clean_for_json
 from auth.router import require_authenticated_user
+from brand_mentions import assign_brand_mentions_to_keywords, assign_and_summarize_brand_mentions
 
 # Optional OpenAI client for push potential AI triage
 try:
@@ -208,6 +209,8 @@ def ensure_calendar_tables():
                     top_links JSONB,
                     verification JSONB,
                     outreach_site JSONB,
+                    brand_mention_site JSONB,
+                    brand_mention_sites JSONB,
                     landing_page_url TEXT,
                     selected BOOLEAN DEFAULT FALSE,
                     budget_used NUMERIC(12, 2),
@@ -218,6 +221,8 @@ def ensure_calendar_tables():
                 );
             """))
             conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS budget_summary JSONB;"))
+            conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS brand_mention_site JSONB;"))
+            conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS brand_mention_sites JSONB;"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_run ON calendar_ai_analysis (run_id);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_project ON calendar_ai_analysis (project_slug, created_at DESC);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_activity ON calendar_ai_analysis (activity_id);"))
@@ -293,6 +298,7 @@ class PushPotentialRequest(BaseModel):
     quantity: Optional[int] = None
     activity_id: Optional[str] = None  # link this analysis run to the activity being scheduled
     activity_ids: Optional[List[str]] = None
+    activity_names: Optional[List[str]] = None  # e.g. ["Paid Guest Post"] or ["Brand Mentions"] -- decides which enrichment pass(es) run below
 
 
 # ─────────────────────────────────────────────────────────────
@@ -2329,6 +2335,8 @@ def _ensure_ai_analysis_table():
                     top_links JSONB,
                     verification JSONB,
                     outreach_site JSONB,
+                    brand_mention_site JSONB,
+                    brand_mention_sites JSONB,
                     landing_page_url TEXT,
                     selected BOOLEAN DEFAULT FALSE,
                     budget_used NUMERIC(12, 2),
@@ -2339,6 +2347,8 @@ def _ensure_ai_analysis_table():
                 );
             """))
             conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS budget_summary JSONB;"))
+            conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS brand_mention_site JSONB;"))
+            conn.execute(text("ALTER TABLE calendar_ai_analysis ADD COLUMN IF NOT EXISTS brand_mention_sites JSONB;"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_run ON calendar_ai_analysis (run_id);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_project ON calendar_ai_analysis (project_slug, created_at DESC);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cal_ai_activity ON calendar_ai_analysis (activity_id);"))
@@ -2435,6 +2445,8 @@ def save_calendar_ai_run(
             "top_links": _jsonb(k.get("top_links") or k.get("top3")),
             "verification": _jsonb(vr),
             "outreach_site": _jsonb(k.get("outreach_site")),
+            "brand_mention_site": _jsonb(k.get("brand_mention_site")),
+            "brand_mention_sites": _jsonb(k.get("brand_mention_sites")),
             "landing_page_url": k.get("landing_page_url") or k.get("topicLink") or k.get("topic_link") or None,
             "budget_used": _parse_num(budget_used, None),
             "quantity_requested": _as_int(quantity_requested, None),
@@ -2449,14 +2461,14 @@ def save_calendar_ai_run(
                     run_id, activity_id, project_slug, domain, country, keyword, keyword_id,
                     category, cluster, db_rank, prev_rank, live_rank, delta, sv, kd, target_type,
                     batch, confidence, confidence_breakdown, reason, top3_types, top3_is_landing,
-                    top_links, verification, outreach_site, landing_page_url, budget_used,
+                    top_links, verification, outreach_site, brand_mention_site, brand_mention_sites, landing_page_url, budget_used,
                     quantity_requested, summary, budget_summary
                 ) VALUES (
                     :run_id, :activity_id, :project_slug, :domain, :country, :keyword, :keyword_id,
                     :category, :cluster, :db_rank, :prev_rank, :live_rank, :delta, :sv, :kd, :target_type,
                     :batch, :confidence, CAST(:confidence_breakdown AS JSONB), :reason,
                     CAST(:top3_types AS JSONB), :top3_is_landing, CAST(:top_links AS JSONB),
-                    CAST(:verification AS JSONB), CAST(:outreach_site AS JSONB), :landing_page_url,
+                    CAST(:verification AS JSONB), CAST(:outreach_site AS JSONB), CAST(:brand_mention_site AS JSONB), CAST(:brand_mention_sites AS JSONB), :landing_page_url,
                     :budget_used, :quantity_requested, :summary, CAST(:budget_summary AS JSONB)
                 )
             """), rows)
@@ -2820,18 +2832,63 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
 
     ai_res = calculate_live_serp_batches(keywords, domain=payload.domain or payload.project_slug or "", country=payload.country or "India")
 
-    # Enrich with outreach sites & 3-domain rule
+    # Which enrichment pass(es) this batch actually needs, based on the
+    # activities configured in Campaign Activities & Budgets:
+    #   - ONLY "Brand Mentions"        -> brand-mention search ONLY, the
+    #                                      Paid-Guest-Post outreach-site
+    #                                      assignment step is skipped entirely
+    #                                      (no outreach_site gets attached).
+    #   - "Paid Guest Post" / anything
+    #     else, or nothing specified   -> outreach-site assignment only
+    #                                      (previous/default behavior) --
+    #                                      brand-mention search is skipped so
+    #                                      a Guest-Post-only batch never fires
+    #                                      the live-search AI calls for nothing.
+    #   - a MIXED batch (both present) -> both passes run.
+    act_names = [str(a or "").strip().lower() for a in (payload.activity_names or [])]
+    is_brand_mention_only = bool(act_names) and all("brand mention" in a for a in act_names)
+    wants_brand_mentions = bool(act_names) and any("brand mention" in a for a in act_names)
+
     available_sites = fetch_available_outreach_sites(payload.project_slug)
     eval_kws = ai_res.get("evaluated_keywords") or keywords
-    assigned_kws, budget_summary = assign_outreach_sites_to_keywords(
-        eval_kws,
-        available_sites,
-        budget_ceiling=payload.budget,
-        requested_quantity=payload.quantity,
-        project_slug=payload.project_slug,
-        target_country=payload.country,
-        target_domain=payload.domain
-    )
+    profile = get_project_target_profile(payload.project_slug, payload.domain)
+    resolved_country = payload.country or profile.get("country") or "India"
+
+    if is_brand_mention_only:
+        scored_sites_for_bm = score_and_rank_outreach_sites(
+            available_sites, target_country=resolved_country, target_industry=profile.get("industry") or "General",
+        )
+        assigned_kws, budget_summary = assign_and_summarize_brand_mentions(
+            eval_kws, scored_sites_for_bm,
+            client_domain=payload.domain, country=resolved_country,
+            budget_ceiling=payload.budget, requested_quantity=payload.quantity,
+        )
+    else:
+        assigned_kws, budget_summary = assign_outreach_sites_to_keywords(
+            eval_kws,
+            available_sites,
+            budget_ceiling=payload.budget,
+            requested_quantity=payload.quantity,
+            project_slug=payload.project_slug,
+            target_country=payload.country,
+            target_domain=payload.domain
+        )
+        if wants_brand_mentions:
+            # Mixed batch (Paid Guest Post + Brand Mentions together): also
+            # run the live search, matched against the SAME scored+sorted
+            # outreach inventory Paid Guest Post just used (identical DA/SS/
+            # industry/traffic criteria, guaranteed by passing that list in
+            # rather than rescoring).
+            try:
+                scored_sites_for_bm = score_and_rank_outreach_sites(
+                    available_sites, target_country=resolved_country, target_industry=profile.get("industry") or "General",
+                )
+                assigned_kws = assign_brand_mentions_to_keywords(
+                    assigned_kws, scored_sites_for_bm, client_domain=payload.domain, country=resolved_country,
+                )
+            except Exception as e:
+                print(f"[Calendar AI] Brand Mentions assignment notice: {e}", file=sys.stderr, flush=True)
+
     ai_res["evaluated_keywords"] = assigned_kws
     ai_res["available_outreach_sites"] = available_sites
     ai_res["budget_optimization"] = budget_summary

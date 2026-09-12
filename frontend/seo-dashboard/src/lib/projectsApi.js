@@ -3175,12 +3175,12 @@ export async function getCalendarAiRunApi(runId) {
 }
 
 // Run AI push-potential triage via Python backend
-export async function analyzeCalendarAiPushPotentialApi(projectSlug, domain = '', keywords = [], country = 'India', budget = null, quantity = null, activityId = null) {
+export async function analyzeCalendarAiPushPotentialApi(projectSlug, domain = '', keywords = [], country = 'India', budget = null, quantity = null, activityId = null, activityNames = []) {
   try {
     const res = await fetch(`${CATEGORY_API_BASE}/calendar/analyze-potential`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_slug: projectSlug, domain, country, keywords, budget, quantity, activity_id: activityId })
+      body: JSON.stringify({ project_slug: projectSlug, domain, country, keywords, budget, quantity, activity_id: activityId, activity_names: activityNames })
     });
     if (res.ok) {
       return await res.json();

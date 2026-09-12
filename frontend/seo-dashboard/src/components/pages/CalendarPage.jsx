@@ -154,18 +154,18 @@ function RankSparklineHover({ prevRank, liveRank, delta, gainPctStr }) {
   const lNum = liveRank != null ? Number(liveRank) : null;
   const isUp = (pNum != null && lNum != null && pNum > lNum) || (delta > 0);
   const isDrop = (pNum != null && lNum != null && pNum < lNum) || (delta < 0);
-  
+
   // Calculate SVG curve coordinates (inverted Y since rank 1 is highest on SERP)
   const calcY = (r) => {
     if (r == null) return 16;
     if (r >= 100) return 26;
     return Math.max(5, Math.min(27, Math.round(27 - ((100 - r) * 0.22))));
   };
-  
+
   const y1 = calcY(pNum);
   const y2 = calcY(lNum);
   const yMid = Math.max(4, Math.min(28, Math.round((y1 + y2) / 2 + (isUp ? -5 : (isDrop ? 5 : 0)))));
-  
+
   const strokeColor = isUp ? '#00BFA2' : (isDrop ? '#D4007A' : '#8A8A9A');
   const fillColor = isUp ? '#E6FAF6' : (isDrop ? '#FDEBF4' : '#F5F5F5');
   const borderColor = isUp ? '#A7F3D0' : (isDrop ? '#F8B4D9' : '#E2DBEC');
@@ -474,6 +474,105 @@ function CalendarPage({ user, onNavigate }) {
       </div>
     );
   };
+  // Abandon-AI-run confirmation: shown when the user clicks "Back to Calendar"
+  // from the AI review screen. The activities backing this run were already
+  // created (status 'saved') before the review screen loaded -- if the user
+  // confirms leaving, those get deleted so nothing empty/orphaned is left in
+  // the DB; if they cancel, nothing changes and they stay on the review screen.
+  const [abandonConfirmOpen, setAbandonConfirmOpen] = useState(false);
+  const [abandonDeleting, setAbandonDeleting] = useState(false);
+
+  const handleBackToCalendarClick = () => setAbandonConfirmOpen(true);
+  const handleCancelAbandon = () => setAbandonConfirmOpen(false);
+
+  const handleConfirmAbandon = async () => {
+    setAbandonDeleting(true);
+    try {
+      const toDelete = (createdActivitiesList && createdActivitiesList.length > 0)
+        ? createdActivitiesList
+        : (createdActivity ? [createdActivity] : []);
+      if (toDelete.length > 0) {
+        await Promise.all(toDelete.map(a => deleteCalendarActivityApi(a.id).catch(() => { })));
+        const deletedIds = new Set(toDelete.map(a => a.id));
+        setActivities(prev => prev.filter(a => !deletedIds.has(a.id)));
+      }
+    } finally {
+      setAbandonDeleting(false);
+      setAbandonConfirmOpen(false);
+      setCreatedActivity(null);
+      setCreatedActivitiesList([]);
+      setIsModalOpen(false);
+      setModalStep('form');
+    }
+  };
+
+  const renderAbandonConfirmModal = () => {
+    if (!abandonConfirmOpen) return null;
+    return (
+      <div
+        onClick={handleCancelAbandon}
+        style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 100000, padding: 20
+        }}
+      >
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            background: '#ffffff', borderRadius: 16, width: '100%', maxWidth: 440,
+            padding: '28px 24px 22px 24px', boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.35)',
+            textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center',
+            border: '1px solid #FDE68A'
+          }}
+        >
+          <div style={{
+            width: 54, height: 54, borderRadius: '50%', background: '#FEF3C7', color: '#D97706',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16
+          }}>
+            <AlertCircle size={30} />
+          </div>
+          <h4 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: '0 0 10px 0', letterSpacing: '-0.01em' }}>
+
+          </h4>
+          <p style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.55, margin: '0 0 22px 0' }}>
+            The AI-researched and shortlisted keywords for this run will no longer be here if you go back now --
+            nothing will be scheduled, and this in-progress activity won't be saved.
+          </p>
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button
+              type="button"
+              onClick={handleCancelAbandon}
+              disabled={abandonDeleting}
+              style={{
+                flex: 1, padding: '11px 18px', fontSize: 13.5, fontWeight: 700, color: '#334155',
+                background: '#F1F5F9', border: '1px solid #E2E8F0', borderRadius: 9,
+                cursor: abandonDeleting ? 'not-allowed' : 'pointer'
+              }}
+            >
+              Stay &amp; keep working
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmAbandon}
+              disabled={abandonDeleting}
+              style={{
+                flex: 1, padding: '11px 18px', fontSize: 13.5, fontWeight: 700, color: '#ffffff',
+                background: abandonDeleting ? '#94a3b8' : 'linear-gradient(135deg, #DC2626 0%, #B91C1C 100%)',
+                border: 'none', borderRadius: 9, cursor: abandonDeleting ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
+              }}
+            >
+              {abandonDeleting && <div style={{ width: 13, height: 13, border: '2px solid #FFFFFF', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />}
+              <span>{abandonDeleting ? 'Discarding…' : 'Yes, go back'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const [modalStep, setModalStep] = useState('form'); // 'form' | 'keywords_prompt'
   const [createdActivity, setCreatedActivity] = useState(null);
   const [savingActivity, setSavingActivity] = useState(false);
@@ -496,6 +595,7 @@ function CalendarPage({ user, onNavigate }) {
   const [availableOutreachSites, setAvailableOutreachSites] = useState([]);
   const [budgetOptimization, setBudgetOptimization] = useState(null);
   const [selectedOutreachSites, setSelectedOutreachSites] = useState({});
+  const [selectedBrandMentionSites, setSelectedBrandMentionSites] = useState({}); // kwId -> chosen site (when brand_mention_sites has multiple options)
   const [latestAiRunId, setLatestAiRunId] = useState(null);
   const [latestAiSummary, setLatestAiSummary] = useState('');
   const [createdActivitiesList, setCreatedActivitiesList] = useState([]);
@@ -722,6 +822,17 @@ function CalendarPage({ user, onNavigate }) {
     }));
   };
 
+  // Brand Mentions can find MULTIPLE vetted outreach-table matches for one
+  // keyword -- unlike Paid Guest Post there's no 4-keywords-per-domain reuse
+  // limit here (each keyword's listing site is picked independently), so no
+  // capacity check is needed, just remember which one the user picked.
+  const handleSelectBrandMentionSite = (kwId, site) => {
+    setSelectedBrandMentionSites(prev => ({
+      ...prev,
+      [kwId]: site
+    }));
+  };
+
   // Period Selector defaults
   const now = new Date();
   const [periodMonth, setPeriodMonth] = useState(MONTH_NAMES[now.getMonth()]);
@@ -921,7 +1032,7 @@ function CalendarPage({ user, onNavigate }) {
     if (activitiesList.length <= 1) return;
     const totalB = activitiesList.reduce((acc, a) => acc + (parseFloat(String(a.budget || '0').replace(/[^0-9.]/g, '')) || 0), 0) || 500;
     const totalQ = activitiesList.reduce((acc, a) => acc + (parseInt(a.quantity, 10) || 1), 0) || activitiesList.length;
-    
+
     const count = activitiesList.length;
     const perActBudget = Math.round(totalB / count);
     const baseQty = Math.floor(totalQ / count) || 1;
@@ -1168,7 +1279,7 @@ function CalendarPage({ user, onNavigate }) {
       setAnalyzingPotential(true);
 
       try {
-        const aiRes = await analyzeCalendarAiPushPotentialApi(slug, domain, kws, 'India', totalBudget, totalQty, primaryCreated?.id);
+        const aiRes = await analyzeCalendarAiPushPotentialApi(slug, domain, kws, 'India', totalBudget, totalQty, primaryCreated?.id, activitiesList.map(a => a.activity_name));
         if (aiRes?.run_id) setLatestAiRunId(aiRes.run_id);
         if (aiRes?.summary) setLatestAiSummary(aiRes.summary);
         if (aiRes?.batches) {
@@ -1271,6 +1382,15 @@ function CalendarPage({ user, onNavigate }) {
       const selectedPotential = potentialKws.filter(k => selectedKwIds.has(k.id)).map(k => {
         const info = batchById.get(k.id) || {};
         const chosenSite = selectedOutreachSites[k.id] || k.outreach_site || null;
+        // brand_mention_sites = raw domains FETCHED by the live search (audit trail).
+        // k.brand_mention_site / info.brand_mention_site is now the ALLOCATED list
+        // (outreach-table + DA>25/SS<3 gate) -- the one actually saved is whichever
+        // the user picked (dropdown), defaulting to the best allocated one.
+        const brandMentionSites = k.brand_mention_sites || info.brand_mention_sites || [];
+        const brandMentionAllocated = (Array.isArray(k.brand_mention_site) ? k.brand_mention_site : null)
+          || (Array.isArray(info.brand_mention_site) ? info.brand_mention_site : null)
+          || [];
+        const brandMentionSite = selectedBrandMentionSites[k.id] || brandMentionAllocated[0] || null;
         const lp = (topicLinks[k.id] !== undefined && topicLinks[k.id] !== '')
           ? topicLinks[k.id]
           : (k.topic_link || k.landing_page_url || k.topicLink || '');
@@ -1291,7 +1411,10 @@ function CalendarPage({ user, onNavigate }) {
           push_reason: info.reason || '',
           topic_link: lp,
           landing_page_url: lp,
-          outreach_site: chosenSite
+          outreach_site: chosenSite,
+          brand_mention_site: brandMentionSite,
+          brand_mention_sites: brandMentionSites,
+          brand_mention_allocated_sites: brandMentionAllocated
         };
       });
 
@@ -1698,7 +1821,7 @@ function CalendarPage({ user, onNavigate }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0, flex: 1 }}>
             <button
               type="button"
-              onClick={() => { setIsModalOpen(false); setModalStep('form'); }}
+              onClick={handleBackToCalendarClick}
               title="Return to Calendar"
               style={{
                 display: 'flex',
@@ -1890,21 +2013,25 @@ function CalendarPage({ user, onNavigate }) {
             </div>
             <button
               type="button"
-              onClick={() => { setModalStep('form'); setIsModalOpen(false); }}
+              onClick={handleConfirmAbandon}
+              disabled={abandonDeleting}
               style={{
                 marginTop: 8,
                 padding: '10px 24px',
                 fontSize: 13.5,
                 fontWeight: 700,
-                background: 'linear-gradient(135deg, #CB196B 0%, #D4007A 100%)',
+                background: abandonDeleting ? '#94a3b8' : 'linear-gradient(135deg, #CB196B 0%, #D4007A 100%)',
                 color: '#FFFFFF',
                 border: 'none',
                 borderRadius: 10,
-                cursor: 'pointer',
+                cursor: abandonDeleting ? 'not-allowed' : 'pointer',
                 boxShadow: '0 4px 12px rgba(212, 0, 122, 0.25)'
               }}
             >
-              Back to Calendar
+              {/* No AI-researched keywords exist yet in this error state (the
+                  search found nothing), so just clean up the empty activity
+                  this run already created -- no confirm prompt needed here. */}
+              {abandonDeleting ? 'Discarding…' : 'Back to Calendar'}
             </button>
           </div>
         ) : (
@@ -2643,27 +2770,390 @@ function CalendarPage({ user, onNavigate }) {
               </div>
             )}
 
-            {/* TAB CONTENT: BRAND MENTION (Channel Preview) */}
+            {/* TAB CONTENT: BRAND MENTION -- same AI-scheduled keyword batches as
+                Paid Guest Post, same table UI, but the outreach-site column is
+                replaced with a "Brand Mentions" column (left empty for now --
+                no real mention-URL data wired in yet). */}
             {activeChannelTab === 'brand_mention' && (
-              <div style={{
-                background: '#FFFFFF',
-                borderRadius: 14,
-                border: '1px solid #E2DBEC',
-                padding: '32px 24px',
-                textAlign: 'center'
-              }}>
-                <div style={{ width: 44, height: 44, borderRadius: 12, background: '#F6EEFD', color: '#7B2FBE', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
-                  <Sparkles size={22} />
-                </div>
-                <h3 style={{ fontSize: 17, fontWeight: 800, color: '#1A1A1A', margin: '0 0 8px 0' }}>
-                  Brand Mention &amp; Citation Outreach
-                </h3>
-                <p style={{ fontSize: 13, color: '#64748B', maxWidth: 520, margin: '0 auto 18px', lineHeight: 1.55 }}>
-                  AI monitors unlinked brand mentions and high-authority editorial references to reclaim contextual backlinks and citation prominence.
-                </p>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#F6EEFD', border: '1px solid #E5CCF7', color: '#7B2FBE', padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
-                  <span>Tracked under unified organic campaign</span>
-                </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {['high', 'medium', 'low'].map(batchKey => {
+                  const meta = PUSH_BATCH_META[batchKey];
+                  const rows = pushBatches[batchKey] || [];
+                  const isCollapsed = collapsedBatches[batchKey];
+                  const checkedCount = rows.filter(r => selectedKwIds.has(r.id)).length;
+
+                  return (
+                    <div
+                      key={batchKey}
+                      style={{
+                        background: '#FFFFFF',
+                        borderRadius: 14,
+                        border: `1px solid ${meta.border}`,
+                        overflow: 'hidden',
+                        boxShadow: '0 2px 10px rgba(0,0,0,0.03)'
+                      }}
+                    >
+                      {/* Batch Header */}
+                      <div style={{
+                        padding: '12px 20px',
+                        background: meta.bg,
+                        borderBottom: isCollapsed ? 'none' : `1px solid ${meta.border}`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: 12
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 8,
+                            background: '#FFFFFF',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: `1px solid ${meta.border}`
+                          }}>
+                            <meta.Icon size={16} color={meta.tint} />
+                          </div>
+                          <div>
+                            <span style={{ fontSize: 14, fontWeight: 800, color: '#1A1A1A' }}>
+                              {meta.label}
+                            </span>
+                            <span style={{
+                              marginLeft: 8,
+                              fontSize: 11,
+                              fontWeight: 800,
+                              padding: '2px 8px',
+                              borderRadius: 10,
+                              background: '#FFFFFF',
+                              color: meta.tint,
+                              border: `1px solid ${meta.border}`
+                            }}>
+                              {checkedCount} / {rows.length} selected
+                            </span>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          {rows.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const allIds = rows.map(r => r.id);
+                                const allChecked = allIds.every(id => selectedKwIds.has(id));
+                                const next = new Set(selectedKwIds);
+                                if (allChecked) allIds.forEach(id => next.delete(id));
+                                else allIds.forEach(id => next.add(id));
+                                setSelectedKwIds(next);
+                              }}
+                              style={{
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                color: meta.tint,
+                                background: '#FFFFFF',
+                                border: `1px solid ${meta.border}`,
+                                padding: '4px 10px',
+                                borderRadius: 6,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {rows.every(r => selectedKwIds.has(r.id)) ? 'Deselect All' : 'Select All'}
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => toggleBatchCollapse(batchKey)}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              cursor: 'pointer',
+                              color: '#8A8A9A',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              fontSize: 12,
+                              fontWeight: 600
+                            }}
+                          >
+                            <span>{isCollapsed ? 'Expand' : 'Collapse'}</span>
+                            {isCollapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Batch Table Body */}
+                      {!isCollapsed && (
+                        <>
+                          {rows.length === 0 ? (
+                            <div style={{ fontSize: 12.5, color: '#8A8A9A', fontStyle: 'italic', padding: '16px 20px' }}>
+                              No keywords categorized into this batch.
+                            </div>
+                          ) : (
+                            <div style={{ overflowX: 'auto' }}>
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, textAlign: 'left' }}>
+                                <thead>
+                                  <tr style={{
+                                    color: '#8A8A9A',
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.04em',
+                                    background: '#F5F5F5',
+                                    borderBottom: '1px solid #E2DBEC'
+                                  }}>
+                                    <th style={{ padding: '9px 12px', width: 44, textAlign: 'center' }}></th>
+                                    <th style={{ padding: '9px 14px', minWidth: 220 }}>Guest Post / Keyword</th>
+                                    <th style={{ padding: '9px 14px', width: 180 }}>Rank Shift &amp; Trajectory</th>
+                                    <th style={{ padding: '9px 14px', width: 75 }}>SV</th>
+                                    <th style={{ padding: '9px 14px', width: 60 }}>KD</th>
+                                    <th style={{ padding: '9px 14px', width: 85 }}>Confidence</th>
+                                    <th style={{ padding: '9px 14px', width: 130 }}>VI Rationale</th>
+                                    <th style={{ padding: '9px 14px', width: 230 }}>Brand Mentions</th>
+                                    <th style={{ padding: '9px 14px', minWidth: 220 }}>Target Landing Page</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {rows.map(item => {
+                                    const isChecked = selectedKwIds.has(item.id);
+                                    const prevRankVal = item.prev_rank ?? item.rank;
+                                    const currentRank = item.new_rank ?? item.rank;
+
+                                    return (
+                                      <tr
+                                        key={item.id}
+                                        style={{
+                                          borderTop: '1px solid #F5F5F5',
+                                          background: isChecked ? '#F6EEFD' : 'transparent',
+                                          transition: 'background-color 0.1s ease'
+                                        }}
+                                      >
+                                        <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                          <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={(e) => {
+                                              const next = new Set(selectedKwIds);
+                                              if (e.target.checked) next.add(item.id);
+                                              else next.delete(item.id);
+                                              setSelectedKwIds(next);
+                                            }}
+                                            style={{ cursor: 'pointer', width: 16, height: 16, accentColor: '#7B2FBE' }}
+                                          />
+                                        </td>
+                                        <td style={{ padding: '8px 14px' }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                            <div style={{ fontWeight: 700, color: '#1A1A1A', fontSize: 13 }}>{item.keyword}</div>
+                                            {activitiesList.length > 1 && keywordToActivityMap[item.id] && (
+                                              <span style={{
+                                                fontSize: 10,
+                                                fontWeight: 700,
+                                                color: '#7B2FBE',
+                                                background: '#F6EEFD',
+                                                border: '1px solid #E5CCF7',
+                                                padding: '1px 6px',
+                                                borderRadius: 4,
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: 3
+                                              }}>
+                                                <Layers size={10} />
+                                                <span>{keywordToActivityMap[item.id]}</span>
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
+                                            {(item.category || item.cluster) && (
+                                              <span style={{ fontSize: 11, color: '#8A8A9A' }}>
+                                                {[item.category, item.cluster].filter(Boolean).join(' • ')}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </td>
+                                        <td style={{ padding: '8px 14px' }}>
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                            <RankSparklineHover
+                                              prevRank={prevRankVal}
+                                              liveRank={currentRank}
+                                              delta={item.delta}
+                                              gainPctStr={item.gain_pct_str}
+                                            />
+                                            <div style={{ fontSize: 10.5, color: '#8A8A9A' }}>
+                                              {prevRankVal != null ? `#${prevRankVal}` : '—'} → <strong style={{ color: '#1A1A1A' }}>{currentRank != null ? `#${currentRank}` : '—'}</strong>
+                                              {item.delta ? ` (${Math.abs(item.delta)} spot${Math.abs(item.delta) > 1 ? 's' : ''})` : ''}
+                                            </div>
+                                          </div>
+                                        </td>
+                                        <td style={{ padding: '8px 14px', fontWeight: 600, color: '#2D2D44' }}>
+                                          {item.sv ? item.sv.toLocaleString() : '—'}
+                                        </td>
+                                        <td style={{ padding: '8px 14px', color: '#8A8A9A' }}>
+                                          {item.kd ?? '—'}
+                                        </td>
+                                        <td style={{ padding: '8px 14px' }}>
+                                          {item.confidence !== undefined ? (
+                                            <span style={{
+                                              fontWeight: 800,
+                                              fontSize: 11.5,
+                                              color: item.confidence >= 80 ? '#00BFA2' : (item.confidence >= 60 ? '#D4007A' : '#8A8A9A')
+                                            }}>
+                                              {item.confidence}%
+                                            </span>
+                                          ) : '—'}
+                                        </td>
+                                        <td style={{ padding: '8px 14px' }}>
+                                          <RationaleTooltip item={item} />
+                                        </td>
+                                        <td style={{ padding: '8px 14px' }}>
+                                          {(() => {
+                                            // brand_mention_sites = every domain FETCHED by the live search (raw, up to 8).
+                                            // brand_mention_site  = the ALLOCATED ones -- fetched domains that are both
+                                            // in the outreach table AND pass DA>25 / spam<3% -- this is what drives the UI.
+                                            const fetchedSites = Array.isArray(item.brand_mention_sites) ? item.brand_mention_sites : [];
+                                            const allMatches = Array.isArray(item.brand_mention_site) ? item.brand_mention_site : (item.brand_mention_site ? [item.brand_mention_site] : []);
+                                            if (allMatches.length === 0) {
+                                              return (
+                                                <span style={{ fontSize: 12, color: '#8A8A9A', fontStyle: 'italic' }} title={fetchedSites.map(s => s.domain).join(', ')}>
+                                                  {fetchedSites.length > 0
+                                                    ? `${fetchedSites.length} site(s) found, none passed outreach/DA/SS`
+                                                    : 'No listing sites found'}
+                                                </span>
+                                              );
+                                            }
+                                            // Best (highest-scored) allocated site by default; user can pick any of the others
+                                            const chosen = selectedBrandMentionSites[item.id] || allMatches[0];
+                                            const bmUrl = chosen.url || `https://${chosen.domain}`;
+                                            return (
+                                              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                                {allMatches.length > 1 ? (
+                                                  <select
+                                                    value={chosen.domain || ''}
+                                                    onChange={(e) => {
+                                                      const matchedSite = allMatches.find(s => s.domain === e.target.value);
+                                                      handleSelectBrandMentionSite(item.id, matchedSite || null);
+                                                    }}
+                                                    style={{
+                                                      padding: '4px 8px',
+                                                      fontSize: 12,
+                                                      fontWeight: 600,
+                                                      color: '#1A1A1A',
+                                                      background: '#FFFFFF',
+                                                      border: '1px solid #E2DBEC',
+                                                      borderRadius: 6,
+                                                      outline: 'none',
+                                                      maxWidth: 210,
+                                                      cursor: 'pointer'
+                                                    }}
+                                                  >
+                                                    {allMatches.map(s => (
+                                                      <option key={s.id || s.domain} value={s.domain}>
+                                                        {s.domain} (DA {s.da} | Spam {s.ss})
+                                                      </option>
+                                                    ))}
+                                                  </select>
+                                                ) : (
+                                                  <a
+                                                    href={bmUrl}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    title={bmUrl}
+                                                    style={{ fontSize: 12, fontWeight: 700, color: '#7B2FBE', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                                    onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline'; }}
+                                                    onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none'; }}
+                                                  >
+                                                    <span>{chosen.domain}</span>
+                                                    <ExternalLink size={10} color="#7B2FBE" style={{ flexShrink: 0 }} />
+                                                  </a>
+                                                )}
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                                                  {chosen.da !== undefined && (
+                                                    <span style={{ fontSize: 10, fontWeight: 800, background: '#E6FAF6', color: '#00BFA2', border: '1px solid #A7F3D0', padding: '1px 5px', borderRadius: 4 }}>
+                                                      DA {chosen.da}
+                                                    </span>
+                                                  )}
+                                                  {chosen.ss !== undefined && (
+                                                    <span style={{ fontSize: 10, fontWeight: 700, background: '#FDEBF4', color: '#D4007A', border: '1px solid #F8B4D9', padding: '1px 5px', borderRadius: 4 }}>
+                                                      Spam {chosen.ss}
+                                                    </span>
+                                                  )}
+                                                  {allMatches.length > 1 && (
+                                                    <span style={{ fontSize: 10, fontWeight: 700, color: '#7B2FBE' }}>
+                                                      {allMatches.length} matches
+                                                    </span>
+                                                  )}
+                                                  {allMatches.length > 1 && (
+                                                    <a
+                                                      href={bmUrl}
+                                                      target="_blank"
+                                                      rel="noreferrer"
+                                                      title={bmUrl}
+                                                      style={{ color: '#7B2FBE', display: 'inline-flex', alignItems: 'center' }}
+                                                    >
+                                                      <ExternalLink size={11} />
+                                                    </a>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            );
+                                          })()}
+                                        </td>
+                                        <td style={{ padding: '8px 14px' }}>
+                                          {(() => {
+                                            const currentLp = item.landing_page_url || item.topicLink || item.topic_link || topicLinks[item.id] || '';
+                                            if (!currentLp) {
+                                              return (
+                                                <span style={{ fontSize: 12, color: '#8A8A9A', fontStyle: 'italic' }}>
+                                                  —
+                                                </span>
+                                              );
+                                            }
+                                            return (
+                                              <a
+                                                href={currentLp}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                title={currentLp}
+                                                style={{
+                                                  display: 'inline-flex',
+                                                  alignItems: 'center',
+                                                  gap: 4,
+                                                  fontSize: 12,
+                                                  fontWeight: 600,
+                                                  color: '#7B2FBE',
+                                                  textDecoration: 'none',
+                                                  maxWidth: 250,
+                                                  overflow: 'hidden',
+                                                  textOverflow: 'ellipsis',
+                                                  whiteSpace: 'nowrap',
+                                                  background: 'transparent',
+                                                  border: 'none',
+                                                  padding: 0
+                                                }}
+                                                onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline'; }}
+                                                onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none'; }}
+                                              >
+                                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                  {currentLp.replace(/^https?:\/\/(www\.)?/, '')}
+                                                </span>
+                                                <ExternalLink size={11} color="#7B2FBE" style={{ flexShrink: 0 }} />
+                                              </a>
+                                            );
+                                          })()}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -2788,6 +3278,7 @@ function CalendarPage({ user, onNavigate }) {
           </>
         )}
         {renderNoDataModal()}
+        {renderAbandonConfirmModal()}
       </div>
     );
   }
@@ -3971,7 +4462,7 @@ function CalendarPage({ user, onNavigate }) {
                           <PlainSelect
                             value={actItem.activity_name}
                             onChange={v => handleUpdateActivityRow(actItem.id, 'activity_name', v)}
-                            options={['Paid Guest Post', 'Forum - Quora', 'Forum - Reddit', 'Business Listing', 'Classified Ads']}
+                            options={['Paid Guest Post', 'Forum - Quora', 'Forum - Reddit', 'Business Listing', 'Classified Ads', 'Brand Mentions']}
                           />
                         </div>
 

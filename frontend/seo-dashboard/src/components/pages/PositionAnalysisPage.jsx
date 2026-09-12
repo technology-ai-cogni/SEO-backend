@@ -289,11 +289,34 @@ function AiVisibilityArcGauge({
                     Cited Pages ({citedPages})
                   </div>
                   {kwCitationsList.length > 0 ? (
-                    kwCitationsList.map((item, i) => (
-                      <div key={i} style={{ fontSize: 11.5, color: '#1e293b', marginBottom: 4, fontWeight: 600 }}>
-                        {i + 1}. {item}
-                      </div>
-                    ))
+                    kwCitationsList.map((item, i) => {
+                      const isObj = item && typeof item === 'object';
+                      const kwText = isObj ? item.keyword : String(item);
+                      const urlText = isObj ? item.url : '';
+                      return (
+                        <div key={i} style={{ marginBottom: 7 }}>
+                          <div style={{ fontSize: 11.5, color: '#1e293b', fontWeight: 600 }}>
+                            {i + 1}.{' '}
+                            {urlText ? (
+                              <a
+                                href={urlText.startsWith('http') ? urlText : `https://${urlText}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={urlText}
+                                style={{ color: theme.citedColor || '#7c3aed', textDecoration: 'underline', wordBreak: 'break-all' }}
+                              >
+                                {urlText}
+                              </a>
+                            ) : (
+                              <span style={{ color: '#94a3b8', fontStyle: 'italic', fontWeight: 500 }}>No landing page mapped</span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 500, paddingLeft: 14 }}>
+                            for "{kwText}"
+                          </div>
+                        </div>
+                      );
+                    })
                   ) : (
                     <div style={{ fontSize: 11.5, color: '#64748b', fontStyle: 'italic' }}>
                       No cited pages found for target domain.
@@ -440,6 +463,31 @@ function RankHoverCell({ count, kwList, title, color }) {
   );
 }
 
+
+// A cited_pages_list entry is a keyword string (occasionally "keyword - url"
+// for old-format rows). The AI doesn't have live web access when it produces
+// this list, so instead of showing/trusting any URL the model guesses, look
+// up the LANDING PAGE this project already has mapped to that keyword and
+// show that real, known-good URL in the hover popover.
+function mapCitationToLandingPage(rawItem, keywordsList) {
+  let kw = String(rawItem || '').trim();
+  let fallbackUrl = '';
+  if (kw.includes(' - ')) {
+    const parts = kw.split(' - ');
+    kw = parts[0].trim();
+    fallbackUrl = parts.slice(1).join(' - ').trim();
+  }
+  const cleanKw = kw.toLowerCase();
+  let match = (keywordsList || []).find(k => String(k.kw || k.keyword || '').toLowerCase().trim() === cleanKw);
+  if (!match) {
+    match = (keywordsList || []).find(k => {
+      const kt = String(k.kw || k.keyword || '').toLowerCase().trim();
+      return kt && (kt.includes(cleanKw) || cleanKw.includes(kt));
+    });
+  }
+  const landingPage = match?.landingPage || match?.landing_page_url || match?.page_url || match?.url || '';
+  return { keyword: kw, url: landingPage || fallbackUrl || '' };
+}
 
 // Build per-engine (+ overview) tabResults from a list of ai_analysis rows.
 // Latest row wins per engine. Returns {} when `rows` is empty.
@@ -2095,7 +2143,7 @@ export default function PositionAnalysisPage({ onNavigate, user }) {
                         })();
 
                         const mList = visibilityData.mentioned_keywords || [];
-                        const cList = visibilityData.cited_pages_list || [];
+                        const cList = (visibilityData.cited_pages_list || []).map(item => mapCitationToLandingPage(item, projectKeywords));
                         const mentionsVal = (typeof visibilityData.mentions === 'number' && visibilityData.mentions > 0)
                           ? visibilityData.mentions
                           : mList.length;
