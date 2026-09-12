@@ -1755,26 +1755,26 @@ def record_calendar_rank_hit(
 def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "", country_code: str = "in") -> Dict[str, Any]:
     """
     Live rank check + Top-3 SERP landing page verification for one keyword.
-    Exclusively powered by Firecrawl (strictly 1 hit, no secondary recheck).
+    Exclusively powered by Bright Data (strictly 1 hit, no secondary recheck).
     """
     kw_text = str(k.get("keyword") or "").strip()
     lp_url = str(k.get("landing_page_url") or k.get("topicLink") or "").strip()
     prev_rank = int(_parse_num(k.get("rank") or k.get("prev_rank"), 0))
 
-    print(f"[Calendar AI Check] >>> Checking keyword via Firecrawl (single hit): \"{kw_text}\" | DB Rank: #{prev_rank} | LP URL: {lp_url or 'None'}", flush=True)
+    print(f"[Calendar AI Check] >>> Checking keyword via Bright Data (single hit): \"{kw_text}\" | DB Rank: #{prev_rank} | LP URL: {lp_url or 'None'}", flush=True)
 
     new_rank = prev_rank
     top_links = []
 
-    # Single Live Check via Firecrawl (strictly 1 hit, no recheck)
+    # Single Live Check via Bright Data (strictly 1 hit, no recheck)
     try:
-        from services import rank_checker_fc
-        new_rank, top_links = rank_checker_fc.find_rank(
+        from services import rank_checker
+        new_rank, top_links = rank_checker.find_rank(
             kw_text, lp_url, default_domain=default_domain, country_code=country_code
         )
         top_links = top_links or []
     except Exception as e:
-        print(f"[Calendar AI Check] Firecrawl rank check error for \"{kw_text}\": {e}", flush=True)
+        print(f"[Calendar AI Check] Bright Data rank check error for \"{kw_text}\": {e}", flush=True)
         new_rank = prev_rank
         top_links = []
 
@@ -1851,7 +1851,7 @@ def _check_single_keyword_live(k: Dict[str, Any], default_domain: str = "", coun
         "match_precision_pts": 25 if new_rank < 101 else 15,
         "intent_alignment_pts": 25 if top3_is_landing else 15,
         "data_depth_pts": 15 if len(top_links) >= 10 else 10,
-        "explanation": f"Confidence Score: {confidence}% (Evaluated via single Firecrawl SERP scan and Top-3 intent classification)."
+        "explanation": f"Confidence Score: {confidence}% (Evaluated via single Bright Data SERP scan and Top-3 intent classification)."
     }
 
     batch_display = "BATCH 1 (High - Improved)" if batch == "high" else ("BATCH 2 (Medium - Dropped)" if batch == "medium" else "BATCH 3 (Low - Stagnant)")
@@ -1901,8 +1901,8 @@ def calculate_live_serp_batches(
     country: str = "India"
 ) -> Dict[str, Any]:
     """
-    Evaluates candidate landing page keywords against live Google SERP via Firecrawl:
-    - Runs parallel live rank checks (strictly 1 hit per keyword on Firecrawl)
+    Evaluates candidate landing page keywords against live Google SERP via Bright Data:
+    - Runs parallel live rank checks (strictly 1 hit per keyword on Bright Data)
     - Checks top 3 SERP results for Landing Page intent
     - Places into Batch 1 (improved), Batch 2 (dropped), or Batch 3 (didn't move / non-landing)
     """
@@ -1911,22 +1911,13 @@ def calculate_live_serp_batches(
         return {"batches": {"high": [], "medium": [], "low": []}, "summary": "No keywords supplied.", "evaluated_keywords": []}
 
     print(f"\n=======================================================", flush=True)
-    print(f"[Calendar AI Check] Starting Live Google SERP Verification via Firecrawl (single hit) for {len(potential)} keywords", flush=True)
+    print(f"[Calendar AI Check] Starting Live Google SERP Verification via Bright Data (single hit) for {len(potential)} keywords", flush=True)
     print(f"[Calendar AI Check] Target Domain: '{domain or 'N/A'}' | Country: '{country}'", flush=True)
     print(f"=======================================================", flush=True)
 
-    # Determine country code for Firecrawl
-    cc = "in"
-    if country:
-        c_lower = country.strip().lower()
-        if c_lower in ("united states", "usa", "us"):
-            cc = "us"
-        elif c_lower in ("india", "in"):
-            cc = "in"
-        elif c_lower in ("united kingdom", "uk", "gb"):
-            cc = "gb"
-        elif len(c_lower) == 2:
-            cc = c_lower
+    # Bright Data's `gl` parameter needs a strict 2-letter ISO code.
+    from services.category_checker import resolve_country_code
+    cc = resolve_country_code(country) or "in"
 
     from concurrent.futures import ThreadPoolExecutor
     batches = {"high": [], "medium": [], "low": []}
@@ -3408,12 +3399,8 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
     resolved_country = payload.country or profile.get("country") or "India"
 
     if is_brand_mention_only:
-        scored_sites_for_bm = score_and_rank_outreach_sites(
-            available_sites, target_country=resolved_country, target_industry=profile.get("industry") or "General",
-        )
         assigned_kws, budget_summary = assign_and_summarize_brand_mentions(
-            eval_kws, scored_sites_for_bm, project_slug=payload.project_slug,
-            client_domain=payload.domain, country=resolved_country,
+            eval_kws, client_domain=payload.domain, country=resolved_country,
             budget_ceiling=payload.budget, requested_quantity=payload.quantity,
         )
     else:
@@ -3428,17 +3415,12 @@ def analyze_potential_endpoint(payload: PushPotentialRequest):
         )
         if wants_brand_mentions:
             # Mixed batch (Paid Guest Post + Brand Mentions together): also
-            # run the live search, matched against the SAME scored+sorted
-            # outreach inventory Paid Guest Post just used (identical DA/SS/
-            # industry/traffic criteria, guaranteed by passing that list in
-            # rather than rescoring).
+            # run the live Bright Data search + listing classification for
+            # Brand Mentions (not matched against outreach -- that gating is
+            # removed for now).
             try:
-                scored_sites_for_bm = score_and_rank_outreach_sites(
-                    available_sites, target_country=resolved_country, target_industry=profile.get("industry") or "General",
-                )
                 assigned_kws = assign_brand_mentions_to_keywords(
-                    assigned_kws, scored_sites_for_bm, project_slug=payload.project_slug,
-                    client_domain=payload.domain, country=resolved_country,
+                    assigned_kws, client_domain=payload.domain, country=resolved_country,
                 )
             except Exception as e:
                 print(f"[Calendar AI] Brand Mentions assignment notice: {e}", file=sys.stderr, flush=True)

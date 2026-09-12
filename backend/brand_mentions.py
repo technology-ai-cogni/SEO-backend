@@ -3,69 +3,126 @@ brand_mentions.py -- "Brand Mentions" off-page activity.
 
 Triggered from calendar_backend.py's AI-scheduling endpoint
 (analyze_potential_endpoint / POST /calendar/analyze-potential), once per
-keyword that passed the hard gate (Landing Page + rank >= 5) -- EVERY such
-keyword gets processed, no cap, no subset.
+keyword that passed the hard gate (Landing Page + rank >= 5).
 
-NO live OpenAI web search happens in this module anymore. Per keyword:
+Per keyword:
+  1. FETCH -- hits Bright Data LIVE for the top BRAND_MENTION_TOP_N (10)
+     organic results, via services.rank_checker.get_top_n_organic_results()
+     -- the EXACT SAME SERP fetch rank-checking itself uses (same Bright
+     Data key/zone, same display_link parsing). This is a real, fresh live
+     search call per keyword (not free, not instant) -- no more relying on
+     rank_meta.top_links being already populated from a prior rank-check.
 
-  1. FETCH -- reuse the real organic SERP URLs already fetched for this
-     EXACT keyword during rank-checking (hosted_rank_check.py writes them to
-     keyword_categories.rank_meta.top_links when it rank-checks a keyword,
-     which every keyword reaching this module has already been through --
-     that's the Landing-Page/rank>=5 hard gate). This is free: no new
-     search call, just a DB read.
+  2. CLASSIFY -- every fetched URL is scraped (via the Competitors tab's
+     scrape_website() helper) and sent through ONE dedicated OpenAI call
+     (_classify_as_listing() below) that answers a single yes/no question:
+     is this a LISTING/DIRECTORY/AGGREGATOR page (a page that lists many
+     businesses/schools for a visitor to browse or submit to), or not. This
+     is a separate, dedicated prompt/function from
+     services.competitor_classifier.classify_url() -- that shared function
+     only distinguishes "Official Entity" vs "Platform" (used by the
+     Competitors tab) and its DB cache is keyed by URL only, so reusing it
+     here would both misclassify (no "Listing" concept) and pollute its
+     cache with a different classification question. No caching here (yet)
+     -- every fetched URL gets a fresh OpenAI call per run.
 
-  2. NARROW -- of those fetched URLs, keep only the ones whose domain is
-     already in this project's own `outreach_sites` inventory AND has
-     status = 'Shortlisted' there (cheap set-intersection, no API calls,
-     no DA/SS/PA re-checking -- the outreach table's own Validate Sites
-     workflow already did that). This is usually a handful of URLs out of
-     the ~40 fetched, since your outreach table is finite.
+  NOTE: matching against this project's outreach_sites inventory (DA/SS/
+  Shortlisted-status gating) has been REMOVED for now, per explicit
+  instruction -- every URL that classifies as a listing-type page is kept,
+  whether or not it's already in your outreach table.
 
-  3. CLASSIFY -- for that small narrowed set, classify each via the EXACT
-     SAME logic the Competitors tab already uses: BeautifulSoup-scrape the
-     page + one OpenAI call classifying it as "Official Entity" (a specific
-     business's own site) vs "Platform" (directory/listing/marketplace/
-     review-aggregator/news/blog/comparison portal) --
-     services.competitor_classifier.classify_url(), including its existing
-     url_classifications DB cache, so repeat domains across keywords/runs
-     don't get rescraped or reclassified. Only "Platform" results count as
-     ALLOCATED for Brand Mentions -- an "Official Entity" hit (e.g. a
-     competing school's own page that happens to be Shortlisted in outreach
-     for a different reason) is not a listing/submission-type page, so it's
-     excluded even though it passed step 2.
-
-Two distinct results land on every keyword dict:
-  - `brand_mention_sites` (plural)  = every URL FETCHED from that keyword's
-    already-stored rank-check SERP results -- the raw audit trail, before
-    any outreach/status/classification filtering.
-  - `brand_mention_site`  (singular name, but holds a LIST)  = the
-    ALLOCATED sites -- fetched URLs whose domain is in the outreach table,
-    status = Shortlisted, AND classified as "Platform", best-first (by the
-    same Paid-Guest-Post DA/spam-score/industry/traffic ranking, run by the
-    caller and passed in here -- never re-derived in this module). Empty
-    list if none qualified.
+Two results land on every keyword dict:
+  - `brand_mention_sites` (plural)  = every URL FETCHED from Bright Data for
+    that keyword (up to 10) -- the raw audit trail, before classification.
+  - `brand_mention_site`  (singular name, but holds a LIST)  = the subset
+    classified "Listing" -- these are what the Brand Mentions column shows.
 """
 
 import json
+import os
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from sqlalchemy import text
+from services.rank_checker import get_top_n_organic_results
+from services.category_checker import resolve_country_code
 
-from core.db import engine
+# Real live Bright Data SERP hit per keyword -- top 10 organic results (one
+# SERP page, no pagination needed).
+BRAND_MENTION_TOP_N = 10
 
-# Hard allocation gate -- a fetched URL only becomes an "allocated" site if
-# its domain is in outreach_sites, its status there is this (case-insensitive),
-# AND it classifies as "Platform" (see step 3 in the module docstring).
-BRAND_MENTION_REQUIRED_STATUS = "shortlisted"
-
-# Classification (BeautifulSoup scrape + 1 OpenAI call) only ever runs on the
-# narrowed, already-outreach-matched set, so this is a light pool -- most
-# keywords have 0-2 candidates to classify, not 40.
+# Classification (BeautifulSoup scrape + 1 OpenAI call) runs on every fetched
+# URL now (no outreach-table pre-filter to shrink the pool), so keep the
+# per-keyword worker pool modest.
 BRAND_MENTION_WORKERS = 5
+
+_LISTING_SYSTEM_PROMPT = """You are analyzing a webpage's scraped metadata to decide if it is a \
+LISTING / DIRECTORY / AGGREGATOR page.
+
+A LISTING page displays or compares MULTIPLE businesses, schools, products, or service \
+providers for a visitor to browse, compare, or submit their own business to -- examples: \
+Justdial, Sulekha, a school-directory site, a "Top 10 schools in <city>" roundup/aggregator \
+page, Yellow-Pages-style pages, review-aggregator pages listing many providers.
+
+It is NOT a listing page if it is:
+- A single business/organization's own official website (even if it has multiple pages)
+- A blog article or news article (even if it mentions multiple businesses in passing)
+- A government or educational-board page
+- A generic search engine or social media page
+
+Respond ONLY in valid raw JSON with exact keys: 'website_type' ('Listing' or 'Not Listing')."""
+
+_LISTING_MODEL = os.getenv("OPENAI_CHAT_MODEL") or "gpt-4o-mini"
+_LISTING_MODEL_FALLBACKS = ["gpt-4o-mini", "gpt-4o"]
+
+
+def _classify_as_listing(url: str, session) -> Dict[str, str]:
+    """Scrapes `url` and asks OpenAI whether it's a Listing/Directory page.
+    Returns {"url", "website_type"} where website_type is "Listing" or
+    "Not Listing". On total OpenAI failure (e.g. no credits), returns
+    "Not Listing" so the URL is simply excluded rather than the whole batch
+    erroring out."""
+    from openai import OpenAI
+    from services.competitor_classifier import scrape_website
+
+    page = scrape_website(session, url)
+    user_prompt = f"""Extracted Website Data:
+- Target URL: {page.get('original_url')}
+- Domain: {page.get('domain')}
+- Page Title: {page.get('title')}
+- Meta Description: {page.get('description')}
+- Meta Keywords: {page.get('keywords')}
+- Page Text Content: {page.get('text_snippet')}
+"""
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY is not configured.")
+    client = OpenAI(api_key=api_key)
+
+    candidate_models = [_LISTING_MODEL] + [m for m in _LISTING_MODEL_FALLBACKS if m != _LISTING_MODEL]
+    for model in candidate_models:
+        for attempt in range(2):
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": _LISTING_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                )
+                parsed = json.loads(response.choices[0].message.content.strip())
+                w_type = "Listing" if "listing" in str(parsed.get("website_type", "")).strip().lower() else "Not Listing"
+                return {"url": url, "website_type": w_type}
+            except Exception as e:
+                print(f"[BrandMentions] classify_as_listing error (model: {model}, attempt {attempt + 1}) for {url!r}: {e}", file=sys.stderr, flush=True)
+                time.sleep(1.5)
+
+    return {"url": url, "website_type": "Not Listing"}
 
 
 def _domain_only(url_or_host: str) -> str:
@@ -86,153 +143,71 @@ def _domain_only(url_or_host: str) -> str:
     return netloc.split(":")[0].strip()
 
 
-def fetch_top_links_for_keyword(project_slug: str, keyword: str) -> List[str]:
-    """Reuses the real organic SERP URLs already fetched for this exact
-    keyword during rank-checking (hosted_rank_check.py stores them in
-    keyword_categories.rank_meta.top_links) -- no new live search here."""
-    if not project_slug or not keyword:
-        return []
-    try:
-        with engine.connect() as conn:
-            row = conn.execute(text("""
-                SELECT rank_meta FROM keyword_categories
-                WHERE LOWER(project_name) = LOWER(:slug) AND LOWER(keyword) = LOWER(:kw)
-                  AND rank_meta IS NOT NULL
-                ORDER BY rank_checked_at DESC NULLS LAST, checked_at DESC
-                LIMIT 1
-            """), {"slug": project_slug, "kw": keyword}).mappings().first()
-        if not row:
-            return []
-        rm = row.get("rank_meta")
-        if isinstance(rm, str):
-            try:
-                rm = json.loads(rm)
-            except Exception:
-                return []
-        if not isinstance(rm, dict):
-            return []
-        links = rm.get("top_links") or []
-        return [str(u).strip() for u in links if u and str(u).strip()]
-    except Exception as e:
-        print(f"[BrandMentions] fetch_top_links_for_keyword failed for {keyword!r}: {e}", file=sys.stderr, flush=True)
-        return []
-
-
-def _to_display_site(scored_site: Dict[str, Any], matched_url: str) -> Dict[str, Any]:
-    """Normalize a score_and_rank_outreach_sites() result into the SAME
-    clean shape calendar_backend.py's assign_outreach_sites_to_keywords()
-    already builds for `outreach_site` (Paid Guest Post) -- domain, url, da,
-    ss, spam_score, price, country_traffic -- rather than leaking its
-    internal `_`-prefixed scoring fields. `url` is the ACTUAL ranking page
-    that matched (from rank-check SERP data), not a guessed homepage."""
-    da = int(scored_site.get("_da") or scored_site.get("da") or 0)
-    ss_disp = scored_site.get("_ss") or str(scored_site.get("ss") or "0%")
-    price = scored_site.get("_price") or 0
-    return {
-        "id": scored_site.get("id"),
-        "domain": scored_site.get("domain") or "",
-        "url": matched_url or scored_site.get("url") or (f"https://{scored_site.get('domain')}" if scored_site.get("domain") else ""),
-        "da": da,
-        "ss": ss_disp,
-        "spam_score": int(scored_site.get("_spam_num") or 0),
-        "price": f"₹{int(price):,}" if price else None,
-        "country_traffic": scored_site.get("_traffic_disp") or None,
-        "domain_industry": scored_site.get("_site_industry") or scored_site.get("domain_industry") or None,
-        "status": scored_site.get("status") or None,
-    }
-
-
-def _passes_hard_gate(scored_site: Dict[str, Any], required_status: str = BRAND_MENTION_REQUIRED_STATUS) -> bool:
-    """status == required_status (case-insensitive). No DA/SS/PA re-check
-    here -- the outreach table's own Validate Sites workflow already applied
-    those checks when it set this status."""
-    return str(scored_site.get("status") or "").strip().lower() == required_status
-
-
-def find_brand_mention_matches(keyword: str, project_slug: str, scored_outreach_sites: List[Dict[str, Any]],
-                                client_domain: Optional[str] = None) -> Tuple[List[Dict[str, str]], List[Dict[str, Any]]]:
+def find_brand_mention_matches(keyword: str, client_domain: Optional[str] = None,
+                                country: Optional[str] = None) -> Tuple[List[Dict[str, str]], List[Dict[str, Any]]]:
     """
     Returns:
-      fetched   -- every URL already fetched for this keyword during
-                   rank-checking, as [{"domain", "url"}], regardless of
-                   outreach/status/classification.
-      allocated -- the subset whose domain is in `scored_outreach_sites`,
-                   status = Shortlisted, AND classifies as "Platform" via
-                   the Competitors tab's scrape+classify logic. Full display
-                   shape (da, ss, price, ...), best-first (same scoring/
-                   order Paid Guest Post uses).
+      fetched -- every URL Bright Data returned for `keyword` (up to
+                 BRAND_MENTION_TOP_N), as [{"domain", "url"}].
+      listing -- the subset classify_url() labels specifically "Listing"
+                 (not "Platform" or "Official Entity"), as
+                 [{"domain", "url", "website_type"}]. NOT matched against
+                 outreach_sites -- that step is removed for now.
     """
-    top_links = fetch_top_links_for_keyword(project_slug, keyword)
+    # Bright Data's `gl` parameter needs a 2-letter ISO code (e.g. "in"), not
+    # a full country name -- `country` here is typically "India" (whatever
+    # the project's target_regions/payload.country says), so resolve it.
+    gl = resolve_country_code(country) or "in"
+    results = get_top_n_organic_results(keyword, n=BRAND_MENTION_TOP_N, country_code=gl) or []
     client_d = _domain_only(client_domain) if client_domain else ""
 
     fetched, seen = [], set()
-    for u in top_links:
-        d = _domain_only(u)
-        if not d or d == client_d or d in seen:
+    for r in results:
+        url = r.get("url") if isinstance(r, dict) else None
+        d = (r.get("domain") if isinstance(r, dict) else None) or _domain_only(url)
+        if not url or not d or d == client_d or d in seen:
             continue
         seen.add(d)
-        fetched.append({"domain": d, "url": u})
+        fetched.append({"domain": d, "url": url})
 
-    if not fetched or not scored_outreach_sites:
+    if not fetched:
         return fetched, []
 
-    outreach_by_domain: Dict[str, Dict[str, Any]] = {}
-    for site in scored_outreach_sites:
-        d = str(site.get("domain") or "").strip().lower()
-        if d and d not in outreach_by_domain:   # scored_outreach_sites is already best-first sorted
-            outreach_by_domain[d] = site
-
-    # Step 2: narrow to Shortlisted outreach-table matches -- cheap, no API calls.
-    candidates = []   # [(url, site)]
-    for f in fetched:
-        site = outreach_by_domain.get(f["domain"])
-        if site and _passes_hard_gate(site):
-            candidates.append((f["url"], site))
-
-    if not candidates:
-        return fetched, []
-
-    # Step 3: classify only the narrowed candidates -- SAME BeautifulSoup-scrape
-    # + OpenAI logic the Competitors tab uses (with its own DB cache).
-    from services.competitor_classifier import classify_url, create_http_session
+    # Classify every fetched URL via the dedicated Listing/Not-Listing OpenAI
+    # call (see _classify_as_listing() above).
+    from services.competitor_classifier import create_http_session
     session = create_http_session()
-    allocated = []
+    listing = []
     try:
-        for url, site in candidates:
+        for f in fetched:
             try:
-                result = classify_url(url, session=session)
+                result = _classify_as_listing(f["url"], session)
             except Exception as e:
-                print(f"[BrandMentions] classify_url failed for {url!r}: {e}", file=sys.stderr, flush=True)
+                print(f"[BrandMentions] classify_as_listing failed for {f['url']!r}: {e}", file=sys.stderr, flush=True)
                 continue
-            if result.get("website_type") == "Platform":
-                allocated.append(_to_display_site(site, url))
+            if str(result.get("website_type") or "").strip().lower() == "listing":
+                listing.append({
+                    "domain": f["domain"],
+                    "url": f["url"],
+                    "website_type": result.get("website_type"),
+                })
     finally:
         session.close()
 
-    return fetched, allocated
+    return fetched, listing
 
 
 def assign_brand_mentions_to_keywords(keywords: List[Dict[str, Any]],
-                                       scored_outreach_sites: List[Dict[str, Any]],
-                                       project_slug: Optional[str] = None,
                                        client_domain: Optional[str] = None,
                                        country: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Attaches to EVERY keyword dict passed in (no cap -- no live search
-    happens here, so there's no per-keyword API cost to guard against):
-      - `brand_mention_sites`: every URL already fetched for that keyword
-        during rank-checking -- the raw audit trail.
-      - `brand_mention_site`: the ALLOCATED sites -- outreach + Shortlisted +
-        classified "Platform", best-first. Empty list if none qualified.
-    Returns NEW dicts (does not mutate the input list). `country` is accepted
-    for call-signature compatibility with the rest of the AI-scheduling
-    pipeline but unused -- rank-check SERP data is already country-scoped
-    from when it was fetched."""
+    """Attaches to EVERY keyword dict passed in:
+      - `brand_mention_sites`: every URL Bright Data fetched for that
+        keyword -- the raw audit trail.
+      - `brand_mention_site`: the URLs classified as listing-type pages.
+    Returns NEW dicts (does not mutate the input list). Each keyword
+    triggers one live Bright Data SERP call plus one classify_url() call per
+    fetched URL (cached on repeat domains)."""
     out = [dict(k) for k in (keywords or [])]
-    if not project_slug:
-        for item in out:
-            item["brand_mention_sites"] = []
-            item["brand_mention_site"] = []
-        return out
 
     with ThreadPoolExecutor(max_workers=BRAND_MENTION_WORKERS) as pool:
         futures = {}
@@ -242,25 +217,23 @@ def assign_brand_mentions_to_keywords(keywords: List[Dict[str, Any]],
                 item["brand_mention_sites"] = []
                 item["brand_mention_site"] = []
                 continue
-            futures[pool.submit(find_brand_mention_matches, kw, project_slug, scored_outreach_sites, client_domain)] = item
+            futures[pool.submit(find_brand_mention_matches, kw, client_domain, country)] = item
 
         for fut in as_completed(futures):
             item = futures[fut]
             try:
-                fetched, allocated = fut.result()
+                fetched, listing = fut.result()
             except Exception as e:
                 print(f"[BrandMentions] match failed for {item.get('keyword')!r}: {e}", file=sys.stderr, flush=True)
-                fetched, allocated = [], []
+                fetched, listing = [], []
             item["brand_mention_sites"] = fetched
-            item["brand_mention_site"] = allocated
+            item["brand_mention_site"] = listing
 
     return out
 
 
 def assign_and_summarize_brand_mentions(
     keywords: List[Dict[str, Any]],
-    scored_outreach_sites: List[Dict[str, Any]],
-    project_slug: Optional[str] = None,
     client_domain: Optional[str] = None,
     country: Optional[str] = None,
     budget_ceiling: Optional[float] = None,
@@ -284,47 +257,41 @@ def assign_and_summarize_brand_mentions(
         item["outreach_site"] = None
         normalized.append(item)
 
-    assigned = assign_brand_mentions_to_keywords(
-        normalized, scored_outreach_sites, project_slug=project_slug, client_domain=client_domain, country=country
-    )
+    assigned = assign_brand_mentions_to_keywords(normalized, client_domain=client_domain, country=country)
 
     total_kws = len(assigned)
-    allocated_kws = [k for k in assigned if k.get("brand_mention_site")]
-    allocated_count = len(allocated_kws)
+    listing_kws = [k for k in assigned if k.get("brand_mention_site")]
+    listing_count = len(listing_kws)
     fetched_total = sum(len(k.get("brand_mention_sites") or []) for k in assigned)
     req_qty = requested_quantity or max(1, total_kws)
     budget_cap = float(budget_ceiling) if (budget_ceiling and float(budget_ceiling) > 0) else 0.0
 
-    da_list = [s.get("da") for k in allocated_kws for s in (k.get("brand_mention_site") or []) if s.get("da") is not None]
-    da_range = f"{min(da_list)}–{max(da_list)}" if da_list else "n/a"
-
     general_strategy_summary = (
-        f"Checked already-fetched rank-check SERP results for {total_kws} candidate keyword(s) "
-        f"({fetched_total} ranking URLs in total). {allocated_count} keyword(s) had at least one URL whose "
-        f"domain is in your outreach inventory (status = Shortlisted) and classifies as a listing/directory "
-        f"Platform page."
+        f"Live-searched Google for {total_kws} candidate keyword(s) ({fetched_total} organic URLs fetched in "
+        f"total, top {BRAND_MENTION_TOP_N} per keyword). {listing_count} keyword(s) had at least one result "
+        f"classified as a listing/directory-type page (not your client's own site)."
     )
     keyword_exclusion_summary = (
-        f"All {total_kws} candidate keywords had at least one allocated listing site."
-        if allocated_count >= total_kws and total_kws > 0 else
-        f"{total_kws - allocated_count} keyword(s) had no ranking URL that's both a Shortlisted outreach "
-        f"domain and classifies as a listing/directory Platform page."
+        f"All {total_kws} candidate keywords had at least one listing-type page found."
+        if listing_count >= total_kws and total_kws > 0 else
+        f"{total_kws - listing_count} keyword(s) had no fetched result that classified as a listing/directory page."
     )
     budget_allocation_advisory = (
-        f"Brand Mentions batch: {allocated_count} of {total_kws} keyword(s) got an allocated Shortlisted "
-        f"listing site (DA {da_range}). No Paid Guest Post outreach-site budget allocation applies to this activity."
+        f"Brand Mentions batch: {listing_count} of {total_kws} keyword(s) found a listing-type page in the "
+        f"live top {BRAND_MENTION_TOP_N}. Not matched against your outreach inventory -- that gating is removed "
+        f"for now. No Paid Guest Post outreach-site budget allocation applies to this activity."
     )
     domain_constraints_alert = (
         "Brand Mentions matching does not apply the Paid Guest Post 3-to-4 domain reuse limit -- each "
-        "keyword's listing site(s) are allocated independently from your outreach inventory."
+        "keyword's listing pages are found independently via a live search."
     )
 
     budget_summary = {
         "requested_quantity": req_qty,
         "requested_activities": req_qty,
-        "recommended_quantity": allocated_count,
-        "recommended_activities": allocated_count,
-        "redundant_posts_saved": max(0, total_kws - allocated_count),
+        "recommended_quantity": listing_count,
+        "recommended_activities": listing_count,
+        "redundant_posts_saved": max(0, total_kws - listing_count),
         "budget_cap": round(budget_cap, 2),
         "total_budget_cap": round(budget_cap, 2),
         "planned_spend": 0.0,
@@ -338,7 +305,7 @@ def assign_and_summarize_brand_mentions(
         "analysis_narrative": general_strategy_summary,
         "target_country": country or "India",
         "target_industry": None,
-        "top_da_range": da_range,
-        "spam_score_range": "n/a (gated by outreach Shortlisted status, not re-checked here)",
+        "top_da_range": "n/a (outreach matching removed)",
+        "spam_score_range": "n/a (outreach matching removed)",
     }
     return assigned, budget_summary

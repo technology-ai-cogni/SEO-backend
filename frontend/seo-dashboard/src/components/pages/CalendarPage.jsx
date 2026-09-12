@@ -779,7 +779,6 @@ function CalendarPage({ user, onNavigate }) {
   const [availableOutreachSites, setAvailableOutreachSites] = useState([]);
   const [budgetOptimization, setBudgetOptimization] = useState(null);
   const [selectedOutreachSites, setSelectedOutreachSites] = useState({});
-  const [selectedBrandMentionSites, setSelectedBrandMentionSites] = useState({}); // kwId -> chosen site (when brand_mention_sites has multiple options)
   const [latestAiRunId, setLatestAiRunId] = useState(null);
   const [latestAiSummary, setLatestAiSummary] = useState('');
   const [createdActivitiesList, setCreatedActivitiesList] = useState([]);
@@ -1005,17 +1004,6 @@ function CalendarPage({ user, onNavigate }) {
       }
     }
     setSelectedOutreachSites(prev => ({
-      ...prev,
-      [kwId]: site
-    }));
-  };
-
-  // Brand Mentions can find MULTIPLE vetted outreach-table matches for one
-  // keyword -- unlike Paid Guest Post there's no 4-keywords-per-domain reuse
-  // limit here (each keyword's listing site is picked independently), so no
-  // capacity check is needed, just remember which one the user picked.
-  const handleSelectBrandMentionSite = (kwId, site) => {
-    setSelectedBrandMentionSites(prev => ({
       ...prev,
       [kwId]: site
     }));
@@ -1765,7 +1753,9 @@ function CalendarPage({ user, onNavigate }) {
               push_reason: k.reason || '',
               topic_link: null,
               landing_page_url: lp,
-              outreach_site: chosenSite
+              outreach_site: chosenSite,
+              brand_mention_site: k.brand_mention_site || null,
+              brand_mention_sites: k.brand_mention_sites || []
             };
           });
           outreachList = effectiveKws.map(k => k.outreach_site).filter(Boolean);
@@ -3434,93 +3424,41 @@ function CalendarPage({ user, onNavigate }) {
                                         </td>
                                         <td style={{ padding: '8px 14px' }}>
                                           {(() => {
-                                            // brand_mention_sites = every domain FETCHED by the live search (raw, up to 8).
-                                            // brand_mention_site  = the ALLOCATED ones -- fetched domains that are both
-                                            // in the outreach table AND pass DA>25 / spam<3% -- this is what drives the UI.
+                                            // brand_mention_sites = every URL FETCHED live from Bright Data (raw, up to 10).
+                                            // brand_mention_site  = the subset classified specifically as "Listing" --
+                                            // show only the single top one (first in fetched/SERP order), full URL.
                                             const fetchedSites = Array.isArray(item.brand_mention_sites) ? item.brand_mention_sites : [];
-                                            const allMatches = Array.isArray(item.brand_mention_site) ? item.brand_mention_site : (item.brand_mention_site ? [item.brand_mention_site] : []);
-                                            if (allMatches.length === 0) {
+                                            const listingMatches = Array.isArray(item.brand_mention_site) ? item.brand_mention_site : (item.brand_mention_site ? [item.brand_mention_site] : []);
+                                            if (listingMatches.length === 0) {
                                               return (
-                                                <span style={{ fontSize: 12, color: '#8A8A9A', fontStyle: 'italic' }} title={fetchedSites.map(s => s.domain).join(', ')}>
+                                                <span style={{ fontSize: 12, color: '#8A8A9A', fontStyle: 'italic' }} title={fetchedSites.map(s => s.url || s.domain).join(', ')}>
                                                   {fetchedSites.length > 0
-                                                    ? `${fetchedSites.length} site(s) found, none passed outreach/DA/SS`
+                                                    ? `${fetchedSites.length} site(s) found, none classified as Listing`
                                                     : 'No listing sites found'}
                                                 </span>
                                               );
                                             }
-                                            // Best (highest-scored) allocated site by default; user can pick any of the others
-                                            const chosen = selectedBrandMentionSites[item.id] || allMatches[0];
-                                            const bmUrl = chosen.url || `https://${chosen.domain}`;
+                                            const top = listingMatches[0];
+                                            const bmUrl = top.url || `https://${top.domain}`;
                                             return (
                                               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                                {allMatches.length > 1 ? (
-                                                  <select
-                                                    value={chosen.domain || ''}
-                                                    onChange={(e) => {
-                                                      const matchedSite = allMatches.find(s => s.domain === e.target.value);
-                                                      handleSelectBrandMentionSite(item.id, matchedSite || null);
-                                                    }}
-                                                    style={{
-                                                      padding: '4px 8px',
-                                                      fontSize: 12,
-                                                      fontWeight: 600,
-                                                      color: '#1A1A1A',
-                                                      background: '#FFFFFF',
-                                                      border: '1px solid #E2DBEC',
-                                                      borderRadius: 6,
-                                                      outline: 'none',
-                                                      maxWidth: 210,
-                                                      cursor: 'pointer'
-                                                    }}
-                                                  >
-                                                    {allMatches.map(s => (
-                                                      <option key={s.id || s.domain} value={s.domain}>
-                                                        {s.domain} (DA {s.da} | Spam {s.ss})
-                                                      </option>
-                                                    ))}
-                                                  </select>
-                                                ) : (
-                                                  <a
-                                                    href={bmUrl}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    title={bmUrl}
-                                                    style={{ fontSize: 12, fontWeight: 700, color: '#7B2FBE', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                                                    onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline'; }}
-                                                    onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none'; }}
-                                                  >
-                                                    <span>{chosen.domain}</span>
-                                                    <ExternalLink size={10} color="#7B2FBE" style={{ flexShrink: 0 }} />
-                                                  </a>
+                                                <a
+                                                  href={bmUrl}
+                                                  target="_blank"
+                                                  rel="noreferrer"
+                                                  title={bmUrl}
+                                                  style={{ fontSize: 12, fontWeight: 700, color: '#7B2FBE', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: 230, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                                  onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline'; }}
+                                                  onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none'; }}
+                                                >
+                                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bmUrl}</span>
+                                                  <ExternalLink size={10} color="#7B2FBE" style={{ flexShrink: 0 }} />
+                                                </a>
+                                                {top.website_type && (
+                                                  <span style={{ fontSize: 10, fontWeight: 700, background: '#F6EEFD', color: '#7B2FBE', border: '1px solid #E5CCF7', padding: '1px 5px', borderRadius: 4, alignSelf: 'flex-start' }}>
+                                                    {top.website_type}
+                                                  </span>
                                                 )}
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                                                  {chosen.da !== undefined && (
-                                                    <span style={{ fontSize: 10, fontWeight: 800, background: '#E6FAF6', color: '#00BFA2', border: '1px solid #A7F3D0', padding: '1px 5px', borderRadius: 4 }}>
-                                                      DA {chosen.da}
-                                                    </span>
-                                                  )}
-                                                  {chosen.ss !== undefined && (
-                                                    <span style={{ fontSize: 10, fontWeight: 700, background: '#FDEBF4', color: '#D4007A', border: '1px solid #F8B4D9', padding: '1px 5px', borderRadius: 4 }}>
-                                                      Spam {chosen.ss}
-                                                    </span>
-                                                  )}
-                                                  {allMatches.length > 1 && (
-                                                    <span style={{ fontSize: 10, fontWeight: 700, color: '#7B2FBE' }}>
-                                                      {allMatches.length} matches
-                                                    </span>
-                                                  )}
-                                                  {allMatches.length > 1 && (
-                                                    <a
-                                                      href={bmUrl}
-                                                      target="_blank"
-                                                      rel="noreferrer"
-                                                      title={bmUrl}
-                                                      style={{ color: '#7B2FBE', display: 'inline-flex', alignItems: 'center' }}
-                                                    >
-                                                      <ExternalLink size={11} />
-                                                    </a>
-                                                  )}
-                                                </div>
                                               </div>
                                             );
                                           })()}
